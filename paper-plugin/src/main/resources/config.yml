@@ -1,5 +1,4 @@
-# Only a non-sensitive health endpoint exists in the current scaffold.
-# Environment variables override these values for local development.
+# The bridge always listens on 127.0.0.1 while the plugin is enabled.
+# DIRT_MCP_BRIDGE_PORT overrides this value.
 bridge:
-  enabled: false
   port: 8765

@@ -16,6 +16,56 @@ Inputs:
 Returns normalized bounds, dimensions, volume, and block-state counts. V1 does
 not return entities, player data, rendered images, or every block coordinate.
 
+The planned bridge request is `POST /v1/inspect-region` with a JSON body:
+
+```json
+{
+  "world": "world",
+  "min": { "x": 0, "y": 60, "z": 0 },
+  "max": { "x": 15, "y": 80, "z": 15 }
+}
+```
+
+Coordinates are signed 32-bit integers. The request object and both position
+objects reject unknown fields. A successful response has this shape:
+
+```json
+{
+  "world": "world",
+  "bounds": {
+    "min": { "x": 0, "y": 60, "z": 0 },
+    "max": { "x": 15, "y": 80, "z": 15 }
+  },
+  "dimensions": { "x": 16, "y": 21, "z": 16 },
+  "volume": 5376,
+  "blockStates": {
+    "minecraft:air": 4096,
+    "minecraft:stone": 1280
+  }
+}
+```
+
+Bounds in the response are normalized independently on each axis. Dimensions
+and volume are positive integers, counts are non-negative integers, and
+block-state keys use canonical namespaced state strings. Counts sum to
+`volume`.
+
+The endpoint uses the common error envelope:
+
+```json
+{
+  "error": {
+    "code": "world_not_found",
+    "message": "World is not loaded: example"
+  }
+}
+```
+
+Its defined failures are `invalid_request` (400), `unauthorized` (401),
+`world_not_found` (404), `region_too_large` (413), `world_unavailable` (503),
+and `internal_error` (500). This section fixes the intended wire format; the
+endpoint is not available until it also appears in `protocol/openapi.yaml`.
+
 ### `replace_blocks`
 
 Inputs:
@@ -77,7 +127,6 @@ The v1 configuration surface is intentionally small:
 
 ```yaml
 bridge:
-  enabled: false
   port: 8765
 
 limits:
@@ -89,12 +138,14 @@ undo:
 ```
 
 The bearer token is supplied to both processes as `DIRT_MCP_BRIDGE_TOKEN` and is
-never committed. The bridge address is not configurable and remains
-`127.0.0.1`.
+sent on every bridge request as `Authorization: Bearer <token>`. It is never
+committed. Source-development commands generate an ignored token under
+`paper-plugin/run/` and pass it to both processes. The bridge address is not
+configurable and remains `127.0.0.1`.
 
 ## Current implementation
 
-The repository currently implements the Paper lifecycle, loopback health
-bridge, OpenAPI health contract, and `dirt_status` MCP tool. The four v1 world
-tools, bearer authentication, and FAWE integration described above are the
-remaining product implementation, not placeholder functionality.
+The repository currently implements the Paper lifecycle, authenticated
+loopback health bridge, OpenAPI health contract, and `dirt_status` MCP tool. The
+four v1 world tools and FAWE integration described above remain product design,
+not placeholder functionality.

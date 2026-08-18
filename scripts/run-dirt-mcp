@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+token_file="${repo_root}/paper-plugin/run/.dirt-mcp-token"
+
+if [[ ! -s "${token_file}" ]]; then
+  printf 'Dirt MCP token not found. Run make up or make dev-token first.\n' >&2
+  exit 1
+fi
+
+DIRT_MCP_BRIDGE_TOKEN="$(<"${token_file}")"
+export DIRT_MCP_BRIDGE_TOKEN
+
+exec node "${repo_root}/mcp-server/dist/index.js"

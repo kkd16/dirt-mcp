@@ -50,11 +50,10 @@ Java implementation, TypeScript tool, validation, and tests.
 
 ## Deployment
 
-V1 is a same-machine deployment. The Paper bridge is hard-coded to
-`127.0.0.1`, disabled by default, and enabled deliberately by the server
-operator. Editing endpoints require a shared bearer token even on loopback.
-The MCP server receives the bridge URL and token through its process
-environment.
+V1 is a same-machine deployment. Loading the plugin starts the Paper bridge on
+the hard-coded `127.0.0.1` interface. Bridge endpoints require a shared bearer
+token even on loopback. The MCP server receives the bridge URL and token through
+its process environment.
 
 The planned release consists of:
 

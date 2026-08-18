@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.api;
 
+import com.google.gson.Gson;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -11,20 +12,31 @@ import java.util.logging.Logger;
 
 public final class ApiServer implements AutoCloseable {
     private static final String LOOPBACK_ADDRESS = "127.0.0.1";
+    private static final Gson GSON = new Gson();
 
     private final int port;
     private final String responseBody;
+    private final BearerAuthentication authentication;
     private final Logger logger;
 
     private HttpServer server;
     private ExecutorService executor;
 
-    public ApiServer(int port, String pluginVersion, String minecraftVersion, Logger logger) {
+    public ApiServer(
+            int port,
+            String pluginVersion,
+            String minecraftVersion,
+            String bearerToken,
+            Logger logger) {
         this.port = port;
         this.logger = logger;
-        this.responseBody = """
-                {"status":"ok","service":"dirt-mcp-paper","version":%s,"minecraftVersion":%s,"capabilities":{"worldEditing":false}}
-                """.formatted(jsonString(pluginVersion), jsonString(minecraftVersion)).strip();
+        this.authentication = new BearerAuthentication(bearerToken);
+        this.responseBody = GSON.toJson(new HealthResponse(
+                "ok",
+                "dirt-mcp-paper",
+                pluginVersion,
+                minecraftVersion,
+                new Capabilities(false)));
     }
 
     public void start() throws IOException {
@@ -73,13 +85,24 @@ public final class ApiServer implements AutoCloseable {
     }
 
     private void handleHealth(HttpExchange exchange) throws IOException {
+        if (!this.authentication.accepts(exchange.getRequestHeaders().getFirst("Authorization"))) {
+            exchange.getResponseHeaders().set("WWW-Authenticate", "Bearer realm=\"dirt-mcp\"");
+            sendError(exchange, 401, "unauthorized", "A valid bearer token is required");
+            return;
+        }
+
         if (!"GET".equals(exchange.getRequestMethod())) {
             exchange.getResponseHeaders().set("Allow", "GET");
-            send(exchange, 405, "{\"error\":\"method_not_allowed\"}");
+            sendError(exchange, 405, "method_not_allowed", "Method must be GET");
             return;
         }
 
         send(exchange, 200, this.responseBody);
+    }
+
+    private static void sendError(HttpExchange exchange, int statusCode, String code, String message)
+            throws IOException {
+        send(exchange, statusCode, GSON.toJson(new ErrorEnvelope(new ErrorDetail(code, message))));
     }
 
     private static void send(HttpExchange exchange, int statusCode, String body) throws IOException {
@@ -93,27 +116,16 @@ public final class ApiServer implements AutoCloseable {
         }
     }
 
-    private static String jsonString(String value) {
-        StringBuilder result = new StringBuilder(value.length() + 2).append('"');
-        for (int index = 0; index < value.length(); index++) {
-            char character = value.charAt(index);
-            switch (character) {
-                case '"' -> result.append("\\\"");
-                case '\\' -> result.append("\\\\");
-                case '\b' -> result.append("\\b");
-                case '\f' -> result.append("\\f");
-                case '\n' -> result.append("\\n");
-                case '\r' -> result.append("\\r");
-                case '\t' -> result.append("\\t");
-                default -> {
-                    if (character < 0x20) {
-                        result.append("\\u%04x".formatted((int) character));
-                    } else {
-                        result.append(character);
-                    }
-                }
-            }
-        }
-        return result.append('"').toString();
-    }
+    private record HealthResponse(
+            String status,
+            String service,
+            String version,
+            String minecraftVersion,
+            Capabilities capabilities) {}
+
+    private record Capabilities(boolean worldEditing) {}
+
+    private record ErrorEnvelope(ErrorDetail error) {}
+
+    private record ErrorDetail(String code, String message) {}
 }

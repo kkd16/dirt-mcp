@@ -16,7 +16,7 @@ implemented.
 
 Dirt MCP tracks the latest stable Paper release only. The current baseline is:
 
-- Paper 26.2 build 112;
+- Paper 26.2;
 - Java 25;
 - Node.js 24 LTS or newer; and
 - FAWE for the forthcoming v1 editing tools.
@@ -66,30 +66,31 @@ the current health-only foundation can run without it.
 
 ## Running on a Paper server
 
-The bridge is disabled by default. Enable it when starting Paper:
+The loopback bridge starts with the plugin and requires a bearer token. Supply
+the token when starting Paper:
 
 ```bash
-DIRT_MCP_BRIDGE_ENABLED=true \
+export DIRT_MCP_BRIDGE_TOKEN="$(openssl rand -hex 32)"
 DIRT_MCP_BRIDGE_PORT=8765 \
 java -Xms2G -Xmx2G -jar paper.jar --nogui
 ```
 
-Or enable it in `plugins/DirtMCP/config.yml` and restart Paper:
+The port may instead be set in `plugins/DirtMCP/config.yml`:
 
 ```yaml
 bridge:
-  enabled: true
   port: 8765
 ```
 
-The bridge always binds to `127.0.0.1`; do not proxy or expose it publicly. The
-MCP process must run on the same machine and network namespace as Paper.
+The bridge always binds to `127.0.0.1`; do not proxy or expose it publicly. Give
+the same `DIRT_MCP_BRIDGE_TOKEN` to the MCP process. Tokens must contain at
+least 32 bytes. Never commit or log them.
 
 The repository includes a project-scoped Codex configuration in
-`.codex/config.toml`. After building the project, start Codex from this trusted
-repository (or restart an existing Codex session); Codex will launch the MCP
-process when it connects. Keep `make up` running so the MCP process can reach
-the Paper bridge.
+`.codex/config.toml`. Run `make up` at least once to build the project and create
+its ignored development token, then start Codex from this trusted repository
+(or restart an existing Codex session). Codex launches the MCP process when it
+connects; keep `make up` running so that process can reach the Paper bridge.
 
 For another MCP host, configure it to launch the source build:
 
@@ -100,7 +101,8 @@ For another MCP host, configure it to launch the source build:
       "command": "node",
       "args": ["/absolute/path/to/dirt-mcp/mcp-server/dist/index.js"],
       "env": {
-        "DIRT_MCP_BRIDGE_URL": "http://127.0.0.1:8765"
+        "DIRT_MCP_BRIDGE_URL": "http://127.0.0.1:8765",
+        "DIRT_MCP_BRIDGE_TOKEN": "<same secret supplied to Paper>"
       }
     }
   }
@@ -120,10 +122,11 @@ make doctor
 make up
 ```
 
-`make up` installs locked dependencies, builds and tests both components, and
-accepts Mojang's EULA on the command line. It runs Paper in the foreground on
-port `25566` with an IPv4 listener suitable for Windows and WSL. Connect to the
-Minecraft server at `127.0.0.1:25566`. The MCP bridge is available to local MCP
+`make up` installs locked dependencies, builds and tests both components,
+creates an ignored local bearer token when needed, and accepts Mojang's EULA on
+the command line. It runs Paper in the foreground on port `25566` with an IPv4
+listener suitable for Windows and WSL. Connect to the Minecraft server at
+`127.0.0.1:25566`. The authenticated MCP bridge is available to local MCP
 clients at `127.0.0.1:8765`. Only run it if you agree to the
 [Minecraft EULA](https://aka.ms/MinecraftEULA). Type `stop` in the Paper console
 for a clean shutdown.
@@ -141,6 +144,7 @@ make help      List commands and configuration overrides
 make build     Build the Paper plugin and MCP server
 make check     Run Java tests and TypeScript checks
 make ci        Reproduce the clean CI build
+make dev-token Create the ignored local bearer token
 make health    Query a running bridge
 make mcp       Run the MCP stdio process
 make inspect   Open the pinned MCP Inspector

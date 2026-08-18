@@ -17,6 +17,11 @@ const HealthSchema = z.object({
 }).strict();
 
 function createServer(): McpServer {
+  const bridgeToken = process.env.DIRT_MCP_BRIDGE_TOKEN;
+  if (bridgeToken === undefined || bridgeToken.length === 0) {
+    throw new Error('DIRT_MCP_BRIDGE_TOKEN is required');
+  }
+
   const server = new McpServer({
     name: 'dirt-mcp',
     version: '0.1.0',
@@ -40,12 +45,18 @@ function createServer(): McpServer {
         }
 
         const response = await fetch(healthUrl, {
-          headers: { Accept: 'application/json' },
+          headers: {
+            Accept: 'application/json',
+            Authorization: `Bearer ${bridgeToken}`,
+          },
           redirect: 'error',
           signal: AbortSignal.timeout(3_000),
         });
 
         if (!response.ok) {
+          if (response.status === 401) {
+            throw new Error('Bridge rejected DIRT_MCP_BRIDGE_TOKEN');
+          }
           throw new Error(`Bridge returned HTTP ${response.status}`);
         }
 
