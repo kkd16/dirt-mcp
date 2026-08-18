@@ -12,6 +12,8 @@ import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionReques
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Failure;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionException;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewDirection;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewRequest;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -47,6 +49,21 @@ public final class ApiServer implements AutoCloseable {
     private static final Set<String> EXACT_INSPECTION_REQUIRED_FIELDS = Set.of("world", "min", "max");
     private static final Set<String> EXACT_INSPECTION_FIELDS =
             Set.of("world", "min", "max", "include", "exclude", "includeAir", "maxResults", "mode");
+    private static final Set<String> VIEW_REQUIRED_FIELDS = Set.of(
+            "world",
+            "origin",
+            "direction",
+            "horizontalRadius",
+            "verticalRadius",
+            "maxDistance");
+    private static final Set<String> VIEW_FIELDS = Set.of(
+            "world",
+            "origin",
+            "direction",
+            "horizontalRadius",
+            "verticalRadius",
+            "maxDistance",
+            "maxResults");
     private static final Set<String> REPLACEMENT_REQUIRED_FIELDS =
             Set.of("world", "min", "max", "source", "destination");
     private static final Set<String> REPLACEMENT_FIELDS =
@@ -104,6 +121,9 @@ public final class ApiServer implements AutoCloseable {
             newServer.createContext(
                     "/v1/inspect-blocks",
                     exchange -> handleAudited("inspect_blocks", exchange, this::handleInspectBlocks));
+            newServer.createContext(
+                    "/v1/inspect-view",
+                    exchange -> handleAudited("inspect_view", exchange, this::handleInspectView));
             newServer.createContext(
                     "/v1/replace-blocks",
                     exchange -> handleAudited("replace_blocks", exchange, this::handleReplaceBlocks));
@@ -237,6 +257,30 @@ public final class ApiServer implements AutoCloseable {
         }
     }
 
+    private void handleInspectView(HttpExchange exchange) throws IOException {
+        if (!authenticate(exchange)) {
+            return;
+        }
+        if (!"POST".equals(exchange.getRequestMethod())) {
+            exchange.getResponseHeaders().set("Allow", "POST");
+            sendError(exchange, 405, "method_not_allowed", "Method must be POST");
+            return;
+        }
+
+        try {
+            ViewRequest request = parseViewRequest(exchange);
+            exchange.setAttribute(WORLD_ATTRIBUTE, request.world());
+            send(exchange, 200, GSON.toJson(this.regionInspector.inspectView(request)));
+        } catch (InvalidRequestException exception) {
+            sendError(exchange, 400, "invalid_request", exception.getMessage());
+        } catch (InspectionException exception) {
+            sendInspectionError(exchange, exception);
+        } catch (RuntimeException exception) {
+            this.logger.log(Level.SEVERE, "Unexpected inspect-view failure", exception);
+            sendError(exchange, 500, "internal_error", "The view could not be inspected");
+        }
+    }
+
     private void handleReplaceBlocks(HttpExchange exchange) throws IOException {
         if (!authenticate(exchange)) {
             return;
@@ -361,6 +405,44 @@ public final class ApiServer implements AutoCloseable {
         }
     }
 
+    private static ViewRequest parseViewRequest(HttpExchange exchange)
+            throws IOException, InvalidRequestException {
+        try {
+            JsonObject object = parseRequestObject(exchange);
+            if (!object.keySet().containsAll(VIEW_REQUIRED_FIELDS)
+                    || !VIEW_FIELDS.containsAll(object.keySet())) {
+                throw new InvalidRequestException("Request contains missing or unknown fields");
+            }
+            int horizontalRadius = parseInteger(object.get("horizontalRadius"), "horizontalRadius");
+            int verticalRadius = parseInteger(object.get("verticalRadius"), "verticalRadius");
+            int maxDistance = parseInteger(object.get("maxDistance"), "maxDistance");
+            int maxResults = object.has("maxResults")
+                    ? parseInteger(object.get("maxResults"), "maxResults")
+                    : RegionInspector.DEFAULT_VIEW_RESULTS;
+            if (horizontalRadius < 0 || verticalRadius < 0) {
+                throw new InvalidRequestException(
+                        "horizontalRadius and verticalRadius must be non-negative");
+            }
+            if (maxDistance < 1) {
+                throw new InvalidRequestException("maxDistance must be positive");
+            }
+            if (maxResults < 1 || maxResults > RegionInspector.MAX_VIEW_RESULTS) {
+                throw new InvalidRequestException(
+                        "maxResults must be between 1 and " + RegionInspector.MAX_VIEW_RESULTS);
+            }
+            return new ViewRequest(
+                    parseString(object.get("world"), "world"),
+                    parsePosition(object.get("origin"), "origin"),
+                    parseViewDirection(object.get("direction")),
+                    horizontalRadius,
+                    verticalRadius,
+                    maxDistance,
+                    maxResults);
+        } catch (JsonParseException | NumberFormatException | ArithmeticException exception) {
+            throw new InvalidRequestException("Request body must contain valid JSON values");
+        }
+    }
+
     private static ReplaceRequest parseReplaceRequest(HttpExchange exchange)
             throws IOException, InvalidRequestException {
         try {
@@ -464,6 +546,21 @@ public final class ApiServer implements AutoCloseable {
             case "blocks" -> ExactInspectionMode.BLOCKS;
             case "runs" -> ExactInspectionMode.RUNS;
             default -> throw new InvalidRequestException("mode must be blocks or runs");
+        };
+    }
+
+    private static ViewDirection parseViewDirection(JsonElement element)
+            throws InvalidRequestException {
+        String direction = parseString(element, "direction");
+        return switch (direction) {
+            case "north" -> ViewDirection.NORTH;
+            case "east" -> ViewDirection.EAST;
+            case "south" -> ViewDirection.SOUTH;
+            case "west" -> ViewDirection.WEST;
+            case "up" -> ViewDirection.UP;
+            case "down" -> ViewDirection.DOWN;
+            default -> throw new InvalidRequestException(
+                    "direction must be north, east, south, west, up, or down");
         };
     }
 

@@ -129,6 +129,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /v1/inspect-view:
+    post:
+      operationId: inspectView
+      summary: Return the first non-air block along each sightline in an orthographic view
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InspectViewRequest'
+      responses:
+        '200':
+          description: Exact sparse visible block layer and its world-aligned view basis
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InspectViewResponse'
+        '400':
+          description: Invalid JSON, fields, coordinates, view geometry, or world height
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: World is not loaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          $ref: '#/components/responses/PostMethodNotAllowed'
+        '413':
+          description: View scan volume or exact result exceeds its limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected inspection failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: View contains an unloaded chunk or inspection was interrupted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v1/replace-blocks:
     post:
       operationId: replaceBlocks
@@ -598,6 +649,190 @@ components:
           maxItems: 10000
           items:
             $ref: '#/components/schemas/BlockRun'
+    InspectViewRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - world
+        - origin
+        - direction
+        - horizontalRadius
+        - verticalRadius
+        - maxDistance
+      properties:
+        world:
+          type: string
+          minLength: 1
+        origin:
+          description: Center anchor of the orthographic view; scanning starts one block forward.
+          $ref: '#/components/schemas/BlockPosition'
+        direction:
+          type: string
+          enum:
+            - north
+            - east
+            - south
+            - west
+            - up
+            - down
+        horizontalRadius:
+          type: integer
+          format: int32
+          minimum: 0
+        verticalRadius:
+          type: integer
+          format: int32
+          minimum: 0
+        maxDistance:
+          type: integer
+          format: int32
+          minimum: 1
+        maxResults:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 10000
+          default: 2048
+          description: Maximum visible blocks; oversized exact results fail rather than truncate.
+    AxisVector:
+      type: object
+      additionalProperties: false
+      required:
+        - x
+        - y
+        - z
+      properties:
+        x:
+          type: integer
+          format: int32
+          minimum: -1
+          maximum: 1
+        y:
+          type: integer
+          format: int32
+          minimum: -1
+          maximum: 1
+        z:
+          type: integer
+          format: int32
+          minimum: -1
+          maximum: 1
+    ViewBasis:
+      type: object
+      additionalProperties: false
+      required:
+        - forward
+        - horizontal
+        - vertical
+      properties:
+        forward:
+          $ref: '#/components/schemas/AxisVector'
+        horizontal:
+          $ref: '#/components/schemas/AxisVector'
+        vertical:
+          $ref: '#/components/schemas/AxisVector'
+    Viewport:
+      type: object
+      additionalProperties: false
+      required:
+        - horizontalRadius
+        - verticalRadius
+        - maxDistance
+      properties:
+        horizontalRadius:
+          type: integer
+          format: int32
+          minimum: 0
+        verticalRadius:
+          type: integer
+          format: int32
+          minimum: 0
+        maxDistance:
+          type: integer
+          format: int32
+          minimum: 1
+    ViewOffset:
+      type: object
+      additionalProperties: false
+      required:
+        - horizontal
+        - vertical
+        - distance
+      properties:
+        horizontal:
+          type: integer
+          format: int32
+        vertical:
+          type: integer
+          format: int32
+        distance:
+          type: integer
+          format: int32
+          minimum: 1
+    ViewBlock:
+      type: object
+      additionalProperties: false
+      required:
+        - position
+        - offset
+        - state
+      properties:
+        position:
+          $ref: '#/components/schemas/BlockPosition'
+        offset:
+          $ref: '#/components/schemas/ViewOffset'
+        state:
+          type: string
+          minLength: 1
+    InspectViewResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - world
+        - origin
+        - direction
+        - basis
+        - viewport
+        - bounds
+        - scannedVolume
+        - visibleBlocks
+        - blocks
+      properties:
+        world:
+          type: string
+          minLength: 1
+        origin:
+          $ref: '#/components/schemas/BlockPosition'
+        direction:
+          type: string
+          enum:
+            - north
+            - east
+            - south
+            - west
+            - up
+            - down
+        basis:
+          $ref: '#/components/schemas/ViewBasis'
+        viewport:
+          $ref: '#/components/schemas/Viewport'
+        bounds:
+          $ref: '#/components/schemas/Bounds'
+        scannedVolume:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 32768
+        visibleBlocks:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 10000
+        blocks:
+          type: array
+          maxItems: 10000
+          items:
+            $ref: '#/components/schemas/ViewBlock'
     ReplaceBlocksRequest:
       type: object
       additionalProperties: false

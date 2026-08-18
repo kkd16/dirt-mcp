@@ -140,6 +140,76 @@ entries in `runs` mode. The bridge returns `result_too_large` (413) instead of
 truncating. Other failures match `inspect_region`. Both modes use snapshots and
 never load or generate chunks.
 
+### `inspect_view`
+
+Structured view inspection returns one sparse orthographic surface layer. For
+each viewport cell, it scans away from an integer origin and returns the first
+non-air block. The origin is not scanned; distance `1` is the adjacent block.
+Glass, liquids, leaves, and every other non-air state stop their sightline.
+
+The bridge request is `POST /v1/inspect-view`:
+
+```json
+{
+  "world": "world",
+  "origin": { "x": 0, "y": 70, "z": 5 },
+  "direction": "north",
+  "horizontalRadius": 1,
+  "verticalRadius": 1,
+  "maxDistance": 8,
+  "maxResults": 2048
+}
+```
+
+Directions are `north`, `east`, `south`, `west`, `up`, and `down`. They use
+Minecraft world axes: east is +X, up is +Y, south is +Z, and their opposites
+use the negative axes. Horizontal views use world-up as the positive vertical
+axis. Both vertical views use east as positive horizontal and north as positive
+vertical so they read like a Minecraft map.
+
+A successful response includes both absolute positions and view-relative
+offsets:
+
+```json
+{
+  "world": "world",
+  "origin": { "x": 0, "y": 70, "z": 5 },
+  "direction": "north",
+  "basis": {
+    "forward": { "x": 0, "y": 0, "z": -1 },
+    "horizontal": { "x": 1, "y": 0, "z": 0 },
+    "vertical": { "x": 0, "y": 1, "z": 0 }
+  },
+  "viewport": {
+    "horizontalRadius": 1,
+    "verticalRadius": 1,
+    "maxDistance": 8
+  },
+  "bounds": {
+    "min": { "x": -1, "y": 69, "z": -3 },
+    "max": { "x": 1, "y": 71, "z": 4 }
+  },
+  "scannedVolume": 72,
+  "visibleBlocks": 1,
+  "blocks": [
+    {
+      "position": { "x": -1, "y": 71, "z": 2 },
+      "offset": { "horizontal": -1, "vertical": 1, "distance": 3 },
+      "state": "minecraft:oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]"
+    }
+  ]
+}
+```
+
+Blocks are ordered from the viewport's top row to bottom row, then left to
+right; empty sightlines are omitted. `maxResults` defaults to 2,048 and may be
+set from 1 through 10,000. Oversized results fail with `result_too_large`
+instead of truncating. Scan volume is
+`(2 * horizontalRadius + 1) * (2 * verticalRadius + 1) * maxDistance` and may
+not exceed 32,768 blocks or the configured general region limit, whichever is
+lower. The complete scan prism must be within world height and already-loaded
+chunks. This tool returns block data rather than an image or perspective render.
+
 ### `replace_blocks`
 
 Inputs:

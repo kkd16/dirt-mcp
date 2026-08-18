@@ -57,11 +57,11 @@ Java implementation, TypeScript tool, validation, and tests.
 
 Region inspection never loads or generates terrain. The plugin verifies that
 every intersecting chunk is already loaded and captures thread-safe Paper chunk
-snapshots on the main server thread. It counts summary states or extracts exact
-filtered geometry from those snapshots off-thread. Exact results may be sparse
-blocks or deterministic axis-aligned runs and are rejected rather than
-truncated when their cap is exceeded. Requests fail if the world, height range,
-or any chunk is unavailable.
+snapshots on the main server thread. It counts summary states, extracts exact
+filtered geometry, or scans the nearest non-air block along each sightline of a
+bounded orthographic view from those snapshots off-thread. Exact results are
+rejected rather than truncated when their cap is exceeded. Requests fail if the
+world, height range, or any chunk is unavailable.
 
 ## Deployment
 

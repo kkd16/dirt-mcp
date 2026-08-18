@@ -96,7 +96,7 @@ command: dev-token ## Send one Paper console command with CMD='...'.
 	@test -n "$$DIRT_MCP_DEV_COMMAND" || { printf 'Usage: make command CMD='\''version'\''\n' >&2; exit 2; }
 	@scripts/dev-paper command "$$DIRT_MCP_DEV_COMMAND"
 
-smoke-fill: dev-token ## Exercise live inspection, edits, result caps, no-ops, and undo.
+smoke-fill: dev-token ## Exercise live inspection, views, edits, result caps, no-ops, and undo.
 	@node scripts/smoke-fill-region.mjs
 
 mcp: build-mcp dev-token ## Run the MCP stdio server for an MCP host.

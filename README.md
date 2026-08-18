@@ -8,8 +8,8 @@ for inspecting bounded regions and performing deterministic bulk edits through
 while Paper remains the owner of the live world.
 
 The repository currently ships the Paper plugin, authenticated loopback bridge,
-and MCP tools for status, bounded summary and exact block inspection,
-FAWE-backed block replacement and filling, and undo.
+and MCP tools for status, bounded summary, exact block inspection, sparse
+orthographic views, FAWE-backed block replacement and filling, and undo.
 
 ## Platform support
 
@@ -114,8 +114,8 @@ For another MCP host, configure it to launch the source build:
 
 Once npm publishing exists, a global installation will provide the equivalent
 `dirt-mcp` command. The current tool surface contains `dirt_status`,
-`inspect_region`, `inspect_blocks`, `replace_blocks`, `fill_region`, and
-`undo_last_edit`.
+`inspect_region`, `inspect_blocks`, `inspect_view`, `replace_blocks`,
+`fill_region`, and `undo_last_edit`.
 
 ## Local development
 
@@ -169,7 +169,7 @@ make status    Report Paper and authenticated bridge health
 make logs      Print recent Paper console output
 make console   Attach to Paper; detach without stopping with Ctrl-b d
 make command   Send one console command with CMD='...'
-make smoke-fill Exercise live inspection, edits, result caps, no-ops, and undo
+make smoke-fill Exercise live inspection, views, edits, result caps, no-ops, and undo
 make check     Run Java and MCP checks and tests
 make ci        Reproduce the clean CI build
 make dev-token Create the ignored local bearer token
@@ -184,9 +184,9 @@ of creating temporary Paper servers. Normal builds, reloads, and cleans preserve
 the world.
 
 Run `make smoke-fill` without concurrent Dirt MCP edits. It temporarily
-force-loads chunk `0,0`, verifies exact block and run inspection, mutates eight
-blocks through fill and replacement, checks result caps and no-ops, then restores
-their exact prior state.
+force-loads chunk `0,0`, verifies exact block, run, and view inspection, mutates
+eight blocks through fill and replacement, checks result caps and no-ops, then
+restores their exact prior state.
 
 ## Contributing
 

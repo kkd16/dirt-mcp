@@ -160,6 +160,51 @@ try {
   const exactBlocks = await bridgeRequest('/v1/inspect-blocks', region);
   assertExactBlocks(exactBlocks, filled.destination);
 
+  const viewRequest = {
+    world,
+    origin: { x: 0, y: 0, z: 2 },
+    direction: 'north',
+    horizontalRadius: 0,
+    verticalRadius: 0,
+    maxDistance: 2,
+  };
+  const view = await bridgeRequest('/v1/inspect-view', viewRequest);
+  assert.equal(view.direction, 'north');
+  assert.deepEqual(view.basis, {
+    forward: { x: 0, y: 0, z: -1 },
+    horizontal: { x: 1, y: 0, z: 0 },
+    vertical: { x: 0, y: 1, z: 0 },
+  });
+  assert.deepEqual(view.viewport, {
+    horizontalRadius: 0,
+    verticalRadius: 0,
+    maxDistance: 2,
+  });
+  assert.deepEqual(view.bounds, {
+    min: { x: 0, y: 0, z: 0 },
+    max: { x: 0, y: 0, z: 1 },
+  });
+  assert.equal(view.scannedVolume, 2);
+  assert.equal(view.visibleBlocks, 1);
+  assert.deepEqual(view.blocks, [{
+    position: { x: 0, y: 0, z: 1 },
+    offset: { horizontal: 0, vertical: 0, distance: 1 },
+    state: filled.destination,
+  }]);
+
+  const limitedView = await bridgeResponse('/v1/inspect-view', {
+    ...viewRequest,
+    verticalRadius: 1,
+    maxResults: 1,
+  });
+  assert.equal(limitedView.status, 413);
+  assert.deepEqual(limitedView.body, {
+    error: {
+      code: 'result_too_large',
+      message: 'View result exceeds maxResults of 1 visible blocks',
+    },
+  });
+
   const exactRuns = await bridgeRequest('/v1/inspect-blocks', {
     ...region,
     include: [filled.destination],

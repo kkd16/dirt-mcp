@@ -11,6 +11,8 @@ import * as z from 'zod/v4';
 const INT32_MIN = -2_147_483_648;
 const INT32_MAX = 2_147_483_647;
 const MAX_EXACT_RESULTS = 10_000;
+const DEFAULT_VIEW_RESULTS = 2_048;
+const MAX_VIEW_RESULTS = 10_000;
 
 export interface BridgeConfig {
   baseUrl: string;
@@ -91,6 +93,57 @@ const InspectBlocksOutputSchema = z.discriminatedUnion('mode', [
     }).strict()).max(MAX_EXACT_RESULTS),
   }).strict(),
 ]);
+
+const ViewDirectionSchema = z.enum(['north', 'east', 'south', 'west', 'up', 'down']);
+
+const InspectViewInputSchema = z.object({
+  world: z.string().min(1),
+  origin: BlockPositionSchema,
+  direction: ViewDirectionSchema
+    .describe('Minecraft cardinal direction in which the orthographic view scans.'),
+  horizontalRadius: z.number().int().min(0).max(INT32_MAX)
+    .describe('Number of viewport cells on each side of the center sightline.'),
+  verticalRadius: z.number().int().min(0).max(INT32_MAX)
+    .describe('Number of viewport cells above and below the center sightline.'),
+  maxDistance: z.number().int().min(1).max(INT32_MAX)
+    .describe('Maximum blocks to scan forward; distance 1 is adjacent to origin.'),
+  maxResults: z.number().int().min(1).max(MAX_VIEW_RESULTS).optional().default(DEFAULT_VIEW_RESULTS)
+    .describe('Maximum visible blocks; oversized exact results fail instead of truncating.'),
+}).strict();
+
+const AxisVectorSchema = z.object({
+  x: z.number().int().min(-1).max(1),
+  y: z.number().int().min(-1).max(1),
+  z: z.number().int().min(-1).max(1),
+}).strict();
+
+const InspectViewOutputSchema = z.object({
+  world: z.string().min(1),
+  origin: BlockPositionSchema,
+  direction: ViewDirectionSchema,
+  basis: z.object({
+    forward: AxisVectorSchema,
+    horizontal: AxisVectorSchema,
+    vertical: AxisVectorSchema,
+  }).strict(),
+  viewport: z.object({
+    horizontalRadius: z.number().int().nonnegative(),
+    verticalRadius: z.number().int().nonnegative(),
+    maxDistance: z.number().int().positive(),
+  }).strict(),
+  bounds: BoundsSchema,
+  scannedVolume: z.number().int().min(1).max(32_768),
+  visibleBlocks: z.number().int().min(0).max(MAX_VIEW_RESULTS),
+  blocks: z.array(z.object({
+    position: BlockPositionSchema,
+    offset: z.object({
+      horizontal: z.number().int().min(INT32_MIN).max(INT32_MAX),
+      vertical: z.number().int().min(INT32_MIN).max(INT32_MAX),
+      distance: z.number().int().min(1).max(INT32_MAX),
+    }).strict(),
+    state: z.string().min(1),
+  }).strict()).max(MAX_VIEW_RESULTS),
+}).strict();
 
 const ReplaceBlocksInputSchema = z.object({
   world: z.string().min(1),
@@ -298,6 +351,42 @@ export function registerTools(
         const message = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: 'text', text: `Could not inspect exact blocks: ${message}` }],
+          isError: true,
+        };
+      }
+    }),
+  ));
+
+  registrations.push(register(
+    'inspect_view',
+    {
+      title: 'Inspect a view',
+      description: 'Return the nearest non-air block along each sightline in a bounded orthographic view of already-loaded chunks.',
+      inputSchema: InspectViewInputSchema,
+      outputSchema: InspectViewOutputSchema,
+    },
+    async (input, context) => auditToolCall('inspect_view', input.world, context, async (callId) => {
+      try {
+        const response = await bridgeRequest(
+          config,
+          '/v1/inspect-view',
+          callId,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(input),
+          },
+          30_000,
+        );
+        const view = InspectViewOutputSchema.parse(await response.json());
+        return {
+          content: [{ type: 'text', text: JSON.stringify(view, null, 2) }],
+          structuredContent: view,
+        };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: 'text', text: `Could not inspect the view: ${message}` }],
           isError: true,
         };
       }

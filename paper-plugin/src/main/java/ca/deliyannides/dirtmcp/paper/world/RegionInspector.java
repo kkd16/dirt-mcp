@@ -7,10 +7,14 @@ import java.util.Map;
 public interface RegionInspector {
     int MAX_EXACT_VOLUME = 32_768;
     int MAX_EXACT_RESULTS = 10_000;
+    int DEFAULT_VIEW_RESULTS = 2_048;
+    int MAX_VIEW_RESULTS = 10_000;
 
     InspectionResult inspect(InspectionRequest request) throws InspectionException;
 
     ExactInspectionResult inspectBlocks(ExactInspectionRequest request) throws InspectionException;
+
+    ViewResult inspectView(ViewRequest request) throws InspectionException;
 
     record BlockPosition(int x, int y, int z) {}
 
@@ -73,6 +77,45 @@ public interface RegionInspector {
             long matchedBlocks,
             String mode,
             List<BlockRun> runs) implements ExactInspectionResult {}
+
+    enum ViewDirection {
+        NORTH,
+        EAST,
+        SOUTH,
+        WEST,
+        UP,
+        DOWN
+    }
+
+    record ViewRequest(
+            String world,
+            BlockPosition origin,
+            ViewDirection direction,
+            int horizontalRadius,
+            int verticalRadius,
+            int maxDistance,
+            int maxResults) {}
+
+    record AxisVector(int x, int y, int z) {}
+
+    record ViewBasis(AxisVector forward, AxisVector horizontal, AxisVector vertical) {}
+
+    record Viewport(int horizontalRadius, int verticalRadius, int maxDistance) {}
+
+    record ViewOffset(int horizontal, int vertical, int distance) {}
+
+    record ViewBlock(BlockPosition position, ViewOffset offset, String state) {}
+
+    record ViewResult(
+            String world,
+            BlockPosition origin,
+            String direction,
+            ViewBasis basis,
+            Viewport viewport,
+            Bounds bounds,
+            long scannedVolume,
+            long visibleBlocks,
+            List<ViewBlock> blocks) {}
 
     enum Failure {
         INVALID_REQUEST,

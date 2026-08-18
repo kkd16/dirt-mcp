@@ -30,7 +30,7 @@ inspect region -> describe an edit -> optionally preview -> execute -> inspect -
 
 V1 provides four world operations:
 
-- inspect a bounded region;
+- inspect bounded regions as summaries, exact geometry, or sparse orthographic views;
 - replace matching blocks;
 - fill a bounded region; and
 - undo the most recent Dirt MCP edit in a world.

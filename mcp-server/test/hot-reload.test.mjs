@@ -93,6 +93,7 @@ test('reloads tools without replacing the stdio process', async (context) => {
       'fill_region',
       'inspect_blocks',
       'inspect_region',
+      'inspect_view',
       'replace_blocks',
       'undo_last_edit',
     ],

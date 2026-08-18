@@ -19,6 +19,7 @@ import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockInspectionResult
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockRun;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Bounds;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Dimensions;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.AxisVector;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionMode;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionResult;
@@ -27,6 +28,13 @@ import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectedBlock;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionException;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RunInspectionResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewBasis;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewBlock;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewDirection;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewOffset;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Viewport;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -383,6 +391,92 @@ final class ApiServerTest {
                     "{\"error\":{\"code\":\"result_too_large\","
                             + "\"message\":\"Too many exact blocks\"}}",
                     response.body());
+        }
+    }
+
+    @Test
+    void inspectsAViewWithTheSparseResultDefault() throws Exception {
+        RegionInspector inspector = new TestInspector() {
+            @Override
+            public ViewResult inspectView(ViewRequest request) {
+                assertEquals("world", request.world());
+                assertEquals(new BlockPosition(1, 2, 3), request.origin());
+                assertEquals(ViewDirection.NORTH, request.direction());
+                assertEquals(1, request.horizontalRadius());
+                assertEquals(1, request.verticalRadius());
+                assertEquals(3, request.maxDistance());
+                assertEquals(2_048, request.maxResults());
+                return new ViewResult(
+                        request.world(),
+                        request.origin(),
+                        "north",
+                        new ViewBasis(
+                                new AxisVector(0, 0, -1),
+                                new AxisVector(1, 0, 0),
+                                new AxisVector(0, 1, 0)),
+                        new Viewport(1, 1, 3),
+                        new Bounds(new BlockPosition(0, 1, 0), new BlockPosition(2, 3, 2)),
+                        27,
+                        1,
+                        List.of(new ViewBlock(
+                                new BlockPosition(1, 2, 2),
+                                new ViewOffset(0, 0, 1),
+                                "minecraft:oak_stairs[facing=north]")));
+            }
+        };
+
+        try (ApiServer server = server(inspector); HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+            HttpResponse<String> response = client.send(
+                    viewRequest(server, """
+                            {"world":"world","origin":{"x":1,"y":2,"z":3},
+                             "direction":"north","horizontalRadius":1,"verticalRadius":1,
+                             "maxDistance":3}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, response.statusCode());
+            assertEquals(
+                    "{\"world\":\"world\",\"origin\":{\"x\":1,\"y\":2,\"z\":3},"
+                            + "\"direction\":\"north\",\"basis\":{\"forward\":{\"x\":0,\"y\":0,\"z\":-1},"
+                            + "\"horizontal\":{\"x\":1,\"y\":0,\"z\":0},"
+                            + "\"vertical\":{\"x\":0,\"y\":1,\"z\":0}},"
+                            + "\"viewport\":{\"horizontalRadius\":1,\"verticalRadius\":1,\"maxDistance\":3},"
+                            + "\"bounds\":{\"min\":{\"x\":0,\"y\":1,\"z\":0},"
+                            + "\"max\":{\"x\":2,\"y\":3,\"z\":2}},\"scannedVolume\":27,"
+                            + "\"visibleBlocks\":1,\"blocks\":[{\"position\":{\"x\":1,\"y\":2,\"z\":2},"
+                            + "\"offset\":{\"horizontal\":0,\"vertical\":0,\"distance\":1},"
+                            + "\"state\":\"minecraft:oak_stairs[facing\\u003dnorth]\"}]}",
+                    response.body());
+        }
+    }
+
+    @Test
+    void rejectsInvalidViewOptionsAndUnknownFields() throws Exception {
+        try (ApiServer server = server(UNUSED_INSPECTOR); HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+            String base = """
+                    {"world":"world","origin":{"x":0,"y":0,"z":0},
+                     "direction":"%s","horizontalRadius":%d,"verticalRadius":1,
+                     "maxDistance":3%s}
+                    """;
+            HttpResponse<String> direction = client.send(
+                    viewRequest(server, base.formatted("forward", 1, "")),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> radius = client.send(
+                    viewRequest(server, base.formatted("north", -1, "")),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resultCap = client.send(
+                    viewRequest(server, base.formatted("north", 1, ",\"maxResults\":10001")),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> unknown = client.send(
+                    viewRequest(server, base.formatted("north", 1, ",\"extra\":true")),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(400, direction.statusCode());
+            assertEquals(400, radius.statusCode());
+            assertEquals(400, resultCap.statusCode());
+            assertEquals(400, unknown.statusCode());
         }
     }
 
@@ -745,6 +839,13 @@ final class ApiServerTest {
                 .build();
     }
 
+    private static HttpRequest viewRequest(ApiServer server, String body) {
+        return authorizedRequest(inspectViewUri(server))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+    }
+
     private static HttpRequest undoRequest(ApiServer server, String body) {
         return authorizedRequest(undoLastEditUri(server))
                 .header("Content-Type", "application/json")
@@ -777,6 +878,10 @@ final class ApiServerTest {
 
     private static URI inspectBlocksUri(ApiServer server) {
         return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/inspect-blocks");
+    }
+
+    private static URI inspectViewUri(ApiServer server) {
+        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/inspect-view");
     }
 
     private static URI undoLastEditUri(ApiServer server) {
@@ -815,6 +920,11 @@ final class ApiServerTest {
         public ExactInspectionResult inspectBlocks(ExactInspectionRequest request)
                 throws InspectionException {
             throw new AssertionError("Exact block inspector should not be called");
+        }
+
+        @Override
+        public ViewResult inspectView(ViewRequest request) throws InspectionException {
+            throw new AssertionError("View inspector should not be called");
         }
     }
 }
