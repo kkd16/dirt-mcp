@@ -14,7 +14,8 @@
   "scripts": {
     "build": "npm run build --workspace=@dirt-mcp/server",
     "check": "npm run check --workspace=@dirt-mcp/server",
-    "clean": "npm run clean --workspace=@dirt-mcp/server"
+    "clean": "npm run clean --workspace=@dirt-mcp/server",
+    "test": "npm test --workspace=@dirt-mcp/server"
   },
   "repository": {
     "type": "git",

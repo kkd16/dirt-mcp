@@ -4,19 +4,19 @@ SHELL := /bin/bash
 
 MC_PORT ?= 25566
 BRIDGE_PORT ?= 8765
-BRIDGE_URL := http://127.0.0.1:$(BRIDGE_PORT)
 DEV_TOKEN_FILE := paper-plugin/run/.dirt-mcp-token
 
-.PHONY: help doctor install build build-java build-mcp check ci dev-token up mcp health clean
+.PHONY: help doctor install build build-java build-mcp dev-build check ci dev-token up reload down status logs console command mcp health clean
 
 help: ## Show the available development commands.
 	@awk 'BEGIN { FS = ":.*## "; printf "Dirt MCP development commands:\n\n" } /^[a-zA-Z_-]+:.*## / { printf "  %-12s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 	@printf '\nOverrides: MC_PORT=%s BRIDGE_PORT=%s\n' "$(MC_PORT)" "$(BRIDGE_PORT)"
 
-doctor: ## Verify the required Java, Node.js, npm, and wrapper tools.
+doctor: ## Verify the required Java, Node.js, npm, Gradle, and tmux tools.
 	@command -v java >/dev/null || { printf 'Java 25 is required.\n' >&2; exit 1; }
 	@command -v node >/dev/null || { printf 'Node.js 24 LTS or newer is required.\n' >&2; exit 1; }
 	@command -v npm >/dev/null || { printf 'npm is required.\n' >&2; exit 1; }
+	@command -v tmux >/dev/null || { printf 'tmux is required for the managed development server.\n' >&2; exit 1; }
 	@if ! ./gradlew -q javaToolchains | grep -Eq 'Language Version:[[:space:]]+25'; then \
 	  printf 'Gradle could not resolve the Java 25 toolchain required by Paper 26.2.\n' >&2; exit 1; fi
 	@node_major="$$(node -p "process.versions.node.split('.')[0]")"; \
@@ -38,15 +38,22 @@ build-java: ## Compile and test the Paper plugin.
 build-mcp: ## Compile the MCP server.
 	npm run build
 
+dev-build: ## Incrementally compile the Paper plugin and MCP server without tests.
+	./gradlew :paper-plugin:jar
+	npm run build
+
 check: ## Run all static checks and Java tests.
 	./gradlew check
 	npm run check
+	npm run build
+	npm test
 
 ci: ## Reproduce the clean continuous-integration build.
 	npm ci
 	./gradlew --no-daemon clean build
 	npm run check
 	npm run build
+	npm test
 
 dev-token: ## Create the ignored bearer token used by local development.
 	@mkdir -p "$(dir $(DEV_TOKEN_FILE))"
@@ -57,25 +64,42 @@ dev-token: ## Create the ignored bearer token used by local development.
 	fi
 	@chmod 600 "$(DEV_TOKEN_FILE)"
 
-up: ## Build and run the full local Paper development stack in the foreground.
-	@$(MAKE) --no-print-directory install
-	@$(MAKE) --no-print-directory build
+up: ## Start the managed Paper development server and wait until it is ready.
 	@$(MAKE) --no-print-directory dev-token
-	@printf 'Starting Paper on 0.0.0.0:%s with the bridge on %s. Type "stop" to shut it down.\n' "$(MC_PORT)" "$(BRIDGE_URL)"
-	@token="$$(< "$(DEV_TOKEN_FILE)")"; \
-	  env PAPER_EULA=true \
-	  DIRT_MCP_DEV_PORT="$(MC_PORT)" \
-	  DIRT_MCP_BRIDGE_PORT="$(BRIDGE_PORT)" \
-	  DIRT_MCP_BRIDGE_TOKEN="$$token" \
-	  ./gradlew :paper-plugin:runServer
+	@if scripts/dev-paper status >/dev/null 2>&1; then \
+	  scripts/dev-paper status; \
+	else \
+	  $(MAKE) --no-print-directory install; \
+	  $(MAKE) --no-print-directory build; \
+	  scripts/dev-paper up "$(MC_PORT)" "$(BRIDGE_PORT)"; \
+	fi
+
+reload: ## Rebuild and gracefully restart the managed development server.
+	@$(MAKE) --no-print-directory dev-build
+	@scripts/dev-paper restart
+
+down: dev-token ## Stop the managed development server cleanly.
+	@scripts/dev-paper down
+
+status: dev-token ## Report managed Paper process and bridge health.
+	@scripts/dev-paper status
+
+logs: dev-token ## Print recent managed Paper console output (override with LINES=...).
+	@scripts/dev-paper logs "$(or $(LINES),100)"
+
+console: dev-token ## Attach to the managed Paper console; detach with Ctrl-b d.
+	@scripts/dev-paper console
+
+command: export DIRT_MCP_DEV_COMMAND := $(value CMD)
+command: dev-token ## Send one Paper console command with CMD='...'.
+	@test -n "$$DIRT_MCP_DEV_COMMAND" || { printf 'Usage: make command CMD='\''version'\''\n' >&2; exit 2; }
+	@scripts/dev-paper command "$$DIRT_MCP_DEV_COMMAND"
 
 mcp: build-mcp dev-token ## Run the MCP stdio server for an MCP host.
-	@env DIRT_MCP_BRIDGE_URL="$(BRIDGE_URL)" scripts/run-dirt-mcp
+	@scripts/run-dirt-mcp
 
 health: dev-token ## Query the running Paper bridge health endpoint.
-	@token="$$(< "$(DEV_TOKEN_FILE)")"; \
-	  curl --fail --silent --show-error --header "Authorization: Bearer $$token" "$(BRIDGE_URL)/v1/health"
-	@printf '\n'
+	@scripts/dev-paper health
 
 clean: ## Remove generated build outputs; preserve the local Paper world.
 	./gradlew clean

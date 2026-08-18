@@ -22,7 +22,7 @@ Dirt MCP tracks the latest stable Paper release only. The current baseline is:
 - Node.js 24 LTS or newer.
 
 Older Paper or Minecraft versions are not supported unless they happen to work.
-Source development also requires GNU Make and curl.
+Source development also requires GNU Make, curl, and tmux.
 
 ## Installation
 
@@ -90,9 +90,10 @@ least 32 bytes. Never commit or log them.
 
 The repository includes a project-scoped Codex configuration in
 `.codex/config.toml`. Run `make up` at least once to build the project and create
-its ignored development token, then start Codex from this trusted repository
-(or restart an existing Codex session). Codex launches the MCP process when it
-connects; keep `make up` running so that process can reach the Paper bridge.
+its ignored development token, then start Codex from this trusted repository.
+Codex launches the MCP process when it connects. The source-development MCP
+process hot-reloads rebuilt tool definitions; changes to its small bootstrap
+still require restarting Codex.
 
 For another MCP host, configure it to launch the source build:
 
@@ -118,7 +119,7 @@ Once npm publishing exists, a global installation will provide the equivalent
 ## Local development
 
 The checked-in Gradle wrapper supplies Gradle. Verify the local toolchain and
-start an isolated development server with:
+start the managed development server with:
 
 ```bash
 make doctor
@@ -127,13 +128,24 @@ make up
 
 `make up` installs locked dependencies, builds and tests both components,
 downloads the pinned FAWE development dependency, creates an ignored local
-bearer token when needed, and accepts Mojang's EULA on the command line. It runs
-Paper in the foreground on port `25566` with an IPv4 listener suitable for
-Windows and WSL. Connect to the Minecraft server at
+bearer token when needed, and accepts Mojang's EULA on the command line. It
+starts one persistent Paper process in a detached tmux session, waits for the
+authenticated bridge to become healthy, and returns. Paper listens on port
+`25566` with an IPv4 listener suitable for Windows and WSL. Connect at
 `127.0.0.1:25566`. The authenticated MCP bridge is available to local MCP
 clients at `127.0.0.1:8765`. Only run it if you agree to the
-[Minecraft EULA](https://aka.ms/MinecraftEULA). Type `stop` in the Paper console
-for a clean shutdown.
+[Minecraft EULA](https://aka.ms/MinecraftEULA).
+
+During development, rebuild and safely cycle Paper with:
+
+```bash
+make reload
+```
+
+Paper does not safely support plugin hot reloads, so this performs an
+incremental build, clean `stop`, restart of the same development world, and
+health check. Players disconnect only for the restart. The MCP tool catalog
+reloads in place when its compiled module changes.
 
 Override local ports when needed:
 
@@ -141,11 +153,20 @@ Override local ports when needed:
 make up MC_PORT=25567 BRIDGE_PORT=9876
 ```
 
+The selected ports are retained by `make reload`. Restart Codex after changing
+the bridge port so its MCP process reads the new development state.
+
 Useful commands:
 
 ```text
 make help      List commands and configuration overrides
 make build     Build the Paper plugin and MCP server
+make reload    Incrementally rebuild and gracefully restart Paper
+make down      Stop the managed Paper server cleanly
+make status    Report Paper and authenticated bridge health
+make logs      Print recent Paper console output
+make console   Attach to Paper; detach without stopping with Ctrl-b d
+make command   Send one console command with CMD='...'
 make check     Run Java tests and TypeScript checks
 make ci        Reproduce the clean CI build
 make dev-token Create the ignored local bearer token
@@ -154,7 +175,10 @@ make mcp       Run the MCP stdio process
 make clean     Remove build outputs, preserving the development world
 ```
 
-Generated Paper state lives in `paper-plugin/run/` and is not committed.
+Generated Paper state lives in `paper-plugin/run/` and is not committed. This is
+the canonical disposable development world: reuse and mutate it freely instead
+of creating temporary Paper servers. Normal builds, reloads, and cleans preserve
+the world.
 
 ## Contributing
 
@@ -169,8 +193,8 @@ make ci
 ```
 
 Changes affecting plugin startup, configuration, networking, Paper APIs, or
-FAWE must also be exercised on the local Paper server with `make up` and shut
-down cleanly afterward.
+FAWE must also be exercised on the managed Paper server and cycled with
+`make reload` when plugin code changes.
 
 Read [`AGENTS.md`](AGENTS.md) for repository engineering rules and
 [`docs/`](docs/README.md) for the v1 product design.

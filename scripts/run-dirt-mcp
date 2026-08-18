@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 token_file="${repo_root}/paper-plugin/run/.dirt-mcp-token"
+state_file="${repo_root}/paper-plugin/run/.dirt-mcp-dev-state"
 
 if [[ ! -s "${token_file}" ]]; then
   printf 'Dirt MCP token not found. Run make up or make dev-token first.\n' >&2
@@ -11,5 +12,15 @@ fi
 
 DIRT_MCP_BRIDGE_TOKEN="$(<"${token_file}")"
 export DIRT_MCP_BRIDGE_TOKEN
+export DIRT_MCP_DEV_RELOAD=1
+
+if [[ -z "${DIRT_MCP_BRIDGE_URL:-}" && -f "${state_file}" ]]; then
+  bridge_port="$(awk -F= '$1 == "BRIDGE_PORT" { print $2 }' "${state_file}")"
+  if [[ "${bridge_port}" =~ ^[0-9]+$ ]] && (( bridge_port >= 1 && bridge_port <= 65535 )); then
+    DIRT_MCP_BRIDGE_URL="http://127.0.0.1:${bridge_port}"
+  fi
+fi
+DIRT_MCP_BRIDGE_URL="${DIRT_MCP_BRIDGE_URL:-http://127.0.0.1:8765}"
+export DIRT_MCP_BRIDGE_URL
 
 exec node "${repo_root}/mcp-server/dist/index.js"

@@ -4,6 +4,3 @@ args = ["scripts/run-dirt-mcp"]
 cwd = "."
 enabled = true
 tool_timeout_sec = 130
-
-[mcp_servers.dirt.env]
-DIRT_MCP_BRIDGE_URL = "http://127.0.0.1:8765"

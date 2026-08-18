@@ -56,17 +56,26 @@ the planned fill tool as working.
 Use the root commands rather than duplicating build invocations:
 
 ```text
-make doctor   Verify Java, Node, npm, and Gradle
+make doctor   Verify Java, Node, npm, Gradle, and tmux
 make build    Build Java and TypeScript
 make check    Run Java tests and TypeScript static checks
 make ci       Perform the clean CI-equivalent build
-make up       Build and run the local Paper integration server
+make up       Start or reuse the managed Paper integration server
+make reload   Rebuild and gracefully restart the managed server
+make down     Stop the managed server cleanly
 ```
 
 `make up` uses `paper-plugin/run/`, Minecraft port `25566`, and bridge port
-`8765`. Treat that directory as local runtime state: do not commit it, delete its
-world, or hand-edit generated configuration as part of ordinary development.
-Stop Paper with the console `stop` command.
+`8765`. It returns after the authenticated bridge is healthy; use `make status`,
+`make logs`, `make command CMD='...'`, or `make console` to operate it. Reuse
+this server for live tests rather than creating disposable Paper instances. Its
+world is disposable development data and may be mutated freely, while normal
+commands preserve it. Do not commit or hand-edit generated runtime files.
+
+Paper plugin reload is unsupported. Use `make reload`, which preserves the
+development world but clears in-memory plugin state such as undo history. The
+project MCP process hot-reloads rebuilt tool definitions; bootstrap changes
+still require a Codex restart. Stop Paper with `make down`.
 
 Validation expectations:
 
@@ -76,8 +85,8 @@ Validation expectations:
 - Java or contract changes: `make ci`, inspect the built JAR, and run focused
   tests.
 - Plugin lifecycle, Paper API, networking, configuration, or FAWE changes:
-  perform a real `make up` boot, exercise the changed path, and verify clean
-  shutdown.
+  exercise the changed path on the managed server, run `make reload` when the
+  plugin changes, and verify clean lifecycle logs.
 
 Keep documentation concise and durable. Record the present design and supported
 behavior, not conversation history, implementation diaries, review reports, or
