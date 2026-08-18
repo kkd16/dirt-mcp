@@ -9,13 +9,13 @@ info:
 servers:
   - url: http://127.0.0.1:8765
     description: Default loopback development endpoint
+security:
+  - bearerAuth: []
 paths:
   /v1/health:
     get:
       operationId: getHealth
       summary: Report bridge availability and versions
-      security:
-        - bearerAuth: []
       responses:
         '200':
           description: Bridge health
@@ -24,33 +24,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/Health'
         '401':
-          description: Missing or invalid bearer token
-          headers:
-            WWW-Authenticate:
-              schema:
-                type: string
-                const: Bearer realm="dirt-mcp"
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/Unauthorized'
         '405':
-          description: Method not allowed
-          headers:
-            Allow:
-              description: Methods supported by this endpoint.
-              schema:
-                const: GET
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/GetMethodNotAllowed'
   /v1/inspect-region:
     post:
       operationId: inspectRegion
       summary: Count block states in a bounded region of loaded chunks
-      security:
-        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -71,16 +51,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '401':
-          description: Missing or invalid bearer token
-          headers:
-            WWW-Authenticate:
-              schema:
-                type: string
-                const: Bearer realm="dirt-mcp"
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/Unauthorized'
         '404':
           description: World is not loaded
           content:
@@ -88,15 +59,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '405':
-          description: Method not allowed
-          headers:
-            Allow:
-              schema:
-                const: POST
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/PostMethodNotAllowed'
         '413':
           description: Normalized region exceeds the configured volume limit
           content:
@@ -119,8 +82,6 @@ paths:
     post:
       operationId: replaceBlocks
       summary: Replace one exact block state in a bounded region of loaded chunks
-      security:
-        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -141,16 +102,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '401':
-          description: Missing or invalid bearer token
-          headers:
-            WWW-Authenticate:
-              schema:
-                type: string
-                const: Bearer realm="dirt-mcp"
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/Unauthorized'
         '404':
           description: World is not loaded
           content:
@@ -158,15 +110,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '405':
-          description: Method not allowed
-          headers:
-            Allow:
-              schema:
-                const: POST
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/PostMethodNotAllowed'
         '409':
           description: Another Dirt MCP edit is active in this world
           content:
@@ -195,8 +139,6 @@ paths:
     post:
       operationId: undoLastEdit
       summary: Undo the newest successful Dirt MCP edit in a loaded world
-      security:
-        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -217,16 +159,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '401':
-          description: Missing or invalid bearer token
-          headers:
-            WWW-Authenticate:
-              schema:
-                type: string
-                const: Bearer realm="dirt-mcp"
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/Unauthorized'
         '404':
           description: World is not loaded
           content:
@@ -234,15 +167,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '405':
-          description: Method not allowed
-          headers:
-            Allow:
-              schema:
-                const: POST
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/PostMethodNotAllowed'
         '409':
           description: No undo is available or another Dirt MCP edit is active in this world
           content:
@@ -262,6 +187,38 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 components:
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            const: Bearer realm="dirt-mcp"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    GetMethodNotAllowed:
+      description: Method not allowed
+      headers:
+        Allow:
+          schema:
+            const: GET
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PostMethodNotAllowed:
+      description: Method not allowed
+      headers:
+        Allow:
+          schema:
+            const: POST
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
   securitySchemes:
     bearerAuth:
       type: http
@@ -312,6 +269,17 @@ components:
         z:
           type: integer
           format: int32
+    Bounds:
+      type: object
+      additionalProperties: false
+      required:
+        - min
+        - max
+      properties:
+        min:
+          $ref: '#/components/schemas/BlockPosition'
+        max:
+          $ref: '#/components/schemas/BlockPosition'
     Dimensions:
       type: object
       additionalProperties: false
@@ -361,16 +329,7 @@ components:
           type: string
           minLength: 1
         bounds:
-          type: object
-          additionalProperties: false
-          required:
-            - min
-            - max
-          properties:
-            min:
-              $ref: '#/components/schemas/BlockPosition'
-            max:
-              $ref: '#/components/schemas/BlockPosition'
+          $ref: '#/components/schemas/Bounds'
         dimensions:
           $ref: '#/components/schemas/Dimensions'
         volume:
@@ -425,16 +384,7 @@ components:
           type: string
           minLength: 1
         bounds:
-          type: object
-          additionalProperties: false
-          required:
-            - min
-            - max
-          properties:
-            min:
-              $ref: '#/components/schemas/BlockPosition'
-            max:
-              $ref: '#/components/schemas/BlockPosition'
+          $ref: '#/components/schemas/Bounds'
         source:
           type: string
           minLength: 1

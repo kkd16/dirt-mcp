@@ -45,6 +45,10 @@ the planned fill tool as working.
   edit complete only after FAWE completion and history capture.
 - Prefer small concrete implementations over empty packages, placeholder types,
   factories, or dependency-heavy frameworks.
+- Preserve conventional project infrastructure, metadata, wrapper/config files,
+  and standard scripts even when the current build could work without them.
+  Remove them only when they are obsolete or actively harmful, not merely
+  redundant.
 - Pin compatibility-sensitive dependencies. Before upgrading Paper, Java,
   Gradle, FAWE, or MCP, verify current official documentation and artifact
   metadata, then update code, lockfiles, CI, and docs together.
@@ -56,9 +60,9 @@ the planned fill tool as working.
 Use the root commands rather than duplicating build invocations:
 
 ```text
-make doctor   Verify Java, Node, npm, Gradle, and tmux
+make doctor   Verify Java, Node, npm, Gradle, curl, and tmux
 make build    Build Java and TypeScript
-make check    Run Java tests and TypeScript static checks
+make check    Run Java and MCP checks and tests
 make ci       Perform the clean CI-equivalent build
 make up       Start or reuse the managed Paper integration server
 make reload   Rebuild and gracefully restart the managed server

@@ -190,10 +190,3 @@ sent on every bridge request as `Authorization: Bearer <token>`. It is never
 committed. Source-development commands generate an ignored token under
 `paper-plugin/run/` and pass it to both processes. The bridge address is not
 configurable and remains `127.0.0.1`.
-
-## Current implementation
-
-The repository currently implements the Paper lifecycle, authenticated
-loopback bridge, `dirt_status`, `inspect_region`, and FAWE-backed
-`replace_blocks` and `undo_last_edit`. `fill_region` remains product design, not
-placeholder functionality.

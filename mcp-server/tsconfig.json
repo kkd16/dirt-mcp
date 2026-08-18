@@ -15,8 +15,7 @@
     "noUnusedParameters": true,
     "forceConsistentCasingInFileNames": true,
     "verbatimModuleSyntax": true,
-    "noEmitOnError": true,
-    "skipLibCheck": true
+    "noEmitOnError": true
   },
   "include": ["src/**/*.ts"]
 }

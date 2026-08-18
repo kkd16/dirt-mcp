@@ -63,14 +63,6 @@ the hard-coded `127.0.0.1` interface. Bridge endpoints require a shared bearer
 token even on loopback. The MCP server receives the bridge URL and token through
 its process environment.
 
-The planned release consists of:
-
-- `dirt-mcp-paper-<version>.jar` attached to a GitHub release; and
-- `@dirt-mcp/server` published to npm.
-
-Release publishing is not automated yet. Source builds produce the same two
-artifacts locally.
-
 ## Edit execution
 
 V1 keeps execution intentionally direct:
@@ -91,7 +83,7 @@ that requires server-thread ownership crosses a small scheduler boundary.
 Responses report success only after FAWE has completed and closed its edit
 session.
 
-`replace_blocks` is the first implemented edit path. It uses the same
+`replace_blocks` uses the same
 already-loaded-chunk rule as inspection, canonicalizes Bukkit block-state
 strings at the Paper boundary, and records only successful non-empty edits.
 `undo_last_edit` uses the same world lock, applies the newest history entry

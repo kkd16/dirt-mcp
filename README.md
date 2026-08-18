@@ -21,7 +21,7 @@ Dirt MCP tracks the latest stable Paper release only. The current baseline is:
 - Java 25;
 - Node.js 24 LTS or newer.
 
-Older Paper or Minecraft versions are not supported unless they happen to work.
+Older Paper or Minecraft versions are not supported.
 Source development also requires GNU Make, curl, and tmux.
 
 ## Installation
@@ -82,6 +82,7 @@ bridge:
 
 limits:
   max-region-volume: 1000000
+  max-changed-blocks: 250000
 ```
 
 The bridge always binds to `127.0.0.1`; do not proxy or expose it publicly. Give
@@ -167,7 +168,7 @@ make status    Report Paper and authenticated bridge health
 make logs      Print recent Paper console output
 make console   Attach to Paper; detach without stopping with Ctrl-b d
 make command   Send one console command with CMD='...'
-make check     Run Java tests and TypeScript checks
+make check     Run Java and MCP checks and tests
 make ci        Reproduce the clean CI build
 make dev-token Create the ignored local bearer token
 make health    Query a running bridge
