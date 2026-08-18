@@ -64,13 +64,13 @@ final class PaperRegionInspectorTest {
     @Test
     void groupsIdenticalBlocksAlongTheirLongestAxis() throws Exception {
         List<InspectedBlock> blocks = List.of(
-                new InspectedBlock(new BlockPosition(0, 2, 0), "minecraft:stone"),
-                new InspectedBlock(new BlockPosition(2, 0, 0), "minecraft:glass"),
                 new InspectedBlock(new BlockPosition(0, 0, 0), "minecraft:stone"),
                 new InspectedBlock(new BlockPosition(1, 0, 0), "minecraft:glass"),
-                new InspectedBlock(new BlockPosition(0, 1, 0), "minecraft:stone"));
+                new InspectedBlock(new BlockPosition(2, 0, 0), "minecraft:glass"),
+                new InspectedBlock(new BlockPosition(0, 1, 0), "minecraft:stone"),
+                new InspectedBlock(new BlockPosition(0, 2, 0), "minecraft:stone"));
 
-        List<BlockRun> runs = PaperRegionInspector.groupRuns(blocks, 2);
+        List<BlockRun> runs = PaperRegionInspector.groupSortedRuns(blocks, 2);
 
         assertEquals(List.of(
                 new BlockRun(
@@ -91,7 +91,7 @@ final class PaperRegionInspectorTest {
 
         InspectionException exception = assertThrows(
                 InspectionException.class,
-                () -> PaperRegionInspector.groupRuns(blocks, 1));
+                () -> PaperRegionInspector.groupSortedRuns(blocks, 1));
 
         assertEquals(Failure.RESULT_TOO_LARGE, exception.failure());
     }

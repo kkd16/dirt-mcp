@@ -219,7 +219,7 @@ export function registerTools(
     'inspect_blocks',
     {
       title: 'Inspect exact blocks',
-      description: 'Return exact filtered block positions or lossless compressed runs from already-loaded chunks.',
+      description: 'Return exact non-air positions or lossless runs from already-loaded chunks; use inspect_region for cheaper palette totals.',
       inputSchema: InspectBlocksInputSchema,
       outputSchema: InspectBlocksOutputSchema,
     },

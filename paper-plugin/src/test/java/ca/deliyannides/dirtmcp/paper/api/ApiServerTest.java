@@ -250,6 +250,32 @@ final class ApiServerTest {
     }
 
     @Test
+    void mapsOversizedExactResultsToTheWireError() throws Exception {
+        RegionInspector inspector = new TestInspector() {
+            @Override
+            public ExactInspectionResult inspectBlocks(ExactInspectionRequest request)
+                    throws InspectionException {
+                throw new InspectionException(Failure.RESULT_TOO_LARGE, "Too many exact blocks");
+            }
+        };
+
+        try (ApiServer server = server(inspector); HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+            HttpResponse<String> response = client.send(
+                    exactInspectionRequest(server, """
+                            {"world":"world","min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":0}}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(413, response.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"result_too_large\","
+                            + "\"message\":\"Too many exact blocks\"}}",
+                    response.body());
+        }
+    }
+
+    @Test
     void rejectsUnknownFieldsAndNonIntegerCoordinates() throws Exception {
         try (ApiServer server = server(UNUSED_INSPECTOR); HttpClient client = HttpClient.newHttpClient()) {
             server.start();

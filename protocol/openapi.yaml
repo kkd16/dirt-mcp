@@ -518,8 +518,10 @@ components:
           type: string
           minLength: 1
         from:
+          description: Inclusive first position of the axis-aligned run.
           $ref: '#/components/schemas/BlockPosition'
         to:
+          description: Inclusive last position of the axis-aligned run.
           $ref: '#/components/schemas/BlockPosition'
     InspectBlocksResponse:
       oneOf:

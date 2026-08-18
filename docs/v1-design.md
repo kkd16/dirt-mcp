@@ -76,6 +76,7 @@ sparse list of non-air blocks with canonical states and exact coordinates:
   "world": "world",
   "min": { "x": -40, "y": 68, "z": -10 },
   "max": { "x": -24, "y": 85, "z": 7 },
+  "include": ["minecraft:spruce_door[half=lower]"],
   "exclude": ["minecraft:snow"],
   "maxResults": 10000
 }
@@ -98,19 +99,19 @@ The default `mode` is `blocks`:
     "max": { "x": -24, "y": 85, "z": 7 }
   },
   "volume": 5508,
-  "matchedBlocks": 285,
+  "matchedBlocks": 1,
   "mode": "blocks",
   "blocks": [
     {
       "position": { "x": -32, "y": 71, "z": -4 },
-      "state": "minecraft:spruce_door[facing=north,half=lower]"
+      "state": "minecraft:spruce_door[facing=north,half=lower,hinge=left,open=false,powered=false]"
     }
   ]
 }
 ```
 
-Set `mode` to `runs` to return a deterministic, exact cover of the same matched
-blocks using non-overlapping axis-aligned runs:
+Set `mode` to `runs` to return a deterministic, exact cover using
+non-overlapping axis-aligned runs with inclusive endpoints:
 
 ```json
 {
@@ -120,7 +121,7 @@ blocks using non-overlapping axis-aligned runs:
     "max": { "x": -24, "y": 85, "z": 7 }
   },
   "volume": 5508,
-  "matchedBlocks": 285,
+  "matchedBlocks": 5,
   "mode": "runs",
   "runs": [
     {

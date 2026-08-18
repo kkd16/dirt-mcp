@@ -82,7 +82,7 @@ public final class PaperRegionInspector implements RegionInspector {
                     List.copyOf(blocks));
         }
 
-        List<BlockRun> runs = groupRuns(blocks, request.maxResults());
+        List<BlockRun> runs = groupSortedRuns(blocks, request.maxResults());
         return new RunInspectionResult(
                 capture.worldName(),
                 bounds,
@@ -266,17 +266,15 @@ public final class PaperRegionInspector implements RegionInspector {
         return capture.excludePatterns().stream().noneMatch(candidate::matches);
     }
 
-    static List<BlockRun> groupRuns(List<InspectedBlock> blocks, int maxResults)
+    static List<BlockRun> groupSortedRuns(List<InspectedBlock> blocks, int maxResults)
             throws InspectionException {
-        List<InspectedBlock> orderedBlocks = new ArrayList<>(blocks);
-        orderedBlocks.sort(BLOCK_ORDER);
         Map<BlockPosition, String> remaining = new HashMap<>();
-        for (InspectedBlock block : orderedBlocks) {
+        for (InspectedBlock block : blocks) {
             remaining.put(block.position(), block.state());
         }
 
         List<BlockRun> runs = new ArrayList<>();
-        for (InspectedBlock block : orderedBlocks) {
+        for (InspectedBlock block : blocks) {
             String state = remaining.get(block.position());
             if (state == null) {
                 continue;
