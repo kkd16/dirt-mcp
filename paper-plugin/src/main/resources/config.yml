@@ -1,0 +1,5 @@
+# Only a non-sensitive health endpoint exists in the current scaffold.
+# Environment variables override these values for local development.
+bridge:
+  enabled: false
+  port: 8765

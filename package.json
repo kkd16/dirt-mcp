@@ -1,0 +1,31 @@
+{
+  "name": "dirt-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI access to live Minecraft worlds",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "npm@11.17.0",
+  "workspaces": [
+    "mcp-server"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=@dirt-mcp/server",
+    "check": "npm run check --workspace=@dirt-mcp/server",
+    "clean": "npm run clean --workspace=@dirt-mcp/server",
+    "inspect:mcp": "npm run build && mcp-inspector node mcp-server/dist/index.js",
+    "start:mcp": "npm run start --workspace=@dirt-mcp/server"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/inspector": "2.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kkd16/dirt-mcp.git"
+  },
+  "allowScripts": {
+    "@modelcontextprotocol/inspector@2.2.0": true
+  }
+}

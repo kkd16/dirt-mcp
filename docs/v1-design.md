@@ -1,0 +1,100 @@
+# Version 1 design
+
+V1 exposes a small synchronous tool surface. Mutation tools execute immediately
+unless `dryRun` is explicitly enabled; there is no separate approval or commit
+step.
+
+## Tools
+
+### `inspect_region`
+
+Inputs:
+
+- loaded world name;
+- two inclusive block positions defining the region.
+
+Returns normalized bounds, dimensions, volume, and block-state counts. V1 does
+not return entities, player data, rendered images, or every block coordinate.
+
+### `replace_blocks`
+
+Inputs:
+
+- loaded world and bounded region;
+- one source block state;
+- one destination block state; and
+- optional `dryRun`, defaulting to `false`.
+
+A dry-run returns the exact matching and estimated changed-block counts. An
+executed call replaces matches through one FAWE edit session and records one
+undo entry.
+
+### `fill_region`
+
+Inputs:
+
+- loaded world and bounded region;
+- destination block state; and
+- optional `dryRun`, defaulting to `false`.
+
+A dry-run returns the region volume and expected changed-block count. An
+executed call fills through one FAWE edit session and records one undo entry.
+
+### `undo_last_edit`
+
+Input: loaded world name.
+
+Undoes the newest successful Dirt MCP mutation for that world. It does not undo
+console, player, WorldEdit, or other plugin activity. A successful undo consumes
+the history entry. History does not survive restart.
+
+The existing `dirt_status` tool remains available for bridge and capability
+diagnostics.
+
+## Common rules
+
+- Positions use integer block coordinates and inclusive bounds.
+- Worlds must already be loaded; v1 does not load or create worlds.
+- Block states use namespaced Minecraft identifiers and explicit state
+  properties where needed.
+- Unknown worlds, invalid states, oversized regions, and busy worlds produce
+  structured errors without mutation.
+- No-op mutations return `changedBlocks: 0` and do not create undo history.
+- Reads and writes are limited by normalized region volume. Writes are also
+  limited by their estimated changed-block count.
+- V1 defaults are a maximum region volume of 1,000,000 blocks, a maximum of
+  250,000 changed blocks per mutation, and 20 undo entries per world. Operators
+  may lower or raise these limits.
+- A world accepts one Dirt MCP mutation at a time.
+
+These checks bound resource use; they are not a permissions system. The server
+operator controls who can reach the local MCP process and is responsible for
+backups.
+
+## Configuration
+
+The v1 configuration surface is intentionally small:
+
+```yaml
+bridge:
+  enabled: false
+  port: 8765
+
+limits:
+  max-region-volume: 1000000
+  max-changed-blocks: 250000
+
+undo:
+  max-entries-per-world: 20
+```
+
+The bearer token is supplied to both processes as `DIRT_MCP_BRIDGE_TOKEN` and is
+never committed. The bridge address is not configurable and remains
+`127.0.0.1`.
+
+## Current implementation
+
+The repository currently implements the Paper lifecycle, loopback health
+bridge, OpenAPI health contract, and `dirt_status` MCP tool. The four v1 world
+tools, bearer authentication, and FAWE integration described above are the
+remaining product implementation, not placeholder functionality.
