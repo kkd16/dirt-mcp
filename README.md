@@ -85,7 +85,13 @@ bridge:
 The bridge always binds to `127.0.0.1`; do not proxy or expose it publicly. The
 MCP process must run on the same machine and network namespace as Paper.
 
-Configure an MCP host to launch the source build:
+The repository includes a project-scoped Codex configuration in
+`.codex/config.toml`. After building the project, start Codex from this trusted
+repository (or restart an existing Codex session); Codex will launch the MCP
+process when it connects. Keep `make up` running so the MCP process can reach
+the Paper bridge.
+
+For another MCP host, configure it to launch the source build:
 
 ```json
 {

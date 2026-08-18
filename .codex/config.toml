@@ -1,0 +1,10 @@
+[mcp_servers.dirt]
+command = "node"
+args = ["mcp-server/dist/index.js"]
+cwd = "."
+enabled = true
+startup_timeout_sec = 10
+tool_timeout_sec = 10
+
+[mcp_servers.dirt.env]
+DIRT_MCP_BRIDGE_URL = "http://127.0.0.1:8765"
