@@ -45,6 +45,76 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /v1/inspect-region:
+    post:
+      operationId: inspectRegion
+      summary: Count block states in a bounded region of loaded chunks
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InspectRegionRequest'
+      responses:
+        '200':
+          description: Region inspection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InspectRegionResponse'
+        '400':
+          description: Invalid JSON, fields, coordinates, or world height
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid bearer token
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+                const: Bearer realm="dirt-mcp"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: World is not loaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed
+          headers:
+            Allow:
+              schema:
+                const: POST
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Normalized region exceeds the configured volume limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected inspection failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Region contains an unloaded chunk or inspection was interrupted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 components:
   securitySchemes:
     bearerAuth:
@@ -67,10 +137,103 @@ components:
             code:
               type: string
               enum:
+                - internal_error
+                - invalid_request
                 - method_not_allowed
+                - region_too_large
                 - unauthorized
+                - world_not_found
+                - world_unavailable
             message:
               type: string
+    BlockPosition:
+      type: object
+      additionalProperties: false
+      required:
+        - x
+        - y
+        - z
+      properties:
+        x:
+          type: integer
+          format: int32
+        y:
+          type: integer
+          format: int32
+        z:
+          type: integer
+          format: int32
+    Dimensions:
+      type: object
+      additionalProperties: false
+      required:
+        - x
+        - y
+        - z
+      properties:
+        x:
+          type: integer
+          format: int64
+          minimum: 1
+        y:
+          type: integer
+          format: int64
+          minimum: 1
+        z:
+          type: integer
+          format: int64
+          minimum: 1
+    InspectRegionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - world
+        - min
+        - max
+      properties:
+        world:
+          type: string
+          minLength: 1
+        min:
+          $ref: '#/components/schemas/BlockPosition'
+        max:
+          $ref: '#/components/schemas/BlockPosition'
+    InspectRegionResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - world
+        - bounds
+        - dimensions
+        - volume
+        - blockStates
+      properties:
+        world:
+          type: string
+          minLength: 1
+        bounds:
+          type: object
+          additionalProperties: false
+          required:
+            - min
+            - max
+          properties:
+            min:
+              $ref: '#/components/schemas/BlockPosition'
+            max:
+              $ref: '#/components/schemas/BlockPosition'
+        dimensions:
+          $ref: '#/components/schemas/Dimensions'
+        volume:
+          type: integer
+          format: int64
+          minimum: 1
+        blockStates:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+            minimum: 0
     Health:
       type: object
       additionalProperties: false
@@ -93,7 +256,10 @@ components:
           type: object
           additionalProperties: false
           required:
+            - worldInspection
             - worldEditing
           properties:
+            worldInspection:
+              const: true
             worldEditing:
               const: false

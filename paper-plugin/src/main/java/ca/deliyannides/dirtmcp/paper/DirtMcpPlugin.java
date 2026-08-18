@@ -1,6 +1,7 @@
 package ca.deliyannides.dirtmcp.paper;
 
 import ca.deliyannides.dirtmcp.paper.api.ApiServer;
+import ca.deliyannides.dirtmcp.paper.world.PaperRegionInspector;
 import java.io.IOException;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -20,6 +21,7 @@ public final class DirtMcpPlugin extends JavaPlugin {
                 getPluginMeta().getVersion(),
                 getServer().getMinecraftVersion(),
                 bridgeToken(),
+                new PaperRegionInspector(this, maxRegionVolume()),
                 getLogger());
 
         try {
@@ -65,5 +67,13 @@ public final class DirtMcpPlugin extends JavaPlugin {
             throw new IllegalStateException(TOKEN_ENVIRONMENT_VARIABLE + " is required");
         }
         return token;
+    }
+
+    private long maxRegionVolume() {
+        long maximum = getConfig().getLong("limits.max-region-volume", 1_000_000L);
+        if (maximum < 1) {
+            throw new IllegalArgumentException("limits.max-region-volume must be positive");
+        }
+        return maximum;
     }
 }

@@ -2,3 +2,6 @@
 # DIRT_MCP_BRIDGE_PORT overrides this value.
 bridge:
   port: 8765
+
+limits:
+  max-region-volume: 1000000

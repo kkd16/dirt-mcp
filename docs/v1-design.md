@@ -16,7 +16,7 @@ Inputs:
 Returns normalized bounds, dimensions, volume, and block-state counts. V1 does
 not return entities, player data, rendered images, or every block coordinate.
 
-The planned bridge request is `POST /v1/inspect-region` with a JSON body:
+The bridge request is `POST /v1/inspect-region` with a JSON body:
 
 ```json
 {
@@ -63,8 +63,8 @@ The endpoint uses the common error envelope:
 
 Its defined failures are `invalid_request` (400), `unauthorized` (401),
 `world_not_found` (404), `region_too_large` (413), `world_unavailable` (503),
-and `internal_error` (500). This section fixes the intended wire format; the
-endpoint is not available until it also appears in `protocol/openapi.yaml`.
+and `internal_error` (500). Inspection uses snapshots of already-loaded chunks;
+it never loads or generates terrain.
 
 ### `replace_blocks`
 
@@ -146,6 +146,6 @@ configurable and remains `127.0.0.1`.
 ## Current implementation
 
 The repository currently implements the Paper lifecycle, authenticated
-loopback health bridge, OpenAPI health contract, and `dirt_status` MCP tool. The
-four v1 world tools and FAWE integration described above remain product design,
-not placeholder functionality.
+loopback bridge, `dirt_status`, and `inspect_region`. The three mutation tools
+and FAWE integration described above remain product design, not placeholder
+functionality.

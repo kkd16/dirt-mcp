@@ -1,21 +1,37 @@
 package ca.deliyannides.dirtmcp.paper.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Bounds;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Dimensions;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Failure;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionException;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionResult;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
 
 final class ApiServerTest {
     private static final Logger LOGGER = Logger.getLogger(ApiServerTest.class.getName());
     private static final String TOKEN = "test-token-with-at-least-thirty-two-bytes";
+    private static final RegionInspector UNUSED_INSPECTOR = request -> {
+        throw new AssertionError("Region inspector should not be called");
+    };
 
     @Test
     void reportsHealthOnLoopback() throws Exception {
-        try (ApiServer server = new ApiServer(0, "0.1.0-test", "26.2", TOKEN, LOGGER);
+        try (ApiServer server = server(UNUSED_INSPECTOR);
                 HttpClient client = HttpClient.newHttpClient()) {
             server.start();
 
@@ -30,14 +46,15 @@ final class ApiServerTest {
             assertEquals("no-store", response.headers().firstValue("Cache-Control").orElseThrow());
             assertEquals(
                     "{\"status\":\"ok\",\"service\":\"dirt-mcp-paper\",\"version\":\"0.1.0-test\","
-                            + "\"minecraftVersion\":\"26.2\",\"capabilities\":{\"worldEditing\":false}}",
+                            + "\"minecraftVersion\":\"26.2\",\"capabilities\":{"
+                            + "\"worldInspection\":true,\"worldEditing\":false}}",
                     response.body());
         }
     }
 
     @Test
     void requiresBearerAuthentication() throws Exception {
-        try (ApiServer server = new ApiServer(0, "0.1.0-test", "26.2", TOKEN, LOGGER);
+        try (ApiServer server = server(UNUSED_INSPECTOR);
                 HttpClient client = HttpClient.newHttpClient()) {
             server.start();
 
@@ -58,7 +75,7 @@ final class ApiServerTest {
 
     @Test
     void rejectsUnsupportedMethods() throws Exception {
-        try (ApiServer server = new ApiServer(0, "0.1.0-test", "26.2", TOKEN, LOGGER);
+        try (ApiServer server = server(UNUSED_INSPECTOR);
                 HttpClient client = HttpClient.newHttpClient()) {
             server.start();
 
@@ -76,11 +93,138 @@ final class ApiServerTest {
         }
     }
 
+    @Test
+    void inspectsARegion() throws Exception {
+        RegionInspector inspector = request -> {
+            assertEquals("world", request.world());
+            assertEquals(new BlockPosition(5, 60, -2), request.min());
+            assertEquals(new BlockPosition(6, 61, -1), request.max());
+            return new InspectionResult(
+                    request.world(),
+                    new Bounds(request.min(), request.max()),
+                    new Dimensions(2, 2, 2),
+                    8,
+                    Map.of("minecraft:stone", 8L));
+        };
+
+        try (ApiServer server = server(inspector); HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> response = client.send(
+                    inspectionRequest(server, """
+                            {"world":"world","min":{"x":5,"y":60,"z":-2},"max":{"x":6,"y":61,"z":-1}}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, response.statusCode());
+            assertEquals(
+                    "{\"world\":\"world\",\"bounds\":{\"min\":{\"x\":5,\"y\":60,\"z\":-2},"
+                            + "\"max\":{\"x\":6,\"y\":61,\"z\":-1}},"
+                            + "\"dimensions\":{\"x\":2,\"y\":2,\"z\":2},\"volume\":8,"
+                            + "\"blockStates\":{\"minecraft:stone\":8}}",
+                    response.body());
+        }
+    }
+
+    @Test
+    void rejectsUnknownFieldsAndNonIntegerCoordinates() throws Exception {
+        try (ApiServer server = server(UNUSED_INSPECTOR); HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> unknownField = client.send(
+                    inspectionRequest(server, """
+                            {"world":"world","min":{"x":0,"y":60,"z":0},"max":{"x":1,"y":61,"z":1},"extra":true}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> fractionalCoordinate = client.send(
+                    inspectionRequest(server, """
+                            {"world":"world","min":{"x":0.5,"y":60,"z":0},"max":{"x":1,"y":61,"z":1}}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(400, unknownField.statusCode());
+            assertEquals(400, fractionalCoordinate.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"invalid_request\","
+                            + "\"message\":\"min.x must be a signed 32-bit integer\"}}",
+                    fractionalCoordinate.body());
+        }
+    }
+
+    @Test
+    void mapsInspectionFailuresToTheWireError() throws Exception {
+        RegionInspector inspector = request -> {
+            throw new InspectionException(Failure.REGION_TOO_LARGE, "Region is too large");
+        };
+        try (ApiServer server = server(inspector); HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> response = client.send(
+                    inspectionRequest(server, """
+                            {"world":"world","min":{"x":0,"y":60,"z":0},"max":{"x":1,"y":61,"z":1}}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(413, response.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"region_too_large\",\"message\":\"Region is too large\"}}",
+                    response.body());
+        }
+    }
+
+    @Test
+    void interruptsActiveRequestsWhenClosed() throws Exception {
+        CountDownLatch inspectionStarted = new CountDownLatch(1);
+        CountDownLatch inspectionInterrupted = new CountDownLatch(1);
+        RegionInspector inspector = request -> {
+            inspectionStarted.countDown();
+            try {
+                new CountDownLatch(1).await();
+                throw new AssertionError("Inspection should have been interrupted");
+            } catch (InterruptedException exception) {
+                inspectionInterrupted.countDown();
+                Thread.currentThread().interrupt();
+                throw new InspectionException(Failure.WORLD_UNAVAILABLE, "Interrupted", exception);
+            }
+        };
+
+        ApiServer server = server(inspector);
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+            client.sendAsync(
+                    inspectionRequest(server, """
+                            {"world":"world","min":{"x":0,"y":60,"z":0},"max":{"x":0,"y":60,"z":0}}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertTrue(inspectionStarted.await(2, TimeUnit.SECONDS));
+            assertTimeoutPreemptively(Duration.ofSeconds(2), server::close);
+            assertTrue(inspectionInterrupted.await(2, TimeUnit.SECONDS));
+        } finally {
+            server.close();
+        }
+    }
+
+    private static ApiServer server(RegionInspector inspector) {
+        return new ApiServer(0, "0.1.0-test", "26.2", TOKEN, inspector, LOGGER);
+    }
+
+    private static HttpRequest inspectionRequest(ApiServer server, String body) {
+        return authorizedRequest(inspectRegionUri(server))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+    }
+
     private static HttpRequest.Builder authorizedRequest(URI uri) {
         return HttpRequest.newBuilder(uri).header("Authorization", "Bearer " + TOKEN);
     }
 
     private static URI healthUri(ApiServer server) {
         return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/health");
+    }
+
+    private static URI inspectRegionUri(ApiServer server) {
+        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/inspect-region");
     }
 }

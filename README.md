@@ -7,8 +7,8 @@ for inspecting bounded regions and performing deterministic bulk edits through
 [FastAsyncWorldEdit (FAWE)](https://github.com/IntellectualSites/FastAsyncWorldEdit),
 while Paper remains the owner of the live world.
 
-The repository currently ships the working connection foundation: a Paper
-plugin, loopback health bridge, and `dirt_status` MCP tool. The v1 world tools
+The repository currently ships the Paper plugin, authenticated loopback bridge,
+and MCP tools for status and bounded region inspection. The v1 editing tools
 are specified in [`docs/v1-design.md`](docs/v1-design.md) and are not yet
 implemented.
 
@@ -62,7 +62,7 @@ cp paper-plugin/build/libs/dirt-mcp-paper-*.jar /path/to/paper/plugins/
 ```
 
 FAWE will become a required runtime dependency when the v1 editing tools land;
-the current health-only foundation can run without it.
+the current read-only implementation can run without it.
 
 ## Running on a Paper server
 
@@ -80,6 +80,9 @@ The port may instead be set in `plugins/DirtMCP/config.yml`:
 ```yaml
 bridge:
   port: 8765
+
+limits:
+  max-region-volume: 1000000
 ```
 
 The bridge always binds to `127.0.0.1`; do not proxy or expose it publicly. Give
@@ -110,7 +113,8 @@ For another MCP host, configure it to launch the source build:
 ```
 
 Once npm publishing exists, a global installation will provide the equivalent
-`dirt-mcp` command. The current tool surface contains only `dirt_status`.
+`dirt-mcp` command. The current tool surface contains `dirt_status` and
+`inspect_region`.
 
 ## Local development
 

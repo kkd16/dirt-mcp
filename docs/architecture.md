@@ -48,6 +48,14 @@ reserved for MCP; process diagnostics go to stderr.
 It contains implemented behavior only. Every new operation is added with its
 Java implementation, TypeScript tool, validation, and tests.
 
+## Inspection execution
+
+Region inspection never loads or generates terrain. The plugin verifies that
+every intersecting chunk is already loaded, captures thread-safe Paper chunk
+snapshots on the main server thread, and counts block states from those
+snapshots off-thread. Requests fail if the world, height range, or any chunk is
+unavailable.
+
 ## Deployment
 
 V1 is a same-machine deployment. Loading the plugin starts the Paper bridge on
