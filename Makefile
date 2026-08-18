@@ -2,7 +2,7 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 .DEFAULT_GOAL := help
 
-MC_HOST ?= $(if $(strip $(WSL_DISTRO_NAME)),0.0.0.0,127.0.0.1)
+MC_HOST ?= 0.0.0.0
 MC_PORT ?= 25566
 BRIDGE_PORT ?= 8765
 BRIDGE_URL ?= http://127.0.0.1:$(BRIDGE_PORT)

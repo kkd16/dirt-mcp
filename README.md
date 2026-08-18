@@ -116,11 +116,9 @@ make up
 
 `make up` installs locked dependencies, builds and tests both components, and
 accepts Mojang's EULA on the command line. It runs Paper in the foreground on
-port `25566`. Under WSL, the Minecraft listener binds to `0.0.0.0` so Minecraft
-on Windows can connect to `localhost:25566`; whether literal
-`127.0.0.1:25566` also works depends on the active WSL networking mode. Other
-systems default to `127.0.0.1`. The MCP bridge remains loopback-only in both
-cases. Only run it if you agree to the
+port `25566` with an IPv4 listener suitable for Windows and WSL. Connect to the
+Minecraft server at `127.0.0.1:25566`. The MCP bridge is available to local MCP
+clients at `127.0.0.1:8765`. Only run it if you agree to the
 [Minecraft EULA](https://aka.ms/MinecraftEULA). Type `stop` in the Paper console
 for a clean shutdown.
 

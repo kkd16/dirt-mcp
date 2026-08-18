@@ -8,7 +8,7 @@ plugins {
 val projectVersion = providers.gradleProperty("projectVersion").get()
 val paperVersion = providers.gradleProperty("paperVersion").get()
 val paperApiVersion = providers.gradleProperty("paperApiVersion").get()
-val devServerHost = providers.environmentVariable("DIRT_MCP_DEV_HOST").orElse("127.0.0.1")
+val devServerHost = providers.environmentVariable("DIRT_MCP_DEV_HOST").orElse("0.0.0.0")
 val devServerPort = providers.environmentVariable("DIRT_MCP_DEV_PORT").orElse("25566")
 
 group = "ca.deliyannides.dirtmcp"
@@ -71,6 +71,7 @@ tasks {
     runServer {
         minecraftVersion(paperVersion)
         args("--host", devServerHost.get(), "--port", devServerPort.get())
+        jvmArgs("-Djava.net.preferIPv4Stack=true")
 
         if (providers.environmentVariable("PAPER_EULA").map(String::toBoolean).orElse(false).get()) {
             jvmArgs("-Dcom.mojang.eula.agree=true")
