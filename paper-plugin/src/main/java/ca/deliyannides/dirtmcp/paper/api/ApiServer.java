@@ -3,6 +3,7 @@ package ca.deliyannides.dirtmcp.paper.api;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Failure;
@@ -35,6 +36,7 @@ public final class ApiServer implements AutoCloseable {
             Set.of("world", "min", "max", "source", "destination");
     private static final Set<String> REPLACEMENT_FIELDS =
             Set.of("world", "min", "max", "source", "destination", "dryRun");
+    private static final Set<String> UNDO_FIELDS = Set.of("world");
     private static final Set<String> POSITION_FIELDS = Set.of("x", "y", "z");
     private static final Gson GSON = new Gson();
 
@@ -80,6 +82,7 @@ public final class ApiServer implements AutoCloseable {
             newServer.createContext("/v1/health", this::handleHealth);
             newServer.createContext("/v1/inspect-region", this::handleInspectRegion);
             newServer.createContext("/v1/replace-blocks", this::handleReplaceBlocks);
+            newServer.createContext("/v1/undo-last-edit", this::handleUndoLastEdit);
             newServer.setExecutor(newExecutor);
             newServer.start();
         } catch (RuntimeException exception) {
@@ -174,6 +177,28 @@ public final class ApiServer implements AutoCloseable {
         }
     }
 
+    private void handleUndoLastEdit(HttpExchange exchange) throws IOException {
+        if (!authenticate(exchange)) {
+            return;
+        }
+        if (!"POST".equals(exchange.getRequestMethod())) {
+            exchange.getResponseHeaders().set("Allow", "POST");
+            sendError(exchange, 405, "method_not_allowed", "Method must be POST");
+            return;
+        }
+
+        try {
+            send(exchange, 200, GSON.toJson(this.regionEditor.undo(parseUndoRequest(exchange))));
+        } catch (InvalidRequestException exception) {
+            sendError(exchange, 400, "invalid_request", exception.getMessage());
+        } catch (EditException exception) {
+            sendEditError(exchange, exception);
+        } catch (RuntimeException exception) {
+            this.logger.log(Level.SEVERE, "Unexpected undo-last-edit failure", exception);
+            sendError(exchange, 500, "internal_error", "The edit could not be undone");
+        }
+    }
+
     private boolean authenticate(HttpExchange exchange) throws IOException {
         if (this.authentication.accepts(exchange.getRequestHeaders().getFirst("Authorization"))) {
             return true;
@@ -213,6 +238,17 @@ public final class ApiServer implements AutoCloseable {
                     parseString(object.get("destination"), "destination"),
                     object.has("dryRun") && parseBoolean(object.get("dryRun"), "dryRun"));
         } catch (JsonParseException | NumberFormatException | ArithmeticException exception) {
+            throw new InvalidRequestException("Request body must contain valid JSON values");
+        }
+    }
+
+    private static UndoRequest parseUndoRequest(HttpExchange exchange)
+            throws IOException, InvalidRequestException {
+        try {
+            JsonObject object = parseRequestObject(exchange);
+            requireFields(object, UNDO_FIELDS, "Request");
+            return new UndoRequest(parseString(object.get("world"), "world"));
+        } catch (JsonParseException exception) {
             throw new InvalidRequestException("Request body must contain valid JSON values");
         }
     }
@@ -298,7 +334,7 @@ public final class ApiServer implements AutoCloseable {
         int status = switch (exception.failure()) {
             case INVALID_REQUEST -> 400;
             case WORLD_NOT_FOUND -> 404;
-            case WORLD_BUSY -> 409;
+            case NOTHING_TO_UNDO, WORLD_BUSY -> 409;
             case CHANGE_LIMIT_EXCEEDED, REGION_TOO_LARGE -> 413;
             case WORLD_UNAVAILABLE -> 503;
         };

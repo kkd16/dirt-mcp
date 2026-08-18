@@ -191,6 +191,76 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /v1/undo-last-edit:
+    post:
+      operationId: undoLastEdit
+      summary: Undo the newest successful Dirt MCP edit in a loaded world
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UndoLastEditRequest'
+      responses:
+        '200':
+          description: Completed undo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UndoLastEditResponse'
+        '400':
+          description: Invalid JSON or fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid bearer token
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+                const: Bearer realm="dirt-mcp"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: World is not loaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed
+          headers:
+            Allow:
+              schema:
+                const: POST
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: No undo is available or another Dirt MCP edit is active in this world
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected undo failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Undo was interrupted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 components:
   securitySchemes:
     bearerAuth:
@@ -217,6 +287,7 @@ components:
                 - invalid_request
                 - method_not_allowed
                 - change_limit_exceeded
+                - nothing_to_undo
                 - region_too_large
                 - unauthorized
                 - world_busy
@@ -380,6 +451,29 @@ components:
           type: integer
           format: int64
           minimum: 0
+    UndoLastEditRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - world
+      properties:
+        world:
+          type: string
+          minLength: 1
+    UndoLastEditResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - world
+        - changedBlocks
+      properties:
+        world:
+          type: string
+          minLength: 1
+        changedBlocks:
+          type: integer
+          format: int64
+          minimum: 1
     Health:
       type: object
       additionalProperties: false

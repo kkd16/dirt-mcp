@@ -9,7 +9,7 @@ while Paper remains the owner of the live world.
 
 The repository currently ships the Paper plugin, authenticated loopback bridge,
 and MCP tools for status, bounded region inspection, and FAWE-backed block
-replacement. The remaining v1 tools are specified in
+replacement and undo. The remaining v1 tool is specified in
 [`docs/v1-design.md`](docs/v1-design.md).
 
 ## Platform support
@@ -113,7 +113,7 @@ For another MCP host, configure it to launch the source build:
 
 Once npm publishing exists, a global installation will provide the equivalent
 `dirt-mcp` command. The current tool surface contains `dirt_status`,
-`inspect_region`, and `replace_blocks`.
+`inspect_region`, `replace_blocks`, and `undo_last_edit`.
 
 ## Local development
 

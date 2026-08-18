@@ -133,6 +133,22 @@ Undoes the newest successful Dirt MCP mutation for that world. It does not undo
 console, player, WorldEdit, or other plugin activity. A successful undo consumes
 the history entry. History does not survive restart.
 
+The bridge request is `POST /v1/undo-last-edit`:
+
+```json
+{ "world": "world" }
+```
+
+A successful response reports the number of restored blocks:
+
+```json
+{ "world": "world", "changedBlocks": 1280 }
+```
+
+Undo returns `invalid_request` (400), `unauthorized` (401), `world_not_found`
+(404), `nothing_to_undo` (409), `world_busy` (409), `world_unavailable`
+(503), or `internal_error` (500).
+
 The existing `dirt_status` tool remains available for bridge and version
 diagnostics.
 
@@ -179,5 +195,5 @@ configurable and remains `127.0.0.1`.
 
 The repository currently implements the Paper lifecycle, authenticated
 loopback bridge, `dirt_status`, `inspect_region`, and FAWE-backed
-`replace_blocks`. `fill_region` and `undo_last_edit` remain product design, not
-placeholder functionality. Current replacements do not retain undo history.
+`replace_blocks` and `undo_last_edit`. `fill_region` remains product design, not
+placeholder functionality.

@@ -56,6 +56,15 @@ const ReplaceBlocksOutputSchema = z.object({
   changedBlocks: z.number().int().nonnegative(),
 }).strict();
 
+const UndoLastEditInputSchema = z.object({
+  world: z.string().min(1),
+}).strict();
+
+const UndoLastEditOutputSchema = z.object({
+  world: z.string().min(1),
+  changedBlocks: z.number().int().positive(),
+}).strict();
+
 const ErrorSchema = z.object({
   error: z.object({
     code: z.string(),
@@ -177,6 +186,40 @@ function createServer(): McpServer {
         const message = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: 'text', text: `Could not replace blocks: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.registerTool(
+    'undo_last_edit',
+    {
+      title: 'Undo the last edit',
+      description: 'Undo the newest successful Dirt MCP edit in a loaded world.',
+      inputSchema: UndoLastEditInputSchema,
+      outputSchema: UndoLastEditOutputSchema,
+    },
+    async (input) => {
+      try {
+        const response = await bridgeRequest(
+          '/v1/undo-last-edit',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(input),
+          },
+          120_000,
+        );
+        const result = UndoLastEditOutputSchema.parse(await response.json());
+        return {
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+          structuredContent: result,
+        };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: 'text', text: `Could not undo the edit: ${message}` }],
           isError: true,
         };
       }

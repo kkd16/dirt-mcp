@@ -7,6 +7,8 @@ import java.io.Serial;
 public interface RegionEditor {
     ReplaceResult replace(ReplaceRequest request) throws EditException;
 
+    UndoResult undo(UndoRequest request) throws EditException;
+
     record ReplaceRequest(
             String world,
             BlockPosition min,
@@ -24,9 +26,14 @@ public interface RegionEditor {
             long matchedBlocks,
             long changedBlocks) {}
 
+    record UndoRequest(String world) {}
+
+    record UndoResult(String world, long changedBlocks) {}
+
     enum Failure {
         CHANGE_LIMIT_EXCEEDED,
         INVALID_REQUEST,
+        NOTHING_TO_UNDO,
         REGION_TOO_LARGE,
         WORLD_BUSY,
         WORLD_NOT_FOUND,

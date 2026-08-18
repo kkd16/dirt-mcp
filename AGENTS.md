@@ -10,8 +10,8 @@ Read `README.md` and `docs/` before changing behavior. The OpenAPI file describe
 implemented bridge behavior; the v1 design describes the intended product.
 
 The current implementation contains plugin lifecycle, authenticated health and
-region inspection, plus FAWE-backed block replacement. Do not present the
-planned fill or undo tools as working.
+region inspection, plus FAWE-backed block replacement and undo. Do not present
+the planned fill tool as working.
 
 ## Product rules
 
@@ -28,7 +28,7 @@ planned fill or undo tools as working.
 - `replace_blocks` and `fill_region` may execute immediately; `dryRun` is an
   option, not a mandatory approval stage.
 - Keep v1 synchronous and simple: one mutation per world, at most 20 in-memory
-  undo entries per world once undo exists, and no persistent jobs or database.
+  undo entries per world, and no persistent jobs or database.
 - Do not add renderers, Mineflayer, schematics, terrain systems, web UI, Docker,
   or speculative extension points unless the product scope changes explicitly.
 
@@ -42,7 +42,7 @@ planned fill or undo tools as working.
 - Keep blocking FAWE work off Paper's main tick thread. Cross into Paper-owned
   APIs through an explicit scheduler boundary when required.
 - Close FAWE edit sessions and other resources on success and failure. Report an
-  edit complete only after FAWE completion.
+  edit complete only after FAWE completion and history capture.
 - Prefer small concrete implementations over empty packages, placeholder types,
   factories, or dependency-heavy frameworks.
 - Pin compatibility-sensitive dependencies. Before upgrading Paper, Java,

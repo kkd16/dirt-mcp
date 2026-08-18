@@ -23,7 +23,7 @@ The Java plugin owns everything that touches the Minecraft server:
 - bearer authentication and request validation;
 - world lookup, bounds, and configured limits;
 - coordination of reads and edits;
-- FAWE edit sessions; and
+- FAWE edit sessions and bounded in-memory undo history; and
 - the loopback HTTP API.
 
 Paper and FAWE classes stop at this boundary. The plugin never hosts a model or
@@ -79,11 +79,12 @@ V1 keeps execution intentionally direct:
 2. Resolve an already-loaded world and normalize the inclusive region bounds.
 3. Reject invalid block states or requests beyond configured limits.
 4. If `dryRun` is true, calculate and return the effect without mutation.
-5. Otherwise run the FAWE operation, wait for completion, and return exact
-   counts.
+5. Otherwise run the FAWE operation, wait for completion, retain its history,
+   and return exact counts.
 
 There is no persistent job system. One mutation may run per world at a time;
-additional mutations fail as busy rather than racing.
+additional mutations fail as busy rather than racing. Each world retains its 20
+newest Dirt MCP edits in memory; history is cleared on restart.
 
 Potentially blocking FAWE work stays off Paper's main tick thread. Any Paper API
 that requires server-thread ownership crosses a small scheduler boundary.
@@ -92,7 +93,9 @@ session.
 
 `replace_blocks` is the first implemented edit path. It uses the same
 already-loaded-chunk rule as inspection, canonicalizes Bukkit block-state
-strings at the Paper boundary, and does not retain FAWE history.
+strings at the Paper boundary, and records only successful non-empty edits.
+`undo_last_edit` uses the same world lock, applies the newest history entry
+through a fresh FAWE edit session, and consumes it only after completion.
 
 ## Dependency direction
 

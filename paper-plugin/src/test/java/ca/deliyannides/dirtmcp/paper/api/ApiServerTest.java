@@ -7,7 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Bounds;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Dimensions;
@@ -31,9 +34,7 @@ final class ApiServerTest {
     private static final RegionInspector UNUSED_INSPECTOR = request -> {
         throw new AssertionError("Region inspector should not be called");
     };
-    private static final RegionEditor UNUSED_EDITOR = request -> {
-        throw new AssertionError("Region editor should not be called");
-    };
+    private static final RegionEditor UNUSED_EDITOR = new TestEditor() {};
 
     @Test
     void reportsHealthOnLoopback() throws Exception {
@@ -179,21 +180,24 @@ final class ApiServerTest {
 
     @Test
     void replacesBlocksWithDryRunDefaultingToFalse() throws Exception {
-        RegionEditor editor = request -> {
-            assertEquals("world", request.world());
-            assertEquals(new BlockPosition(5, 60, -2), request.min());
-            assertEquals(new BlockPosition(6, 61, -1), request.max());
-            assertEquals("minecraft:stone", request.source());
-            assertEquals("minecraft:dirt", request.destination());
-            assertEquals(false, request.dryRun());
-            return new ReplaceResult(
-                    request.world(),
-                    new Bounds(request.min(), request.max()),
-                    request.source(),
-                    request.destination(),
-                    request.dryRun(),
-                    8,
-                    8);
+        RegionEditor editor = new TestEditor() {
+            @Override
+            public ReplaceResult replace(ReplaceRequest request) {
+                assertEquals("world", request.world());
+                assertEquals(new BlockPosition(5, 60, -2), request.min());
+                assertEquals(new BlockPosition(6, 61, -1), request.max());
+                assertEquals("minecraft:stone", request.source());
+                assertEquals("minecraft:dirt", request.destination());
+                assertEquals(false, request.dryRun());
+                return new ReplaceResult(
+                        request.world(),
+                        new Bounds(request.min(), request.max()),
+                        request.source(),
+                        request.destination(),
+                        request.dryRun(),
+                        8,
+                        8);
+            }
         };
 
         try (ApiServer server = server(UNUSED_INSPECTOR, editor);
@@ -248,8 +252,11 @@ final class ApiServerTest {
 
     @Test
     void mapsEditFailuresToTheWireError() throws Exception {
-        RegionEditor editor = request -> {
-            throw new EditException(RegionEditor.Failure.WORLD_BUSY, "World is busy");
+        RegionEditor editor = new TestEditor() {
+            @Override
+            public ReplaceResult replace(ReplaceRequest request) throws EditException {
+                throw new EditException(RegionEditor.Failure.WORLD_BUSY, "World is busy");
+            }
         };
         try (ApiServer server = server(UNUSED_INSPECTOR, editor);
                 HttpClient client = HttpClient.newHttpClient()) {
@@ -266,6 +273,51 @@ final class ApiServerTest {
             assertEquals(409, response.statusCode());
             assertEquals(
                     "{\"error\":{\"code\":\"world_busy\",\"message\":\"World is busy\"}}",
+                    response.body());
+        }
+    }
+
+    @Test
+    void undoesTheLastEdit() throws Exception {
+        RegionEditor editor = new TestEditor() {
+            @Override
+            public UndoResult undo(UndoRequest request) {
+                assertEquals("world", request.world());
+                return new UndoResult(request.world(), 8);
+            }
+        };
+        try (ApiServer server = server(UNUSED_INSPECTOR, editor);
+                HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> response = client.send(
+                    undoRequest(server, "{\"world\":\"world\"}"),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, response.statusCode());
+            assertEquals("{\"world\":\"world\",\"changedBlocks\":8}", response.body());
+        }
+    }
+
+    @Test
+    void reportsWhenThereIsNothingToUndo() throws Exception {
+        RegionEditor editor = new TestEditor() {
+            @Override
+            public UndoResult undo(UndoRequest request) throws EditException {
+                throw new EditException(RegionEditor.Failure.NOTHING_TO_UNDO, "Nothing to undo");
+            }
+        };
+        try (ApiServer server = server(UNUSED_INSPECTOR, editor);
+                HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> response = client.send(
+                    undoRequest(server, "{\"world\":\"world\"}"),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(409, response.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"nothing_to_undo\",\"message\":\"Nothing to undo\"}}",
                     response.body());
         }
     }
@@ -325,6 +377,13 @@ final class ApiServerTest {
                 .build();
     }
 
+    private static HttpRequest undoRequest(ApiServer server, String body) {
+        return authorizedRequest(undoLastEditUri(server))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+    }
+
     private static HttpRequest.Builder authorizedRequest(URI uri) {
         return HttpRequest.newBuilder(uri).header("Authorization", "Bearer " + TOKEN);
     }
@@ -339,5 +398,21 @@ final class ApiServerTest {
 
     private static URI replaceBlocksUri(ApiServer server) {
         return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/replace-blocks");
+    }
+
+    private static URI undoLastEditUri(ApiServer server) {
+        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/undo-last-edit");
+    }
+
+    private abstract static class TestEditor implements RegionEditor {
+        @Override
+        public ReplaceResult replace(ReplaceRequest request) throws EditException {
+            throw new AssertionError("Region editor should not be called");
+        }
+
+        @Override
+        public UndoResult undo(UndoRequest request) throws EditException {
+            throw new AssertionError("Region editor should not be called");
+        }
     }
 }
