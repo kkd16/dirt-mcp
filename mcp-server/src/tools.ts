@@ -1,4 +1,11 @@
-import { McpServer, type RegisteredTool } from '@modelcontextprotocol/server';
+import { randomUUID } from 'node:crypto';
+import {
+  CLIENT_INFO_META_KEY,
+  McpServer,
+  type CallToolResult,
+  type RegisteredTool,
+  type ServerContext,
+} from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 
 const INT32_MIN = -2_147_483_648;
@@ -144,6 +151,51 @@ const HealthSchema = z.object({
   minecraftVersion: z.string(),
 }).strict();
 
+function logValue(value: string | number): string {
+  return JSON.stringify(value).replaceAll('\u2028', '\\u2028').replaceAll('\u2029', '\\u2029');
+}
+
+function clientLabel(context: ServerContext): string {
+  const envelope = context.mcpReq.envelope as Record<string, unknown> | undefined;
+  const current = envelope?.[CLIENT_INFO_META_KEY];
+  if (typeof current === 'object' && current !== null) {
+    const { name, version } = current as { name?: unknown; version?: unknown };
+    if (typeof name === 'string' && typeof version === 'string') {
+      return `${name}/${version}`;
+    }
+  }
+  return 'unknown';
+}
+
+async function auditToolCall(
+  tool: string,
+  world: string | undefined,
+  context: ServerContext,
+  call: (callId: string) => Promise<CallToolResult>,
+): Promise<CallToolResult> {
+  const callId = randomUUID();
+  const started = performance.now();
+  let outcome = 'exception';
+  try {
+    const result = await call(callId);
+    outcome = result.isError === true ? 'error' : 'ok';
+    return result;
+  } finally {
+    const fields = [
+      `tool=${tool}`,
+      `call=${callId}`,
+      `request=${logValue(context.mcpReq.id)}`,
+      `client=${logValue(clientLabel(context))}`,
+    ];
+    if (world !== undefined) {
+      fields.push(`world=${logValue(world)}`);
+    }
+    fields.push(`outcome=${outcome}`);
+    fields.push(`duration_ms=${Math.max(0, Math.round(performance.now() - started))}`);
+    process.stderr.write(`Dirt MCP tool_call ${fields.join(' ')}\n`);
+  }
+}
+
 export function registerTools(
   server: McpServer,
   config: BridgeConfig,
@@ -159,9 +211,9 @@ export function registerTools(
       inputSchema: z.object({}),
       outputSchema: HealthSchema,
     },
-    async () => {
+    async (_input, context) => auditToolCall('dirt_status', undefined, context, async (callId) => {
       try {
-        const response = await bridgeRequest(config, '/v1/health');
+        const response = await bridgeRequest(config, '/v1/health', callId);
         const health = HealthSchema.parse(await response.json());
         return {
           content: [{ type: 'text', text: JSON.stringify(health, null, 2) }],
@@ -177,7 +229,7 @@ export function registerTools(
           isError: true,
         };
       }
-    },
+    }),
   ));
 
   registrations.push(register(
@@ -188,11 +240,12 @@ export function registerTools(
       inputSchema: InspectRegionInputSchema,
       outputSchema: InspectRegionOutputSchema,
     },
-    async (input) => {
+    async (input, context) => auditToolCall('inspect_region', input.world, context, async (callId) => {
       try {
         const response = await bridgeRequest(
           config,
           '/v1/inspect-region',
+          callId,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -212,7 +265,7 @@ export function registerTools(
           isError: true,
         };
       }
-    },
+    }),
   ));
 
   registrations.push(register(
@@ -223,11 +276,12 @@ export function registerTools(
       inputSchema: InspectBlocksInputSchema,
       outputSchema: InspectBlocksOutputSchema,
     },
-    async (input) => {
+    async (input, context) => auditToolCall('inspect_blocks', input.world, context, async (callId) => {
       try {
         const response = await bridgeRequest(
           config,
           '/v1/inspect-blocks',
+          callId,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -247,7 +301,7 @@ export function registerTools(
           isError: true,
         };
       }
-    },
+    }),
   ));
 
   registrations.push(register(
@@ -258,11 +312,12 @@ export function registerTools(
       inputSchema: ReplaceBlocksInputSchema,
       outputSchema: ReplaceBlocksOutputSchema,
     },
-    async (input) => {
+    async (input, context) => auditToolCall('replace_blocks', input.world, context, async (callId) => {
       try {
         const response = await bridgeRequest(
           config,
           '/v1/replace-blocks',
+          callId,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -282,7 +337,7 @@ export function registerTools(
           isError: true,
         };
       }
-    },
+    }),
   ));
 
   registrations.push(register(
@@ -293,11 +348,12 @@ export function registerTools(
       inputSchema: FillRegionInputSchema,
       outputSchema: FillRegionOutputSchema,
     },
-    async (input) => {
+    async (input, context) => auditToolCall('fill_region', input.world, context, async (callId) => {
       try {
         const response = await bridgeRequest(
           config,
           '/v1/fill-region',
+          callId,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -317,7 +373,7 @@ export function registerTools(
           isError: true,
         };
       }
-    },
+    }),
   ));
 
   registrations.push(register(
@@ -328,11 +384,12 @@ export function registerTools(
       inputSchema: UndoLastEditInputSchema,
       outputSchema: UndoLastEditOutputSchema,
     },
-    async (input) => {
+    async (input, context) => auditToolCall('undo_last_edit', input.world, context, async (callId) => {
       try {
         const response = await bridgeRequest(
           config,
           '/v1/undo-last-edit',
+          callId,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -352,19 +409,21 @@ export function registerTools(
           isError: true,
         };
       }
-    },
+    }),
   ));
 }
 
 async function bridgeRequest(
   config: BridgeConfig,
   path: string,
+  callId: string,
   init?: RequestInit,
   timeoutMilliseconds = 3_000,
 ): Promise<Response> {
   const headers = new Headers(init?.headers);
   headers.set('Accept', 'application/json');
   headers.set('Authorization', `Bearer ${config.token}`);
+  headers.set('X-Dirt-Call-Id', callId);
 
   const response = await fetch(new URL(path, config.url), {
     ...init,

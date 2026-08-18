@@ -24,7 +24,7 @@ The Java plugin owns everything that touches the Minecraft server:
 - world lookup, bounds, and configured limits;
 - coordination of reads and edits;
 - FAWE edit sessions and bounded in-memory undo history; and
-- the loopback HTTP API.
+- the loopback HTTP API and concise request audit records in the server console.
 
 Paper and FAWE classes stop at this boundary. The plugin never hosts a model or
 parses MCP messages.
@@ -41,6 +41,11 @@ The TypeScript process owns the agent-facing interface:
 
 It does not read world files or reproduce Minecraft editing logic. Stdout is
 reserved for MCP; process diagnostics go to stderr.
+
+Each accepted tool call writes one completion record to stderr with a generated
+call ID, MCP request ID, client label when available, world, outcome, and elapsed
+time. The call ID is forwarded to the Paper bridge so its matching console record
+can be correlated. Neither record includes bearer tokens or complete tool inputs.
 
 ### Protocol
 

@@ -35,7 +35,10 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
 
@@ -141,6 +144,61 @@ final class ApiServerTest {
                             + "\"dimensions\":{\"x\":2,\"y\":2,\"z\":2},\"volume\":8,"
                             + "\"blockStates\":{\"minecraft:stone\":8}}",
                     response.body());
+        }
+    }
+
+    @Test
+    void logsOneCorrelatedBridgeCallWithoutRequestContents() throws Exception {
+        List<String> messages = new CopyOnWriteArrayList<>();
+        CountDownLatch logged = new CountDownLatch(1);
+        Logger auditLogger = Logger.getAnonymousLogger();
+        auditLogger.setUseParentHandlers(false);
+        auditLogger.addHandler(new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                messages.add(record.getMessage());
+                logged.countDown();
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        });
+        RegionInspector inspector = new TestInspector() {
+            @Override
+            public InspectionResult inspect(RegionInspector.InspectionRequest request) {
+                return new InspectionResult(
+                        request.world(),
+                        new Bounds(request.min(), request.max()),
+                        new Dimensions(1, 1, 1),
+                        1,
+                        Map.of("minecraft:stone", 1L));
+            }
+        };
+        String callId = "123e4567-e89b-42d3-a456-426614174000";
+
+        try (ApiServer server = server(inspector, UNUSED_EDITOR, auditLogger);
+                HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+            HttpResponse<String> response = client.send(
+                    authorizedRequest(inspectRegionUri(server))
+                            .header("Content-Type", "application/json")
+                            .header("X-Dirt-Call-Id", callId)
+                            .POST(HttpRequest.BodyPublishers.ofString("""
+                                    {"world":"world","min":{"x":1,"y":2,"z":3},
+                                     "max":{"x":1,"y":2,"z":3}}
+                                    """))
+                            .build(),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, response.statusCode());
+            assertTrue(logged.await(2, TimeUnit.SECONDS));
+            assertEquals(1, messages.size());
+            assertTrue(messages.getFirst().matches(
+                    "Dirt MCP bridge_call operation=inspect_region method=POST status=200 "
+                            + "world=\\\"world\\\" call=" + callId + " duration_ms=\\d+"));
         }
     }
 
@@ -659,7 +717,11 @@ final class ApiServerTest {
     }
 
     private static ApiServer server(RegionInspector inspector, RegionEditor editor) {
-        return new ApiServer(0, "0.1.0-test", "26.2", TOKEN, inspector, editor, LOGGER);
+        return server(inspector, editor, LOGGER);
+    }
+
+    private static ApiServer server(RegionInspector inspector, RegionEditor editor, Logger logger) {
+        return new ApiServer(0, "0.1.0-test", "26.2", TOKEN, inspector, editor, logger);
     }
 
     private static HttpRequest inspectionRequest(ApiServer server, String body) {

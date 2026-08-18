@@ -5,9 +5,25 @@ import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import {
+  CLIENT_CAPABILITIES_META_KEY,
+  CLIENT_INFO_META_KEY,
+  PROTOCOL_VERSION_META_KEY,
+} from '@modelcontextprotocol/server';
 
 const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 const repositoryRoot = dirname(packageDirectory);
+
+function modernParams(params) {
+  return {
+    ...params,
+    _meta: {
+      [PROTOCOL_VERSION_META_KEY]: '2026-07-28',
+      [CLIENT_INFO_META_KEY]: { name: 'hot-reload-test', version: '1' },
+      [CLIENT_CAPABILITIES_META_KEY]: {},
+    },
+  };
+}
 
 function waitFor(list, predicate, timeoutMilliseconds = 5_000) {
   const existing = list.values.find(predicate);
@@ -67,19 +83,7 @@ test('reloads tools without replacing the stdio process', async (context) => {
   const errors = collectLines(child.stderr, (line) => line);
   const send = (message) => child.stdin.write(`${JSON.stringify(message)}\n`);
 
-  send({
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'initialize',
-    params: {
-      protocolVersion: '2025-11-25',
-      capabilities: {},
-      clientInfo: { name: 'hot-reload-test', version: '1' },
-    },
-  });
-  await waitFor(messages, (message) => message.id === 1);
-  send({ jsonrpc: '2.0', method: 'notifications/initialized' });
-  send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
+  send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: modernParams({}) });
   const initial = await waitFor(messages, (message) => message.id === 2);
   assert.equal(initial.result.tools[0].title, 'Dirt MCP status');
   assert.deepEqual(
@@ -99,15 +103,14 @@ test('reloads tools without replacing the stdio process', async (context) => {
   assert.notEqual(changedSource, toolsSource);
   await writeFile(toolsPath, changedSource);
 
-  await waitFor(messages, (message) => message.method === 'notifications/tools/list_changed');
   await waitFor(errors, (line) => line.includes('Reloaded Dirt MCP tools'));
-  send({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} });
+  send({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: modernParams({}) });
   const reloaded = await waitFor(messages, (message) => message.id === 3);
   assert.equal(reloaded.result.tools[0].title, 'Reloaded Dirt MCP status');
 
   await writeFile(toolsPath, 'this is not valid JavaScript');
   await waitFor(errors, (line) => line.includes('Could not reload Dirt MCP tools'));
-  send({ jsonrpc: '2.0', id: 4, method: 'tools/list', params: {} });
+  send({ jsonrpc: '2.0', id: 4, method: 'tools/list', params: modernParams({}) });
   const retained = await waitFor(messages, (message) => message.id === 4);
   assert.equal(retained.result.tools[0].title, 'Reloaded Dirt MCP status');
 

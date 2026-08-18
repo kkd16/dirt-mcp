@@ -19,6 +19,7 @@ import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.Serial;
@@ -32,10 +33,16 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 public final class ApiServer implements AutoCloseable {
     private static final String LOOPBACK_ADDRESS = "127.0.0.1";
+    private static final String CALL_ID_HEADER = "X-Dirt-Call-Id";
+    private static final String STATUS_ATTRIBUTE = ApiServer.class.getName() + ".status";
+    private static final String WORLD_ATTRIBUTE = ApiServer.class.getName() + ".world";
     private static final int MAXIMUM_REQUEST_BYTES = 8_192;
+    private static final Pattern CALL_ID_PATTERN = Pattern.compile(
+            "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}");
     private static final Set<String> INSPECTION_FIELDS = Set.of("world", "min", "max");
     private static final Set<String> EXACT_INSPECTION_REQUIRED_FIELDS = Set.of("world", "min", "max");
     private static final Set<String> EXACT_INSPECTION_FIELDS =
@@ -89,12 +96,23 @@ public final class ApiServer implements AutoCloseable {
         ExecutorService newExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
         try {
-            newServer.createContext("/v1/health", this::handleHealth);
-            newServer.createContext("/v1/inspect-region", this::handleInspectRegion);
-            newServer.createContext("/v1/inspect-blocks", this::handleInspectBlocks);
-            newServer.createContext("/v1/replace-blocks", this::handleReplaceBlocks);
-            newServer.createContext("/v1/fill-region", this::handleFillRegion);
-            newServer.createContext("/v1/undo-last-edit", this::handleUndoLastEdit);
+            newServer.createContext(
+                    "/v1/health", exchange -> handleAudited("health", exchange, this::handleHealth));
+            newServer.createContext(
+                    "/v1/inspect-region",
+                    exchange -> handleAudited("inspect_region", exchange, this::handleInspectRegion));
+            newServer.createContext(
+                    "/v1/inspect-blocks",
+                    exchange -> handleAudited("inspect_blocks", exchange, this::handleInspectBlocks));
+            newServer.createContext(
+                    "/v1/replace-blocks",
+                    exchange -> handleAudited("replace_blocks", exchange, this::handleReplaceBlocks));
+            newServer.createContext(
+                    "/v1/fill-region",
+                    exchange -> handleAudited("fill_region", exchange, this::handleFillRegion));
+            newServer.createContext(
+                    "/v1/undo-last-edit",
+                    exchange -> handleAudited("undo_last_edit", exchange, this::handleUndoLastEdit));
             newServer.setExecutor(newExecutor);
             newServer.start();
         } catch (RuntimeException exception) {
@@ -144,6 +162,33 @@ public final class ApiServer implements AutoCloseable {
         send(exchange, 200, this.responseBody);
     }
 
+    private void handleAudited(String operation, HttpExchange exchange, HttpHandler handler)
+            throws IOException {
+        long started = System.nanoTime();
+        try {
+            handler.handle(exchange);
+        } finally {
+            Object status = exchange.getAttribute(STATUS_ATTRIBUTE);
+            Object world = exchange.getAttribute(WORLD_ATTRIBUTE);
+            String callId = exchange.getRequestHeaders().getFirst(CALL_ID_HEADER);
+            StringBuilder message = new StringBuilder("Dirt MCP bridge_call operation=")
+                    .append(operation)
+                    .append(" method=")
+                    .append(exchange.getRequestMethod())
+                    .append(" status=")
+                    .append(status instanceof Integer ? status : "aborted");
+            if (world instanceof String worldName) {
+                message.append(" world=").append(GSON.toJson(worldName));
+            }
+            if (callId != null && CALL_ID_PATTERN.matcher(callId).matches()) {
+                message.append(" call=").append(callId);
+            }
+            message.append(" duration_ms=")
+                    .append(Math.max(0, (System.nanoTime() - started) / 1_000_000));
+            this.logger.info(message.toString());
+        }
+    }
+
     private void handleInspectRegion(HttpExchange exchange) throws IOException {
         if (!authenticate(exchange)) {
             return;
@@ -156,6 +201,7 @@ public final class ApiServer implements AutoCloseable {
 
         try {
             InspectionRequest request = parseInspectionRequest(exchange);
+            exchange.setAttribute(WORLD_ATTRIBUTE, request.world());
             send(exchange, 200, GSON.toJson(this.regionInspector.inspect(request)));
         } catch (InvalidRequestException exception) {
             sendError(exchange, 400, "invalid_request", exception.getMessage());
@@ -179,6 +225,7 @@ public final class ApiServer implements AutoCloseable {
 
         try {
             ExactInspectionRequest request = parseExactInspectionRequest(exchange);
+            exchange.setAttribute(WORLD_ATTRIBUTE, request.world());
             send(exchange, 200, GSON.toJson(this.regionInspector.inspectBlocks(request)));
         } catch (InvalidRequestException exception) {
             sendError(exchange, 400, "invalid_request", exception.getMessage());
@@ -201,7 +248,9 @@ public final class ApiServer implements AutoCloseable {
         }
 
         try {
-            send(exchange, 200, GSON.toJson(this.regionEditor.replace(parseReplaceRequest(exchange))));
+            ReplaceRequest request = parseReplaceRequest(exchange);
+            exchange.setAttribute(WORLD_ATTRIBUTE, request.world());
+            send(exchange, 200, GSON.toJson(this.regionEditor.replace(request)));
         } catch (InvalidRequestException exception) {
             sendError(exchange, 400, "invalid_request", exception.getMessage());
         } catch (EditException exception) {
@@ -223,7 +272,9 @@ public final class ApiServer implements AutoCloseable {
         }
 
         try {
-            send(exchange, 200, GSON.toJson(this.regionEditor.undo(parseUndoRequest(exchange))));
+            UndoRequest request = parseUndoRequest(exchange);
+            exchange.setAttribute(WORLD_ATTRIBUTE, request.world());
+            send(exchange, 200, GSON.toJson(this.regionEditor.undo(request)));
         } catch (InvalidRequestException exception) {
             sendError(exchange, 400, "invalid_request", exception.getMessage());
         } catch (EditException exception) {
@@ -245,7 +296,9 @@ public final class ApiServer implements AutoCloseable {
         }
 
         try {
-            send(exchange, 200, GSON.toJson(this.regionEditor.fill(parseFillRequest(exchange))));
+            FillRequest request = parseFillRequest(exchange);
+            exchange.setAttribute(WORLD_ATTRIBUTE, request.world());
+            send(exchange, 200, GSON.toJson(this.regionEditor.fill(request)));
         } catch (InvalidRequestException exception) {
             sendError(exchange, 400, "invalid_request", exception.getMessage());
         } catch (EditException exception) {
@@ -479,6 +532,7 @@ public final class ApiServer implements AutoCloseable {
 
     private static void send(HttpExchange exchange, int statusCode, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.setAttribute(STATUS_ATTRIBUTE, statusCode);
         exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
         exchange.getResponseHeaders().set("Cache-Control", "no-store");
         exchange.sendResponseHeaders(statusCode, bytes.length);
