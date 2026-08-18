@@ -52,8 +52,7 @@ final class ApiServerTest {
             assertEquals("no-store", response.headers().firstValue("Cache-Control").orElseThrow());
             assertEquals(
                     "{\"status\":\"ok\",\"service\":\"dirt-mcp-paper\",\"version\":\"0.1.0-test\","
-                            + "\"minecraftVersion\":\"26.2\",\"capabilities\":{"
-                            + "\"worldInspection\":true,\"worldEditing\":true}}",
+                            + "\"minecraftVersion\":\"26.2\"}",
                     response.body());
         }
     }

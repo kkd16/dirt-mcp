@@ -133,7 +133,7 @@ Undoes the newest successful Dirt MCP mutation for that world. It does not undo
 console, player, WorldEdit, or other plugin activity. A successful undo consumes
 the history entry. History does not survive restart.
 
-The existing `dirt_status` tool remains available for bridge and capability
+The existing `dirt_status` tool remains available for bridge and version
 diagnostics.
 
 ## Common rules
@@ -148,8 +148,8 @@ diagnostics.
 - Reads and writes are limited by normalized region volume. Writes are also
   limited by their estimated changed-block count.
 - V1 defaults are a maximum region volume of 1,000,000 blocks, a maximum of
-  250,000 changed blocks per mutation, and 20 undo entries per world. Operators
-  may lower or raise these limits.
+  250,000 changed blocks per mutation, and 20 undo entries per world. The first
+  two limits are configurable.
 - A world accepts one Dirt MCP mutation at a time.
 
 These checks bound resource use; they are not a permissions system. The server
@@ -167,9 +167,6 @@ bridge:
 limits:
   max-region-volume: 1000000
   max-changed-blocks: 250000
-
-undo:
-  max-entries-per-world: 20
 ```
 
 The bearer token is supplied to both processes as `DIRT_MCP_BRIDGE_TOKEN` and is
@@ -183,5 +180,4 @@ configurable and remains `127.0.0.1`.
 The repository currently implements the Paper lifecycle, authenticated
 loopback bridge, `dirt_status`, `inspect_region`, and FAWE-backed
 `replace_blocks`. `fill_region` and `undo_last_edit` remain product design, not
-placeholder functionality; replacement history is already captured in memory
-for the future undo slice.
+placeholder functionality. Current replacements do not retain undo history.

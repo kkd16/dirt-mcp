@@ -1,8 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.world;
 
 import java.io.Serial;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 public interface RegionInspector {
@@ -21,11 +19,7 @@ public interface RegionInspector {
             Bounds bounds,
             Dimensions dimensions,
             long volume,
-            Map<String, Long> blockStates) {
-        public InspectionResult {
-            blockStates = Collections.unmodifiableMap(new LinkedHashMap<>(blockStates));
-        }
-    }
+            Map<String, Long> blockStates) {}
 
     enum Failure {
         INVALID_REQUEST,

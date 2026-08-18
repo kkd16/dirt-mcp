@@ -14,18 +14,10 @@
   "scripts": {
     "build": "npm run build --workspace=@dirt-mcp/server",
     "check": "npm run check --workspace=@dirt-mcp/server",
-    "clean": "npm run clean --workspace=@dirt-mcp/server",
-    "inspect:mcp": "npm run build && mcp-inspector node mcp-server/dist/index.js",
-    "start:mcp": "npm run start --workspace=@dirt-mcp/server"
-  },
-  "devDependencies": {
-    "@modelcontextprotocol/inspector": "2.2.0"
+    "clean": "npm run clean --workspace=@dirt-mcp/server"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kkd16/dirt-mcp.git"
-  },
-  "allowScripts": {
-    "@modelcontextprotocol/inspector@2.2.0": true
   }
 }

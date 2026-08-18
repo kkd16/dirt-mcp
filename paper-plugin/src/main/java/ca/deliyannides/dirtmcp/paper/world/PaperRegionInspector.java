@@ -88,6 +88,7 @@ public final class PaperRegionInspector implements RegionInspector {
         int minChunkZ = region.min().z() >> 4;
         int maxChunkZ = region.max().z() >> 4;
 
+        List<ChunkSnapshot> snapshots = new ArrayList<>();
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
             for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
                 if (!world.isChunkLoaded(chunkX, chunkZ)) {
@@ -95,26 +96,20 @@ public final class PaperRegionInspector implements RegionInspector {
                             Failure.WORLD_UNAVAILABLE,
                             "Region contains an unloaded chunk at " + chunkX + "," + chunkZ);
                 }
-            }
-        }
-
-        List<CapturedChunk> snapshots = new ArrayList<>();
-        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
-            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
                 ChunkSnapshot snapshot = world.getChunkAt(chunkX, chunkZ, false)
                         .getChunkSnapshot(false, false, false, false);
-                snapshots.add(new CapturedChunk(chunkX, chunkZ, snapshot));
+                snapshots.add(snapshot);
             }
         }
         return new WorldCapture(world.getName(), snapshots);
     }
 
     private static Map<String, Long> countBlockStates(
-            NormalizedRegion region, List<CapturedChunk> snapshots) {
+            NormalizedRegion region, List<ChunkSnapshot> snapshots) {
         Map<String, Long> counts = new TreeMap<>();
-        for (CapturedChunk captured : snapshots) {
-            int chunkMinX = captured.x() << 4;
-            int chunkMinZ = captured.z() << 4;
+        for (ChunkSnapshot snapshot : snapshots) {
+            int chunkMinX = snapshot.getX() << 4;
+            int chunkMinZ = snapshot.getZ() << 4;
             int minX = Math.max(region.min().x(), chunkMinX);
             int maxX = Math.min(region.max().x(), chunkMinX + 15);
             int minZ = Math.max(region.min().z(), chunkMinZ);
@@ -123,7 +118,7 @@ public final class PaperRegionInspector implements RegionInspector {
             for (int y = region.min().y(); y <= region.max().y(); y++) {
                 for (long z = minZ; z <= maxZ; z++) {
                     for (long x = minX; x <= maxX; x++) {
-                        String blockState = captured.snapshot()
+                        String blockState = snapshot
                                 .getBlockData((int) x & 15, y, (int) z & 15)
                                 .getAsString();
                         counts.merge(blockState, 1L, Long::sum);
@@ -134,7 +129,5 @@ public final class PaperRegionInspector implements RegionInspector {
         return counts;
     }
 
-    private record CapturedChunk(int x, int z, ChunkSnapshot snapshot) {}
-
-    private record WorldCapture(String worldName, List<CapturedChunk> snapshots) {}
+    private record WorldCapture(String worldName, List<ChunkSnapshot> snapshots) {}
 }

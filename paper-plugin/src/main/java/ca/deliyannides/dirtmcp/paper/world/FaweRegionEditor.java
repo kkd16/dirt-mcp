@@ -13,8 +13,6 @@ import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.regions.CuboidRegion;
 import com.sk89q.worldedit.world.block.BaseBlock;
-import java.util.ArrayDeque;
-import java.util.Deque;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,19 +28,15 @@ public final class FaweRegionEditor implements RegionEditor {
     private final JavaPlugin plugin;
     private final long maxRegionVolume;
     private final int maxChangedBlocks;
-    private final int maxUndoEntries;
     private final Map<String, ReentrantLock> worldLocks = new ConcurrentHashMap<>();
-    private final Map<String, Deque<EditSession>> undoHistory = new ConcurrentHashMap<>();
 
-    public FaweRegionEditor(
-            JavaPlugin plugin, long maxRegionVolume, int maxChangedBlocks, int maxUndoEntries) {
-        if (maxRegionVolume < 1 || maxChangedBlocks < 1 || maxUndoEntries < 1) {
+    public FaweRegionEditor(JavaPlugin plugin, long maxRegionVolume, int maxChangedBlocks) {
+        if (maxRegionVolume < 1 || maxChangedBlocks < 1) {
             throw new IllegalArgumentException("Edit limits must be positive");
         }
         this.plugin = plugin;
         this.maxRegionVolume = maxRegionVolume;
         this.maxChangedBlocks = maxChangedBlocks;
-        this.maxUndoEntries = maxUndoEntries;
     }
 
     @Override
@@ -71,50 +65,30 @@ public final class FaweRegionEditor implements RegionEditor {
                 com.sk89q.worldedit.math.BlockVector3.at(
                         region.max().x(), region.max().y(), region.max().z()));
 
-        if (request.dryRun()) {
-            try (EditSession session = WorldEdit.getInstance()
-                    .newEditSessionBuilder()
-                    .world(prepared.world())
-                    .allowedRegionsEverywhere()
-                    .fastMode(true)
-                    .changeSetNull()
-                    .build()) {
-                int matches = session.countBlocks(selection, Set.of(prepared.source()));
-                long changes = prepared.sourceName().equals(prepared.destinationName()) ? 0 : matches;
-                enforceChangeLimit(changes);
-                return result(request, region, prepared, matches, changes);
-            }
-        }
-
-        EditSession session = WorldEdit.getInstance()
+        boolean changesBlocks = !prepared.sourceName().equals(prepared.destinationName());
+        try (EditSession session = WorldEdit.getInstance()
                 .newEditSessionBuilder()
                 .world(prepared.world())
                 .maxBlocks(this.maxChangedBlocks)
                 .allowedRegionsEverywhere()
-                .fastMode(false)
-                .combineStages(false)
-                .changeSet(false, null)
-                .build();
-        int matches;
-        int changes = 0;
-        try (session) {
-            matches = session.countBlocks(selection, Set.of(prepared.source()));
-            enforceChangeLimit(prepared.sourceName().equals(prepared.destinationName()) ? 0 : matches);
-            if (!prepared.sourceName().equals(prepared.destinationName()) && matches > 0) {
+                .fastMode(true)
+                .changeSetNull()
+                .build()) {
+            int matches = session.countBlocks(selection, Set.of(prepared.source()));
+            long expectedChanges = changesBlocks ? matches : 0;
+            enforceChangeLimit(expectedChanges);
+
+            long changes = expectedChanges;
+            if (!request.dryRun() && expectedChanges > 0) {
                 changes = session.replaceBlocks(selection, Set.of(prepared.source()), prepared.destination());
             }
+            return result(request, region, prepared, matches, changes);
         } catch (MaxChangedBlocksException exception) {
             throw new EditException(
                     Failure.CHANGE_LIMIT_EXCEEDED,
                     "Edit exceeds the maximum of " + this.maxChangedBlocks + " changed blocks",
                     exception);
-        } finally {
-            if (session.getChangeSet() != null && session.getChangeSet().longSize() > 0) {
-                remember(prepared.worldName(), session);
-            }
         }
-
-        return result(request, region, prepared, matches, changes);
     }
 
     private ReplaceResult result(
@@ -212,16 +186,6 @@ public final class FaweRegionEditor implements RegionEditor {
             throw new EditException(
                     Failure.CHANGE_LIMIT_EXCEEDED,
                     "Edit exceeds the maximum of " + this.maxChangedBlocks + " changed blocks");
-        }
-    }
-
-    private void remember(String world, EditSession session) {
-        Deque<EditSession> history = this.undoHistory.computeIfAbsent(world, ignored -> new ArrayDeque<>());
-        synchronized (history) {
-            history.addLast(session);
-            while (history.size() > this.maxUndoEntries) {
-                history.removeFirst();
-            }
         }
     }
 

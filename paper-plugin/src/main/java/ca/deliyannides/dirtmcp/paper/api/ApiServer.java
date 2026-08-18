@@ -65,8 +65,7 @@ public final class ApiServer implements AutoCloseable {
                 "ok",
                 "dirt-mcp-paper",
                 pluginVersion,
-                minecraftVersion,
-                new Capabilities(true, true)));
+                minecraftVersion));
     }
 
     public void start() throws IOException {
@@ -330,10 +329,7 @@ public final class ApiServer implements AutoCloseable {
             String status,
             String service,
             String version,
-            String minecraftVersion,
-            Capabilities capabilities) {}
-
-    private record Capabilities(boolean worldInspection, boolean worldEditing) {}
+            String minecraftVersion) {}
 
     private record ErrorEnvelope(ErrorDetail error) {}
 

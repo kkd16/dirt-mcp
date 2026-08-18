@@ -13,7 +13,7 @@ paths:
   /v1/health:
     get:
       operationId: getHealth
-      summary: Report bridge availability and implemented capabilities
+      summary: Report bridge availability and versions
       security:
         - bearerAuth: []
       responses:
@@ -388,7 +388,6 @@ components:
         - service
         - version
         - minecraftVersion
-        - capabilities
       properties:
         status:
           const: ok
@@ -398,14 +397,3 @@ components:
           type: string
         minecraftVersion:
           type: string
-        capabilities:
-          type: object
-          additionalProperties: false
-          required:
-            - worldInspection
-            - worldEditing
-          properties:
-            worldInspection:
-              const: true
-            worldEditing:
-              const: true

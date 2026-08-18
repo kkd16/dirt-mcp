@@ -17,13 +17,14 @@ public final class DirtMcpPlugin extends JavaPlugin {
         saveDefaultConfig();
 
         int port = bridgePort();
+        long maxRegionVolume = maxRegionVolume();
         this.apiServer = new ApiServer(
                 port,
                 getPluginMeta().getVersion(),
                 getServer().getMinecraftVersion(),
                 bridgeToken(),
-                new PaperRegionInspector(this, maxRegionVolume()),
-                new FaweRegionEditor(this, maxRegionVolume(), maxChangedBlocks(), maxUndoEntries()),
+                new PaperRegionInspector(this, maxRegionVolume),
+                new FaweRegionEditor(this, maxRegionVolume, maxChangedBlocks()),
                 getLogger());
 
         try {
@@ -83,14 +84,6 @@ public final class DirtMcpPlugin extends JavaPlugin {
         int maximum = getConfig().getInt("limits.max-changed-blocks", 250_000);
         if (maximum < 1) {
             throw new IllegalArgumentException("limits.max-changed-blocks must be positive");
-        }
-        return maximum;
-    }
-
-    private int maxUndoEntries() {
-        int maximum = getConfig().getInt("undo.max-entries-per-world", 20);
-        if (maximum < 1) {
-            throw new IllegalArgumentException("undo.max-entries-per-world must be positive");
         }
         return maximum;
     }

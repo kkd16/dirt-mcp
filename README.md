@@ -151,7 +151,6 @@ make ci        Reproduce the clean CI build
 make dev-token Create the ignored local bearer token
 make health    Query a running bridge
 make mcp       Run the MCP stdio process
-make inspect   Open the pinned MCP Inspector
 make clean     Remove build outputs, preserving the development world
 ```
 

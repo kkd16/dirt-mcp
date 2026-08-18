@@ -14,6 +14,11 @@ const BlockPositionSchema = z.object({
   z: z.number().int().min(INT32_MIN).max(INT32_MAX),
 }).strict();
 
+const BoundsSchema = z.object({
+  min: BlockPositionSchema,
+  max: BlockPositionSchema,
+}).strict();
+
 const InspectRegionInputSchema = z.object({
   world: z.string().min(1),
   min: BlockPositionSchema,
@@ -22,10 +27,7 @@ const InspectRegionInputSchema = z.object({
 
 const InspectRegionOutputSchema = z.object({
   world: z.string().min(1),
-  bounds: z.object({
-    min: BlockPositionSchema,
-    max: BlockPositionSchema,
-  }).strict(),
+  bounds: BoundsSchema,
   dimensions: z.object({
     x: z.number().int().positive(),
     y: z.number().int().positive(),
@@ -46,10 +48,7 @@ const ReplaceBlocksInputSchema = z.object({
 
 const ReplaceBlocksOutputSchema = z.object({
   world: z.string().min(1),
-  bounds: z.object({
-    min: BlockPositionSchema,
-    max: BlockPositionSchema,
-  }).strict(),
+  bounds: BoundsSchema,
   source: z.string().min(1),
   destination: z.string().min(1),
   dryRun: z.boolean(),
@@ -69,10 +68,6 @@ const HealthSchema = z.object({
   service: z.literal('dirt-mcp-paper'),
   version: z.string(),
   minecraftVersion: z.string(),
-  capabilities: z.object({
-    worldInspection: z.literal(true),
-    worldEditing: z.literal(true),
-  }).strict(),
 }).strict();
 
 function createServer(): McpServer {

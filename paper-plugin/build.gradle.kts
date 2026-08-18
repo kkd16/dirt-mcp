@@ -10,7 +10,6 @@ val paperVersion = providers.gradleProperty("paperVersion").get()
 val paperApiVersion = providers.gradleProperty("paperApiVersion").get()
 val faweVersion = providers.gradleProperty("faweVersion").get()
 val faweModrinthVersionId = providers.gradleProperty("faweModrinthVersionId").get()
-val devServerHost = providers.environmentVariable("DIRT_MCP_DEV_HOST").orElse("0.0.0.0")
 val devServerPort = providers.environmentVariable("DIRT_MCP_DEV_PORT").orElse("25566")
 
 group = "ca.deliyannides.dirtmcp"
@@ -84,7 +83,7 @@ tasks {
         downloadPlugins {
             modrinth("z4HZZnLr", faweModrinthVersionId)
         }
-        args("--host", devServerHost.get(), "--port", devServerPort.get())
+        args("--host", "0.0.0.0", "--port", devServerPort.get())
         jvmArgs("-Djava.net.preferIPv4Stack=true")
 
         if (providers.environmentVariable("PAPER_EULA").map(String::toBoolean).orElse(false).get()) {
