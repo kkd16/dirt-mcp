@@ -5,3 +5,4 @@ description: AI access to live Minecraft worlds
 author: kkd16
 website: https://github.com/kkd16/dirt-mcp
 api-version: '${paperVersion}'
+depend: [FastAsyncWorldEdit]

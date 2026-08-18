@@ -35,6 +35,28 @@ const InspectRegionOutputSchema = z.object({
   blockStates: z.record(z.string(), z.number().int().nonnegative()),
 }).strict();
 
+const ReplaceBlocksInputSchema = z.object({
+  world: z.string().min(1),
+  min: BlockPositionSchema,
+  max: BlockPositionSchema,
+  source: z.string().min(1),
+  destination: z.string().min(1),
+  dryRun: z.boolean().optional().default(false),
+}).strict();
+
+const ReplaceBlocksOutputSchema = z.object({
+  world: z.string().min(1),
+  bounds: z.object({
+    min: BlockPositionSchema,
+    max: BlockPositionSchema,
+  }).strict(),
+  source: z.string().min(1),
+  destination: z.string().min(1),
+  dryRun: z.boolean(),
+  matchedBlocks: z.number().int().nonnegative(),
+  changedBlocks: z.number().int().nonnegative(),
+}).strict();
+
 const ErrorSchema = z.object({
   error: z.object({
     code: z.string(),
@@ -49,7 +71,7 @@ const HealthSchema = z.object({
   minecraftVersion: z.string(),
   capabilities: z.object({
     worldInspection: z.literal(true),
-    worldEditing: z.literal(false),
+    worldEditing: z.literal(true),
   }).strict(),
 }).strict();
 
@@ -126,6 +148,40 @@ function createServer(): McpServer {
         const message = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: 'text', text: `Could not inspect the region: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.registerTool(
+    'replace_blocks',
+    {
+      title: 'Replace blocks',
+      description: 'Replace one exact block state in a bounded region, or preview the exact result.',
+      inputSchema: ReplaceBlocksInputSchema,
+      outputSchema: ReplaceBlocksOutputSchema,
+    },
+    async (input) => {
+      try {
+        const response = await bridgeRequest(
+          '/v1/replace-blocks',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(input),
+          },
+          120_000,
+        );
+        const result = ReplaceBlocksOutputSchema.parse(await response.json());
+        return {
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+          structuredContent: result,
+        };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: 'text', text: `Could not replace blocks: ${message}` }],
           isError: true,
         };
       }

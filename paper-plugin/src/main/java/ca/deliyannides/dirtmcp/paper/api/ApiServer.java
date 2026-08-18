@@ -1,5 +1,8 @@
 package ca.deliyannides.dirtmcp.paper.api;
 
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Failure;
@@ -28,6 +31,10 @@ public final class ApiServer implements AutoCloseable {
     private static final String LOOPBACK_ADDRESS = "127.0.0.1";
     private static final int MAXIMUM_REQUEST_BYTES = 8_192;
     private static final Set<String> INSPECTION_FIELDS = Set.of("world", "min", "max");
+    private static final Set<String> REPLACEMENT_REQUIRED_FIELDS =
+            Set.of("world", "min", "max", "source", "destination");
+    private static final Set<String> REPLACEMENT_FIELDS =
+            Set.of("world", "min", "max", "source", "destination", "dryRun");
     private static final Set<String> POSITION_FIELDS = Set.of("x", "y", "z");
     private static final Gson GSON = new Gson();
 
@@ -35,6 +42,7 @@ public final class ApiServer implements AutoCloseable {
     private final String responseBody;
     private final BearerAuthentication authentication;
     private final RegionInspector regionInspector;
+    private final RegionEditor regionEditor;
     private final Logger logger;
 
     private HttpServer server;
@@ -46,17 +54,19 @@ public final class ApiServer implements AutoCloseable {
             String minecraftVersion,
             String bearerToken,
             RegionInspector regionInspector,
+            RegionEditor regionEditor,
             Logger logger) {
         this.port = port;
         this.logger = logger;
         this.authentication = new BearerAuthentication(bearerToken);
         this.regionInspector = regionInspector;
+        this.regionEditor = regionEditor;
         this.responseBody = GSON.toJson(new HealthResponse(
                 "ok",
                 "dirt-mcp-paper",
                 pluginVersion,
                 minecraftVersion,
-                new Capabilities(true, false)));
+                new Capabilities(true, true)));
     }
 
     public void start() throws IOException {
@@ -70,6 +80,7 @@ public final class ApiServer implements AutoCloseable {
         try {
             newServer.createContext("/v1/health", this::handleHealth);
             newServer.createContext("/v1/inspect-region", this::handleInspectRegion);
+            newServer.createContext("/v1/replace-blocks", this::handleReplaceBlocks);
             newServer.setExecutor(newExecutor);
             newServer.start();
         } catch (RuntimeException exception) {
@@ -142,6 +153,28 @@ public final class ApiServer implements AutoCloseable {
         }
     }
 
+    private void handleReplaceBlocks(HttpExchange exchange) throws IOException {
+        if (!authenticate(exchange)) {
+            return;
+        }
+        if (!"POST".equals(exchange.getRequestMethod())) {
+            exchange.getResponseHeaders().set("Allow", "POST");
+            sendError(exchange, 405, "method_not_allowed", "Method must be POST");
+            return;
+        }
+
+        try {
+            send(exchange, 200, GSON.toJson(this.regionEditor.replace(parseReplaceRequest(exchange))));
+        } catch (InvalidRequestException exception) {
+            sendError(exchange, 400, "invalid_request", exception.getMessage());
+        } catch (EditException exception) {
+            sendEditError(exchange, exception);
+        } catch (RuntimeException exception) {
+            this.logger.log(Level.SEVERE, "Unexpected replace-blocks failure", exception);
+            sendError(exchange, 500, "internal_error", "The blocks could not be replaced");
+        }
+    }
+
     private boolean authenticate(HttpExchange exchange) throws IOException {
         if (this.authentication.accepts(exchange.getRequestHeaders().getFirst("Authorization"))) {
             return true;
@@ -153,39 +186,70 @@ public final class ApiServer implements AutoCloseable {
 
     private static InspectionRequest parseInspectionRequest(HttpExchange exchange)
             throws IOException, InvalidRequestException {
-        String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
-        if (contentType == null
-                || !contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT).equals("application/json")) {
-            throw new InvalidRequestException("Content-Type must be application/json");
-        }
-
-        byte[] body = exchange.getRequestBody().readNBytes(MAXIMUM_REQUEST_BYTES + 1);
-        if (body.length > MAXIMUM_REQUEST_BYTES) {
-            throw new InvalidRequestException("Request body is too large");
-        }
-
         try {
-            JsonElement document = JsonParser.parseString(new String(body, StandardCharsets.UTF_8));
-            if (!document.isJsonObject()) {
-                throw new InvalidRequestException("Request body must be a JSON object");
-            }
-            JsonObject object = document.getAsJsonObject();
+            JsonObject object = parseRequestObject(exchange);
             requireFields(object, INSPECTION_FIELDS, "Request");
-
-            JsonElement worldElement = object.get("world");
-            if (!(worldElement instanceof JsonPrimitive worldPrimitive)
-                    || !worldPrimitive.isString()
-                    || worldPrimitive.getAsString().isBlank()) {
-                throw new InvalidRequestException("world must be a non-empty string");
-            }
-
             return new InspectionRequest(
-                    worldPrimitive.getAsString(),
+                    parseString(object.get("world"), "world"),
                     parsePosition(object.get("min"), "min"),
                     parsePosition(object.get("max"), "max"));
         } catch (JsonParseException | NumberFormatException | ArithmeticException exception) {
             throw new InvalidRequestException("Request body must contain valid JSON values");
         }
+    }
+
+    private static ReplaceRequest parseReplaceRequest(HttpExchange exchange)
+            throws IOException, InvalidRequestException {
+        try {
+            JsonObject object = parseRequestObject(exchange);
+            if (!object.keySet().containsAll(REPLACEMENT_REQUIRED_FIELDS)
+                    || !REPLACEMENT_FIELDS.containsAll(object.keySet())) {
+                throw new InvalidRequestException("Request contains missing or unknown fields");
+            }
+            return new ReplaceRequest(
+                    parseString(object.get("world"), "world"),
+                    parsePosition(object.get("min"), "min"),
+                    parsePosition(object.get("max"), "max"),
+                    parseString(object.get("source"), "source"),
+                    parseString(object.get("destination"), "destination"),
+                    object.has("dryRun") && parseBoolean(object.get("dryRun"), "dryRun"));
+        } catch (JsonParseException | NumberFormatException | ArithmeticException exception) {
+            throw new InvalidRequestException("Request body must contain valid JSON values");
+        }
+    }
+
+    private static JsonObject parseRequestObject(HttpExchange exchange)
+            throws IOException, InvalidRequestException {
+        String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
+        if (contentType == null
+                || !contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT).equals("application/json")) {
+            throw new InvalidRequestException("Content-Type must be application/json");
+        }
+        byte[] body = exchange.getRequestBody().readNBytes(MAXIMUM_REQUEST_BYTES + 1);
+        if (body.length > MAXIMUM_REQUEST_BYTES) {
+            throw new InvalidRequestException("Request body is too large");
+        }
+        JsonElement document = JsonParser.parseString(new String(body, StandardCharsets.UTF_8));
+        if (!document.isJsonObject()) {
+            throw new InvalidRequestException("Request body must be a JSON object");
+        }
+        return document.getAsJsonObject();
+    }
+
+    private static String parseString(JsonElement element, String name) throws InvalidRequestException {
+        if (!(element instanceof JsonPrimitive primitive)
+                || !primitive.isString()
+                || primitive.getAsString().isBlank()) {
+            throw new InvalidRequestException(name + " must be a non-empty string");
+        }
+        return primitive.getAsString();
+    }
+
+    private static boolean parseBoolean(JsonElement element, String name) throws InvalidRequestException {
+        if (!(element instanceof JsonPrimitive primitive) || !primitive.isBoolean()) {
+            throw new InvalidRequestException(name + " must be a boolean");
+        }
+        return primitive.getAsBoolean();
     }
 
     private static BlockPosition parsePosition(JsonElement element, String name)
@@ -229,6 +293,21 @@ public final class ApiServer implements AutoCloseable {
             case WORLD_UNAVAILABLE -> 503;
         };
         sendError(exchange, status, failure.name().toLowerCase(Locale.ROOT), exception.getMessage());
+    }
+
+    private static void sendEditError(HttpExchange exchange, EditException exception) throws IOException {
+        int status = switch (exception.failure()) {
+            case INVALID_REQUEST -> 400;
+            case WORLD_NOT_FOUND -> 404;
+            case WORLD_BUSY -> 409;
+            case CHANGE_LIMIT_EXCEEDED, REGION_TOO_LARGE -> 413;
+            case WORLD_UNAVAILABLE -> 503;
+        };
+        sendError(
+                exchange,
+                status,
+                exception.failure().name().toLowerCase(Locale.ROOT),
+                exception.getMessage());
     }
 
     private static void sendError(HttpExchange exchange, int statusCode, String code, String message)

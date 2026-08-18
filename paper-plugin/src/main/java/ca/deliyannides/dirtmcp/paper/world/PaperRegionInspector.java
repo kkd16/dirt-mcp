@@ -1,12 +1,12 @@
 package ca.deliyannides.dirtmcp.paper.world;
 
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Bounds;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Dimensions;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Failure;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionException;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.NormalizedRegion;
+import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.RegionTooLargeException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -45,21 +45,11 @@ public final class PaperRegionInspector implements RegionInspector {
 
     static NormalizedRegion normalize(InspectionRequest request, long maxRegionVolume)
             throws InspectionException {
-        BlockPosition min = new BlockPosition(
-                Math.min(request.min().x(), request.max().x()),
-                Math.min(request.min().y(), request.max().y()),
-                Math.min(request.min().z(), request.max().z()));
-        BlockPosition max = new BlockPosition(
-                Math.max(request.min().x(), request.max().x()),
-                Math.max(request.min().y(), request.max().y()),
-                Math.max(request.min().z(), request.max().z()));
-
-        long sizeX = (long) max.x() - min.x() + 1;
-        long sizeY = (long) max.y() - min.y() + 1;
-        long sizeZ = (long) max.z() - min.z() + 1;
-        long volume = cappedProduct(sizeX, sizeY, sizeZ, maxRegionVolume);
-
-        return new NormalizedRegion(min, max, new Dimensions(sizeX, sizeY, sizeZ), volume);
+        try {
+            return RegionGeometry.normalize(request.min(), request.max(), maxRegionVolume);
+        } catch (RegionTooLargeException exception) {
+            throw new InspectionException(Failure.REGION_TOO_LARGE, exception.getMessage(), exception);
+        }
     }
 
     private WorldCapture capture(String worldName, NormalizedRegion region) throws InspectionException {
@@ -143,17 +133,6 @@ public final class PaperRegionInspector implements RegionInspector {
         }
         return counts;
     }
-
-    private static long cappedProduct(long sizeX, long sizeY, long sizeZ, long maximum)
-            throws InspectionException {
-        if (sizeX > maximum || sizeY > maximum / sizeX || sizeZ > maximum / (sizeX * sizeY)) {
-            throw new InspectionException(
-                    Failure.REGION_TOO_LARGE, "Region exceeds the maximum volume of " + maximum + " blocks");
-        }
-        return sizeX * sizeY * sizeZ;
-    }
-
-    record NormalizedRegion(BlockPosition min, BlockPosition max, Dimensions dimensions, long volume) {}
 
     private record CapturedChunk(int x, int z, ChunkSnapshot snapshot) {}
 

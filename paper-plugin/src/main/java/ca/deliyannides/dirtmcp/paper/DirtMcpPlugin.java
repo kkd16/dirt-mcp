@@ -1,6 +1,7 @@
 package ca.deliyannides.dirtmcp.paper;
 
 import ca.deliyannides.dirtmcp.paper.api.ApiServer;
+import ca.deliyannides.dirtmcp.paper.world.FaweRegionEditor;
 import ca.deliyannides.dirtmcp.paper.world.PaperRegionInspector;
 import java.io.IOException;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -22,6 +23,7 @@ public final class DirtMcpPlugin extends JavaPlugin {
                 getServer().getMinecraftVersion(),
                 bridgeToken(),
                 new PaperRegionInspector(this, maxRegionVolume()),
+                new FaweRegionEditor(this, maxRegionVolume(), maxChangedBlocks(), maxUndoEntries()),
                 getLogger());
 
         try {
@@ -73,6 +75,22 @@ public final class DirtMcpPlugin extends JavaPlugin {
         long maximum = getConfig().getLong("limits.max-region-volume", 1_000_000L);
         if (maximum < 1) {
             throw new IllegalArgumentException("limits.max-region-volume must be positive");
+        }
+        return maximum;
+    }
+
+    private int maxChangedBlocks() {
+        int maximum = getConfig().getInt("limits.max-changed-blocks", 250_000);
+        if (maximum < 1) {
+            throw new IllegalArgumentException("limits.max-changed-blocks must be positive");
+        }
+        return maximum;
+    }
+
+    private int maxUndoEntries() {
+        int maximum = getConfig().getInt("undo.max-entries-per-world", 20);
+        if (maximum < 1) {
+            throw new IllegalArgumentException("undo.max-entries-per-world must be positive");
         }
         return maximum;
     }

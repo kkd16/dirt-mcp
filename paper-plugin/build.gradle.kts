@@ -8,6 +8,8 @@ plugins {
 val projectVersion = providers.gradleProperty("projectVersion").get()
 val paperVersion = providers.gradleProperty("paperVersion").get()
 val paperApiVersion = providers.gradleProperty("paperApiVersion").get()
+val faweVersion = providers.gradleProperty("faweVersion").get()
+val faweModrinthVersionId = providers.gradleProperty("faweModrinthVersionId").get()
 val devServerHost = providers.environmentVariable("DIRT_MCP_DEV_HOST").orElse("0.0.0.0")
 val devServerPort = providers.environmentVariable("DIRT_MCP_DEV_PORT").orElse("25566")
 
@@ -26,6 +28,12 @@ repositories {
 dependencies {
     compileOnly("io.papermc.paper:paper-api:$paperApiVersion")
     compileOnly("com.google.code.gson:gson:2.14.0")
+    compileOnly("com.fastasyncworldedit:FastAsyncWorldEdit-Core:$faweVersion") {
+        isTransitive = false
+    }
+    compileOnly("com.fastasyncworldedit:FastAsyncWorldEdit-Bukkit:$faweVersion") {
+        isTransitive = false
+    }
 
     testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("io.papermc.paper:paper-api:$paperApiVersion")
@@ -73,6 +81,9 @@ tasks {
 
     runServer {
         minecraftVersion(paperVersion)
+        downloadPlugins {
+            modrinth("z4HZZnLr", faweModrinthVersionId)
+        }
         args("--host", devServerHost.get(), "--port", devServerPort.get())
         jvmArgs("-Djava.net.preferIPv4Stack=true")
 

@@ -77,7 +77,42 @@ Inputs:
 
 A dry-run returns the exact matching and estimated changed-block counts. An
 executed call replaces matches through one FAWE edit session and records one
-undo entry.
+undo entry. The bridge request is `POST /v1/replace-blocks`:
+
+```json
+{
+  "world": "world",
+  "min": { "x": 0, "y": 60, "z": 0 },
+  "max": { "x": 15, "y": 80, "z": 15 },
+  "source": "minecraft:stone",
+  "destination": "minecraft:dirt",
+  "dryRun": false
+}
+```
+
+`dryRun` may be omitted and defaults to `false`. A successful response contains
+canonical block states and normalized bounds:
+
+```json
+{
+  "world": "world",
+  "bounds": {
+    "min": { "x": 0, "y": 60, "z": 0 },
+    "max": { "x": 15, "y": 80, "z": 15 }
+  },
+  "source": "minecraft:stone",
+  "destination": "minecraft:dirt",
+  "dryRun": false,
+  "matchedBlocks": 1280,
+  "changedBlocks": 1280
+}
+```
+
+Replacement requires already-loaded chunks and returns `invalid_request` (400),
+`world_not_found` (404), `world_busy` (409), `region_too_large` (413),
+`change_limit_exceeded` (413), `world_unavailable` (503), or `internal_error`
+(500). A dry-run does not mutate or record history. Replacing a state with
+itself reports matches but zero changes and records no history.
 
 ### `fill_region`
 
@@ -146,6 +181,7 @@ configurable and remains `127.0.0.1`.
 ## Current implementation
 
 The repository currently implements the Paper lifecycle, authenticated
-loopback bridge, `dirt_status`, and `inspect_region`. The three mutation tools
-and FAWE integration described above remain product design, not placeholder
-functionality.
+loopback bridge, `dirt_status`, `inspect_region`, and FAWE-backed
+`replace_blocks`. `fill_region` and `undo_last_edit` remain product design, not
+placeholder functionality; replacement history is already captured in memory
+for the future undo slice.

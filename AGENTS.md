@@ -9,9 +9,9 @@ the plugin owns all Minecraft and FAWE access.
 Read `README.md` and `docs/` before changing behavior. The OpenAPI file describes
 implemented bridge behavior; the v1 design describes the intended product.
 
-The current implementation contains plugin lifecycle, `GET /v1/health`,
-`POST /v1/inspect-region`, and the `dirt_status` and `inspect_region` MCP tools.
-Do not present planned mutation tools as working.
+The current implementation contains plugin lifecycle, authenticated health and
+region inspection, plus FAWE-backed block replacement. Do not present the
+planned fill or undo tools as working.
 
 ## Product rules
 

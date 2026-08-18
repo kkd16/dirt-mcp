@@ -8,18 +8,18 @@ for inspecting bounded regions and performing deterministic bulk edits through
 while Paper remains the owner of the live world.
 
 The repository currently ships the Paper plugin, authenticated loopback bridge,
-and MCP tools for status and bounded region inspection. The v1 editing tools
-are specified in [`docs/v1-design.md`](docs/v1-design.md) and are not yet
-implemented.
+and MCP tools for status, bounded region inspection, and FAWE-backed block
+replacement. The remaining v1 tools are specified in
+[`docs/v1-design.md`](docs/v1-design.md).
 
 ## Platform support
 
 Dirt MCP tracks the latest stable Paper release only. The current baseline is:
 
 - Paper 26.2;
+- FAWE 2.15.4;
 - Java 25;
-- Node.js 24 LTS or newer; and
-- FAWE for the forthcoming v1 editing tools.
+- Node.js 24 LTS or newer.
 
 Older Paper or Minecraft versions are not supported unless they happen to work.
 Source development also requires GNU Make and curl.
@@ -61,8 +61,7 @@ Copy the Paper plugin into an existing server:
 cp paper-plugin/build/libs/dirt-mcp-paper-*.jar /path/to/paper/plugins/
 ```
 
-FAWE will become a required runtime dependency when the v1 editing tools land;
-the current read-only implementation can run without it.
+FAWE is a required runtime dependency. Dirt MCP will not load without it.
 
 ## Running on a Paper server
 
@@ -113,8 +112,8 @@ For another MCP host, configure it to launch the source build:
 ```
 
 Once npm publishing exists, a global installation will provide the equivalent
-`dirt-mcp` command. The current tool surface contains `dirt_status` and
-`inspect_region`.
+`dirt-mcp` command. The current tool surface contains `dirt_status`,
+`inspect_region`, and `replace_blocks`.
 
 ## Local development
 
@@ -127,9 +126,10 @@ make up
 ```
 
 `make up` installs locked dependencies, builds and tests both components,
-creates an ignored local bearer token when needed, and accepts Mojang's EULA on
-the command line. It runs Paper in the foreground on port `25566` with an IPv4
-listener suitable for Windows and WSL. Connect to the Minecraft server at
+downloads the pinned FAWE development dependency, creates an ignored local
+bearer token when needed, and accepts Mojang's EULA on the command line. It runs
+Paper in the foreground on port `25566` with an IPv4 listener suitable for
+Windows and WSL. Connect to the Minecraft server at
 `127.0.0.1:25566`. The authenticated MCP bridge is available to local MCP
 clients at `127.0.0.1:8765`. Only run it if you agree to the
 [Minecraft EULA](https://aka.ms/MinecraftEULA). Type `stop` in the Paper console

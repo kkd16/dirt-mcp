@@ -5,3 +5,7 @@ bridge:
 
 limits:
   max-region-volume: 1000000
+  max-changed-blocks: 250000
+
+undo:
+  max-entries-per-world: 20

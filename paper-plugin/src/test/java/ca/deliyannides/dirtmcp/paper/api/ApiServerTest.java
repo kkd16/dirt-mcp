@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Bounds;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Dimensions;
@@ -28,6 +31,9 @@ final class ApiServerTest {
     private static final RegionInspector UNUSED_INSPECTOR = request -> {
         throw new AssertionError("Region inspector should not be called");
     };
+    private static final RegionEditor UNUSED_EDITOR = request -> {
+        throw new AssertionError("Region editor should not be called");
+    };
 
     @Test
     void reportsHealthOnLoopback() throws Exception {
@@ -47,7 +53,7 @@ final class ApiServerTest {
             assertEquals(
                     "{\"status\":\"ok\",\"service\":\"dirt-mcp-paper\",\"version\":\"0.1.0-test\","
                             + "\"minecraftVersion\":\"26.2\",\"capabilities\":{"
-                            + "\"worldInspection\":true,\"worldEditing\":false}}",
+                            + "\"worldInspection\":true,\"worldEditing\":true}}",
                     response.body());
         }
     }
@@ -173,6 +179,99 @@ final class ApiServerTest {
     }
 
     @Test
+    void replacesBlocksWithDryRunDefaultingToFalse() throws Exception {
+        RegionEditor editor = request -> {
+            assertEquals("world", request.world());
+            assertEquals(new BlockPosition(5, 60, -2), request.min());
+            assertEquals(new BlockPosition(6, 61, -1), request.max());
+            assertEquals("minecraft:stone", request.source());
+            assertEquals("minecraft:dirt", request.destination());
+            assertEquals(false, request.dryRun());
+            return new ReplaceResult(
+                    request.world(),
+                    new Bounds(request.min(), request.max()),
+                    request.source(),
+                    request.destination(),
+                    request.dryRun(),
+                    8,
+                    8);
+        };
+
+        try (ApiServer server = server(UNUSED_INSPECTOR, editor);
+                HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> response = client.send(
+                    replacementRequest(server, """
+                            {"world":"world","min":{"x":5,"y":60,"z":-2},
+                             "max":{"x":6,"y":61,"z":-1},"source":"minecraft:stone",
+                             "destination":"minecraft:dirt"}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, response.statusCode());
+            assertEquals(
+                    "{\"world\":\"world\",\"bounds\":{\"min\":{\"x\":5,\"y\":60,\"z\":-2},"
+                            + "\"max\":{\"x\":6,\"y\":61,\"z\":-1}},"
+                            + "\"source\":\"minecraft:stone\",\"destination\":\"minecraft:dirt\","
+                            + "\"dryRun\":false,\"matchedBlocks\":8,\"changedBlocks\":8}",
+                    response.body());
+        }
+    }
+
+    @Test
+    void rejectsInvalidReplacementFields() throws Exception {
+        try (ApiServer server = server(UNUSED_INSPECTOR, UNUSED_EDITOR);
+                HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> missing = client.send(
+                    replacementRequest(server, """
+                            {"world":"world","min":{"x":0,"y":60,"z":0},
+                             "max":{"x":0,"y":60,"z":0},"source":"minecraft:stone"}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> wrongDryRun = client.send(
+                    replacementRequest(server, """
+                            {"world":"world","min":{"x":0,"y":60,"z":0},
+                             "max":{"x":0,"y":60,"z":0},"source":"minecraft:stone",
+                             "destination":"minecraft:dirt","dryRun":"yes"}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(400, missing.statusCode());
+            assertEquals(400, wrongDryRun.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"invalid_request\",\"message\":\"dryRun must be a boolean\"}}",
+                    wrongDryRun.body());
+        }
+    }
+
+    @Test
+    void mapsEditFailuresToTheWireError() throws Exception {
+        RegionEditor editor = request -> {
+            throw new EditException(RegionEditor.Failure.WORLD_BUSY, "World is busy");
+        };
+        try (ApiServer server = server(UNUSED_INSPECTOR, editor);
+                HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> response = client.send(
+                    replacementRequest(server, """
+                            {"world":"world","min":{"x":0,"y":60,"z":0},
+                             "max":{"x":0,"y":60,"z":0},"source":"minecraft:stone",
+                             "destination":"minecraft:dirt","dryRun":true}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(409, response.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"world_busy\",\"message\":\"World is busy\"}}",
+                    response.body());
+        }
+    }
+
+    @Test
     void interruptsActiveRequestsWhenClosed() throws Exception {
         CountDownLatch inspectionStarted = new CountDownLatch(1);
         CountDownLatch inspectionInterrupted = new CountDownLatch(1);
@@ -206,11 +305,22 @@ final class ApiServerTest {
     }
 
     private static ApiServer server(RegionInspector inspector) {
-        return new ApiServer(0, "0.1.0-test", "26.2", TOKEN, inspector, LOGGER);
+        return server(inspector, UNUSED_EDITOR);
+    }
+
+    private static ApiServer server(RegionInspector inspector, RegionEditor editor) {
+        return new ApiServer(0, "0.1.0-test", "26.2", TOKEN, inspector, editor, LOGGER);
     }
 
     private static HttpRequest inspectionRequest(ApiServer server, String body) {
         return authorizedRequest(inspectRegionUri(server))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+    }
+
+    private static HttpRequest replacementRequest(ApiServer server, String body) {
+        return authorizedRequest(replaceBlocksUri(server))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
@@ -226,5 +336,9 @@ final class ApiServerTest {
 
     private static URI inspectRegionUri(ApiServer server) {
         return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/inspect-region");
+    }
+
+    private static URI replaceBlocksUri(ApiServer server) {
+        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/replace-blocks");
     }
 }

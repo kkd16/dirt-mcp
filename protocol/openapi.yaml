@@ -115,6 +115,82 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /v1/replace-blocks:
+    post:
+      operationId: replaceBlocks
+      summary: Replace one exact block state in a bounded region of loaded chunks
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceBlocksRequest'
+      responses:
+        '200':
+          description: Executed edit or exact dry-run result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplaceBlocksResponse'
+        '400':
+          description: Invalid JSON, fields, coordinates, world height, or block state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid bearer token
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+                const: Bearer realm="dirt-mcp"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: World is not loaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed
+          headers:
+            Allow:
+              schema:
+                const: POST
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Another Dirt MCP edit is active in this world
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Region volume or estimated changed-block count exceeds its configured limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected edit failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Region contains an unloaded chunk or editing was interrupted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 components:
   securitySchemes:
     bearerAuth:
@@ -140,8 +216,10 @@ components:
                 - internal_error
                 - invalid_request
                 - method_not_allowed
+                - change_limit_exceeded
                 - region_too_large
                 - unauthorized
+                - world_busy
                 - world_not_found
                 - world_unavailable
             message:
@@ -234,6 +312,74 @@ components:
             type: integer
             format: int64
             minimum: 0
+    ReplaceBlocksRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - world
+        - min
+        - max
+        - source
+        - destination
+      properties:
+        world:
+          type: string
+          minLength: 1
+        min:
+          $ref: '#/components/schemas/BlockPosition'
+        max:
+          $ref: '#/components/schemas/BlockPosition'
+        source:
+          type: string
+          minLength: 1
+        destination:
+          type: string
+          minLength: 1
+        dryRun:
+          type: boolean
+          default: false
+    ReplaceBlocksResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - world
+        - bounds
+        - source
+        - destination
+        - dryRun
+        - matchedBlocks
+        - changedBlocks
+      properties:
+        world:
+          type: string
+          minLength: 1
+        bounds:
+          type: object
+          additionalProperties: false
+          required:
+            - min
+            - max
+          properties:
+            min:
+              $ref: '#/components/schemas/BlockPosition'
+            max:
+              $ref: '#/components/schemas/BlockPosition'
+        source:
+          type: string
+          minLength: 1
+        destination:
+          type: string
+          minLength: 1
+        dryRun:
+          type: boolean
+        matchedBlocks:
+          type: integer
+          format: int64
+          minimum: 0
+        changedBlocks:
+          type: integer
+          format: int64
+          minimum: 0
     Health:
       type: object
       additionalProperties: false
@@ -262,4 +408,4 @@ components:
             worldInspection:
               const: true
             worldEditing:
-              const: false
+              const: true

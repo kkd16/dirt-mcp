@@ -7,6 +7,7 @@ import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Failure;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionException;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.NormalizedRegion;
 import org.junit.jupiter.api.Test;
 
 final class PaperRegionInspectorTest {
@@ -15,7 +16,7 @@ final class PaperRegionInspectorTest {
         InspectionRequest request = new InspectionRequest(
                 "world", new BlockPosition(4, 12, 9), new BlockPosition(2, 10, 6));
 
-        PaperRegionInspector.NormalizedRegion region = PaperRegionInspector.normalize(request, 1_000);
+        NormalizedRegion region = PaperRegionInspector.normalize(request, 1_000);
 
         assertEquals(new BlockPosition(2, 10, 6), region.min());
         assertEquals(new BlockPosition(4, 12, 9), region.max());

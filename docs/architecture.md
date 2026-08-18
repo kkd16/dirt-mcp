@@ -91,6 +91,11 @@ that requires server-thread ownership crosses a small scheduler boundary.
 Responses report success only after FAWE has completed and closed its edit
 session.
 
+`replace_blocks` is the first implemented edit path. It uses the same
+already-loaded-chunk rule as inspection, canonicalizes Bukkit block-state
+strings at the Paper boundary, and keeps closed FAWE sessions only as bounded
+in-memory undo entries.
+
 ## Dependency direction
 
 Dependencies point toward the live world:
