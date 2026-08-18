@@ -203,6 +203,9 @@ final class PaperRegionInspectorTest {
                 () -> PaperRegionInspector.normalizeView(overflowing, 1_000_000, 32_768, 10));
 
         assertEquals(Failure.REGION_TOO_LARGE, oversizedFailure.failure());
+        assertEquals(
+                "View scan volume 40401 exceeds the maximum of 32768 blocks",
+                oversizedFailure.getMessage());
         assertEquals(Failure.INVALID_REQUEST, overflowFailure.failure());
     }
 

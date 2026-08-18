@@ -138,6 +138,10 @@ Once npm publishing exists, a global installation will provide the equivalent
 `inspect_region`, `inspect_blocks`, `inspect_view`, `replace_blocks`,
 `fill_region`, and `undo_last_edit`.
 
+`inspect_view` defaults to explicit visible-block records. MCP callers can set
+`format` to `grid` for a substantially smaller lossless response containing a
+canonical state palette plus aligned state-index and distance rows.
+
 ## Local development
 
 The checked-in Gradle wrapper supplies Gradle. Verify the local toolchain and

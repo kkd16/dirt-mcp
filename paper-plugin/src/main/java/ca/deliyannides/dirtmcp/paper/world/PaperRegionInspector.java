@@ -23,6 +23,7 @@ import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Viewport;
 import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.NormalizedRegion;
 import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.RegionTooLargeException;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -191,14 +192,16 @@ public final class PaperRegionInspector implements RegionInspector {
         long maximum = Math.min(maxRegionVolume, maxViewVolume);
         long horizontalSize = 2L * request.horizontalRadius() + 1;
         long verticalSize = 2L * request.verticalRadius() + 1;
-        if (horizontalSize > maximum
-                || verticalSize > maximum / horizontalSize
-                || request.maxDistance() > maximum / (horizontalSize * verticalSize)) {
+        BigInteger requestedVolume = BigInteger.valueOf(horizontalSize)
+                .multiply(BigInteger.valueOf(verticalSize))
+                .multiply(BigInteger.valueOf(request.maxDistance()));
+        if (requestedVolume.compareTo(BigInteger.valueOf(maximum)) > 0) {
             throw new InspectionException(
                     Failure.REGION_TOO_LARGE,
-                    "View exceeds the maximum scan volume of " + maximum + " blocks");
+                    "View scan volume " + requestedVolume
+                            + " exceeds the maximum of " + maximum + " blocks");
         }
-        long scannedVolume = horizontalSize * verticalSize * request.maxDistance();
+        long scannedVolume = requestedVolume.longValueExact();
 
         ViewBasis basis = viewBasis(request.direction());
         BlockPosition firstCorner = viewPosition(

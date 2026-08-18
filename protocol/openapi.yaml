@@ -163,7 +163,7 @@ paths:
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '413':
-          description: View scan volume or exact result exceeds its limit
+          description: View scan volume or exact result exceeds its limit; scan-volume messages report requested and maximum volumes
           content:
             application/json:
               schema:

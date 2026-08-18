@@ -213,6 +213,18 @@ lower. The shipped view-volume default is 32,768 blocks. The complete scan
 prism must be within world height and already-loaded chunks. This tool returns
 block data rather than an image or perspective render.
 
+The MCP tool additionally accepts `format: "grid"`; this option is consumed by
+the TypeScript process and is not sent to the bridge. Grid responses retain the
+same view metadata and encode the sparse bridge result as `palette`,
+`stateRows`, and `distanceRows`. Palette indices are one-based, while `0` in
+both aligned matrices means an empty sightline. Rows remain top-to-bottom and
+cells remain left-to-right, so basis vectors, offsets inferred from the
+viewport radii, and distances reconstruct every absolute position. Omitting
+`format`, or setting it to `blocks`, preserves the explicit bridge response.
+
+View scan-limit errors report both the requested scan volume and the effective
+maximum to make radius and distance adjustments mechanical.
+
 ### `replace_blocks`
 
 Inputs:

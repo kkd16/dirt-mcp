@@ -107,6 +107,8 @@ const InspectViewInputSchema = z.object({
     .describe('Maximum blocks to scan forward; distance 1 is adjacent to origin.'),
   maxResults: z.number().int().min(1).max(INT32_MAX).optional()
     .describe('Maximum visible blocks, bounded by Paper configuration; omission uses its default.'),
+  format: z.enum(['blocks', 'grid']).optional().default('blocks')
+    .describe('Use grid for a compact lossless palette and distance matrix; blocks returns explicit positions.'),
 }).strict();
 
 const AxisVectorSchema = z.object({
@@ -115,7 +117,7 @@ const AxisVectorSchema = z.object({
   z: z.number().int().min(-1).max(1),
 }).strict();
 
-const InspectViewOutputSchema = z.object({
+const InspectViewBlocksOutputSchema = z.object({
   world: z.string().min(1),
   origin: BlockPositionSchema,
   direction: ViewDirectionSchema,
@@ -145,6 +147,77 @@ const InspectViewOutputSchema = z.object({
     state: z.string().min(1),
   }).strict()),
 }).strict();
+
+const InspectViewGridOutputSchema = z.object({
+  world: z.string().min(1),
+  origin: BlockPositionSchema,
+  direction: ViewDirectionSchema,
+  basis: z.object({
+    forward: AxisVectorSchema,
+    horizontal: AxisVectorSchema,
+    vertical: AxisVectorSchema,
+  }).strict().describe('World-axis unit vectors used to reconstruct absolute positions.'),
+  viewport: z.object({
+    horizontalRadius: z.number().int().nonnegative(),
+    verticalRadius: z.number().int().nonnegative(),
+    maxDistance: z.number().int().positive(),
+  }).strict(),
+  bounds: BoundsSchema,
+  scannedVolume: z.number().int().positive(),
+  visibleBlocks: z.number().int().nonnegative(),
+  format: z.literal('grid'),
+  palette: z.array(z.string().min(1))
+    .describe('Canonical states; stateRows uses one-based indices and reserves 0 for an empty sightline.'),
+  stateRows: z.array(z.array(z.number().int().nonnegative()))
+    .describe('Top-to-bottom rows, left-to-right cells; 0 means no visible block.'),
+  distanceRows: z.array(z.array(z.number().int().nonnegative()))
+    .describe('Distances aligned with stateRows; 0 means no visible block.'),
+}).strict();
+
+const InspectViewOutputSchema = z.union([
+  InspectViewBlocksOutputSchema,
+  InspectViewGridOutputSchema,
+]);
+
+type InspectViewBlocksOutput = z.infer<typeof InspectViewBlocksOutputSchema>;
+
+function compactView(view: InspectViewBlocksOutput): z.infer<typeof InspectViewGridOutputSchema> {
+  const width = 2 * view.viewport.horizontalRadius + 1;
+  const height = 2 * view.viewport.verticalRadius + 1;
+  const stateRows = Array.from({ length: height }, () => Array<number>(width).fill(0));
+  const distanceRows = Array.from({ length: height }, () => Array<number>(width).fill(0));
+  const palette: string[] = [];
+  const paletteIndices = new Map<string, number>();
+
+  for (const block of view.blocks) {
+    const rowIndex = view.viewport.verticalRadius - block.offset.vertical;
+    const columnIndex = block.offset.horizontal + view.viewport.horizontalRadius;
+    const stateRow = stateRows[rowIndex];
+    const distanceRow = distanceRows[rowIndex];
+    if (stateRow === undefined || distanceRow === undefined
+        || columnIndex < 0 || columnIndex >= width) {
+      throw new Error('Bridge returned a view block outside its viewport');
+    }
+
+    let paletteIndex = paletteIndices.get(block.state);
+    if (paletteIndex === undefined) {
+      palette.push(block.state);
+      paletteIndex = palette.length;
+      paletteIndices.set(block.state, paletteIndex);
+    }
+    stateRow[columnIndex] = paletteIndex;
+    distanceRow[columnIndex] = block.offset.distance;
+  }
+
+  const { blocks: _blocks, ...metadata } = view;
+  return {
+    ...metadata,
+    format: 'grid',
+    palette,
+    stateRows,
+    distanceRows,
+  };
+}
 
 const ReplaceBlocksInputSchema = z.object({
   world: z.string().min(1),
@@ -390,13 +463,14 @@ export function registerTools(
     'inspect_view',
     {
       title: 'Inspect a view',
-      description: 'Return a sparse orthographic surface: the first non-air block on each bounded world-axis sightline. Results include absolute positions, view-relative offsets, and basis vectors; every non-air block occludes blocks behind it.',
+      description: 'Return the first non-air block on each bounded orthographic sightline. Use format=grid for compact lossless palette and distance rows, or blocks for explicit positions.',
       inputSchema: InspectViewInputSchema,
       outputSchema: InspectViewOutputSchema,
       annotations: { readOnlyHint: true },
     },
     async (input, context) => auditToolCall('inspect_view', input.world, context, async (callId) => {
       try {
+        const { format, ...bridgeInput } = input;
         const response = await bridgeRequest(
           config,
           '/v1/inspect-view',
@@ -404,14 +478,24 @@ export function registerTools(
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(input),
+            body: JSON.stringify(bridgeInput),
           },
           30_000,
         );
-        const view = InspectViewOutputSchema.parse(await response.json());
+        const sparseView = InspectViewBlocksOutputSchema.parse(await response.json());
+        if (format === 'grid') {
+          const view = compactView(sparseView);
+          return {
+            content: [{
+              type: 'text',
+              text: `Compact ${view.viewport.horizontalRadius * 2 + 1}x${view.viewport.verticalRadius * 2 + 1} view: ${view.visibleBlocks} visible blocks, ${view.palette.length} states. See structuredContent for palette, stateRows, and distanceRows.`,
+            }],
+            structuredContent: view,
+          };
+        }
         return {
-          content: [{ type: 'text', text: JSON.stringify(view, null, 2) }],
-          structuredContent: view,
+          content: [{ type: 'text', text: JSON.stringify(sparseView, null, 2) }],
+          structuredContent: sparseView,
         };
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
