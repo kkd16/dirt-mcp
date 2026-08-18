@@ -98,13 +98,14 @@ const ViewDirectionSchema = z.enum(['north', 'east', 'south', 'west', 'up', 'dow
 
 const InspectViewInputSchema = z.object({
   world: z.string().min(1),
-  origin: BlockPositionSchema,
+  origin: BlockPositionSchema
+    .describe('Center anchor of the view; scanning starts one block away and never includes the origin.'),
   direction: ViewDirectionSchema
-    .describe('Minecraft cardinal direction in which the orthographic view scans.'),
+    .describe('World-axis direction: north=-Z, east=+X, south=+Z, west=-X, up=+Y, down=-Y.'),
   horizontalRadius: z.number().int().min(0).max(INT32_MAX)
-    .describe('Number of viewport cells on each side of the center sightline.'),
+    .describe('Viewport cells on each side of the center sightline along the returned horizontal basis.'),
   verticalRadius: z.number().int().min(0).max(INT32_MAX)
-    .describe('Number of viewport cells above and below the center sightline.'),
+    .describe('Viewport cells on each side of the center sightline along the returned vertical basis.'),
   maxDistance: z.number().int().min(1).max(INT32_MAX)
     .describe('Maximum blocks to scan forward; distance 1 is adjacent to origin.'),
   maxResults: z.number().int().min(1).max(MAX_VIEW_RESULTS).optional().default(DEFAULT_VIEW_RESULTS)
@@ -125,7 +126,7 @@ const InspectViewOutputSchema = z.object({
     forward: AxisVectorSchema,
     horizontal: AxisVectorSchema,
     vertical: AxisVectorSchema,
-  }).strict(),
+  }).strict().describe('World-axis unit vectors used to convert each view-relative offset to a position.'),
   viewport: z.object({
     horizontalRadius: z.number().int().nonnegative(),
     verticalRadius: z.number().int().nonnegative(),
@@ -137,9 +138,12 @@ const InspectViewOutputSchema = z.object({
   blocks: z.array(z.object({
     position: BlockPositionSchema,
     offset: z.object({
-      horizontal: z.number().int().min(INT32_MIN).max(INT32_MAX),
-      vertical: z.number().int().min(INT32_MIN).max(INT32_MAX),
-      distance: z.number().int().min(1).max(INT32_MAX),
+      horizontal: z.number().int().min(INT32_MIN).max(INT32_MAX)
+        .describe('Signed displacement along basis.horizontal.'),
+      vertical: z.number().int().min(INT32_MIN).max(INT32_MAX)
+        .describe('Signed displacement along basis.vertical.'),
+      distance: z.number().int().min(1).max(INT32_MAX)
+        .describe('Positive displacement along basis.forward; 1 is adjacent to origin.'),
     }).strict(),
     state: z.string().min(1),
   }).strict()).max(MAX_VIEW_RESULTS),
@@ -361,9 +365,10 @@ export function registerTools(
     'inspect_view',
     {
       title: 'Inspect a view',
-      description: 'Return the nearest non-air block along each sightline in a bounded orthographic view of already-loaded chunks.',
+      description: 'Return a sparse orthographic surface: the first non-air block on each bounded world-axis sightline. Results include absolute positions, view-relative offsets, and basis vectors; every non-air block occludes blocks behind it.',
       inputSchema: InspectViewInputSchema,
       outputSchema: InspectViewOutputSchema,
+      annotations: { readOnlyHint: true },
     },
     async (input, context) => auditToolCall('inspect_view', input.world, context, async (callId) => {
       try {

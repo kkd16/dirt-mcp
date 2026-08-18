@@ -3,9 +3,9 @@ package ca.deliyannides.dirtmcp.paper.world;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.AxisVector;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockRun;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.AxisVector;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionMode;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Failure;

@@ -668,6 +668,7 @@ components:
           $ref: '#/components/schemas/BlockPosition'
         direction:
           type: string
+          description: World-axis direction; north is -Z, east is +X, south is +Z, west is -X, up is +Y, and down is -Y.
           enum:
             - north
             - east
@@ -679,14 +680,17 @@ components:
           type: integer
           format: int32
           minimum: 0
+          description: Viewport cells on each side of the center sightline along the response's horizontal basis.
         verticalRadius:
           type: integer
           format: int32
           minimum: 0
+          description: Viewport cells on each side of the center sightline along the response's vertical basis.
         maxDistance:
           type: integer
           format: int32
           minimum: 1
+          description: Blocks scanned forward from the origin; distance 1 is adjacent.
         maxResults:
           type: integer
           format: int32
@@ -720,6 +724,7 @@ components:
     ViewBasis:
       type: object
       additionalProperties: false
+      description: World-axis unit vectors used to convert view-relative offsets to block positions.
       required:
         - forward
         - horizontal
@@ -762,13 +767,16 @@ components:
         horizontal:
           type: integer
           format: int32
+          description: Signed displacement along the view's horizontal basis.
         vertical:
           type: integer
           format: int32
+          description: Signed displacement along the view's vertical basis.
         distance:
           type: integer
           format: int32
           minimum: 1
+          description: Positive displacement along the forward basis; 1 is adjacent to the origin.
     ViewBlock:
       type: object
       additionalProperties: false

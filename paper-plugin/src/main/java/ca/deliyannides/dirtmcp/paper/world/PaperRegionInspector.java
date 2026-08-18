@@ -1,10 +1,10 @@
 package ca.deliyannides.dirtmcp.paper.world;
 
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.AxisVector;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Bounds;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockInspectionResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockRun;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.AxisVector;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionMode;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionResult;
@@ -168,8 +168,14 @@ public final class PaperRegionInspector implements RegionInspector {
         long scannedVolume = horizontalSize * verticalSize * request.maxDistance();
 
         ViewBasis basis = viewBasis(request.direction());
-        BlockPosition min = null;
-        BlockPosition max = null;
+        BlockPosition firstCorner = viewPosition(
+                request.origin(),
+                basis,
+                -request.horizontalRadius(),
+                -request.verticalRadius(),
+                1);
+        BlockPosition min = firstCorner;
+        BlockPosition max = firstCorner;
         int[] horizontalOffsets = {-request.horizontalRadius(), request.horizontalRadius()};
         int[] verticalOffsets = {-request.verticalRadius(), request.verticalRadius()};
         int[] distances = {1, request.maxDistance()};
@@ -178,18 +184,14 @@ public final class PaperRegionInspector implements RegionInspector {
                 for (int distance : distances) {
                     BlockPosition corner = viewPosition(
                             request.origin(), basis, horizontal, vertical, distance);
-                    min = min == null
-                            ? corner
-                            : new BlockPosition(
-                                    Math.min(min.x(), corner.x()),
-                                    Math.min(min.y(), corner.y()),
-                                    Math.min(min.z(), corner.z()));
-                    max = max == null
-                            ? corner
-                            : new BlockPosition(
-                                    Math.max(max.x(), corner.x()),
-                                    Math.max(max.y(), corner.y()),
-                                    Math.max(max.z(), corner.z()));
+                    min = new BlockPosition(
+                            Math.min(min.x(), corner.x()),
+                            Math.min(min.y(), corner.y()),
+                            Math.min(min.z(), corner.z()));
+                    max = new BlockPosition(
+                            Math.max(max.x(), corner.x()),
+                            Math.max(max.y(), corner.y()),
+                            Math.max(max.z(), corner.z()));
                 }
             }
         }
@@ -338,8 +340,6 @@ public final class PaperRegionInspector implements RegionInspector {
 
         List<BlockData> includePatterns = parsePatterns(include, "include");
         List<BlockData> excludePatterns = parsePatterns(exclude, "exclude");
-        List<ChunkSnapshot> snapshots = new ArrayList<>();
-        Map<Long, ChunkSnapshot> snapshotsByChunk = new HashMap<>();
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
             for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
                 if (!world.isChunkLoaded(chunkX, chunkZ)) {
@@ -347,6 +347,13 @@ public final class PaperRegionInspector implements RegionInspector {
                             Failure.WORLD_UNAVAILABLE,
                             "Region contains an unloaded chunk at " + chunkX + "," + chunkZ);
                 }
+            }
+        }
+
+        List<ChunkSnapshot> snapshots = new ArrayList<>();
+        Map<Long, ChunkSnapshot> snapshotsByChunk = new HashMap<>();
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
                 ChunkSnapshot snapshot = world.getChunkAt(chunkX, chunkZ, false)
                         .getChunkSnapshot(false, false, false, false);
                 snapshots.add(snapshot);

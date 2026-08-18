@@ -87,6 +87,10 @@ test('reloads tools without replacing the stdio process', async (context) => {
   const initial = await waitFor(messages, (message) => message.id === 2);
   assert.equal(initial.result.tools[0].title, 'Dirt MCP status');
   assert.deepEqual(
+    initial.result.tools.find((tool) => tool.name === 'inspect_view').annotations,
+    { readOnlyHint: true },
+  );
+  assert.deepEqual(
     initial.result.tools.map((tool) => tool.name).sort(),
     [
       'dirt_status',
