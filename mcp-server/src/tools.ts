@@ -3,6 +3,7 @@ import * as z from 'zod/v4';
 
 const INT32_MIN = -2_147_483_648;
 const INT32_MAX = 2_147_483_647;
+const MAX_EXACT_RESULTS = 10_000;
 
 export interface BridgeConfig {
   baseUrl: string;
@@ -38,6 +39,51 @@ const InspectRegionOutputSchema = z.object({
   volume: z.number().int().positive(),
   blockStates: z.record(z.string(), z.number().int().nonnegative()),
 }).strict();
+
+const InspectBlocksInputSchema = z.object({
+  world: z.string().min(1),
+  min: BlockPositionSchema,
+  max: BlockPositionSchema,
+  include: z.array(z.string().min(1))
+    .optional().default([])
+    .describe('Optional block-state allowlist; omitted state properties match any value.'),
+  exclude: z.array(z.string().min(1))
+    .optional().default([])
+    .describe('Block-state patterns to exclude after include filtering.'),
+  includeAir: z.boolean().optional().default(false)
+    .describe('Include air-family states; false by default.'),
+  maxResults: z.number().int().min(1).max(MAX_EXACT_RESULTS).optional().default(MAX_EXACT_RESULTS)
+    .describe('Maximum returned block or run entries; oversized results fail instead of truncating.'),
+  mode: z.enum(['blocks', 'runs']).optional().default('blocks')
+    .describe('Return sparse blocks or a deterministic exact cover of axis-aligned runs.'),
+}).strict();
+
+const ExactInspectionBase = {
+  world: z.string().min(1),
+  bounds: BoundsSchema,
+  volume: z.number().int().min(1).max(32_768),
+  matchedBlocks: z.number().int().min(0).max(32_768),
+};
+
+const InspectBlocksOutputSchema = z.discriminatedUnion('mode', [
+  z.object({
+    ...ExactInspectionBase,
+    mode: z.literal('blocks'),
+    blocks: z.array(z.object({
+      position: BlockPositionSchema,
+      state: z.string().min(1),
+    }).strict()).max(MAX_EXACT_RESULTS),
+  }).strict(),
+  z.object({
+    ...ExactInspectionBase,
+    mode: z.literal('runs'),
+    runs: z.array(z.object({
+      state: z.string().min(1),
+      from: BlockPositionSchema,
+      to: BlockPositionSchema,
+    }).strict()).max(MAX_EXACT_RESULTS),
+  }).strict(),
+]);
 
 const ReplaceBlocksInputSchema = z.object({
   world: z.string().min(1),
@@ -163,6 +209,41 @@ export function registerTools(
         const message = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: 'text', text: `Could not inspect the region: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+  ));
+
+  registrations.push(register(
+    'inspect_blocks',
+    {
+      title: 'Inspect exact blocks',
+      description: 'Return exact filtered block positions or lossless compressed runs from already-loaded chunks.',
+      inputSchema: InspectBlocksInputSchema,
+      outputSchema: InspectBlocksOutputSchema,
+    },
+    async (input) => {
+      try {
+        const response = await bridgeRequest(
+          config,
+          '/v1/inspect-blocks',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(input),
+          },
+          30_000,
+        );
+        const inspection = InspectBlocksOutputSchema.parse(await response.json());
+        return {
+          content: [{ type: 'text', text: JSON.stringify(inspection, null, 2) }],
+          structuredContent: inspection,
+        };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: 'text', text: `Could not inspect exact blocks: ${message}` }],
           isError: true,
         };
       }

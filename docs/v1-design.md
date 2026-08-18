@@ -66,6 +66,79 @@ Its defined failures are `invalid_request` (400), `unauthorized` (401),
 and `internal_error` (500). Inspection uses snapshots of already-loaded chunks;
 it never loads or generates terrain.
 
+### `inspect_blocks`
+
+Exact inspection returns geometry rather than palette totals. It defaults to a
+sparse list of non-air blocks with canonical states and exact coordinates:
+
+```json
+{
+  "world": "world",
+  "min": { "x": -40, "y": 68, "z": -10 },
+  "max": { "x": -24, "y": 85, "z": 7 },
+  "exclude": ["minecraft:snow"],
+  "maxResults": 10000
+}
+```
+
+`include` is an optional allowlist and `exclude` is applied afterward. Filter
+values are validated block-state patterns: omitted properties match every value
+of that property, so `minecraft:spruce_door` matches every spruce-door state
+while `minecraft:spruce_door[half=lower]` is narrower. Air-family states are
+excluded unless `includeAir` is `true`, even when an include pattern matches
+them.
+
+The default `mode` is `blocks`:
+
+```json
+{
+  "world": "world",
+  "bounds": {
+    "min": { "x": -40, "y": 68, "z": -10 },
+    "max": { "x": -24, "y": 85, "z": 7 }
+  },
+  "volume": 5508,
+  "matchedBlocks": 285,
+  "mode": "blocks",
+  "blocks": [
+    {
+      "position": { "x": -32, "y": 71, "z": -4 },
+      "state": "minecraft:spruce_door[facing=north,half=lower]"
+    }
+  ]
+}
+```
+
+Set `mode` to `runs` to return a deterministic, exact cover of the same matched
+blocks using non-overlapping axis-aligned runs:
+
+```json
+{
+  "world": "world",
+  "bounds": {
+    "min": { "x": -40, "y": 68, "z": -10 },
+    "max": { "x": -24, "y": 85, "z": 7 }
+  },
+  "volume": 5508,
+  "matchedBlocks": 285,
+  "mode": "runs",
+  "runs": [
+    {
+      "state": "minecraft:stripped_spruce_log[axis=y]",
+      "from": { "x": -37, "y": 71, "z": -4 },
+      "to": { "x": -37, "y": 75, "z": -4 }
+    }
+  ]
+}
+```
+
+Exact inspection has a hard inclusive-volume limit of 32,768 blocks, or the
+configured general region limit when that is lower. `maxResults` defaults to
+and cannot exceed 10,000; it limits block entries in `blocks` mode and run
+entries in `runs` mode. The bridge returns `result_too_large` (413) instead of
+truncating. Other failures match `inspect_region`. Both modes use snapshots and
+never load or generate chunks.
+
 ### `replace_blocks`
 
 Inputs:

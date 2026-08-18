@@ -78,6 +78,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /v1/inspect-blocks:
+    post:
+      operationId: inspectBlocks
+      summary: Return exact filtered block geometry from a bounded region of loaded chunks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InspectBlocksRequest'
+      responses:
+        '200':
+          description: Exact sparse blocks or deterministic axis-aligned runs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InspectBlocksResponse'
+        '400':
+          description: Invalid JSON, fields, coordinates, filters, options, or world height
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: World is not loaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          $ref: '#/components/responses/PostMethodNotAllowed'
+        '413':
+          description: Region volume or exact result exceeds its limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected inspection failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Region contains an unloaded chunk or inspection was interrupted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v1/replace-blocks:
     post:
       operationId: replaceBlocks
@@ -303,6 +354,7 @@ components:
                 - change_limit_exceeded
                 - nothing_to_undo
                 - region_too_large
+                - result_too_large
                 - unauthorized
                 - world_busy
                 - world_not_found
@@ -399,6 +451,151 @@ components:
             type: integer
             format: int64
             minimum: 0
+    InspectBlocksRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - world
+        - min
+        - max
+      properties:
+        world:
+          type: string
+          minLength: 1
+        min:
+          $ref: '#/components/schemas/BlockPosition'
+        max:
+          $ref: '#/components/schemas/BlockPosition'
+        include:
+          type: array
+          description: Block-state patterns to include; omitted properties match any value.
+          items:
+            type: string
+            minLength: 1
+        exclude:
+          type: array
+          description: Block-state patterns to exclude after include filtering.
+          items:
+            type: string
+            minLength: 1
+        includeAir:
+          type: boolean
+          default: false
+          description: Include air-family block states in filtering and results.
+        maxResults:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 10000
+          default: 10000
+        mode:
+          type: string
+          enum:
+            - blocks
+            - runs
+          default: blocks
+    InspectedBlock:
+      type: object
+      additionalProperties: false
+      required:
+        - position
+        - state
+      properties:
+        position:
+          $ref: '#/components/schemas/BlockPosition'
+        state:
+          type: string
+          minLength: 1
+    BlockRun:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - from
+        - to
+      properties:
+        state:
+          type: string
+          minLength: 1
+        from:
+          $ref: '#/components/schemas/BlockPosition'
+        to:
+          $ref: '#/components/schemas/BlockPosition'
+    InspectBlocksResponse:
+      oneOf:
+        - $ref: '#/components/schemas/InspectBlocksListResponse'
+        - $ref: '#/components/schemas/InspectBlockRunsResponse'
+      discriminator:
+        propertyName: mode
+        mapping:
+          blocks: '#/components/schemas/InspectBlocksListResponse'
+          runs: '#/components/schemas/InspectBlockRunsResponse'
+    InspectBlocksListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - world
+        - bounds
+        - volume
+        - matchedBlocks
+        - mode
+        - blocks
+      properties:
+        world:
+          type: string
+          minLength: 1
+        bounds:
+          $ref: '#/components/schemas/Bounds'
+        volume:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 32768
+        matchedBlocks:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 32768
+        mode:
+          const: blocks
+        blocks:
+          type: array
+          maxItems: 10000
+          items:
+            $ref: '#/components/schemas/InspectedBlock'
+    InspectBlockRunsResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - world
+        - bounds
+        - volume
+        - matchedBlocks
+        - mode
+        - runs
+      properties:
+        world:
+          type: string
+          minLength: 1
+        bounds:
+          $ref: '#/components/schemas/Bounds'
+        volume:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 32768
+        matchedBlocks:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 32768
+        mode:
+          const: runs
+        runs:
+          type: array
+          maxItems: 10000
+          items:
+            $ref: '#/components/schemas/BlockRun'
     ReplaceBlocksRequest:
       type: object
       additionalProperties: false

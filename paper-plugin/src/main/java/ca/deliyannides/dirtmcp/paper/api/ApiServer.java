@@ -7,6 +7,8 @@ import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionMode;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Failure;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionException;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionRequest;
@@ -22,6 +24,8 @@ import java.io.IOException;
 import java.io.Serial;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -33,6 +37,9 @@ public final class ApiServer implements AutoCloseable {
     private static final String LOOPBACK_ADDRESS = "127.0.0.1";
     private static final int MAXIMUM_REQUEST_BYTES = 8_192;
     private static final Set<String> INSPECTION_FIELDS = Set.of("world", "min", "max");
+    private static final Set<String> EXACT_INSPECTION_REQUIRED_FIELDS = Set.of("world", "min", "max");
+    private static final Set<String> EXACT_INSPECTION_FIELDS =
+            Set.of("world", "min", "max", "include", "exclude", "includeAir", "maxResults", "mode");
     private static final Set<String> REPLACEMENT_REQUIRED_FIELDS =
             Set.of("world", "min", "max", "source", "destination");
     private static final Set<String> REPLACEMENT_FIELDS =
@@ -84,6 +91,7 @@ public final class ApiServer implements AutoCloseable {
         try {
             newServer.createContext("/v1/health", this::handleHealth);
             newServer.createContext("/v1/inspect-region", this::handleInspectRegion);
+            newServer.createContext("/v1/inspect-blocks", this::handleInspectBlocks);
             newServer.createContext("/v1/replace-blocks", this::handleReplaceBlocks);
             newServer.createContext("/v1/fill-region", this::handleFillRegion);
             newServer.createContext("/v1/undo-last-edit", this::handleUndoLastEdit);
@@ -156,6 +164,29 @@ public final class ApiServer implements AutoCloseable {
         } catch (RuntimeException exception) {
             this.logger.log(Level.SEVERE, "Unexpected inspect-region failure", exception);
             sendError(exchange, 500, "internal_error", "The region could not be inspected");
+        }
+    }
+
+    private void handleInspectBlocks(HttpExchange exchange) throws IOException {
+        if (!authenticate(exchange)) {
+            return;
+        }
+        if (!"POST".equals(exchange.getRequestMethod())) {
+            exchange.getResponseHeaders().set("Allow", "POST");
+            sendError(exchange, 405, "method_not_allowed", "Method must be POST");
+            return;
+        }
+
+        try {
+            ExactInspectionRequest request = parseExactInspectionRequest(exchange);
+            send(exchange, 200, GSON.toJson(this.regionInspector.inspectBlocks(request)));
+        } catch (InvalidRequestException exception) {
+            sendError(exchange, 400, "invalid_request", exception.getMessage());
+        } catch (InspectionException exception) {
+            sendInspectionError(exchange, exception);
+        } catch (RuntimeException exception) {
+            this.logger.log(Level.SEVERE, "Unexpected inspect-blocks failure", exception);
+            sendError(exchange, 500, "internal_error", "The blocks could not be inspected");
         }
     }
 
@@ -248,6 +279,35 @@ public final class ApiServer implements AutoCloseable {
         }
     }
 
+    private static ExactInspectionRequest parseExactInspectionRequest(HttpExchange exchange)
+            throws IOException, InvalidRequestException {
+        try {
+            JsonObject object = parseRequestObject(exchange);
+            if (!object.keySet().containsAll(EXACT_INSPECTION_REQUIRED_FIELDS)
+                    || !EXACT_INSPECTION_FIELDS.containsAll(object.keySet())) {
+                throw new InvalidRequestException("Request contains missing or unknown fields");
+            }
+            int maxResults = object.has("maxResults")
+                    ? parseInteger(object.get("maxResults"), "maxResults")
+                    : RegionInspector.MAX_EXACT_RESULTS;
+            if (maxResults < 1 || maxResults > RegionInspector.MAX_EXACT_RESULTS) {
+                throw new InvalidRequestException(
+                        "maxResults must be between 1 and " + RegionInspector.MAX_EXACT_RESULTS);
+            }
+            return new ExactInspectionRequest(
+                    parseString(object.get("world"), "world"),
+                    parsePosition(object.get("min"), "min"),
+                    parsePosition(object.get("max"), "max"),
+                    object.has("include") ? parseStringList(object.get("include"), "include") : List.of(),
+                    object.has("exclude") ? parseStringList(object.get("exclude"), "exclude") : List.of(),
+                    object.has("includeAir") && parseBoolean(object.get("includeAir"), "includeAir"),
+                    maxResults,
+                    object.has("mode") ? parseInspectionMode(object.get("mode")) : ExactInspectionMode.BLOCKS);
+        } catch (JsonParseException | NumberFormatException | ArithmeticException exception) {
+            throw new InvalidRequestException("Request body must contain valid JSON values");
+        }
+    }
+
     private static ReplaceRequest parseReplaceRequest(HttpExchange exchange)
             throws IOException, InvalidRequestException {
         try {
@@ -332,6 +392,28 @@ public final class ApiServer implements AutoCloseable {
         return primitive.getAsBoolean();
     }
 
+    private static List<String> parseStringList(JsonElement element, String name)
+            throws InvalidRequestException {
+        if (element == null || !element.isJsonArray()) {
+            throw new InvalidRequestException(name + " must be an array of non-empty strings");
+        }
+        List<String> values = new ArrayList<>();
+        for (JsonElement value : element.getAsJsonArray()) {
+            values.add(parseString(value, name + "[]"));
+        }
+        return List.copyOf(values);
+    }
+
+    private static ExactInspectionMode parseInspectionMode(JsonElement element)
+            throws InvalidRequestException {
+        String mode = parseString(element, "mode");
+        return switch (mode) {
+            case "blocks" -> ExactInspectionMode.BLOCKS;
+            case "runs" -> ExactInspectionMode.RUNS;
+            default -> throw new InvalidRequestException("mode must be blocks or runs");
+        };
+    }
+
     private static BlockPosition parsePosition(JsonElement element, String name)
             throws InvalidRequestException {
         if (element == null || !element.isJsonObject()) {
@@ -369,7 +451,7 @@ public final class ApiServer implements AutoCloseable {
         int status = switch (failure) {
             case INVALID_REQUEST -> 400;
             case WORLD_NOT_FOUND -> 404;
-            case REGION_TOO_LARGE -> 413;
+            case REGION_TOO_LARGE, RESULT_TOO_LARGE -> 413;
             case WORLD_UNAVAILABLE -> 503;
         };
         sendError(exchange, status, failure.name().toLowerCase(Locale.ROOT), exception.getMessage());
