@@ -114,9 +114,13 @@ make doctor
 make up
 ```
 
-`make up` installs locked dependencies, builds and tests both components,
-accepts Mojang's EULA on the command line, and runs Paper in the foreground on
-`127.0.0.1:25566`. Only run it if you agree to the
+`make up` installs locked dependencies, builds and tests both components, and
+accepts Mojang's EULA on the command line. It runs Paper in the foreground on
+port `25566`. Under WSL, the Minecraft listener binds to `0.0.0.0` so Minecraft
+on Windows can connect to `localhost:25566`; whether literal
+`127.0.0.1:25566` also works depends on the active WSL networking mode. Other
+systems default to `127.0.0.1`. The MCP bridge remains loopback-only in both
+cases. Only run it if you agree to the
 [Minecraft EULA](https://aka.ms/MinecraftEULA). Type `stop` in the Paper console
 for a clean shutdown.
 
