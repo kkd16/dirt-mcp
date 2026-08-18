@@ -124,6 +124,40 @@ Inputs:
 
 A dry-run returns the region volume and expected changed-block count. An
 executed call fills through one FAWE edit session and records one undo entry.
+The expected count excludes blocks already in the destination state.
+
+The bridge request is `POST /v1/fill-region`:
+
+```json
+{
+  "world": "world",
+  "min": { "x": 0, "y": 60, "z": 0 },
+  "max": { "x": 15, "y": 80, "z": 15 },
+  "destination": "minecraft:stone",
+  "dryRun": false
+}
+```
+
+A successful response contains the normalized bounds and canonical destination
+state:
+
+```json
+{
+  "world": "world",
+  "bounds": {
+    "min": { "x": 0, "y": 60, "z": 0 },
+    "max": { "x": 15, "y": 80, "z": 15 }
+  },
+  "destination": "minecraft:stone",
+  "dryRun": false,
+  "volume": 5376,
+  "changedBlocks": 5376
+}
+```
+
+Fill requires already-loaded chunks and returns the same edit failures as
+`replace_blocks`. A dry-run does not mutate or record history. Filling a region
+already in the destination state reports zero changes and records no history.
 
 ### `undo_last_edit`
 

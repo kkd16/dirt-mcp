@@ -135,6 +135,63 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /v1/fill-region:
+    post:
+      operationId: fillRegion
+      summary: Fill a bounded region of loaded chunks with one block state
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FillRegionRequest'
+      responses:
+        '200':
+          description: Executed edit or exact dry-run result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FillRegionResponse'
+        '400':
+          description: Invalid JSON, fields, coordinates, world height, or block state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: World is not loaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          $ref: '#/components/responses/PostMethodNotAllowed'
+        '409':
+          description: Another Dirt MCP edit is active in this world
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Region volume or estimated changed-block count exceeds its configured limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected edit failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Region contains an unloaded chunk or editing was interrupted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v1/undo-last-edit:
     post:
       operationId: undoLastEdit
@@ -397,6 +454,57 @@ components:
           type: integer
           format: int64
           minimum: 0
+        changedBlocks:
+          type: integer
+          format: int64
+          minimum: 0
+    FillRegionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - world
+        - min
+        - max
+        - destination
+      properties:
+        world:
+          type: string
+          minLength: 1
+        min:
+          $ref: '#/components/schemas/BlockPosition'
+        max:
+          $ref: '#/components/schemas/BlockPosition'
+        destination:
+          type: string
+          minLength: 1
+        dryRun:
+          type: boolean
+          default: false
+    FillRegionResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - world
+        - bounds
+        - destination
+        - dryRun
+        - volume
+        - changedBlocks
+      properties:
+        world:
+          type: string
+          minLength: 1
+        bounds:
+          $ref: '#/components/schemas/Bounds'
+        destination:
+          type: string
+          minLength: 1
+        dryRun:
+          type: boolean
+        volume:
+          type: integer
+          format: int64
+          minimum: 1
         changedBlocks:
           type: integer
           format: int64

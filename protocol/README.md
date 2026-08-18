@@ -5,5 +5,5 @@ Paper plugin. [`openapi.yaml`](openapi.yaml) uses OpenAPI 3.2 and contains only
 implemented behavior.
 
 The current bridge is deliberately loopback-only and exposes authenticated
-health, bounded region inspection, FAWE-backed block replacement, and bounded
-in-memory undo. Unimplemented operations are not included.
+health, bounded region inspection, FAWE-backed block replacement and filling,
+and bounded in-memory undo. Unimplemented operations are not included.

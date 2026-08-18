@@ -82,6 +82,7 @@ test('reloads tools without replacing the stdio process', async (context) => {
   send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
   const initial = await waitFor(messages, (message) => message.id === 2);
   assert.equal(initial.result.tools[0].title, 'Dirt MCP status');
+  assert.ok(initial.result.tools.some((tool) => tool.name === 'fill_region'));
 
   const toolsSource = await readFile(toolsPath, 'utf8');
   const changedSource = toolsSource.replace('Dirt MCP status', 'Reloaded Dirt MCP status');

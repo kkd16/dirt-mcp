@@ -2,10 +2,13 @@ package ca.deliyannides.dirtmcp.paper.world;
 
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.Failure;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Bounds;
 import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.NormalizedRegion;
 import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.RegionTooLargeException;
@@ -14,6 +17,7 @@ import com.sk89q.worldedit.MaxChangedBlocksException;
 import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.regions.CuboidRegion;
+import com.sk89q.worldedit.regions.Region;
 import com.sk89q.worldedit.world.block.BaseBlock;
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -48,7 +52,7 @@ public final class FaweRegionEditor implements RegionEditor {
 
     @Override
     public ReplaceResult replace(ReplaceRequest request) throws EditException {
-        NormalizedRegion region = normalize(request);
+        NormalizedRegion region = normalize(request.min(), request.max());
         PreparedEdit prepared = prepare(request, region);
         WorldState state = this.worldStates.computeIfAbsent(prepared.worldName(), ignored -> new WorldState());
         if (!state.lock.tryLock()) {
@@ -58,6 +62,23 @@ public final class FaweRegionEditor implements RegionEditor {
 
         try {
             return replaceLocked(request, region, prepared, state);
+        } finally {
+            state.lock.unlock();
+        }
+    }
+
+    @Override
+    public FillResult fill(FillRequest request) throws EditException {
+        NormalizedRegion region = normalize(request.min(), request.max());
+        PreparedFill prepared = prepare(request, region);
+        WorldState state = this.worldStates.computeIfAbsent(prepared.worldName(), ignored -> new WorldState());
+        if (!state.lock.tryLock()) {
+            throw new EditException(Failure.WORLD_BUSY, "Another Dirt MCP edit is running in world: "
+                    + prepared.worldName());
+        }
+
+        try {
+            return fillLocked(request, region, prepared, state);
         } finally {
             state.lock.unlock();
         }
@@ -93,12 +114,7 @@ public final class FaweRegionEditor implements RegionEditor {
             NormalizedRegion region,
             PreparedEdit prepared,
             WorldState state) throws EditException {
-        CuboidRegion selection = new CuboidRegion(
-                prepared.world(),
-                com.sk89q.worldedit.math.BlockVector3.at(
-                        region.min().x(), region.min().y(), region.min().z()),
-                com.sk89q.worldedit.math.BlockVector3.at(
-                        region.max().x(), region.max().y(), region.max().z()));
+        CuboidRegion selection = selection(prepared.world(), region);
 
         boolean changesBlocks = !prepared.sourceName().equals(prepared.destinationName());
         EditSession session = newEditSession(prepared.world(), !request.dryRun());
@@ -123,6 +139,52 @@ public final class FaweRegionEditor implements RegionEditor {
             remember(state, session);
         }
         return result(request, region, prepared, matches, changes);
+    }
+
+    private FillResult fillLocked(
+            FillRequest request,
+            NormalizedRegion region,
+            PreparedFill prepared,
+            WorldState state) throws EditException {
+        CuboidRegion selection = selection(prepared.world(), region);
+        EditSession session = newEditSession(prepared.world(), !request.dryRun());
+        long changes;
+        try (session) {
+            int matchingDestination = session.countBlocks(selection, Set.of(prepared.destination()));
+            long expectedChanges = region.volume() - matchingDestination;
+            enforceChangeLimit(expectedChanges);
+
+            changes = expectedChanges;
+            if (!request.dryRun() && expectedChanges > 0) {
+                changes = session.setBlocks((Region) selection, prepared.destination());
+            }
+        } catch (MaxChangedBlocksException exception) {
+            throw new EditException(
+                    Failure.CHANGE_LIMIT_EXCEEDED,
+                    "Edit exceeds the maximum of " + this.maxChangedBlocks + " changed blocks",
+                    exception);
+        }
+        if (!request.dryRun() && changes > 0) {
+            remember(state, session);
+        }
+        return new FillResult(
+                prepared.worldName(),
+                new Bounds(region.min(), region.max()),
+                prepared.destinationName(),
+                request.dryRun(),
+                region.volume(),
+                changes);
+    }
+
+    private static CuboidRegion selection(
+            com.sk89q.worldedit.world.World world,
+            NormalizedRegion region) {
+        return new CuboidRegion(
+                world,
+                com.sk89q.worldedit.math.BlockVector3.at(
+                        region.min().x(), region.min().y(), region.min().z()),
+                com.sk89q.worldedit.math.BlockVector3.at(
+                        region.max().x(), region.max().y(), region.max().z()));
     }
 
     private EditSession newEditSession(com.sk89q.worldedit.world.World world, boolean recordHistory) {
@@ -153,15 +215,21 @@ public final class FaweRegionEditor implements RegionEditor {
                 changes);
     }
 
-    private NormalizedRegion normalize(ReplaceRequest request) throws EditException {
+    private NormalizedRegion normalize(
+            BlockPosition min,
+            BlockPosition max) throws EditException {
         try {
-            return RegionGeometry.normalize(request.min(), request.max(), this.maxRegionVolume);
+            return RegionGeometry.normalize(min, max, this.maxRegionVolume);
         } catch (RegionTooLargeException exception) {
             throw new EditException(Failure.REGION_TOO_LARGE, exception.getMessage(), exception);
         }
     }
 
     private PreparedEdit prepare(ReplaceRequest request, NormalizedRegion region) throws EditException {
+        return onMainThread(() -> prepareOnMainThread(request, region));
+    }
+
+    private PreparedFill prepare(FillRequest request, NormalizedRegion region) throws EditException {
         return onMainThread(() -> prepareOnMainThread(request, region));
     }
 
@@ -189,11 +257,7 @@ public final class FaweRegionEditor implements RegionEditor {
             throws EditException {
         PreparedWorld prepared = resolveWorld(request.world());
         World world = prepared.bukkitWorld();
-        if (region.min().y() < world.getMinHeight() || region.max().y() >= world.getMaxHeight()) {
-            throw new EditException(
-                    Failure.INVALID_REQUEST,
-                    "Y bounds must be between " + world.getMinHeight() + " and " + (world.getMaxHeight() - 1));
-        }
+        requireValidHeight(world, region);
         requireLoadedChunks(world, region);
 
         BlockData source = parseBlockData(request.source(), "source");
@@ -205,6 +269,29 @@ public final class FaweRegionEditor implements RegionEditor {
                 BukkitAdapter.adapt(destination).toBaseBlock(),
                 source.getAsString(),
                 destination.getAsString());
+    }
+
+    private PreparedFill prepareOnMainThread(FillRequest request, NormalizedRegion region)
+            throws EditException {
+        PreparedWorld prepared = resolveWorld(request.world());
+        World world = prepared.bukkitWorld();
+        requireValidHeight(world, region);
+        requireLoadedChunks(world, region);
+
+        BlockData destination = parseBlockData(request.destination(), "destination");
+        return new PreparedFill(
+                prepared.worldName(),
+                prepared.world(),
+                BukkitAdapter.adapt(destination).toBaseBlock(),
+                destination.getAsString());
+    }
+
+    private static void requireValidHeight(World world, NormalizedRegion region) throws EditException {
+        if (region.min().y() < world.getMinHeight() || region.max().y() >= world.getMaxHeight()) {
+            throw new EditException(
+                    Failure.INVALID_REQUEST,
+                    "Y bounds must be between " + world.getMinHeight() + " and " + (world.getMaxHeight() - 1));
+        }
     }
 
     private PreparedWorld resolveWorld(String worldName) throws EditException {
@@ -270,5 +357,11 @@ public final class FaweRegionEditor implements RegionEditor {
             BaseBlock source,
             BaseBlock destination,
             String sourceName,
+            String destinationName) {}
+
+    private record PreparedFill(
+            String worldName,
+            com.sk89q.worldedit.world.World world,
+            BaseBlock destination,
             String destinationName) {}
 }

@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoRequest;
@@ -278,6 +280,101 @@ final class ApiServerTest {
     }
 
     @Test
+    void fillsARegionWithDryRunDefaultingToFalse() throws Exception {
+        RegionEditor editor = new TestEditor() {
+            @Override
+            public FillResult fill(FillRequest request) {
+                assertEquals("world", request.world());
+                assertEquals(new BlockPosition(5, 60, -2), request.min());
+                assertEquals(new BlockPosition(6, 61, -1), request.max());
+                assertEquals("minecraft:oak_planks", request.destination());
+                assertEquals(false, request.dryRun());
+                return new FillResult(
+                        request.world(),
+                        new Bounds(request.min(), request.max()),
+                        request.destination(),
+                        request.dryRun(),
+                        8,
+                        6);
+            }
+        };
+
+        try (ApiServer server = server(UNUSED_INSPECTOR, editor);
+                HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> response = client.send(
+                    fillRequest(server, """
+                            {"world":"world","min":{"x":5,"y":60,"z":-2},
+                             "max":{"x":6,"y":61,"z":-1},"destination":"minecraft:oak_planks"}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, response.statusCode());
+            assertEquals(
+                    "{\"world\":\"world\",\"bounds\":{\"min\":{\"x\":5,\"y\":60,\"z\":-2},"
+                            + "\"max\":{\"x\":6,\"y\":61,\"z\":-1}},"
+                            + "\"destination\":\"minecraft:oak_planks\",\"dryRun\":false,"
+                            + "\"volume\":8,\"changedBlocks\":6}",
+                    response.body());
+        }
+    }
+
+    @Test
+    void rejectsInvalidFillFields() throws Exception {
+        try (ApiServer server = server(UNUSED_INSPECTOR, UNUSED_EDITOR);
+                HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> missing = client.send(
+                    fillRequest(server, """
+                            {"world":"world","min":{"x":0,"y":60,"z":0},
+                             "max":{"x":0,"y":60,"z":0}}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> wrongDryRun = client.send(
+                    fillRequest(server, """
+                            {"world":"world","min":{"x":0,"y":60,"z":0},
+                             "max":{"x":0,"y":60,"z":0},"destination":"minecraft:dirt",
+                             "dryRun":"yes"}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(400, missing.statusCode());
+            assertEquals(400, wrongDryRun.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"invalid_request\",\"message\":\"dryRun must be a boolean\"}}",
+                    wrongDryRun.body());
+        }
+    }
+
+    @Test
+    void mapsFillFailuresToTheWireError() throws Exception {
+        RegionEditor editor = new TestEditor() {
+            @Override
+            public FillResult fill(FillRequest request) throws EditException {
+                throw new EditException(RegionEditor.Failure.CHANGE_LIMIT_EXCEEDED, "Too many changes");
+            }
+        };
+        try (ApiServer server = server(UNUSED_INSPECTOR, editor);
+                HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> response = client.send(
+                    fillRequest(server, """
+                            {"world":"world","min":{"x":0,"y":60,"z":0},
+                             "max":{"x":0,"y":60,"z":0},"destination":"minecraft:dirt","dryRun":true}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(413, response.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"change_limit_exceeded\",\"message\":\"Too many changes\"}}",
+                    response.body());
+        }
+    }
+
+    @Test
     void undoesTheLastEdit() throws Exception {
         RegionEditor editor = new TestEditor() {
             @Override
@@ -384,6 +481,13 @@ final class ApiServerTest {
                 .build();
     }
 
+    private static HttpRequest fillRequest(ApiServer server, String body) {
+        return authorizedRequest(fillRegionUri(server))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+    }
+
     private static HttpRequest.Builder authorizedRequest(URI uri) {
         return HttpRequest.newBuilder(uri).header("Authorization", "Bearer " + TOKEN);
     }
@@ -404,9 +508,18 @@ final class ApiServerTest {
         return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/undo-last-edit");
     }
 
+    private static URI fillRegionUri(ApiServer server) {
+        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/fill-region");
+    }
+
     private abstract static class TestEditor implements RegionEditor {
         @Override
         public ReplaceResult replace(ReplaceRequest request) throws EditException {
+            throw new AssertionError("Region editor should not be called");
+        }
+
+        @Override
+        public FillResult fill(FillRequest request) throws EditException {
             throw new AssertionError("Region editor should not be called");
         }
 

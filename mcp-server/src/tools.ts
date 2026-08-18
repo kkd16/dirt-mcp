@@ -58,6 +58,23 @@ const ReplaceBlocksOutputSchema = z.object({
   changedBlocks: z.number().int().nonnegative(),
 }).strict();
 
+const FillRegionInputSchema = z.object({
+  world: z.string().min(1),
+  min: BlockPositionSchema,
+  max: BlockPositionSchema,
+  destination: z.string().min(1),
+  dryRun: z.boolean().optional().default(false),
+}).strict();
+
+const FillRegionOutputSchema = z.object({
+  world: z.string().min(1),
+  bounds: BoundsSchema,
+  destination: z.string().min(1),
+  dryRun: z.boolean(),
+  volume: z.number().int().positive(),
+  changedBlocks: z.number().int().nonnegative(),
+}).strict();
+
 const UndoLastEditInputSchema = z.object({
   world: z.string().min(1),
 }).strict();
@@ -181,6 +198,41 @@ export function registerTools(
         const message = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: 'text', text: `Could not replace blocks: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+  ));
+
+  registrations.push(register(
+    'fill_region',
+    {
+      title: 'Fill a region',
+      description: 'Set every block in a bounded region to one block state, or preview the exact result.',
+      inputSchema: FillRegionInputSchema,
+      outputSchema: FillRegionOutputSchema,
+    },
+    async (input) => {
+      try {
+        const response = await bridgeRequest(
+          config,
+          '/v1/fill-region',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(input),
+          },
+          120_000,
+        );
+        const result = FillRegionOutputSchema.parse(await response.json());
+        return {
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+          structuredContent: result,
+        };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: 'text', text: `Could not fill the region: ${message}` }],
           isError: true,
         };
       }

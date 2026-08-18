@@ -8,9 +8,8 @@ for inspecting bounded regions and performing deterministic bulk edits through
 while Paper remains the owner of the live world.
 
 The repository currently ships the Paper plugin, authenticated loopback bridge,
-and MCP tools for status, bounded region inspection, and FAWE-backed block
-replacement and undo. The remaining v1 tool is specified in
-[`docs/v1-design.md`](docs/v1-design.md).
+and MCP tools for status, bounded region inspection, FAWE-backed block
+replacement and filling, and undo.
 
 ## Platform support
 
@@ -115,7 +114,7 @@ For another MCP host, configure it to launch the source build:
 
 Once npm publishing exists, a global installation will provide the equivalent
 `dirt-mcp` command. The current tool surface contains `dirt_status`,
-`inspect_region`, `replace_blocks`, and `undo_last_edit`.
+`inspect_region`, `replace_blocks`, `fill_region`, and `undo_last_edit`.
 
 ## Local development
 

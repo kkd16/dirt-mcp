@@ -7,6 +7,8 @@ import java.io.Serial;
 public interface RegionEditor {
     ReplaceResult replace(ReplaceRequest request) throws EditException;
 
+    FillResult fill(FillRequest request) throws EditException;
+
     UndoResult undo(UndoRequest request) throws EditException;
 
     record ReplaceRequest(
@@ -24,6 +26,21 @@ public interface RegionEditor {
             String destination,
             boolean dryRun,
             long matchedBlocks,
+            long changedBlocks) {}
+
+    record FillRequest(
+            String world,
+            BlockPosition min,
+            BlockPosition max,
+            String destination,
+            boolean dryRun) {}
+
+    record FillResult(
+            String world,
+            Bounds bounds,
+            String destination,
+            boolean dryRun,
+            long volume,
             long changedBlocks) {}
 
     record UndoRequest(String world) {}

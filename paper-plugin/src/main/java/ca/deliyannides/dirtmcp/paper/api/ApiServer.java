@@ -2,6 +2,7 @@ package ca.deliyannides.dirtmcp.paper.api;
 
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector;
@@ -36,6 +37,8 @@ public final class ApiServer implements AutoCloseable {
             Set.of("world", "min", "max", "source", "destination");
     private static final Set<String> REPLACEMENT_FIELDS =
             Set.of("world", "min", "max", "source", "destination", "dryRun");
+    private static final Set<String> FILL_REQUIRED_FIELDS = Set.of("world", "min", "max", "destination");
+    private static final Set<String> FILL_FIELDS = Set.of("world", "min", "max", "destination", "dryRun");
     private static final Set<String> UNDO_FIELDS = Set.of("world");
     private static final Set<String> POSITION_FIELDS = Set.of("x", "y", "z");
     private static final Gson GSON = new Gson();
@@ -82,6 +85,7 @@ public final class ApiServer implements AutoCloseable {
             newServer.createContext("/v1/health", this::handleHealth);
             newServer.createContext("/v1/inspect-region", this::handleInspectRegion);
             newServer.createContext("/v1/replace-blocks", this::handleReplaceBlocks);
+            newServer.createContext("/v1/fill-region", this::handleFillRegion);
             newServer.createContext("/v1/undo-last-edit", this::handleUndoLastEdit);
             newServer.setExecutor(newExecutor);
             newServer.start();
@@ -199,6 +203,28 @@ public final class ApiServer implements AutoCloseable {
         }
     }
 
+    private void handleFillRegion(HttpExchange exchange) throws IOException {
+        if (!authenticate(exchange)) {
+            return;
+        }
+        if (!"POST".equals(exchange.getRequestMethod())) {
+            exchange.getResponseHeaders().set("Allow", "POST");
+            sendError(exchange, 405, "method_not_allowed", "Method must be POST");
+            return;
+        }
+
+        try {
+            send(exchange, 200, GSON.toJson(this.regionEditor.fill(parseFillRequest(exchange))));
+        } catch (InvalidRequestException exception) {
+            sendError(exchange, 400, "invalid_request", exception.getMessage());
+        } catch (EditException exception) {
+            sendEditError(exchange, exception);
+        } catch (RuntimeException exception) {
+            this.logger.log(Level.SEVERE, "Unexpected fill-region failure", exception);
+            sendError(exchange, 500, "internal_error", "The region could not be filled");
+        }
+    }
+
     private boolean authenticate(HttpExchange exchange) throws IOException {
         if (this.authentication.accepts(exchange.getRequestHeaders().getFirst("Authorization"))) {
             return true;
@@ -249,6 +275,25 @@ public final class ApiServer implements AutoCloseable {
             requireFields(object, UNDO_FIELDS, "Request");
             return new UndoRequest(parseString(object.get("world"), "world"));
         } catch (JsonParseException exception) {
+            throw new InvalidRequestException("Request body must contain valid JSON values");
+        }
+    }
+
+    private static FillRequest parseFillRequest(HttpExchange exchange)
+            throws IOException, InvalidRequestException {
+        try {
+            JsonObject object = parseRequestObject(exchange);
+            if (!object.keySet().containsAll(FILL_REQUIRED_FIELDS)
+                    || !FILL_FIELDS.containsAll(object.keySet())) {
+                throw new InvalidRequestException("Request contains missing or unknown fields");
+            }
+            return new FillRequest(
+                    parseString(object.get("world"), "world"),
+                    parsePosition(object.get("min"), "min"),
+                    parsePosition(object.get("max"), "max"),
+                    parseString(object.get("destination"), "destination"),
+                    object.has("dryRun") && parseBoolean(object.get("dryRun"), "dryRun"));
+        } catch (JsonParseException | NumberFormatException | ArithmeticException exception) {
             throw new InvalidRequestException("Request body must contain valid JSON values");
         }
     }
