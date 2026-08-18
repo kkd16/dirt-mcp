@@ -22,7 +22,7 @@ const min = { x: 0, y: 0, z: 0 };
 const max = { x: 1, y: 1, z: 1 };
 const baseUrl = `http://127.0.0.1:${bridgePort}`;
 
-async function bridgeRequest(path, body) {
+async function bridgeResponse(path, body) {
   const response = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
     headers: {
@@ -32,10 +32,16 @@ async function bridgeRequest(path, body) {
     body: JSON.stringify(body),
   });
   const text = await response.text();
+  const document = JSON.parse(text);
+  return { status: response.status, ok: response.ok, body: document };
+}
+
+async function bridgeRequest(path, body) {
+  const response = await bridgeResponse(path, body);
   if (!response.ok) {
-    throw new Error(`${path} returned ${response.status}: ${text}`);
+    throw new Error(`${path} returned ${response.status}: ${JSON.stringify(response.body)}`);
   }
-  return JSON.parse(text);
+  return response.body;
 }
 
 async function paperCommand(command) {
@@ -79,8 +85,51 @@ function normalizedJson(value) {
   return value;
 }
 
+function sortedBlockKeys(blocks) {
+  return blocks
+    .map(({ position, state }) => `${position.x},${position.y},${position.z}:${state}`)
+    .sort();
+}
+
+function expectedBlockKeys(state) {
+  const blocks = [];
+  for (let y = min.y; y <= max.y; y += 1) {
+    for (let z = min.z; z <= max.z; z += 1) {
+      for (let x = min.x; x <= max.x; x += 1) {
+        blocks.push(`${x},${y},${z}:${state}`);
+      }
+    }
+  }
+  return blocks.sort();
+}
+
+function expandedRunKeys(runs) {
+  const blocks = [];
+  for (const run of runs) {
+    assert.ok(run.from.x <= run.to.x && run.from.y <= run.to.y && run.from.z <= run.to.z);
+    const varyingAxes = ['x', 'y', 'z'].filter((axis) => run.from[axis] !== run.to[axis]);
+    assert.ok(varyingAxes.length <= 1, 'Each run must be axis-aligned');
+    for (let y = run.from.y; y <= run.to.y; y += 1) {
+      for (let z = run.from.z; z <= run.to.z; z += 1) {
+        for (let x = run.from.x; x <= run.to.x; x += 1) {
+          blocks.push(`${x},${y},${z}:${run.state}`);
+        }
+      }
+    }
+  }
+  return blocks.sort();
+}
+
+function assertExactBlocks(inspection, state) {
+  assert.equal(inspection.mode, 'blocks');
+  assert.equal(inspection.volume, 8);
+  assert.equal(inspection.matchedBlocks, 8);
+  assert.deepEqual(inspection.bounds, { min, max });
+  assert.deepEqual(sortedBlockKeys(inspection.blocks), expectedBlockKeys(state));
+}
+
 const region = { world, min, max };
-let editNeedsUndo = false;
+let editsToUndo = 0;
 let fixtureIsForceLoaded = false;
 try {
   await paperCommand('forceload add 0 0');
@@ -100,7 +149,7 @@ try {
   assert.ok(preview.changedBlocks > 0, 'Smoke destination must change at least one block');
 
   const filled = await bridgeRequest('/v1/fill-region', { ...region, destination });
-  editNeedsUndo = filled.changedBlocks > 0;
+  editsToUndo += filled.changedBlocks > 0 ? 1 : 0;
   assert.equal(filled.dryRun, false);
   assert.equal(filled.destination, preview.destination);
   assert.equal(filled.changedBlocks, preview.changedBlocks);
@@ -108,20 +157,80 @@ try {
   const afterFill = await bridgeRequest('/v1/inspect-region', region);
   assert.deepEqual(afterFill.blockStates, { [filled.destination]: filled.volume });
 
+  const exactBlocks = await bridgeRequest('/v1/inspect-blocks', region);
+  assertExactBlocks(exactBlocks, filled.destination);
+
+  const exactRuns = await bridgeRequest('/v1/inspect-blocks', {
+    ...region,
+    include: [filled.destination],
+    mode: 'runs',
+    maxResults: 8,
+  });
+  assert.equal(exactRuns.mode, 'runs');
+  assert.equal(exactRuns.matchedBlocks, 8);
+  assert.ok(exactRuns.runs.length > 0 && exactRuns.runs.length < 8);
+  assert.deepEqual(expandedRunKeys(exactRuns.runs), expectedBlockKeys(filled.destination));
+
+  const excluded = await bridgeRequest('/v1/inspect-blocks', {
+    ...region,
+    exclude: [filled.destination],
+  });
+  assert.equal(excluded.matchedBlocks, 0);
+  assert.deepEqual(excluded.blocks, []);
+
+  const limited = await bridgeResponse('/v1/inspect-blocks', { ...region, maxResults: 1 });
+  assert.equal(limited.status, 413);
+  assert.deepEqual(limited.body, {
+    error: {
+      code: 'result_too_large',
+      message: 'Inspection result exceeds maxResults of 1 entries',
+    },
+  });
+
+  const replacementDestination = 'minecraft:gold_block';
+  const replacePreview = await bridgeRequest('/v1/replace-blocks', {
+    ...region,
+    source: filled.destination,
+    destination: replacementDestination,
+    dryRun: true,
+  });
+  assert.equal(replacePreview.dryRun, true);
+  assert.equal(replacePreview.matchedBlocks, 8);
+  assert.equal(replacePreview.changedBlocks, 8);
+
+  const replaced = await bridgeRequest('/v1/replace-blocks', {
+    ...region,
+    source: filled.destination,
+    destination: replacementDestination,
+  });
+  editsToUndo += replaced.changedBlocks > 0 ? 1 : 0;
+  assert.equal(replaced.dryRun, false);
+  assert.equal(replaced.matchedBlocks, replacePreview.matchedBlocks);
+  assert.equal(replaced.changedBlocks, replacePreview.changedBlocks);
+  assertExactBlocks(await bridgeRequest('/v1/inspect-blocks', region), replaced.destination);
+
+  const replacementUndone = await bridgeRequest('/v1/undo-last-edit', { world });
+  editsToUndo -= 1;
+  assert.equal(replacementUndone.changedBlocks, replaced.changedBlocks);
+  assertExactBlocks(await bridgeRequest('/v1/inspect-blocks', region), filled.destination);
+
   const noOp = await bridgeRequest('/v1/fill-region', { ...region, destination: filled.destination });
   assert.equal(noOp.changedBlocks, 0);
 
   const undone = await bridgeRequest('/v1/undo-last-edit', { world });
-  editNeedsUndo = false;
+  editsToUndo -= 1;
   assert.equal(undone.changedBlocks, filled.changedBlocks);
 
   const restored = await bridgeRequest('/v1/inspect-region', region);
   assert.deepEqual(normalizedJson(restored), normalizedJson(original));
-  process.stdout.write(`fill_region smoke test passed in ${world}\n`);
+  process.stdout.write(`managed bridge smoke test passed in ${world}\n`);
 } finally {
-  if (editNeedsUndo) {
+  if (editsToUndo > 0) {
     try {
-      await bridgeRequest('/v1/undo-last-edit', { world });
+      while (editsToUndo > 0) {
+        await bridgeRequest('/v1/undo-last-edit', { world });
+        editsToUndo -= 1;
+      }
     } catch (error) {
       process.stderr.write(`Could not restore smoke-test edit: ${error.message}\n`);
     }

@@ -1,6 +1,7 @@
 package ca.deliyannides.dirtmcp.paper.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -151,7 +152,7 @@ final class ApiServerTest {
                 assertEquals("world", request.world());
                 assertEquals(List.of(), request.include());
                 assertEquals(List.of(), request.exclude());
-                assertEquals(false, request.includeAir());
+                assertFalse(request.includeAir());
                 assertEquals(10_000, request.maxResults());
                 assertEquals(ExactInspectionMode.BLOCKS, request.mode());
                 return new BlockInspectionResult(
@@ -189,7 +190,7 @@ final class ApiServerTest {
             public ExactInspectionResult inspectBlocks(ExactInspectionRequest request) {
                 assertEquals(List.of("minecraft:spruce_log[axis=y]"), request.include());
                 assertEquals(List.of("minecraft:air", "minecraft:snow"), request.exclude());
-                assertEquals(true, request.includeAir());
+                assertTrue(request.includeAir());
                 assertEquals(25, request.maxResults());
                 assertEquals(ExactInspectionMode.RUNS, request.mode());
                 return new RunInspectionResult(
@@ -214,9 +215,14 @@ final class ApiServerTest {
                     HttpResponse.BodyHandlers.ofString());
 
             assertEquals(200, response.statusCode());
-            assertTrue(response.body().contains("\"mode\":\"runs\""));
-            assertTrue(response.body().contains("\"from\":{\"x\":1,\"y\":2,\"z\":3}"));
-            assertTrue(response.body().contains("\"to\":{\"x\":1,\"y\":6,\"z\":3}"));
+            assertEquals(
+                    "{\"world\":\"world\",\"bounds\":{\"min\":{\"x\":1,\"y\":2,\"z\":3},"
+                            + "\"max\":{\"x\":1,\"y\":6,\"z\":3}},\"volume\":5,"
+                            + "\"matchedBlocks\":5,\"mode\":\"runs\",\"runs\":[{"
+                            + "\"state\":\"minecraft:spruce_log[axis\\u003dy]\","
+                            + "\"from\":{\"x\":1,\"y\":2,\"z\":3},"
+                            + "\"to\":{\"x\":1,\"y\":6,\"z\":3}}]}",
+                    response.body());
         }
     }
 
@@ -244,8 +250,55 @@ final class ApiServerTest {
                     HttpResponse.BodyHandlers.ofString());
 
             assertEquals(400, tooMany.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"invalid_request\","
+                            + "\"message\":\"maxResults must be between 1 and 10000\"}}",
+                    tooMany.body());
             assertEquals(400, wrongMode.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"invalid_request\","
+                            + "\"message\":\"mode must be blocks or runs\"}}",
+                    wrongMode.body());
             assertEquals(400, wrongInclude.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"invalid_request\","
+                            + "\"message\":\"include must be an array of non-empty strings\"}}",
+                    wrongInclude.body());
+        }
+    }
+
+    @Test
+    void enforcesJsonContentTypeAndRequestSize() throws Exception {
+        try (ApiServer server = server(UNUSED_INSPECTOR); HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+            HttpResponse<String> wrongContentType = client.send(
+                    authorizedRequest(inspectRegionUri(server))
+                            .header("Content-Type", "text/plain")
+                            .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                            .build(),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> oversized = client.send(
+                    inspectionRequest(server, " ".repeat(8_193)),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> atLimit = client.send(
+                    inspectionRequest(server, "{}" + " ".repeat(8_190)),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(400, wrongContentType.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"invalid_request\","
+                            + "\"message\":\"Content-Type must be application/json\"}}",
+                    wrongContentType.body());
+            assertEquals(400, oversized.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"invalid_request\","
+                            + "\"message\":\"Request body is too large\"}}",
+                    oversized.body());
+            assertEquals(400, atLimit.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"invalid_request\","
+                            + "\"message\":\"Request contains missing or unknown fields\"}}",
+                    atLimit.body());
         }
     }
 
@@ -335,7 +388,7 @@ final class ApiServerTest {
                 assertEquals(new BlockPosition(6, 61, -1), request.max());
                 assertEquals("minecraft:stone", request.source());
                 assertEquals("minecraft:dirt", request.destination());
-                assertEquals(false, request.dryRun());
+                assertFalse(request.dryRun());
                 return new ReplaceResult(
                         request.world(),
                         new Bounds(request.min(), request.max()),
@@ -433,7 +486,7 @@ final class ApiServerTest {
                 assertEquals(new BlockPosition(5, 60, -2), request.min());
                 assertEquals(new BlockPosition(6, 61, -1), request.max());
                 assertEquals("minecraft:oak_planks", request.destination());
-                assertEquals(false, request.dryRun());
+                assertFalse(request.dryRun());
                 return new FillResult(
                         request.world(),
                         new Bounds(request.min(), request.max()),
