@@ -15,7 +15,7 @@ paths:
   /v1/health:
     get:
       operationId: getHealth
-      summary: Report bridge availability and versions
+      summary: Report bridge availability, versions, and active non-secret configuration
       responses:
         '200':
           description: Bridge health
@@ -531,20 +531,18 @@ components:
             minLength: 1
         includeAir:
           type: boolean
-          default: false
-          description: Include air-family block states in filtering and results.
+          description: Include air-family states; omission uses the configured default.
         maxResults:
           type: integer
           format: int32
           minimum: 1
-          maximum: 10000
-          default: 10000
+          description: Requested result cap; it cannot exceed the configured maximum.
         mode:
           type: string
           enum:
             - blocks
             - runs
-          default: blocks
+          description: Omission uses the configured exact-inspection mode.
     InspectedBlock:
       type: object
       additionalProperties: false
@@ -603,17 +601,14 @@ components:
           type: integer
           format: int64
           minimum: 1
-          maximum: 32768
         matchedBlocks:
           type: integer
           format: int64
           minimum: 0
-          maximum: 32768
         mode:
           const: blocks
         blocks:
           type: array
-          maxItems: 10000
           items:
             $ref: '#/components/schemas/InspectedBlock'
     InspectBlockRunsResponse:
@@ -636,17 +631,14 @@ components:
           type: integer
           format: int64
           minimum: 1
-          maximum: 32768
         matchedBlocks:
           type: integer
           format: int64
           minimum: 0
-          maximum: 32768
         mode:
           const: runs
         runs:
           type: array
-          maxItems: 10000
           items:
             $ref: '#/components/schemas/BlockRun'
     InspectViewRequest:
@@ -695,9 +687,7 @@ components:
           type: integer
           format: int32
           minimum: 1
-          maximum: 10000
-          default: 2048
-          description: Maximum visible blocks; oversized exact results fail rather than truncate.
+          description: Requested visible-block cap; omission and maximum use plugin configuration.
     AxisVector:
       type: object
       additionalProperties: false
@@ -830,15 +820,12 @@ components:
           type: integer
           format: int64
           minimum: 1
-          maximum: 32768
         visibleBlocks:
           type: integer
           format: int64
           minimum: 0
-          maximum: 10000
         blocks:
           type: array
-          maxItems: 10000
           items:
             $ref: '#/components/schemas/ViewBlock'
     ReplaceBlocksRequest:
@@ -866,7 +853,7 @@ components:
           minLength: 1
         dryRun:
           type: boolean
-          default: false
+          description: Omission uses the configured replace default.
     ReplaceBlocksResponse:
       type: object
       additionalProperties: false
@@ -921,7 +908,7 @@ components:
           minLength: 1
         dryRun:
           type: boolean
-          default: false
+          description: Omission uses the configured fill default.
     FillRegionResponse:
       type: object
       additionalProperties: false
@@ -974,6 +961,121 @@ components:
           type: integer
           format: int64
           minimum: 1
+    BridgeConfiguration:
+      type: object
+      additionalProperties: false
+      required:
+        - port
+        - backlog
+        - shutdownDelaySeconds
+        - maxRequestBytes
+        - minimumTokenBytes
+      properties:
+        port:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 65535
+        backlog:
+          type: integer
+          format: int32
+          minimum: 0
+        shutdownDelaySeconds:
+          type: integer
+          format: int32
+          minimum: 0
+        maxRequestBytes:
+          type: integer
+          format: int32
+          minimum: 1
+        minimumTokenBytes:
+          type: integer
+          format: int32
+          minimum: 1
+    LimitConfiguration:
+      type: object
+      additionalProperties: false
+      required:
+        - maxRegionVolume
+        - maxChangedBlocks
+        - maxExactInspectionVolume
+        - defaultExactResults
+        - maxExactResults
+        - maxViewVolume
+        - defaultViewResults
+        - maxViewResults
+        - undoHistoryPerWorld
+      properties:
+        maxRegionVolume:
+          type: integer
+          format: int32
+          minimum: 1
+        maxChangedBlocks:
+          type: integer
+          format: int32
+          minimum: 1
+        maxExactInspectionVolume:
+          type: integer
+          format: int32
+          minimum: 1
+        defaultExactResults:
+          type: integer
+          format: int32
+          minimum: 1
+        maxExactResults:
+          type: integer
+          format: int32
+          minimum: 1
+        maxViewVolume:
+          type: integer
+          format: int32
+          minimum: 1
+        defaultViewResults:
+          type: integer
+          format: int32
+          minimum: 1
+        maxViewResults:
+          type: integer
+          format: int32
+          minimum: 1
+        undoHistoryPerWorld:
+          type: integer
+          format: int32
+          minimum: 0
+    DefaultConfiguration:
+      type: object
+      additionalProperties: false
+      required:
+        - exactInspectionIncludeAir
+        - exactInspectionMode
+        - replaceDryRun
+        - fillDryRun
+      properties:
+        exactInspectionIncludeAir:
+          type: boolean
+        exactInspectionMode:
+          type: string
+          enum:
+            - blocks
+            - runs
+        replaceDryRun:
+          type: boolean
+        fillDryRun:
+          type: boolean
+    PluginConfiguration:
+      type: object
+      additionalProperties: false
+      required:
+        - bridge
+        - limits
+        - defaults
+      properties:
+        bridge:
+          $ref: '#/components/schemas/BridgeConfiguration'
+        limits:
+          $ref: '#/components/schemas/LimitConfiguration'
+        defaults:
+          $ref: '#/components/schemas/DefaultConfiguration'
     Health:
       type: object
       additionalProperties: false
@@ -982,6 +1084,7 @@ components:
         - service
         - version
         - minecraftVersion
+        - configuration
       properties:
         status:
           const: ok
@@ -991,3 +1094,5 @@ components:
           type: string
         minecraftVersion:
           type: string
+        configuration:
+          $ref: '#/components/schemas/PluginConfiguration'

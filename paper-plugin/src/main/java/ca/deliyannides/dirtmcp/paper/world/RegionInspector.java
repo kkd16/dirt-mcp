@@ -5,11 +5,6 @@ import java.util.List;
 import java.util.Map;
 
 public interface RegionInspector {
-    int MAX_EXACT_VOLUME = 32_768;
-    int MAX_EXACT_RESULTS = 10_000;
-    int DEFAULT_VIEW_RESULTS = 2_048;
-    int MAX_VIEW_RESULTS = 10_000;
-
     InspectionResult inspect(InspectionRequest request) throws InspectionException;
 
     ExactInspectionResult inspectBlocks(ExactInspectionRequest request) throws InspectionException;

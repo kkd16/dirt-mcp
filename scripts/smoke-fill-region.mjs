@@ -22,6 +22,14 @@ const min = { x: 0, y: 0, z: 0 };
 const max = { x: 1, y: 1, z: 1 };
 const baseUrl = `http://127.0.0.1:${bridgePort}`;
 
+async function bridgeHealth() {
+  const response = await fetch(`${baseUrl}/v1/health`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(response.status, 200);
+  return response.json();
+}
+
 async function bridgeResponse(path, body) {
   const response = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
@@ -132,6 +140,19 @@ const region = { world, min, max };
 let editsToUndo = 0;
 let fixtureIsForceLoaded = false;
 try {
+  const health = await bridgeHealth();
+  assert.equal(health.configuration.bridge.port, bridgePort);
+  assert.ok(health.configuration.bridge.maxRequestBytes > 0);
+  assert.ok(health.configuration.limits.maxRegionVolume > 0);
+  assert.ok(
+    health.configuration.limits.defaultExactResults
+      <= health.configuration.limits.maxExactResults,
+  );
+  assert.ok(
+    health.configuration.limits.defaultViewResults
+      <= health.configuration.limits.maxViewResults,
+  );
+
   await paperCommand('forceload add 0 0');
   fixtureIsForceLoaded = true;
 

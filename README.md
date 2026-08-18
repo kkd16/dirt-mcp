@@ -78,15 +78,36 @@ The port may instead be set in `plugins/DirtMCP/config.yml`:
 ```yaml
 bridge:
   port: 8765
+  backlog: 0
+  shutdown-delay-seconds: 0
+  max-request-bytes: 8192
+  minimum-token-bytes: 32
 
 limits:
   max-region-volume: 1000000
   max-changed-blocks: 250000
+  max-exact-inspection-volume: 32768
+  default-exact-results: 10000
+  max-exact-results: 10000
+  max-view-volume: 32768
+  default-view-results: 2048
+  max-view-results: 10000
+  undo-history-per-world: 20
+
+defaults:
+  exact-inspection-include-air: false
+  exact-inspection-mode: blocks
+  replace-dry-run: false
+  fill-dry-run: false
 ```
 
 The bridge always binds to `127.0.0.1`; do not proxy or expose it publicly. Give
-the same `DIRT_MCP_BRIDGE_TOKEN` to the MCP process. Tokens must contain at
-least 32 bytes. Never commit or log them.
+the same `DIRT_MCP_BRIDGE_TOKEN` to the MCP process. Tokens must satisfy the
+configured byte minimum, which defaults to 32; lowering it weakens
+authentication. Never commit or log tokens. All settings are validated at
+startup and reported without secrets by
+`dirt_status`; restart Paper after changing them. Existing configuration files
+receive newly introduced default keys without replacing operator values.
 
 The repository includes a project-scoped Codex configuration in
 `.codex/config.toml`. Run `make up` at least once to build the project and create

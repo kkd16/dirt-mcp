@@ -82,8 +82,9 @@ V1 keeps execution intentionally direct:
    and return exact counts.
 
 There is no persistent job system. One mutation may run per world at a time;
-additional mutations fail as busy rather than racing. Each world retains its 20
-newest Dirt MCP edits in memory; history is cleared on restart.
+additional mutations fail as busy rather than racing. Each world retains its
+configured number of newest Dirt MCP edits in memory; history is cleared on
+restart, and setting the history depth to zero disables undo retention.
 
 Potentially blocking FAWE work stays off Paper's main tick thread. Any Paper API
 that requires server-thread ownership crosses a small scheduler boundary.

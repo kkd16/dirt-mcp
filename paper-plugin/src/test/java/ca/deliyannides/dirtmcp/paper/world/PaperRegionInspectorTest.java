@@ -54,16 +54,16 @@ final class PaperRegionInspectorTest {
         ExactInspectionRequest request = new ExactInspectionRequest(
                 "world",
                 new BlockPosition(0, 0, 0),
-                new BlockPosition(RegionInspector.MAX_EXACT_VOLUME, 0, 0),
+                new BlockPosition(32_768, 0, 0),
                 List.of(),
                 List.of(),
                 false,
-                RegionInspector.MAX_EXACT_RESULTS,
+                10_000,
                 ExactInspectionMode.BLOCKS);
 
         InspectionException exception = assertThrows(
                 InspectionException.class,
-                () -> PaperRegionInspector.normalizeExact(request, 1_000_000));
+                () -> PaperRegionInspector.normalizeExact(request, 1_000_000, 32_768));
 
         assertEquals(Failure.REGION_TOO_LARGE, exception.failure());
     }
@@ -162,7 +162,8 @@ final class PaperRegionInspectorTest {
     void returnsTheFirstNonAirBlockPerSightlineInViewOrder() throws Exception {
         ViewRequest request = viewRequest(
                 new BlockPosition(0, 0, 0), ViewDirection.NORTH, 1, 1, 3, 10);
-        PaperRegionInspector.ViewGeometry geometry = PaperRegionInspector.normalizeView(request, 1_000);
+        PaperRegionInspector.ViewGeometry geometry =
+                PaperRegionInspector.normalizeView(request, 1_000, 1_000, 10);
         Map<BlockPosition, String> states = Map.of(
                 new BlockPosition(-1, 1, -2), "minecraft:glass",
                 new BlockPosition(-1, 1, -3), "minecraft:stone",
@@ -196,10 +197,10 @@ final class PaperRegionInspectorTest {
 
         InspectionException oversizedFailure = assertThrows(
                 InspectionException.class,
-                () -> PaperRegionInspector.normalizeView(oversized, 1_000_000));
+                () -> PaperRegionInspector.normalizeView(oversized, 1_000_000, 32_768, 10));
         InspectionException overflowFailure = assertThrows(
                 InspectionException.class,
-                () -> PaperRegionInspector.normalizeView(overflowing, 1_000_000));
+                () -> PaperRegionInspector.normalizeView(overflowing, 1_000_000, 32_768, 10));
 
         assertEquals(Failure.REGION_TOO_LARGE, oversizedFailure.failure());
         assertEquals(Failure.INVALID_REQUEST, overflowFailure.failure());
@@ -209,7 +210,8 @@ final class PaperRegionInspectorTest {
     void rejectsViewResultsOverTheRequestedCapWithoutTruncating() throws Exception {
         ViewRequest request = viewRequest(
                 new BlockPosition(0, 0, 0), ViewDirection.NORTH, 1, 0, 1, 1);
-        PaperRegionInspector.ViewGeometry geometry = PaperRegionInspector.normalizeView(request, 100);
+        PaperRegionInspector.ViewGeometry geometry =
+                PaperRegionInspector.normalizeView(request, 100, 100, 1);
 
         InspectionException exception = assertThrows(
                 InspectionException.class,
@@ -241,7 +243,8 @@ final class PaperRegionInspectorTest {
             ViewBasis basis,
             BlockPosition min,
             BlockPosition max) throws Exception {
-        PaperRegionInspector.ViewGeometry geometry = PaperRegionInspector.normalizeView(request, 1_000);
+        PaperRegionInspector.ViewGeometry geometry =
+                PaperRegionInspector.normalizeView(request, 1_000, 1_000, 10);
 
         assertEquals(basis, geometry.basis());
         assertEquals(min, geometry.region().min());

@@ -68,8 +68,9 @@ it never loads or generates terrain.
 
 ### `inspect_blocks`
 
-Exact inspection returns geometry rather than palette totals. It defaults to a
-sparse list of non-air blocks with canonical states and exact coordinates:
+Exact inspection returns geometry rather than palette totals. The shipped
+configuration defaults to a sparse list of non-air blocks with canonical states
+and exact coordinates:
 
 ```json
 {
@@ -89,7 +90,7 @@ while `minecraft:spruce_door[half=lower]` is narrower. Air-family states are
 excluded unless `includeAir` is `true`, even when an include pattern matches
 them.
 
-The default `mode` is `blocks`:
+The shipped default `mode` is `blocks`:
 
 ```json
 {
@@ -133,12 +134,13 @@ non-overlapping axis-aligned runs with inclusive endpoints:
 }
 ```
 
-Exact inspection has a hard inclusive-volume limit of 32,768 blocks, or the
-configured general region limit when that is lower. `maxResults` defaults to
-and cannot exceed 10,000; it limits block entries in `blocks` mode and run
-entries in `runs` mode. The bridge returns `result_too_large` (413) instead of
-truncating. Other failures match `inspect_region`. Both modes use snapshots and
-never load or generate chunks.
+Exact inspection uses the lower of `max-exact-inspection-volume` and the general
+region limit. The shipped exact-volume default is 32,768 blocks. Its default and
+maximum result counts are independently configurable and ship as 10,000; the
+request cap limits block entries in `blocks` mode and run entries in `runs`
+mode. The default mode and air inclusion are configurable. The bridge returns
+`result_too_large` (413) instead of truncating. Other failures match
+`inspect_region`. Both modes use snapshots and never load or generate chunks.
 
 ### `inspect_view`
 
@@ -202,13 +204,14 @@ offsets:
 ```
 
 Blocks are ordered from the viewport's top row to bottom row, then left to
-right; empty sightlines are omitted. `maxResults` defaults to 2,048 and may be
-set from 1 through 10,000. Oversized results fail with `result_too_large`
-instead of truncating. Scan volume is
+right; empty sightlines are omitted. The shipped `maxResults` default is 2,048
+and the shipped maximum is 10,000; both are configurable. Oversized results
+fail with `result_too_large` instead of truncating. Scan volume is
 `(2 * horizontalRadius + 1) * (2 * verticalRadius + 1) * maxDistance` and may
-not exceed 32,768 blocks or the configured general region limit, whichever is
-lower. The complete scan prism must be within world height and already-loaded
-chunks. This tool returns block data rather than an image or perspective render.
+not exceed the configured view-volume or general region limit, whichever is
+lower. The shipped view-volume default is 32,768 blocks. The complete scan
+prism must be within world height and already-loaded chunks. This tool returns
+block data rather than an image or perspective render.
 
 ### `replace_blocks`
 
@@ -217,7 +220,7 @@ Inputs:
 - loaded world and bounded region;
 - one source block state;
 - one destination block state; and
-- optional `dryRun`, defaulting to `false`.
+- optional `dryRun`, using the configured replace default when omitted.
 
 A dry-run returns the exact matching and estimated changed-block counts. An
 executed call replaces matches through one FAWE edit session and records one
@@ -234,8 +237,8 @@ undo entry. The bridge request is `POST /v1/replace-blocks`:
 }
 ```
 
-`dryRun` may be omitted and defaults to `false`. A successful response contains
-canonical block states and normalized bounds:
+`dryRun` may be omitted; the shipped replace default is `false`. A successful
+response contains canonical block states and normalized bounds:
 
 ```json
 {
@@ -264,7 +267,7 @@ Inputs:
 
 - loaded world and bounded region;
 - destination block state; and
-- optional `dryRun`, defaulting to `false`.
+- optional `dryRun`, using the configured fill default when omitted.
 
 A dry-run returns the region volume and expected changed-block count. An
 executed call fills through one FAWE edit session and records one undo entry.
@@ -327,8 +330,8 @@ Undo returns `invalid_request` (400), `unauthorized` (401), `world_not_found`
 (404), `nothing_to_undo` (409), `world_busy` (409), `world_unavailable`
 (503), or `internal_error` (500).
 
-The existing `dirt_status` tool remains available for bridge and version
-diagnostics.
+The existing `dirt_status` tool reports bridge/version diagnostics and the
+active non-secret configuration.
 
 ## Common rules
 
@@ -341,11 +344,11 @@ diagnostics.
 - No-op mutations return `changedBlocks: 0` and do not create undo history.
 - Reads and writes are limited by normalized region volume. Writes are also
   limited by their estimated changed-block count.
-- V1 defaults are a maximum region volume of 1,000,000 blocks, a maximum of
-  250,000 changed blocks per mutation, and 20 undo entries per world. The first
-  two limits are configurable. Region volume cannot be configured above
-  2,147,483,647 blocks because FAWE's affected-block counters are signed
-  32-bit integers.
+- Shipped defaults are a maximum region volume of 1,000,000 blocks, 250,000
+  changed blocks per mutation, and 20 undo entries per world. All numeric
+  resource limits and omission defaults listed below are configurable. Numeric
+  configuration uses signed 32-bit integers because the bridge and FAWE
+  counters use that domain.
 - A world accepts one Dirt MCP mutation at a time.
 
 These checks bound resource use; they are not a permissions system. The server
@@ -354,19 +357,38 @@ backups.
 
 ## Configuration
 
-The v1 configuration surface is intentionally small:
+`plugins/DirtMCP/config.yml` contains all user-adjustable Paper behavior:
 
 ```yaml
 bridge:
   port: 8765
+  backlog: 0
+  shutdown-delay-seconds: 0
+  max-request-bytes: 8192
+  minimum-token-bytes: 32
 
 limits:
   max-region-volume: 1000000
   max-changed-blocks: 250000
+  max-exact-inspection-volume: 32768
+  default-exact-results: 10000
+  max-exact-results: 10000
+  max-view-volume: 32768
+  default-view-results: 2048
+  max-view-results: 10000
+  undo-history-per-world: 20
+
+defaults:
+  exact-inspection-include-air: false
+  exact-inspection-mode: blocks
+  replace-dry-run: false
+  fill-dry-run: false
 ```
 
 The bearer token is supplied to both processes as `DIRT_MCP_BRIDGE_TOKEN` and is
 sent on every bridge request as `Authorization: Bearer <token>`. It is never
 committed. Source-development commands generate an ignored token under
 `paper-plugin/run/` and pass it to both processes. The bridge address is not
-configurable and remains `127.0.0.1`.
+configurable and remains `127.0.0.1`. `DIRT_MCP_BRIDGE_PORT` overrides the YAML
+port for deployments that inject networking configuration. Settings are
+validated and snapshotted at plugin startup, so changes require a Paper restart.

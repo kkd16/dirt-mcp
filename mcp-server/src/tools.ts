@@ -10,9 +10,6 @@ import * as z from 'zod/v4';
 
 const INT32_MIN = -2_147_483_648;
 const INT32_MAX = 2_147_483_647;
-const MAX_EXACT_RESULTS = 10_000;
-const DEFAULT_VIEW_RESULTS = 2_048;
-const MAX_VIEW_RESULTS = 10_000;
 
 export interface BridgeConfig {
   baseUrl: string;
@@ -59,19 +56,19 @@ const InspectBlocksInputSchema = z.object({
   exclude: z.array(z.string().min(1))
     .optional().default([])
     .describe('Block-state patterns to exclude after include filtering.'),
-  includeAir: z.boolean().optional().default(false)
-    .describe('Include air-family states; false by default.'),
-  maxResults: z.number().int().min(1).max(MAX_EXACT_RESULTS).optional().default(MAX_EXACT_RESULTS)
-    .describe('Maximum returned block or run entries; oversized results fail instead of truncating.'),
-  mode: z.enum(['blocks', 'runs']).optional().default('blocks')
-    .describe('Return sparse blocks or a deterministic exact cover of axis-aligned runs.'),
+  includeAir: z.boolean().optional()
+    .describe('Include air-family states; omission uses the Paper plugin configuration.'),
+  maxResults: z.number().int().min(1).max(INT32_MAX).optional()
+    .describe('Maximum returned entries, bounded by Paper configuration; oversized results fail.'),
+  mode: z.enum(['blocks', 'runs']).optional()
+    .describe('Sparse blocks or exact axis-aligned runs; omission uses the Paper plugin configuration.'),
 }).strict();
 
 const ExactInspectionBase = {
   world: z.string().min(1),
   bounds: BoundsSchema,
-  volume: z.number().int().min(1).max(32_768),
-  matchedBlocks: z.number().int().min(0).max(32_768),
+  volume: z.number().int().positive(),
+  matchedBlocks: z.number().int().nonnegative(),
 };
 
 const InspectBlocksOutputSchema = z.discriminatedUnion('mode', [
@@ -81,7 +78,7 @@ const InspectBlocksOutputSchema = z.discriminatedUnion('mode', [
     blocks: z.array(z.object({
       position: BlockPositionSchema,
       state: z.string().min(1),
-    }).strict()).max(MAX_EXACT_RESULTS),
+    }).strict()),
   }).strict(),
   z.object({
     ...ExactInspectionBase,
@@ -90,7 +87,7 @@ const InspectBlocksOutputSchema = z.discriminatedUnion('mode', [
       state: z.string().min(1),
       from: BlockPositionSchema,
       to: BlockPositionSchema,
-    }).strict()).max(MAX_EXACT_RESULTS),
+    }).strict()),
   }).strict(),
 ]);
 
@@ -108,8 +105,8 @@ const InspectViewInputSchema = z.object({
     .describe('Viewport cells on each side of the center sightline along the returned vertical basis.'),
   maxDistance: z.number().int().min(1).max(INT32_MAX)
     .describe('Maximum blocks to scan forward; distance 1 is adjacent to origin.'),
-  maxResults: z.number().int().min(1).max(MAX_VIEW_RESULTS).optional().default(DEFAULT_VIEW_RESULTS)
-    .describe('Maximum visible blocks; oversized exact results fail instead of truncating.'),
+  maxResults: z.number().int().min(1).max(INT32_MAX).optional()
+    .describe('Maximum visible blocks, bounded by Paper configuration; omission uses its default.'),
 }).strict();
 
 const AxisVectorSchema = z.object({
@@ -133,8 +130,8 @@ const InspectViewOutputSchema = z.object({
     maxDistance: z.number().int().positive(),
   }).strict(),
   bounds: BoundsSchema,
-  scannedVolume: z.number().int().min(1).max(32_768),
-  visibleBlocks: z.number().int().min(0).max(MAX_VIEW_RESULTS),
+  scannedVolume: z.number().int().positive(),
+  visibleBlocks: z.number().int().nonnegative(),
   blocks: z.array(z.object({
     position: BlockPositionSchema,
     offset: z.object({
@@ -146,7 +143,7 @@ const InspectViewOutputSchema = z.object({
         .describe('Positive displacement along basis.forward; 1 is adjacent to origin.'),
     }).strict(),
     state: z.string().min(1),
-  }).strict()).max(MAX_VIEW_RESULTS),
+  }).strict()),
 }).strict();
 
 const ReplaceBlocksInputSchema = z.object({
@@ -155,7 +152,8 @@ const ReplaceBlocksInputSchema = z.object({
   max: BlockPositionSchema,
   source: z.string().min(1),
   destination: z.string().min(1),
-  dryRun: z.boolean().optional().default(false),
+  dryRun: z.boolean().optional()
+    .describe('Preview without mutation; omission uses the Paper plugin configuration.'),
 }).strict();
 
 const ReplaceBlocksOutputSchema = z.object({
@@ -173,7 +171,8 @@ const FillRegionInputSchema = z.object({
   min: BlockPositionSchema,
   max: BlockPositionSchema,
   destination: z.string().min(1),
-  dryRun: z.boolean().optional().default(false),
+  dryRun: z.boolean().optional()
+    .describe('Preview without mutation; omission uses the Paper plugin configuration.'),
 }).strict();
 
 const FillRegionOutputSchema = z.object({
@@ -204,8 +203,34 @@ const ErrorSchema = z.object({
 const HealthSchema = z.object({
   status: z.literal('ok'),
   service: z.literal('dirt-mcp-paper'),
-  version: z.string(),
-  minecraftVersion: z.string(),
+  version: z.string().min(1),
+  minecraftVersion: z.string().min(1),
+  configuration: z.object({
+    bridge: z.object({
+      port: z.number().int().min(1).max(65_535),
+      backlog: z.number().int().nonnegative(),
+      shutdownDelaySeconds: z.number().int().nonnegative(),
+      maxRequestBytes: z.number().int().positive(),
+      minimumTokenBytes: z.number().int().positive(),
+    }).strict(),
+    limits: z.object({
+      maxRegionVolume: z.number().int().positive(),
+      maxChangedBlocks: z.number().int().positive(),
+      maxExactInspectionVolume: z.number().int().positive(),
+      defaultExactResults: z.number().int().positive(),
+      maxExactResults: z.number().int().positive(),
+      maxViewVolume: z.number().int().positive(),
+      defaultViewResults: z.number().int().positive(),
+      maxViewResults: z.number().int().positive(),
+      undoHistoryPerWorld: z.number().int().nonnegative(),
+    }).strict(),
+    defaults: z.object({
+      exactInspectionIncludeAir: z.boolean(),
+      exactInspectionMode: z.enum(['blocks', 'runs']),
+      replaceDryRun: z.boolean(),
+      fillDryRun: z.boolean(),
+    }).strict(),
+  }).strict(),
 }).strict();
 
 function logValue(value: string | number): string {
@@ -264,7 +289,7 @@ export function registerTools(
     'dirt_status',
     {
       title: 'Dirt MCP status',
-      description: 'Check whether the local Dirt MCP Paper bridge is available.',
+      description: 'Check bridge availability and report the active non-secret Paper plugin configuration.',
       inputSchema: z.object({}),
       outputSchema: HealthSchema,
     },

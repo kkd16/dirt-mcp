@@ -83,6 +83,32 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     service: 'dirt-mcp-paper',
     version: '0.1.0-test',
     minecraftVersion: '26.2',
+    configuration: {
+      bridge: {
+        port: 8765,
+        backlog: 0,
+        shutdownDelaySeconds: 0,
+        maxRequestBytes: 8192,
+        minimumTokenBytes: 32,
+      },
+      limits: {
+        maxRegionVolume: 1_000_000,
+        maxChangedBlocks: 250_000,
+        maxExactInspectionVolume: 32_768,
+        defaultExactResults: 10_000,
+        maxExactResults: 10_000,
+        maxViewVolume: 32_768,
+        defaultViewResults: 2_048,
+        maxViewResults: 10_000,
+        undoHistoryPerWorld: 20,
+      },
+      defaults: {
+        exactInspectionIncludeAir: false,
+        exactInspectionMode: 'blocks',
+        replaceDryRun: false,
+        fillDryRun: false,
+      },
+    },
   };
   const inspection = {
     world: 'world',
@@ -254,20 +280,13 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     ...region,
     include: [],
     exclude: [],
-    includeAir: false,
-    maxResults: 10_000,
-    mode: 'blocks',
   });
   assert.equal(requests[1].headers['content-type'], 'application/json');
-  assert.deepEqual(requests[2].body, {
-    ...viewInput,
-    maxResults: 2_048,
-  });
+  assert.deepEqual(requests[2].body, viewInput);
   assert.equal(requests[2].headers['content-type'], 'application/json');
   assert.deepEqual(requests[3].body, {
     ...region,
     destination: 'minecraft:dirt',
-    dryRun: false,
   });
   assert.equal(requests[3].headers['content-type'], 'application/json');
 

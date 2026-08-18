@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.api;
 
+import ca.deliyannides.dirtmcp.paper.PluginSettings;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRequest;
@@ -42,7 +43,6 @@ public final class ApiServer implements AutoCloseable {
     private static final String CALL_ID_HEADER = "X-Dirt-Call-Id";
     private static final String STATUS_ATTRIBUTE = ApiServer.class.getName() + ".status";
     private static final String WORLD_ATTRIBUTE = ApiServer.class.getName() + ".world";
-    private static final int MAXIMUM_REQUEST_BYTES = 8_192;
     private static final Pattern CALL_ID_PATTERN = Pattern.compile(
             "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}");
     private static final Set<String> INSPECTION_FIELDS = Set.of("world", "min", "max");
@@ -74,7 +74,7 @@ public final class ApiServer implements AutoCloseable {
     private static final Set<String> POSITION_FIELDS = Set.of("x", "y", "z");
     private static final Gson GSON = new Gson();
 
-    private final int port;
+    private final PluginSettings settings;
     private final String responseBody;
     private final BearerAuthentication authentication;
     private final RegionInspector regionInspector;
@@ -85,23 +85,25 @@ public final class ApiServer implements AutoCloseable {
     private ExecutorService executor;
 
     public ApiServer(
-            int port,
+            PluginSettings settings,
             String pluginVersion,
             String minecraftVersion,
             String bearerToken,
             RegionInspector regionInspector,
             RegionEditor regionEditor,
             Logger logger) {
-        this.port = port;
+        this.settings = settings;
         this.logger = logger;
-        this.authentication = new BearerAuthentication(bearerToken);
+        this.authentication = new BearerAuthentication(
+                bearerToken, settings.bridge().minimumTokenBytes());
         this.regionInspector = regionInspector;
         this.regionEditor = regionEditor;
         this.responseBody = GSON.toJson(new HealthResponse(
                 "ok",
                 "dirt-mcp-paper",
                 pluginVersion,
-                minecraftVersion));
+                minecraftVersion,
+                settings));
     }
 
     public void start() throws IOException {
@@ -109,7 +111,9 @@ public final class ApiServer implements AutoCloseable {
             throw new IllegalStateException("Dirt MCP bridge is already running");
         }
 
-        HttpServer newServer = HttpServer.create(new InetSocketAddress(LOOPBACK_ADDRESS, this.port), 0);
+        HttpServer newServer = HttpServer.create(
+                new InetSocketAddress(LOOPBACK_ADDRESS, this.settings.bridge().port()),
+                this.settings.bridge().backlog());
         ExecutorService newExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
         try {
@@ -136,7 +140,7 @@ public final class ApiServer implements AutoCloseable {
             newServer.setExecutor(newExecutor);
             newServer.start();
         } catch (RuntimeException exception) {
-            newServer.stop(0);
+            newServer.stop(this.settings.bridge().shutdownDelaySeconds());
             newExecutor.close();
             throw exception;
         }
@@ -156,7 +160,7 @@ public final class ApiServer implements AutoCloseable {
     @Override
     public void close() {
         if (this.server != null) {
-            this.server.stop(0);
+            this.server.stop(this.settings.bridge().shutdownDelaySeconds());
             this.server = null;
         }
 
@@ -362,7 +366,7 @@ public final class ApiServer implements AutoCloseable {
         return false;
     }
 
-    private static InspectionRequest parseInspectionRequest(HttpExchange exchange)
+    private InspectionRequest parseInspectionRequest(HttpExchange exchange)
             throws IOException, InvalidRequestException {
         try {
             JsonObject object = parseRequestObject(exchange);
@@ -376,7 +380,7 @@ public final class ApiServer implements AutoCloseable {
         }
     }
 
-    private static ExactInspectionRequest parseExactInspectionRequest(HttpExchange exchange)
+    private ExactInspectionRequest parseExactInspectionRequest(HttpExchange exchange)
             throws IOException, InvalidRequestException {
         try {
             JsonObject object = parseRequestObject(exchange);
@@ -386,10 +390,11 @@ public final class ApiServer implements AutoCloseable {
             }
             int maxResults = object.has("maxResults")
                     ? parseInteger(object.get("maxResults"), "maxResults")
-                    : RegionInspector.MAX_EXACT_RESULTS;
-            if (maxResults < 1 || maxResults > RegionInspector.MAX_EXACT_RESULTS) {
+                    : this.settings.limits().defaultExactResults();
+            if (maxResults < 1 || maxResults > this.settings.limits().maxExactResults()) {
                 throw new InvalidRequestException(
-                        "maxResults must be between 1 and " + RegionInspector.MAX_EXACT_RESULTS);
+                        "maxResults must be between 1 and "
+                                + this.settings.limits().maxExactResults());
             }
             return new ExactInspectionRequest(
                     parseString(object.get("world"), "world"),
@@ -397,15 +402,19 @@ public final class ApiServer implements AutoCloseable {
                     parsePosition(object.get("max"), "max"),
                     object.has("include") ? parseStringList(object.get("include"), "include") : List.of(),
                     object.has("exclude") ? parseStringList(object.get("exclude"), "exclude") : List.of(),
-                    object.has("includeAir") && parseBoolean(object.get("includeAir"), "includeAir"),
+                    object.has("includeAir")
+                            ? parseBoolean(object.get("includeAir"), "includeAir")
+                            : this.settings.defaults().exactInspectionIncludeAir(),
                     maxResults,
-                    object.has("mode") ? parseInspectionMode(object.get("mode")) : ExactInspectionMode.BLOCKS);
+                    object.has("mode")
+                            ? parseInspectionMode(object.get("mode"))
+                            : parseInspectionMode(this.settings.defaults().exactInspectionMode()));
         } catch (JsonParseException | NumberFormatException | ArithmeticException exception) {
             throw new InvalidRequestException("Request body must contain valid JSON values");
         }
     }
 
-    private static ViewRequest parseViewRequest(HttpExchange exchange)
+    private ViewRequest parseViewRequest(HttpExchange exchange)
             throws IOException, InvalidRequestException {
         try {
             JsonObject object = parseRequestObject(exchange);
@@ -418,7 +427,7 @@ public final class ApiServer implements AutoCloseable {
             int maxDistance = parseInteger(object.get("maxDistance"), "maxDistance");
             int maxResults = object.has("maxResults")
                     ? parseInteger(object.get("maxResults"), "maxResults")
-                    : RegionInspector.DEFAULT_VIEW_RESULTS;
+                    : this.settings.limits().defaultViewResults();
             if (horizontalRadius < 0 || verticalRadius < 0) {
                 throw new InvalidRequestException(
                         "horizontalRadius and verticalRadius must be non-negative");
@@ -426,9 +435,10 @@ public final class ApiServer implements AutoCloseable {
             if (maxDistance < 1) {
                 throw new InvalidRequestException("maxDistance must be positive");
             }
-            if (maxResults < 1 || maxResults > RegionInspector.MAX_VIEW_RESULTS) {
+            if (maxResults < 1 || maxResults > this.settings.limits().maxViewResults()) {
                 throw new InvalidRequestException(
-                        "maxResults must be between 1 and " + RegionInspector.MAX_VIEW_RESULTS);
+                        "maxResults must be between 1 and "
+                                + this.settings.limits().maxViewResults());
             }
             return new ViewRequest(
                     parseString(object.get("world"), "world"),
@@ -443,7 +453,7 @@ public final class ApiServer implements AutoCloseable {
         }
     }
 
-    private static ReplaceRequest parseReplaceRequest(HttpExchange exchange)
+    private ReplaceRequest parseReplaceRequest(HttpExchange exchange)
             throws IOException, InvalidRequestException {
         try {
             JsonObject object = parseRequestObject(exchange);
@@ -457,13 +467,15 @@ public final class ApiServer implements AutoCloseable {
                     parsePosition(object.get("max"), "max"),
                     parseString(object.get("source"), "source"),
                     parseString(object.get("destination"), "destination"),
-                    object.has("dryRun") && parseBoolean(object.get("dryRun"), "dryRun"));
+                    object.has("dryRun")
+                            ? parseBoolean(object.get("dryRun"), "dryRun")
+                            : this.settings.defaults().replaceDryRun());
         } catch (JsonParseException | NumberFormatException | ArithmeticException exception) {
             throw new InvalidRequestException("Request body must contain valid JSON values");
         }
     }
 
-    private static UndoRequest parseUndoRequest(HttpExchange exchange)
+    private UndoRequest parseUndoRequest(HttpExchange exchange)
             throws IOException, InvalidRequestException {
         try {
             JsonObject object = parseRequestObject(exchange);
@@ -474,7 +486,7 @@ public final class ApiServer implements AutoCloseable {
         }
     }
 
-    private static FillRequest parseFillRequest(HttpExchange exchange)
+    private FillRequest parseFillRequest(HttpExchange exchange)
             throws IOException, InvalidRequestException {
         try {
             JsonObject object = parseRequestObject(exchange);
@@ -487,21 +499,24 @@ public final class ApiServer implements AutoCloseable {
                     parsePosition(object.get("min"), "min"),
                     parsePosition(object.get("max"), "max"),
                     parseString(object.get("destination"), "destination"),
-                    object.has("dryRun") && parseBoolean(object.get("dryRun"), "dryRun"));
+                    object.has("dryRun")
+                            ? parseBoolean(object.get("dryRun"), "dryRun")
+                            : this.settings.defaults().fillDryRun());
         } catch (JsonParseException | NumberFormatException | ArithmeticException exception) {
             throw new InvalidRequestException("Request body must contain valid JSON values");
         }
     }
 
-    private static JsonObject parseRequestObject(HttpExchange exchange)
+    private JsonObject parseRequestObject(HttpExchange exchange)
             throws IOException, InvalidRequestException {
         String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
         if (contentType == null
                 || !contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT).equals("application/json")) {
             throw new InvalidRequestException("Content-Type must be application/json");
         }
-        byte[] body = exchange.getRequestBody().readNBytes(MAXIMUM_REQUEST_BYTES + 1);
-        if (body.length > MAXIMUM_REQUEST_BYTES) {
+        int maximumRequestBytes = this.settings.bridge().maxRequestBytes();
+        byte[] body = exchange.getRequestBody().readNBytes(maximumRequestBytes + 1);
+        if (body.length > maximumRequestBytes) {
             throw new InvalidRequestException("Request body is too large");
         }
         JsonElement document = JsonParser.parseString(new String(body, StandardCharsets.UTF_8));
@@ -541,7 +556,11 @@ public final class ApiServer implements AutoCloseable {
 
     private static ExactInspectionMode parseInspectionMode(JsonElement element)
             throws InvalidRequestException {
-        String mode = parseString(element, "mode");
+        return parseInspectionMode(parseString(element, "mode"));
+    }
+
+    private static ExactInspectionMode parseInspectionMode(String mode)
+            throws InvalidRequestException {
         return switch (mode) {
             case "blocks" -> ExactInspectionMode.BLOCKS;
             case "runs" -> ExactInspectionMode.RUNS;
@@ -643,7 +662,8 @@ public final class ApiServer implements AutoCloseable {
             String status,
             String service,
             String version,
-            String minecraftVersion) {}
+            String minecraftVersion,
+            PluginSettings configuration) {}
 
     private record ErrorEnvelope(ErrorDetail error) {}
 

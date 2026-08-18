@@ -15,26 +15,49 @@ public final class DirtMcpPlugin extends JavaPlugin {
     @Override
     public void onEnable() {
         saveDefaultConfig();
+        boolean hasMissingDefaults = getConfig().getDefaults() != null
+                && getConfig().getDefaults().getKeys(true).stream()
+                        .anyMatch(path -> !getConfig().isSet(path));
+        getConfig().options().copyDefaults(true);
+        if (hasMissingDefaults) {
+            saveConfig();
+        }
 
-        int port = bridgePort();
-        int maxRegionVolume = maxRegionVolume();
+        PluginSettings settings = PluginSettings.load(
+                getConfig(), System.getenv(PORT_ENVIRONMENT_VARIABLE));
+        PluginSettings.Limits limits = settings.limits();
         this.apiServer = new ApiServer(
-                port,
+                settings,
                 getPluginMeta().getVersion(),
                 getServer().getMinecraftVersion(),
                 bridgeToken(),
-                new PaperRegionInspector(this, maxRegionVolume),
-                new FaweRegionEditor(this, maxRegionVolume, maxChangedBlocks()),
+                new PaperRegionInspector(
+                        this,
+                        limits.maxRegionVolume(),
+                        limits.maxExactInspectionVolume(),
+                        limits.maxExactResults(),
+                        limits.maxViewVolume(),
+                        limits.maxViewResults()),
+                new FaweRegionEditor(
+                        this,
+                        limits.maxRegionVolume(),
+                        limits.maxChangedBlocks(),
+                        limits.undoHistoryPerWorld()),
                 getLogger());
 
         try {
             this.apiServer.start();
         } catch (IOException exception) {
             this.apiServer = null;
-            throw new IllegalStateException("Could not start the Dirt MCP bridge on 127.0.0.1:" + port, exception);
+            throw new IllegalStateException(
+                    "Could not start the Dirt MCP bridge on 127.0.0.1:"
+                            + settings.bridge().port(),
+                    exception);
         }
 
-        getLogger().info("Dirt MCP bridge listening on http://127.0.0.1:" + port);
+        getLogger().info(
+                "Dirt MCP bridge listening on http://127.0.0.1:"
+                        + settings.bridge().port());
     }
 
     @Override
@@ -45,47 +68,11 @@ public final class DirtMcpPlugin extends JavaPlugin {
         }
     }
 
-    private int bridgePort() {
-        String override = System.getenv(PORT_ENVIRONMENT_VARIABLE);
-        int port;
-
-        try {
-            port = override == null || override.isBlank()
-                    ? getConfig().getInt("bridge.port", 8765)
-                    : Integer.parseInt(override.trim());
-        } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException(PORT_ENVIRONMENT_VARIABLE + " must be an integer", exception);
-        }
-
-        if (port < 1 || port > 65_535) {
-            throw new IllegalArgumentException("Dirt MCP bridge port must be between 1 and 65535");
-        }
-
-        return port;
-    }
-
     private static String bridgeToken() {
         String token = System.getenv(TOKEN_ENVIRONMENT_VARIABLE);
         if (token == null || token.isBlank()) {
             throw new IllegalStateException(TOKEN_ENVIRONMENT_VARIABLE + " is required");
         }
         return token;
-    }
-
-    private int maxRegionVolume() {
-        long maximum = getConfig().getLong("limits.max-region-volume", 1_000_000L);
-        if (maximum < 1 || maximum > Integer.MAX_VALUE) {
-            throw new IllegalArgumentException(
-                    "limits.max-region-volume must be between 1 and " + Integer.MAX_VALUE);
-        }
-        return (int) maximum;
-    }
-
-    private int maxChangedBlocks() {
-        int maximum = getConfig().getInt("limits.max-changed-blocks", 250_000);
-        if (maximum < 1) {
-            throw new IllegalArgumentException("limits.max-changed-blocks must be positive");
-        }
-        return maximum;
     }
 }

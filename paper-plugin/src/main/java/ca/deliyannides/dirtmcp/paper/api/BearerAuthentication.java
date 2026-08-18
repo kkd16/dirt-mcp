@@ -5,14 +5,19 @@ import java.security.MessageDigest;
 
 final class BearerAuthentication {
     private static final String SCHEME = "Bearer";
-    private static final int MINIMUM_TOKEN_BYTES = 32;
 
     private final byte[] expectedToken;
 
-    BearerAuthentication(String token) {
+    BearerAuthentication(String token, int minimumTokenBytes) {
+        if (minimumTokenBytes < 1) {
+            throw new IllegalArgumentException("Minimum token bytes must be positive");
+        }
         byte[] tokenBytes = token.getBytes(StandardCharsets.UTF_8);
-        if (tokenBytes.length < MINIMUM_TOKEN_BYTES) {
-            throw new IllegalArgumentException("DIRT_MCP_BRIDGE_TOKEN must contain at least 32 bytes");
+        if (tokenBytes.length < minimumTokenBytes) {
+            throw new IllegalArgumentException(
+                    "DIRT_MCP_BRIDGE_TOKEN must contain at least "
+                            + minimumTokenBytes
+                            + " bytes");
         }
         this.expectedToken = tokenBytes.clone();
     }

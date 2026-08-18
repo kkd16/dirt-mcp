@@ -5,6 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ca.deliyannides.dirtmcp.paper.PluginSettings;
+import ca.deliyannides.dirtmcp.paper.PluginSettings.Bridge;
+import ca.deliyannides.dirtmcp.paper.PluginSettings.Defaults;
+import ca.deliyannides.dirtmcp.paper.PluginSettings.Limits;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
@@ -53,6 +57,10 @@ import org.junit.jupiter.api.Test;
 final class ApiServerTest {
     private static final Logger LOGGER = Logger.getLogger(ApiServerTest.class.getName());
     private static final String TOKEN = "test-token-with-at-least-thirty-two-bytes";
+    private static final PluginSettings SETTINGS = new PluginSettings(
+            new Bridge(0, 0, 0, 8_192, 32),
+            new Limits(1_000_000, 250_000, 32_768, 321, 654, 32_768, 123, 456, 20),
+            new Defaults(false, "blocks", false, false));
     private static final RegionInspector UNUSED_INSPECTOR = new TestInspector() {};
     private static final RegionEditor UNUSED_EDITOR = new TestEditor() {};
 
@@ -73,7 +81,16 @@ final class ApiServerTest {
             assertEquals("no-store", response.headers().firstValue("Cache-Control").orElseThrow());
             assertEquals(
                     "{\"status\":\"ok\",\"service\":\"dirt-mcp-paper\",\"version\":\"0.1.0-test\","
-                            + "\"minecraftVersion\":\"26.2\"}",
+                            + "\"minecraftVersion\":\"26.2\",\"configuration\":{"
+                            + "\"bridge\":{\"port\":0,\"backlog\":0,\"shutdownDelaySeconds\":0,"
+                            + "\"maxRequestBytes\":8192,\"minimumTokenBytes\":32},"
+                            + "\"limits\":{\"maxRegionVolume\":1000000,\"maxChangedBlocks\":250000,"
+                            + "\"maxExactInspectionVolume\":32768,\"defaultExactResults\":321,"
+                            + "\"maxExactResults\":654,\"maxViewVolume\":32768,"
+                            + "\"defaultViewResults\":123,\"maxViewResults\":456,"
+                            + "\"undoHistoryPerWorld\":20},\"defaults\":{"
+                            + "\"exactInspectionIncludeAir\":false,\"exactInspectionMode\":\"blocks\","
+                            + "\"replaceDryRun\":false,\"fillDryRun\":false}}}",
                     response.body());
         }
     }
@@ -219,7 +236,7 @@ final class ApiServerTest {
                 assertEquals(List.of(), request.include());
                 assertEquals(List.of(), request.exclude());
                 assertFalse(request.includeAir());
-                assertEquals(10_000, request.maxResults());
+                assertEquals(321, request.maxResults());
                 assertEquals(ExactInspectionMode.BLOCKS, request.mode());
                 return new BlockInspectionResult(
                         request.world(),
@@ -299,7 +316,7 @@ final class ApiServerTest {
             HttpResponse<String> tooMany = client.send(
                     exactInspectionRequest(server, """
                             {"world":"world","min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":0},
-                             "maxResults":10001}
+                             "maxResults":655}
                             """),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> wrongMode = client.send(
@@ -318,7 +335,7 @@ final class ApiServerTest {
             assertEquals(400, tooMany.statusCode());
             assertEquals(
                     "{\"error\":{\"code\":\"invalid_request\","
-                            + "\"message\":\"maxResults must be between 1 and 10000\"}}",
+                            + "\"message\":\"maxResults must be between 1 and 654\"}}",
                     tooMany.body());
             assertEquals(400, wrongMode.statusCode());
             assertEquals(
@@ -335,7 +352,12 @@ final class ApiServerTest {
 
     @Test
     void enforcesJsonContentTypeAndRequestSize() throws Exception {
-        try (ApiServer server = server(UNUSED_INSPECTOR); HttpClient client = HttpClient.newHttpClient()) {
+        PluginSettings settings = new PluginSettings(
+                new Bridge(0, 0, 0, 64, 32),
+                SETTINGS.limits(),
+                SETTINGS.defaults());
+        try (ApiServer server = server(settings, UNUSED_INSPECTOR, UNUSED_EDITOR);
+                HttpClient client = HttpClient.newHttpClient()) {
             server.start();
             HttpResponse<String> wrongContentType = client.send(
                     authorizedRequest(inspectRegionUri(server))
@@ -344,10 +366,10 @@ final class ApiServerTest {
                             .build(),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> oversized = client.send(
-                    inspectionRequest(server, " ".repeat(8_193)),
+                    inspectionRequest(server, " ".repeat(65)),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> atLimit = client.send(
-                    inspectionRequest(server, "{}" + " ".repeat(8_190)),
+                    inspectionRequest(server, "{}" + " ".repeat(62)),
                     HttpResponse.BodyHandlers.ofString());
 
             assertEquals(400, wrongContentType.statusCode());
@@ -365,6 +387,80 @@ final class ApiServerTest {
                     "{\"error\":{\"code\":\"invalid_request\","
                             + "\"message\":\"Request contains missing or unknown fields\"}}",
                     atLimit.body());
+        }
+    }
+
+    @Test
+    void appliesConfiguredRequestDefaults() throws Exception {
+        PluginSettings settings = new PluginSettings(
+                SETTINGS.bridge(),
+                SETTINGS.limits(),
+                new Defaults(true, "runs", true, true));
+        RegionInspector inspector = new TestInspector() {
+            @Override
+            public ExactInspectionResult inspectBlocks(ExactInspectionRequest request) {
+                assertTrue(request.includeAir());
+                assertEquals(ExactInspectionMode.RUNS, request.mode());
+                return new RunInspectionResult(
+                        request.world(),
+                        new Bounds(request.min(), request.max()),
+                        1,
+                        0,
+                        "runs",
+                        List.of());
+            }
+        };
+        RegionEditor editor = new TestEditor() {
+            @Override
+            public ReplaceResult replace(ReplaceRequest request) {
+                assertTrue(request.dryRun());
+                return new ReplaceResult(
+                        request.world(),
+                        new Bounds(request.min(), request.max()),
+                        request.source(),
+                        request.destination(),
+                        request.dryRun(),
+                        0,
+                        0);
+            }
+
+            @Override
+            public FillResult fill(FillRequest request) {
+                assertTrue(request.dryRun());
+                return new FillResult(
+                        request.world(),
+                        new Bounds(request.min(), request.max()),
+                        request.destination(),
+                        request.dryRun(),
+                        1,
+                        0);
+            }
+        };
+
+        try (ApiServer server = server(settings, inspector, editor);
+                HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+            HttpResponse<String> exact = client.send(
+                    exactInspectionRequest(server, """
+                            {"world":"world","min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":0}}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> replace = client.send(
+                    replacementRequest(server, """
+                            {"world":"world","min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":0},
+                             "source":"minecraft:stone","destination":"minecraft:dirt"}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> fill = client.send(
+                    fillRequest(server, """
+                            {"world":"world","min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":0},
+                             "destination":"minecraft:dirt"}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, exact.statusCode());
+            assertEquals(200, replace.statusCode());
+            assertEquals(200, fill.statusCode());
         }
     }
 
@@ -405,7 +501,7 @@ final class ApiServerTest {
                 assertEquals(1, request.horizontalRadius());
                 assertEquals(1, request.verticalRadius());
                 assertEquals(3, request.maxDistance());
-                assertEquals(2_048, request.maxResults());
+                assertEquals(123, request.maxResults());
                 return new ViewResult(
                         request.world(),
                         request.origin(),
@@ -467,7 +563,7 @@ final class ApiServerTest {
                     viewRequest(server, base.formatted("north", -1, "")),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> resultCap = client.send(
-                    viewRequest(server, base.formatted("north", 1, ",\"maxResults\":10001")),
+                    viewRequest(server, base.formatted("north", 1, ",\"maxResults\":457")),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> unknown = client.send(
                     viewRequest(server, base.formatted("north", 1, ",\"extra\":true")),
@@ -815,7 +911,22 @@ final class ApiServerTest {
     }
 
     private static ApiServer server(RegionInspector inspector, RegionEditor editor, Logger logger) {
-        return new ApiServer(0, "0.1.0-test", "26.2", TOKEN, inspector, editor, logger);
+        return server(SETTINGS, inspector, editor, logger);
+    }
+
+    private static ApiServer server(
+            PluginSettings settings,
+            RegionInspector inspector,
+            RegionEditor editor) {
+        return server(settings, inspector, editor, LOGGER);
+    }
+
+    private static ApiServer server(
+            PluginSettings settings,
+            RegionInspector inspector,
+            RegionEditor editor,
+            Logger logger) {
+        return new ApiServer(settings, "0.1.0-test", "26.2", TOKEN, inspector, editor, logger);
     }
 
     private static HttpRequest inspectionRequest(ApiServer server, String body) {

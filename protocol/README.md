@@ -7,4 +7,6 @@ implemented behavior.
 The current bridge is deliberately loopback-only and exposes authenticated
 health, bounded summary and exact block inspection, sparse orthographic views,
 FAWE-backed block replacement and filling, and bounded in-memory undo.
-Unimplemented operations are not included.
+Authenticated health includes the active non-secret plugin configuration so
+clients can discover runtime limits and defaults. Unimplemented operations are
+not included.

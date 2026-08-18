@@ -36,20 +36,25 @@ import org.bukkit.block.data.BlockData;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class FaweRegionEditor implements RegionEditor {
-    private static final int MAX_UNDO_HISTORY = 20;
-
     private final JavaPlugin plugin;
     private final int maxRegionVolume;
     private final int maxChangedBlocks;
+    private final int undoHistoryPerWorld;
     private final Map<String, WorldState> worldStates = new ConcurrentHashMap<>();
 
-    public FaweRegionEditor(JavaPlugin plugin, int maxRegionVolume, int maxChangedBlocks) {
-        if (maxRegionVolume < 1 || maxChangedBlocks < 1) {
-            throw new IllegalArgumentException("Edit limits must be positive");
+    public FaweRegionEditor(
+            JavaPlugin plugin,
+            int maxRegionVolume,
+            int maxChangedBlocks,
+            int undoHistoryPerWorld) {
+        if (maxRegionVolume < 1 || maxChangedBlocks < 1 || undoHistoryPerWorld < 0) {
+            throw new IllegalArgumentException(
+                    "Edit limits must be positive and undo history must be non-negative");
         }
         this.plugin = plugin;
         this.maxRegionVolume = maxRegionVolume;
         this.maxChangedBlocks = maxChangedBlocks;
+        this.undoHistoryPerWorld = undoHistoryPerWorld;
     }
 
     @Override
@@ -401,9 +406,9 @@ public final class FaweRegionEditor implements RegionEditor {
         }
     }
 
-    private static void remember(WorldState state, EditSession session) {
+    private void remember(WorldState state, EditSession session) {
         state.history.addLast(session);
-        while (state.history.size() > MAX_UNDO_HISTORY) {
+        while (state.history.size() > this.undoHistoryPerWorld) {
             state.history.removeFirst();
         }
     }

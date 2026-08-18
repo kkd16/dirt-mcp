@@ -11,7 +11,7 @@ final class BearerAuthenticationTest {
 
     @Test
     void acceptsOnlyTheExactBearerToken() {
-        BearerAuthentication authentication = new BearerAuthentication(TOKEN);
+        BearerAuthentication authentication = new BearerAuthentication(TOKEN, 32);
 
         assertTrue(authentication.accepts("Bearer " + TOKEN));
         assertTrue(authentication.accepts("bearer " + TOKEN));
@@ -23,6 +23,15 @@ final class BearerAuthenticationTest {
 
     @Test
     void rejectsShortTokens() {
-        assertThrows(IllegalArgumentException.class, () -> new BearerAuthentication("too-short"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new BearerAuthentication("too-short", 32));
+    }
+
+    @Test
+    void usesTheConfiguredMinimumTokenLength() {
+        BearerAuthentication authentication = new BearerAuthentication("nine-byte", 9);
+
+        assertTrue(authentication.accepts("Bearer nine-byte"));
     }
 }
