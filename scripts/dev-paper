@@ -73,6 +73,16 @@ session_exists() {
   tmux has-session -t "${session_name}" 2>/dev/null
 }
 
+send_console_command() {
+  local command_text="$1"
+  [[ "${command_text}" != *$'\n'* && "${command_text}" != *$'\r'* ]] || {
+    printf 'Console command must be a single line.\n' >&2
+    exit 1
+  }
+  tmux send-keys -t "${session_name}" -l -- "${command_text}"
+  tmux send-keys -t "${session_name}" Enter
+}
+
 bridge_healthy() {
   local bridge_port="$1"
   local token
@@ -205,6 +215,9 @@ case "${1:-}" in
     read_state
     mc_port="${state_mc_port}"
     bridge_port="${state_bridge_port}"
+    if session_exists; then
+      send_console_command 'kick @a Server restarting for a Dirt MCP update. Please reconnect in a moment.'
+    fi
     stop_server
     start_server "${mc_port}" "${bridge_port}"
     ;;
@@ -242,12 +255,7 @@ case "${1:-}" in
     }
     shift
     command_text="$*"
-    [[ "${command_text}" != *$'\n'* && "${command_text}" != *$'\r'* ]] || {
-      printf 'Console command must be a single line.\n' >&2
-      exit 1
-    }
-    tmux send-keys -t "${session_name}" -l -- "${command_text}"
-    tmux send-keys -t "${session_name}" Enter
+    send_console_command "${command_text}"
     ;;
   *) usage ;;
 esac

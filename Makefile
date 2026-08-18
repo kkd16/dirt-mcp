@@ -6,7 +6,7 @@ MC_PORT ?= 25566
 BRIDGE_PORT ?= 8765
 DEV_TOKEN_FILE := paper-plugin/run/.dirt-mcp-token
 
-.PHONY: help doctor install build build-java build-mcp dev-build check ci dev-token up reload down status logs console command mcp health clean
+.PHONY: help doctor install build build-java build-mcp dev-build check ci dev-token up reload down status logs console command smoke-fill mcp health clean
 
 help: ## Show the available development commands.
 	@awk 'BEGIN { FS = ":.*## "; printf "Dirt MCP development commands:\n\n" } /^[a-zA-Z_-]+:.*## / { printf "  %-12s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -95,6 +95,9 @@ command: export DIRT_MCP_DEV_COMMAND := $(value CMD)
 command: dev-token ## Send one Paper console command with CMD='...'.
 	@test -n "$$DIRT_MCP_DEV_COMMAND" || { printf 'Usage: make command CMD='\''version'\''\n' >&2; exit 2; }
 	@scripts/dev-paper command "$$DIRT_MCP_DEV_COMMAND"
+
+smoke-fill: dev-token ## Exercise fill, no-op, undo, and exact restoration on the managed server.
+	@node scripts/smoke-fill-region.mjs
 
 mcp: build-mcp dev-token ## Run the MCP stdio server for an MCP host.
 	@scripts/run-dirt-mcp

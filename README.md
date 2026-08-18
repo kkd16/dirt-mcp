@@ -144,8 +144,9 @@ make reload
 
 Paper does not safely support plugin hot reloads, so this performs an
 incremental build, clean `stop`, restart of the same development world, and
-health check. Players disconnect only for the restart. The MCP tool catalog
-reloads in place when its compiled module changes.
+health check. Connected players receive a clear restart message before they are
+disconnected. The MCP tool catalog reloads in place when its compiled module
+changes.
 
 Override local ports when needed:
 
@@ -167,6 +168,7 @@ make status    Report Paper and authenticated bridge health
 make logs      Print recent Paper console output
 make console   Attach to Paper; detach without stopping with Ctrl-b d
 make command   Send one console command with CMD='...'
+make smoke-fill Exercise fill, no-op, undo, and restoration on managed Paper
 make check     Run Java and MCP checks and tests
 make ci        Reproduce the clean CI build
 make dev-token Create the ignored local bearer token
@@ -179,6 +181,10 @@ Generated Paper state lives in `paper-plugin/run/` and is not committed. This is
 the canonical disposable development world: reuse and mutate it freely instead
 of creating temporary Paper servers. Normal builds, reloads, and cleans preserve
 the world.
+
+Run `make smoke-fill` without concurrent Dirt MCP edits. It temporarily
+force-loads chunk `0,0`, mutates eight blocks in the development world, and
+restores their exact prior state.
 
 ## Contributing
 

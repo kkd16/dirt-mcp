@@ -20,7 +20,9 @@ import com.sk89q.worldedit.regions.CuboidRegion;
 import com.sk89q.worldedit.regions.Region;
 import com.sk89q.worldedit.world.block.BaseBlock;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -37,11 +39,11 @@ public final class FaweRegionEditor implements RegionEditor {
     private static final int MAX_UNDO_HISTORY = 20;
 
     private final JavaPlugin plugin;
-    private final long maxRegionVolume;
+    private final int maxRegionVolume;
     private final int maxChangedBlocks;
     private final Map<String, WorldState> worldStates = new ConcurrentHashMap<>();
 
-    public FaweRegionEditor(JavaPlugin plugin, long maxRegionVolume, int maxChangedBlocks) {
+    public FaweRegionEditor(JavaPlugin plugin, int maxRegionVolume, int maxChangedBlocks) {
         if (maxRegionVolume < 1 || maxChangedBlocks < 1) {
             throw new IllegalArgumentException("Edit limits must be positive");
         }
@@ -53,15 +55,20 @@ public final class FaweRegionEditor implements RegionEditor {
     @Override
     public ReplaceResult replace(ReplaceRequest request) throws EditException {
         NormalizedRegion region = normalize(request.min(), request.max());
-        PreparedEdit prepared = prepare(request, region);
-        WorldState state = this.worldStates.computeIfAbsent(prepared.worldName(), ignored -> new WorldState());
+        PreparedWorld world = prepareWorld(request.world());
+        WorldState state = this.worldStates.computeIfAbsent(world.worldName(), ignored -> new WorldState());
         if (!state.lock.tryLock()) {
             throw new EditException(Failure.WORLD_BUSY, "Another Dirt MCP edit is running in world: "
-                    + prepared.worldName());
+                    + world.worldName());
         }
 
         try {
-            return replaceLocked(request, region, prepared, state);
+            PreparedEdit prepared = prepare(request, region);
+            try {
+                return replaceLocked(request, region, prepared, state);
+            } finally {
+                releaseChunkTickets(prepared.chunkTickets());
+            }
         } finally {
             state.lock.unlock();
         }
@@ -70,15 +77,20 @@ public final class FaweRegionEditor implements RegionEditor {
     @Override
     public FillResult fill(FillRequest request) throws EditException {
         NormalizedRegion region = normalize(request.min(), request.max());
-        PreparedFill prepared = prepare(request, region);
-        WorldState state = this.worldStates.computeIfAbsent(prepared.worldName(), ignored -> new WorldState());
+        PreparedWorld world = prepareWorld(request.world());
+        WorldState state = this.worldStates.computeIfAbsent(world.worldName(), ignored -> new WorldState());
         if (!state.lock.tryLock()) {
             throw new EditException(Failure.WORLD_BUSY, "Another Dirt MCP edit is running in world: "
-                    + prepared.worldName());
+                    + world.worldName());
         }
 
         try {
-            return fillLocked(request, region, prepared, state);
+            PreparedFill prepared = prepare(request, region);
+            try {
+                return fillLocked(request, region, prepared, state);
+            } finally {
+                releaseChunkTickets(prepared.chunkTickets());
+            }
         } finally {
             state.lock.unlock();
         }
@@ -258,17 +270,18 @@ public final class FaweRegionEditor implements RegionEditor {
         PreparedWorld prepared = resolveWorld(request.world());
         World world = prepared.bukkitWorld();
         requireValidHeight(world, region);
-        requireLoadedChunks(world, region);
 
         BlockData source = parseBlockData(request.source(), "source");
         BlockData destination = parseBlockData(request.destination(), "destination");
+        ChunkTickets chunkTickets = retainLoadedChunks(world, region);
         return new PreparedEdit(
                 prepared.worldName(),
                 prepared.world(),
                 BukkitAdapter.adapt(source).toBaseBlock(),
                 BukkitAdapter.adapt(destination).toBaseBlock(),
                 source.getAsString(),
-                destination.getAsString());
+                destination.getAsString(),
+                chunkTickets);
     }
 
     private PreparedFill prepareOnMainThread(FillRequest request, NormalizedRegion region)
@@ -276,14 +289,15 @@ public final class FaweRegionEditor implements RegionEditor {
         PreparedWorld prepared = resolveWorld(request.world());
         World world = prepared.bukkitWorld();
         requireValidHeight(world, region);
-        requireLoadedChunks(world, region);
 
         BlockData destination = parseBlockData(request.destination(), "destination");
+        ChunkTickets chunkTickets = retainLoadedChunks(world, region);
         return new PreparedFill(
                 prepared.worldName(),
                 prepared.world(),
                 BukkitAdapter.adapt(destination).toBaseBlock(),
-                destination.getAsString());
+                destination.getAsString(),
+                chunkTickets);
     }
 
     private static void requireValidHeight(World world, NormalizedRegion region) throws EditException {
@@ -310,11 +324,12 @@ public final class FaweRegionEditor implements RegionEditor {
         }
     }
 
-    private static void requireLoadedChunks(World world, NormalizedRegion region) throws EditException {
+    private ChunkTickets retainLoadedChunks(World world, NormalizedRegion region) throws EditException {
         int minChunkX = region.min().x() >> 4;
         int maxChunkX = region.max().x() >> 4;
         int minChunkZ = region.min().z() >> 4;
         int maxChunkZ = region.max().z() >> 4;
+        List<ChunkPosition> chunks = new ArrayList<>();
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
             for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
                 if (!world.isChunkLoaded(chunkX, chunkZ)) {
@@ -322,7 +337,59 @@ public final class FaweRegionEditor implements RegionEditor {
                             Failure.WORLD_UNAVAILABLE,
                             "Region contains an unloaded chunk at " + chunkX + "," + chunkZ);
                 }
+                chunks.add(new ChunkPosition(chunkX, chunkZ));
             }
+        }
+
+        List<ChunkPosition> retained = new ArrayList<>(chunks.size());
+        try {
+            for (ChunkPosition chunk : chunks) {
+                if (world.addPluginChunkTicket(chunk.x(), chunk.z(), this.plugin)) {
+                    retained.add(chunk);
+                }
+            }
+        } catch (RuntimeException exception) {
+            removeChunkTickets(world, retained);
+            throw exception;
+        }
+        return new ChunkTickets(world, List.copyOf(retained));
+    }
+
+    private void releaseChunkTickets(ChunkTickets chunkTickets) {
+        if (chunkTickets.chunks().isEmpty()) {
+            return;
+        }
+        if (Bukkit.isPrimaryThread()) {
+            removeChunkTickets(chunkTickets.world(), chunkTickets.chunks());
+            return;
+        }
+
+        Future<Void> result = this.plugin.getServer().getScheduler().callSyncMethod(this.plugin, () -> {
+            removeChunkTickets(chunkTickets.world(), chunkTickets.chunks());
+            return null;
+        });
+        boolean interrupted = false;
+        try {
+            while (true) {
+                try {
+                    result.get();
+                    return;
+                } catch (InterruptedException exception) {
+                    interrupted = true;
+                }
+            }
+        } catch (ExecutionException exception) {
+            throw new IllegalStateException("Could not release chunk tickets", exception.getCause());
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private void removeChunkTickets(World world, List<ChunkPosition> chunks) {
+        for (ChunkPosition chunk : chunks) {
+            world.removePluginChunkTicket(chunk.x(), chunk.z(), this.plugin);
         }
     }
 
@@ -357,11 +424,17 @@ public final class FaweRegionEditor implements RegionEditor {
             BaseBlock source,
             BaseBlock destination,
             String sourceName,
-            String destinationName) {}
+            String destinationName,
+            ChunkTickets chunkTickets) {}
 
     private record PreparedFill(
             String worldName,
             com.sk89q.worldedit.world.World world,
             BaseBlock destination,
-            String destinationName) {}
+            String destinationName,
+            ChunkTickets chunkTickets) {}
+
+    private record ChunkTickets(World world, List<ChunkPosition> chunks) {}
+
+    private record ChunkPosition(int x, int z) {}
 }

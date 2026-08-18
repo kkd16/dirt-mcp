@@ -199,7 +199,9 @@ diagnostics.
   limited by their estimated changed-block count.
 - V1 defaults are a maximum region volume of 1,000,000 blocks, a maximum of
   250,000 changed blocks per mutation, and 20 undo entries per world. The first
-  two limits are configurable.
+  two limits are configurable. Region volume cannot be configured above
+  2,147,483,647 blocks because FAWE's affected-block counters are signed
+  32-bit integers.
 - A world accepts one Dirt MCP mutation at a time.
 
 These checks bound resource use; they are not a permissions system. The server

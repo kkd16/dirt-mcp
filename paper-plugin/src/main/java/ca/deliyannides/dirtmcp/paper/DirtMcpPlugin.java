@@ -17,7 +17,7 @@ public final class DirtMcpPlugin extends JavaPlugin {
         saveDefaultConfig();
 
         int port = bridgePort();
-        long maxRegionVolume = maxRegionVolume();
+        int maxRegionVolume = maxRegionVolume();
         this.apiServer = new ApiServer(
                 port,
                 getPluginMeta().getVersion(),
@@ -72,12 +72,13 @@ public final class DirtMcpPlugin extends JavaPlugin {
         return token;
     }
 
-    private long maxRegionVolume() {
+    private int maxRegionVolume() {
         long maximum = getConfig().getLong("limits.max-region-volume", 1_000_000L);
-        if (maximum < 1) {
-            throw new IllegalArgumentException("limits.max-region-volume must be positive");
+        if (maximum < 1 || maximum > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException(
+                    "limits.max-region-volume must be between 1 and " + Integer.MAX_VALUE);
         }
-        return maximum;
+        return (int) maximum;
     }
 
     private int maxChangedBlocks() {
