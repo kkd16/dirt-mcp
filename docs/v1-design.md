@@ -374,12 +374,11 @@ current Paper name is `FeedbackForwardingSender`, and player-only commands,
 `@s`, and relative position context therefore differ from a real operator.
 
 Each response entry contains the normalized command, bounded plain-text
-feedback, a nullable message, and one of `dispatched`, `not_found`,
-`dispatch_failed`, or `skipped`. The batch stops on `not_found` or
-`dispatch_failed` and marks later commands skipped. `dispatched` means Paper
-found and invoked the command without a dispatch exception; Bukkit does not
-expose the command's Brigadier result value, so semantic failures reported as
-ordinary feedback do not stop the batch.
+feedback, a nullable message, and one of `dispatched`, `not_found`, or
+`dispatch_failed`. Every command is attempted once in order, including after a
+failure. `dispatched` means Paper found and invoked the command without a
+dispatch exception; Bukkit does not expose the command's Brigadier result
+value, so semantic failures reported as ordinary feedback are not inferred.
 
 The shipped limits are 20 commands and 32,768 retained feedback characters per
 request. Command effects execute immediately and are not subject to Dirt's FAWE

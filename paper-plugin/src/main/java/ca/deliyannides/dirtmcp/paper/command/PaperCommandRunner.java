@@ -23,8 +23,6 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 public final class PaperCommandRunner implements CommandRunner {
     private static final String NOT_FOUND_MESSAGE = "Paper found no target for this command";
-    private static final String SKIPPED_MESSAGE =
-            "Skipped because an earlier command was not dispatched";
 
     private final JavaPlugin plugin;
     private final int maxCommandsPerRequest;
@@ -107,6 +105,11 @@ public final class PaperCommandRunner implements CommandRunner {
 
         Server server = this.plugin.getServer();
         CommandSender descriptionSender = server.createCommandSender(component -> {});
+        if (!descriptionSender.isOp() || descriptionSender instanceof Player) {
+            throw new CommandRunnerException(
+                    Failure.SERVER_UNAVAILABLE,
+                    "Paper did not provide an operator-level non-player command sender");
+        }
         Sender senderDescription = new Sender(
                 descriptionSender.getName(),
                 descriptionSender.isOp(),
@@ -128,15 +131,8 @@ public final class PaperCommandRunner implements CommandRunner {
             CommandDispatch dispatch) {
         FeedbackBudget budget = new FeedbackBudget(maxFeedbackCharacters);
         List<CommandResult> results = new ArrayList<>(commands.size());
-        boolean stopped = false;
 
         for (String command : commands) {
-            if (stopped) {
-                results.add(new CommandResult(
-                        command, CommandOutcome.SKIPPED, List.of(), SKIPPED_MESSAGE));
-                continue;
-            }
-
             List<String> feedback = Collections.synchronizedList(new ArrayList<>());
             try {
                 if (dispatch.dispatch(command, component -> budget.capture(component, feedback))) {
@@ -151,7 +147,6 @@ public final class PaperCommandRunner implements CommandRunner {
                             CommandOutcome.NOT_FOUND,
                             snapshot(feedback),
                             NOT_FOUND_MESSAGE));
-                    stopped = true;
                 }
             } catch (CommandException exception) {
                 results.add(new CommandResult(
@@ -161,7 +156,6 @@ public final class PaperCommandRunner implements CommandRunner {
                         exception.getMessage() == null
                                 ? "Paper command dispatch failed"
                                 : exception.getMessage()));
-                stopped = true;
             }
         }
 

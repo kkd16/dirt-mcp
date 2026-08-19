@@ -108,11 +108,11 @@ Paper's feedback-capturing command sender, which has console-equivalent
 permissions but no player entity. Synchronous Adventure feedback is converted
 to bounded plain text for the bridge response.
 
-The batch stops when Paper finds no command target or throws a dispatch
-exception. Bukkit does not expose the Brigadier result value, so ordinary
-command feedback is returned to the caller but is not interpreted as semantic
-success or failure. Command effects do not participate in FAWE locking, Dirt
-resource limits, or Dirt undo history.
+Every command is attempted once in order, including after Paper finds no command
+target or a command executor throws. Bukkit does not expose the Brigadier result
+value, so ordinary command feedback is returned to the caller but is not
+interpreted as semantic success or failure. Command effects do not participate
+in FAWE locking, Dirt resource limits, or Dirt undo history.
 
 ## Dependency direction
 

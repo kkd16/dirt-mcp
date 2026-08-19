@@ -953,7 +953,7 @@ final class ApiServerTest {
     @Test
     void runsAnOrderedMinecraftCommandBatch() throws Exception {
         CommandRunner commandRunner = request -> {
-            assertEquals(List.of("say first", "missing", "say skipped"), request.commands());
+            assertEquals(List.of("say first", "missing", "say last"), request.commands());
             return new RunCommandsResult(
                     new Sender("FeedbackForwardingSender", true, false),
                     false,
@@ -969,10 +969,10 @@ final class ApiServerTest {
                                     List.of(),
                                     "Paper found no target for this command"),
                             new CommandResult(
-                                    "say skipped",
-                                    CommandOutcome.SKIPPED,
-                                    List.of(),
-                                    "Skipped because an earlier command was not dispatched")));
+                                    "say last",
+                                    CommandOutcome.DISPATCHED,
+                                    List.of("[Dirt] last"),
+                                    null)));
         };
 
         try (ApiServer server = server(commandRunner);
@@ -982,7 +982,7 @@ final class ApiServerTest {
             HttpResponse<String> response = client.send(
                     commandRequest(
                             server,
-                            "{\"commands\":[\"say first\",\"missing\",\"say skipped\"]}"),
+                            "{\"commands\":[\"say first\",\"missing\",\"say last\"]}"),
                     HttpResponse.BodyHandlers.ofString());
 
             assertEquals(200, response.statusCode());
@@ -993,8 +993,8 @@ final class ApiServerTest {
                             + "\"feedback\":[\"[Dirt] first\"],\"message\":null},{"
                             + "\"command\":\"missing\",\"outcome\":\"not_found\","
                             + "\"feedback\":[],\"message\":\"Paper found no target for this command\"},{"
-                            + "\"command\":\"say skipped\",\"outcome\":\"skipped\","
-                            + "\"feedback\":[],\"message\":\"Skipped because an earlier command was not dispatched\"}]}",
+                            + "\"command\":\"say last\",\"outcome\":\"dispatched\","
+                            + "\"feedback\":[\"[Dirt] last\"],\"message\":null}]}",
                     response.body());
         }
     }

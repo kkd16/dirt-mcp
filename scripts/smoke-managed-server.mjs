@@ -209,22 +209,22 @@ try {
   });
   assert.equal(afterCommandRun.blocks[0].blockState, 'minecraft:gold_block');
 
-  const stoppedCommandRun = await bridgeRequest('/v1/run-minecraft-commands', {
+  const continuedCommandRun = await bridgeRequest('/v1/run-minecraft-commands', {
     commands: [
       'dirt_command_that_does_not_exist',
       `setblock ${commandPosition.x} ${commandPosition.y} ${commandPosition.z} minecraft:diamond_block replace`,
     ],
   });
   assert.deepEqual(
-    stoppedCommandRun.results.map(({ outcome }) => outcome),
-    ['not_found', 'skipped'],
+    continuedCommandRun.results.map(({ outcome }) => outcome),
+    ['not_found', 'dispatched'],
   );
-  const afterStoppedCommandRun = await bridgeRequest('/v1/get-region-blocks', {
+  const afterContinuedCommandRun = await bridgeRequest('/v1/get-region-blocks', {
     world,
     min: commandPosition,
     max: commandPosition,
   });
-  assert.equal(afterStoppedCommandRun.blocks[0].blockState, 'minecraft:gold_block');
+  assert.equal(afterContinuedCommandRun.blocks[0].blockState, 'minecraft:diamond_block');
 
   await bridgeSetBlocks([{
     position: commandPosition,

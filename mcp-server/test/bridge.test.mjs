@@ -390,7 +390,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     isError: true,
     content: [{
       type: 'text',
-      text: 'Dispatched 1 command(s), then stopped after a Paper dispatch failure.',
+      text: 'Dispatched 1 of 2 command(s); see per-command outcomes.',
     }],
     structuredContent: commandRun,
   }));

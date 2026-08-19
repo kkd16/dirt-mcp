@@ -41,7 +41,7 @@ final class PaperCommandRunnerTest {
     }
 
     @Test
-    void dispatchesInOrderAndSkipsEverythingAfterANotFoundCommand() {
+    void dispatchesEveryCommandInOrderAfterANotFoundCommand() {
         List<String> attempted = new ArrayList<>();
 
         RunCommandsResult result = PaperCommandRunner.runBatch(
@@ -54,21 +54,21 @@ final class PaperCommandRunnerTest {
                     return !command.equals("missing");
                 });
 
-        assertEquals(List.of("say first", "missing"), attempted);
+        assertEquals(List.of("say first", "missing", "say third"), attempted);
         assertEquals(
                 List.of(
                         CommandOutcome.DISPATCHED,
                         CommandOutcome.NOT_FOUND,
-                        CommandOutcome.SKIPPED),
+                        CommandOutcome.DISPATCHED),
                 result.results().stream().map(CommandRunner.CommandResult::outcome).toList());
         assertEquals(List.of("feedback say first"), result.results().getFirst().feedback());
-        assertEquals(List.of(), result.results().getLast().feedback());
+        assertEquals(List.of("feedback say third"), result.results().getLast().feedback());
     }
 
     @Test
-    void capturesBoundedFeedbackAndStopsAfterDispatchExceptions() {
+    void capturesBoundedFeedbackAndContinuesAfterDispatchExceptions() {
         RunCommandsResult result = PaperCommandRunner.runBatch(
-                List.of("first", "broken", "skipped"),
+                List.of("first", "broken", "last"),
                 5,
                 SENDER,
                 (command, feedback) -> {
@@ -83,6 +83,6 @@ final class PaperCommandRunnerTest {
         assertEquals(List.of("abcde"), result.results().getFirst().feedback());
         assertEquals(CommandOutcome.DISPATCH_FAILED, result.results().get(1).outcome());
         assertEquals("boom", result.results().get(1).message());
-        assertEquals(CommandOutcome.SKIPPED, result.results().getLast().outcome());
+        assertEquals(CommandOutcome.DISPATCHED, result.results().getLast().outcome());
     }
 }

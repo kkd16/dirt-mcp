@@ -264,7 +264,6 @@ const CommandOutcomeSchema = z.enum([
   'dispatched',
   'not_found',
   'dispatch_failed',
-  'skipped',
 ]);
 
 const RunMinecraftCommandsOutputSchema = z.object({
@@ -586,7 +585,7 @@ export function registerTools(
 
   registrations.push(register('run_minecraft_commands', {
     title: 'Run Minecraft commands',
-    description: 'Run registered vanilla, Paper, or plugin commands sequentially with operator-level permissions. The sender is not a player: player-only commands, @s, and relative context can differ. The batch stops on command-not-found or a dispatch exception; arbitrary effects are immediate and are not covered by Dirt undo or edit limits.',
+    description: 'Run registered vanilla, Paper, or plugin commands sequentially with operator-level permissions. The sender is not a player: player-only commands, @s, and relative context can differ. Every command is attempted once in order; arbitrary effects are immediate and are not covered by Dirt undo or edit limits.',
     inputSchema: RunMinecraftCommandsInputSchema,
     outputSchema: RunMinecraftCommandsOutputSchema,
     annotations: COMMAND_ANNOTATIONS,
@@ -601,16 +600,16 @@ export function registerTools(
         120_000,
       );
       const dispatched = result.results.filter((entry) => entry.outcome === 'dispatched').length;
-      const stopped = result.results.some(
+      const failed = result.results.some(
         (entry) => entry.outcome === 'not_found' || entry.outcome === 'dispatch_failed',
       );
-      const summary = stopped
-        ? `Dispatched ${dispatched} command(s), then stopped after a Paper dispatch failure.`
+      const summary = failed
+        ? `Dispatched ${dispatched} of ${result.results.length} command(s); see per-command outcomes.`
         : `Dispatched ${dispatched} command(s) in order.`;
       return {
         content: [{ type: 'text', text: summary }],
         structuredContent: result,
-        ...(stopped ? { isError: true } : {}),
+        ...(failed ? { isError: true } : {}),
       };
     } catch (error: unknown) {
       return errorResult(error, 'Could not run Minecraft commands');

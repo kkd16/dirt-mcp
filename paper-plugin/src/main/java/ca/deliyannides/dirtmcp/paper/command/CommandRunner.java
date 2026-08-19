@@ -28,9 +28,7 @@ public interface CommandRunner {
         @SerializedName("not_found")
         NOT_FOUND,
         @SerializedName("dispatch_failed")
-        DISPATCH_FAILED,
-        @SerializedName("skipped")
-        SKIPPED
+        DISPATCH_FAILED
     }
 
     enum Failure {
