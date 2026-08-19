@@ -86,86 +86,80 @@ test('reloads tools without replacing the stdio process', async (context) => {
   send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: modernParams({}) });
   const initial = await waitFor(messages, (message) => message.id === 2);
   assert.equal(initial.result.tools[0].title, 'Ping Dirt server');
-  assert.deepEqual(
-    Object.fromEntries(initial.result.tools.map((tool) => [tool.name, tool.annotations])),
-    {
-      ping_server: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
-      get_server_status: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
-      count_region_block_states: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
-      get_region_blocks: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
-      scan_orthographic_view: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
-      replace_region_blocks: {
-        readOnlyHint: false,
-        destructiveHint: true,
-        idempotentHint: false,
-        openWorldHint: true,
-      },
-      fill_region: {
-        readOnlyHint: false,
-        destructiveHint: true,
-        idempotentHint: false,
-        openWorldHint: true,
-      },
-      set_blocks: {
-        readOnlyHint: false,
-        destructiveHint: true,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
-      undo_last_dirt_edit: {
-        readOnlyHint: false,
-        destructiveHint: true,
-        idempotentHint: false,
-        openWorldHint: true,
-      },
-      run_minecraft_commands: {
-        readOnlyHint: false,
-        destructiveHint: true,
-        idempotentHint: false,
-        openWorldHint: true,
-      },
+  assert.deepEqual(Object.fromEntries(initial.result.tools.map((tool) => [tool.name, tool.annotations])), {
+    ping_server: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
     },
-  );
-  assert.deepEqual(
-    initial.result.tools.map((tool) => tool.name).sort(),
-    [
-      'count_region_block_states',
-      'fill_region',
-      'get_region_blocks',
-      'get_server_status',
-      'ping_server',
-      'replace_region_blocks',
-      'run_minecraft_commands',
-      'scan_orthographic_view',
-      'set_blocks',
-      'undo_last_dirt_edit',
-    ],
-  );
+    get_server_status: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    count_region_block_states: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    get_region_blocks: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    scan_orthographic_view: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    replace_region_blocks: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    fill_region: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    set_blocks: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    undo_last_dirt_edit: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    run_minecraft_commands: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+  });
+  assert.deepEqual(initial.result.tools.map((tool) => tool.name).toSorted(), [
+    'count_region_block_states',
+    'fill_region',
+    'get_region_blocks',
+    'get_server_status',
+    'ping_server',
+    'replace_region_blocks',
+    'run_minecraft_commands',
+    'scan_orthographic_view',
+    'set_blocks',
+    'undo_last_dirt_edit',
+  ]);
 
   const toolsSource = await readFile(toolsPath, 'utf8');
   const changedSource = toolsSource.replace('Ping Dirt server', 'Reloaded Dirt server ping');

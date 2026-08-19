@@ -15,9 +15,7 @@ final class BearerAuthentication {
         byte[] tokenBytes = token.getBytes(StandardCharsets.UTF_8);
         if (tokenBytes.length < minimumTokenBytes) {
             throw new IllegalArgumentException(
-                    "DIRT_MCP_BRIDGE_TOKEN must contain at least "
-                            + minimumTokenBytes
-                            + " bytes");
+                    "DIRT_MCP_BRIDGE_TOKEN must contain at least " + minimumTokenBytes + " bytes");
         }
         this.expectedToken = tokenBytes.clone();
     }
@@ -28,11 +26,13 @@ final class BearerAuthentication {
         }
 
         int separator = authorizationHeader.indexOf(' ');
-        if (separator < 0 || !authorizationHeader.substring(0, separator).equalsIgnoreCase(SCHEME)) {
+        if (separator < 0
+                || !authorizationHeader.substring(0, separator).equalsIgnoreCase(SCHEME)) {
             return false;
         }
 
-        byte[] suppliedToken = authorizationHeader.substring(separator + 1).getBytes(StandardCharsets.UTF_8);
+        byte[] suppliedToken =
+                authorizationHeader.substring(separator + 1).getBytes(StandardCharsets.UTF_8);
         return MessageDigest.isEqual(this.expectedToken, suppliedToken);
     }
 }

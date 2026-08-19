@@ -1,11 +1,13 @@
 package ca.deliyannides.dirtmcp.paper.world;
 
+import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.NormalizedRegion;
+import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.RegionTooLargeException;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.AxisVector;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockRun;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockStateCountRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockStateCountResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Bounds;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockRun;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Failure;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectedBlock;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionException;
@@ -21,8 +23,6 @@ import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewBasis;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewBlock;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewOffset;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Viewport;
-import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.NormalizedRegion;
-import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.RegionTooLargeException;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -56,9 +56,7 @@ public final class PaperRegionInspector implements RegionInspector {
             long maxRegionVolume,
             long maxInspectionVolume,
             int maxInspectionResults) {
-        if (maxRegionVolume < 1
-                || maxInspectionVolume < 1
-                || maxInspectionResults < 1) {
+        if (maxRegionVolume < 1 || maxInspectionVolume < 1 || maxInspectionResults < 1) {
             throw new IllegalArgumentException("Inspection limits must be positive");
         }
         this.plugin = plugin;
@@ -83,20 +81,22 @@ public final class PaperRegionInspector implements RegionInspector {
     }
 
     @Override
-    public RegionBlocksResult getRegionBlocks(RegionBlocksRequest request) throws InspectionException {
+    public RegionBlocksResult getRegionBlocks(RegionBlocksRequest request)
+            throws InspectionException {
         if (request.maxResults() < 1 || request.maxResults() > this.maxInspectionResults) {
             throw new InspectionException(
                     Failure.INVALID_REQUEST,
                     "maxResults must be between 1 and " + this.maxInspectionResults);
         }
 
-        NormalizedRegion region = normalizeRegionBlocks(
-                request, this.maxRegionVolume, this.maxInspectionVolume);
-        WorldCapture capture = capture(
-                request.world(),
-                region,
-                request.includeBlockStatePatterns(),
-                request.excludeBlockStatePatterns());
+        NormalizedRegion region =
+                normalizeRegionBlocks(request, this.maxRegionVolume, this.maxInspectionVolume);
+        WorldCapture capture =
+                capture(
+                        request.world(),
+                        region,
+                        request.includeBlockStatePatterns(),
+                        request.excludeBlockStatePatterns());
         List<InspectedBlock> blocks = collectBlocks(region, capture, request);
         Bounds bounds = new Bounds(region.min(), region.max());
         if (request.format() == RegionBlocksFormat.BLOCKS) {
@@ -111,27 +111,21 @@ public final class PaperRegionInspector implements RegionInspector {
 
         List<BlockRun> runs = groupSortedRuns(blocks, request.maxResults());
         return new RegionBlockRunsResult(
-                capture.worldName(),
-                bounds,
-                region.volume(),
-                blocks.size(),
-                "runs",
-                runs);
+                capture.worldName(), bounds, region.volume(), blocks.size(), "runs", runs);
     }
 
     @Override
     public OrthographicViewResult scanOrthographicView(OrthographicViewRequest request)
             throws InspectionException {
-        ViewGeometry geometry = normalizeOrthographicView(
-                request,
-                this.maxRegionVolume,
-                this.maxInspectionVolume,
-                this.maxInspectionResults);
+        ViewGeometry geometry =
+                normalizeOrthographicView(
+                        request,
+                        this.maxRegionVolume,
+                        this.maxInspectionVolume,
+                        this.maxInspectionResults);
         WorldCapture capture = capture(request.world(), geometry.region(), List.of(), List.of());
-        List<ViewBlock> blocks = collectViewBlocks(
-                request,
-                geometry,
-                position -> visibleStateAt(capture, position));
+        List<ViewBlock> blocks =
+                collectViewBlocks(request, geometry, position -> visibleStateAt(capture, position));
 
         return new OrthographicViewResult(
                 capture.worldName(),
@@ -155,14 +149,10 @@ public final class PaperRegionInspector implements RegionInspector {
     }
 
     static NormalizedRegion normalizeRegionBlocks(
-            RegionBlocksRequest request,
-            long maxRegionVolume,
-            long maxInspectionVolume)
+            RegionBlocksRequest request, long maxRegionVolume, long maxInspectionVolume)
             throws InspectionException {
         return normalize(
-                request.min(),
-                request.max(),
-                Math.min(maxRegionVolume, maxInspectionVolume));
+                request.min(), request.max(), Math.min(maxRegionVolume, maxInspectionVolume));
     }
 
     static ViewGeometry normalizeOrthographicView(
@@ -191,24 +181,29 @@ public final class PaperRegionInspector implements RegionInspector {
         long maximum = Math.min(maxRegionVolume, maxInspectionVolume);
         long horizontalSize = 2L * request.horizontalRadius() + 1;
         long verticalSize = 2L * request.verticalRadius() + 1;
-        BigInteger requestedVolume = BigInteger.valueOf(horizontalSize)
-                .multiply(BigInteger.valueOf(verticalSize))
-                .multiply(BigInteger.valueOf(request.maxDistance()));
+        BigInteger requestedVolume =
+                BigInteger.valueOf(horizontalSize)
+                        .multiply(BigInteger.valueOf(verticalSize))
+                        .multiply(BigInteger.valueOf(request.maxDistance()));
         if (requestedVolume.compareTo(BigInteger.valueOf(maximum)) > 0) {
             throw new InspectionException(
                     Failure.REGION_TOO_LARGE,
-                    "View scan volume " + requestedVolume
-                            + " exceeds the maximum of " + maximum + " blocks");
+                    "View scan volume "
+                            + requestedVolume
+                            + " exceeds the maximum of "
+                            + maximum
+                            + " blocks");
         }
         long scannedVolume = requestedVolume.longValueExact();
 
         ViewBasis basis = viewBasis(request.direction());
-        BlockPosition firstCorner = viewPosition(
-                request.origin(),
-                basis,
-                -request.horizontalRadius(),
-                -request.verticalRadius(),
-                1);
+        BlockPosition firstCorner =
+                viewPosition(
+                        request.origin(),
+                        basis,
+                        -request.horizontalRadius(),
+                        -request.verticalRadius(),
+                        1);
         BlockPosition min = firstCorner;
         BlockPosition max = firstCorner;
         int[] horizontalOffsets = {-request.horizontalRadius(), request.horizontalRadius()};
@@ -217,16 +212,18 @@ public final class PaperRegionInspector implements RegionInspector {
         for (int horizontal : horizontalOffsets) {
             for (int vertical : verticalOffsets) {
                 for (int distance : distances) {
-                    BlockPosition corner = viewPosition(
-                            request.origin(), basis, horizontal, vertical, distance);
-                    min = new BlockPosition(
-                            Math.min(min.x(), corner.x()),
-                            Math.min(min.y(), corner.y()),
-                            Math.min(min.z(), corner.z()));
-                    max = new BlockPosition(
-                            Math.max(max.x(), corner.x()),
-                            Math.max(max.y(), corner.y()),
-                            Math.max(max.z(), corner.z()));
+                    BlockPosition corner =
+                            viewPosition(request.origin(), basis, horizontal, vertical, distance);
+                    min =
+                            new BlockPosition(
+                                    Math.min(min.x(), corner.x()),
+                                    Math.min(min.y(), corner.y()),
+                                    Math.min(min.z(), corner.z()));
+                    max =
+                            new BlockPosition(
+                                    Math.max(max.x(), corner.x()),
+                                    Math.max(max.y(), corner.y()),
+                                    Math.max(max.z(), corner.z()));
                 }
             }
         }
@@ -238,26 +235,36 @@ public final class PaperRegionInspector implements RegionInspector {
         return new ViewGeometry(basis, region, scannedVolume);
     }
 
+    @SuppressWarnings("PMD.AvoidBranchingStatementAsLastInLoop")
     static List<ViewBlock> collectViewBlocks(
             OrthographicViewRequest request,
             ViewGeometry geometry,
-            Function<BlockPosition, String> blockStateAt) throws InspectionException {
+            Function<BlockPosition, String> blockStateAt)
+            throws InspectionException {
         List<ViewBlock> blocks = new ArrayList<>();
-        for (int vertical = request.verticalRadius(); vertical >= -request.verticalRadius(); vertical--) {
+        for (int vertical = request.verticalRadius();
+                vertical >= -request.verticalRadius();
+                vertical--) {
             for (int horizontal = -request.horizontalRadius();
                     horizontal <= request.horizontalRadius();
                     horizontal++) {
                 for (int distance = 1; distance <= request.maxDistance(); distance++) {
-                    BlockPosition position = viewPosition(
-                            request.origin(), geometry.basis(), horizontal, vertical, distance);
+                    BlockPosition position =
+                            viewPosition(
+                                    request.origin(),
+                                    geometry.basis(),
+                                    horizontal,
+                                    vertical,
+                                    distance);
                     String state = blockStateAt.apply(position);
                     if (state == null) {
                         continue;
                     }
-                    blocks.add(new ViewBlock(
-                            position,
-                            new ViewOffset(horizontal, vertical, distance),
-                            state));
+                    blocks.add(
+                            new ViewBlock(
+                                    position,
+                                    new ViewOffset(horizontal, vertical, distance),
+                                    state));
                     if (blocks.size() > request.maxResults()) {
                         throw new InspectionException(
                                 Failure.RESULT_TOO_LARGE,
@@ -275,57 +282,60 @@ public final class PaperRegionInspector implements RegionInspector {
     private static ViewBasis viewBasis(OrthographicViewDirection direction) {
         AxisVector worldUp = new AxisVector(0, 1, 0);
         return switch (direction) {
-            case NORTH -> new ViewBasis(
-                    new AxisVector(0, 0, -1), new AxisVector(1, 0, 0), worldUp);
-            case EAST -> new ViewBasis(
-                    new AxisVector(1, 0, 0), new AxisVector(0, 0, 1), worldUp);
-            case SOUTH -> new ViewBasis(
-                    new AxisVector(0, 0, 1), new AxisVector(-1, 0, 0), worldUp);
-            case WEST -> new ViewBasis(
-                    new AxisVector(-1, 0, 0), new AxisVector(0, 0, -1), worldUp);
-            case UP -> new ViewBasis(
-                    new AxisVector(0, 1, 0), new AxisVector(1, 0, 0), new AxisVector(0, 0, -1));
-            case DOWN -> new ViewBasis(
-                    new AxisVector(0, -1, 0), new AxisVector(1, 0, 0), new AxisVector(0, 0, -1));
+            case NORTH -> new ViewBasis(new AxisVector(0, 0, -1), new AxisVector(1, 0, 0), worldUp);
+            case EAST -> new ViewBasis(new AxisVector(1, 0, 0), new AxisVector(0, 0, 1), worldUp);
+            case SOUTH -> new ViewBasis(new AxisVector(0, 0, 1), new AxisVector(-1, 0, 0), worldUp);
+            case WEST -> new ViewBasis(new AxisVector(-1, 0, 0), new AxisVector(0, 0, -1), worldUp);
+            case UP ->
+                    new ViewBasis(
+                            new AxisVector(0, 1, 0),
+                            new AxisVector(1, 0, 0),
+                            new AxisVector(0, 0, -1));
+            case DOWN ->
+                    new ViewBasis(
+                            new AxisVector(0, -1, 0),
+                            new AxisVector(1, 0, 0),
+                            new AxisVector(0, 0, -1));
         };
     }
 
     private static BlockPosition viewPosition(
-            BlockPosition origin,
-            ViewBasis basis,
-            int horizontal,
-            int vertical,
-            int distance) throws InspectionException {
-        long x = origin.x()
-                + (long) basis.horizontal().x() * horizontal
-                + (long) basis.vertical().x() * vertical
-                + (long) basis.forward().x() * distance;
-        long y = origin.y()
-                + (long) basis.horizontal().y() * horizontal
-                + (long) basis.vertical().y() * vertical
-                + (long) basis.forward().y() * distance;
-        long z = origin.z()
-                + (long) basis.horizontal().z() * horizontal
-                + (long) basis.vertical().z() * vertical
-                + (long) basis.forward().z() * distance;
-        if (x < Integer.MIN_VALUE || x > Integer.MAX_VALUE
-                || y < Integer.MIN_VALUE || y > Integer.MAX_VALUE
-                || z < Integer.MIN_VALUE || z > Integer.MAX_VALUE) {
+            BlockPosition origin, ViewBasis basis, int horizontal, int vertical, int distance)
+            throws InspectionException {
+        long x =
+                origin.x()
+                        + (long) basis.horizontal().x() * horizontal
+                        + (long) basis.vertical().x() * vertical
+                        + (long) basis.forward().x() * distance;
+        long y =
+                origin.y()
+                        + (long) basis.horizontal().y() * horizontal
+                        + (long) basis.vertical().y() * vertical
+                        + (long) basis.forward().y() * distance;
+        long z =
+                origin.z()
+                        + (long) basis.horizontal().z() * horizontal
+                        + (long) basis.vertical().z() * vertical
+                        + (long) basis.forward().z() * distance;
+        if (x < Integer.MIN_VALUE
+                || x > Integer.MAX_VALUE
+                || y < Integer.MIN_VALUE
+                || y > Integer.MAX_VALUE
+                || z < Integer.MIN_VALUE
+                || z > Integer.MAX_VALUE) {
             throw new InspectionException(
-                    Failure.INVALID_REQUEST,
-                    "View extends beyond signed 32-bit block coordinates");
+                    Failure.INVALID_REQUEST, "View extends beyond signed 32-bit block coordinates");
         }
         return new BlockPosition((int) x, (int) y, (int) z);
     }
 
     private static NormalizedRegion normalize(
-            BlockPosition min,
-            BlockPosition max,
-            long maxRegionVolume) throws InspectionException {
+            BlockPosition min, BlockPosition max, long maxRegionVolume) throws InspectionException {
         try {
             return RegionGeometry.normalize(min, max, maxRegionVolume);
         } catch (RegionTooLargeException exception) {
-            throw new InspectionException(Failure.REGION_TOO_LARGE, exception.getMessage(), exception);
+            throw new InspectionException(
+                    Failure.REGION_TOO_LARGE, exception.getMessage(), exception);
         }
     }
 
@@ -333,14 +343,20 @@ public final class PaperRegionInspector implements RegionInspector {
             String worldName,
             NormalizedRegion region,
             List<String> includeBlockStatePatterns,
-            List<String> excludeBlockStatePatterns) throws InspectionException {
-        Future<WorldCapture> capture = this.plugin.getServer()
-                .getScheduler()
-                .callSyncMethod(this.plugin, () -> captureOnMainThread(
-                        worldName,
-                        region,
-                        includeBlockStatePatterns,
-                        excludeBlockStatePatterns));
+            List<String> excludeBlockStatePatterns)
+            throws InspectionException {
+        Future<WorldCapture> capture =
+                this.plugin
+                        .getServer()
+                        .getScheduler()
+                        .callSyncMethod(
+                                this.plugin,
+                                () ->
+                                        captureOnMainThread(
+                                                worldName,
+                                                region,
+                                                includeBlockStatePatterns,
+                                                excludeBlockStatePatterns));
         try {
             return capture.get();
         } catch (InterruptedException exception) {
@@ -352,7 +368,8 @@ public final class PaperRegionInspector implements RegionInspector {
             if (exception.getCause() instanceof InspectionException inspectionException) {
                 throw inspectionException;
             }
-            throw new IllegalStateException("Could not capture region snapshots", exception.getCause());
+            throw new IllegalStateException(
+                    "Could not capture region snapshots", exception.getCause());
         }
     }
 
@@ -364,12 +381,16 @@ public final class PaperRegionInspector implements RegionInspector {
             throws InspectionException {
         World world = this.plugin.getServer().getWorld(worldName);
         if (world == null) {
-            throw new InspectionException(Failure.WORLD_NOT_FOUND, "World is not loaded: " + worldName);
+            throw new InspectionException(
+                    Failure.WORLD_NOT_FOUND, "World is not loaded: " + worldName);
         }
         if (region.min().y() < world.getMinHeight() || region.max().y() >= world.getMaxHeight()) {
             throw new InspectionException(
                     Failure.INVALID_REQUEST,
-                    "Y bounds must be between " + world.getMinHeight() + " and " + (world.getMaxHeight() - 1));
+                    "Y bounds must be between "
+                            + world.getMinHeight()
+                            + " and "
+                            + (world.getMaxHeight() - 1));
         }
 
         int minChunkX = region.min().x() >> 4;
@@ -377,10 +398,10 @@ public final class PaperRegionInspector implements RegionInspector {
         int minChunkZ = region.min().z() >> 4;
         int maxChunkZ = region.max().z() >> 4;
 
-        List<BlockData> includePatterns = parsePatterns(
-                includeBlockStatePatterns, "includeBlockStatePatterns");
-        List<BlockData> excludePatterns = parsePatterns(
-                excludeBlockStatePatterns, "excludeBlockStatePatterns");
+        List<BlockData> includePatterns =
+                parsePatterns(includeBlockStatePatterns, "includeBlockStatePatterns");
+        List<BlockData> excludePatterns =
+                parsePatterns(excludeBlockStatePatterns, "excludeBlockStatePatterns");
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
             for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
                 if (!world.isChunkLoaded(chunkX, chunkZ)) {
@@ -395,8 +416,9 @@ public final class PaperRegionInspector implements RegionInspector {
         Map<Long, ChunkSnapshot> snapshotsByChunk = new HashMap<>();
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
             for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
-                ChunkSnapshot snapshot = world.getChunkAt(chunkX, chunkZ, false)
-                        .getChunkSnapshot(false, false, false, false);
+                ChunkSnapshot snapshot =
+                        world.getChunkAt(chunkX, chunkZ, false)
+                                .getChunkSnapshot(false, false, false, false);
                 snapshots.add(snapshot);
                 snapshotsByChunk.put(chunkKey(chunkX, chunkZ), snapshot);
             }
@@ -439,9 +461,8 @@ public final class PaperRegionInspector implements RegionInspector {
             for (int y = region.min().y(); y <= region.max().y(); y++) {
                 for (long z = minZ; z <= maxZ; z++) {
                     for (long x = minX; x <= maxX; x++) {
-                        String blockState = snapshot
-                                .getBlockData((int) x & 15, y, (int) z & 15)
-                                .getAsString();
+                        String blockState =
+                                snapshot.getBlockData((int) x & 15, y, (int) z & 15).getAsString();
                         counts.merge(blockState, 1L, Long::sum);
                     }
                 }
@@ -451,9 +472,8 @@ public final class PaperRegionInspector implements RegionInspector {
     }
 
     private static List<InspectedBlock> collectBlocks(
-            NormalizedRegion region,
-            WorldCapture capture,
-            RegionBlocksRequest request) throws InspectionException {
+            NormalizedRegion region, WorldCapture capture, RegionBlocksRequest request)
+            throws InspectionException {
         List<InspectedBlock> blocks = new ArrayList<>();
         for (ChunkSnapshot snapshot : capture.snapshots()) {
             int chunkMinX = snapshot.getX() << 4;
@@ -470,9 +490,9 @@ public final class PaperRegionInspector implements RegionInspector {
                         if (!matches(blockData, capture, request.includeAir())) {
                             continue;
                         }
-                        blocks.add(new InspectedBlock(
-                                new BlockPosition(x, y, z),
-                                blockData.getAsString()));
+                        blocks.add(
+                                new InspectedBlock(
+                                        new BlockPosition(x, y, z), blockData.getAsString()));
                         if (request.format() == RegionBlocksFormat.BLOCKS
                                 && blocks.size() > request.maxResults()) {
                             throw resultTooLarge(request.maxResults());
@@ -497,11 +517,13 @@ public final class PaperRegionInspector implements RegionInspector {
     }
 
     private static String visibleStateAt(WorldCapture capture, BlockPosition position) {
-        ChunkSnapshot snapshot = capture.snapshotsByChunk().get(chunkKey(position.x() >> 4, position.z() >> 4));
+        ChunkSnapshot snapshot =
+                capture.snapshotsByChunk().get(chunkKey(position.x() >> 4, position.z() >> 4));
         if (snapshot == null) {
             throw new IllegalStateException("Captured view is missing a required chunk snapshot");
         }
-        BlockData blockData = snapshot.getBlockData(position.x() & 15, position.y(), position.z() & 15);
+        BlockData blockData =
+                snapshot.getBlockData(position.x() & 15, position.y(), position.z() & 15);
         return blockData.getMaterial().isAir() ? null : blockData.getAsString();
     }
 
@@ -542,10 +564,7 @@ public final class PaperRegionInspector implements RegionInspector {
     }
 
     private static int runLength(
-            BlockPosition from,
-            String state,
-            Axis axis,
-            Map<BlockPosition, String> remaining) {
+            BlockPosition from, String state, Axis axis, Map<BlockPosition, String> remaining) {
         int length = 1;
         while (state.equals(remaining.get(advance(from, axis, length)))) {
             length++;
@@ -557,9 +576,12 @@ public final class PaperRegionInspector implements RegionInspector {
         long x = position.x() + (long) axis.x * distance;
         long y = position.y() + (long) axis.y * distance;
         long z = position.z() + (long) axis.z * distance;
-        if (x < Integer.MIN_VALUE || x > Integer.MAX_VALUE
-                || y < Integer.MIN_VALUE || y > Integer.MAX_VALUE
-                || z < Integer.MIN_VALUE || z > Integer.MAX_VALUE) {
+        if (x < Integer.MIN_VALUE
+                || x > Integer.MAX_VALUE
+                || y < Integer.MIN_VALUE
+                || y > Integer.MAX_VALUE
+                || z < Integer.MIN_VALUE
+                || z > Integer.MAX_VALUE) {
             return null;
         }
         return new BlockPosition((int) x, (int) y, (int) z);

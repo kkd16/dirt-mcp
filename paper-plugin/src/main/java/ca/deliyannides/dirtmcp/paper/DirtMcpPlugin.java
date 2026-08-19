@@ -6,6 +6,8 @@ import ca.deliyannides.dirtmcp.paper.server.PaperServerContext;
 import ca.deliyannides.dirtmcp.paper.world.FaweRegionEditor;
 import ca.deliyannides.dirtmcp.paper.world.PaperRegionInspector;
 import java.io.IOException;
+import java.util.logging.Level;
+import org.bukkit.configuration.Configuration;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class DirtMcpPlugin extends JavaPlugin {
@@ -17,50 +19,55 @@ public final class DirtMcpPlugin extends JavaPlugin {
     @Override
     public void onEnable() {
         saveDefaultConfig();
-        boolean hasMissingDefaults = getConfig().getDefaults() != null
-                && getConfig().getDefaults().getKeys(true).stream()
-                        .anyMatch(path -> !getConfig().isSet(path));
+        Configuration defaults = getConfig().getDefaults();
+        boolean hasMissingDefaults =
+                defaults != null
+                        && defaults.getKeys(true).stream()
+                                .anyMatch(path -> !getConfig().isSet(path));
         getConfig().options().copyDefaults(true);
         if (hasMissingDefaults) {
             saveConfig();
         }
 
-        PluginSettings settings = PluginSettings.load(
-                getConfig(), System.getenv(PORT_ENVIRONMENT_VARIABLE));
+        PluginSettings settings =
+                PluginSettings.load(getConfig(), System.getenv(PORT_ENVIRONMENT_VARIABLE));
         PluginSettings.Limits limits = settings.limits();
-        this.apiServer = new ApiServer(
-                settings,
-                bridgeToken(),
-                new PaperServerContext(this, settings),
-                new PaperRegionInspector(
-                        this,
-                        limits.maxRegionVolume(),
-                        limits.maxInspectionVolume(),
-                        limits.maxInspectionResultLimit()),
-                new FaweRegionEditor(
-                        this,
-                        limits.maxRegionVolume(),
-                        limits.maxChangedBlocks(),
-                        limits.undoHistoryPerWorld()),
-                new PaperCommandRunner(
-                        this,
-                        limits.maxCommandsPerRequest(),
-                        limits.maxCommandFeedbackCharacters()),
-                getLogger());
+        this.apiServer =
+                new ApiServer(
+                        settings,
+                        bridgeToken(),
+                        new PaperServerContext(this, settings),
+                        new PaperRegionInspector(
+                                this,
+                                limits.maxRegionVolume(),
+                                limits.maxInspectionVolume(),
+                                limits.maxInspectionResultLimit()),
+                        new FaweRegionEditor(
+                                this,
+                                limits.maxRegionVolume(),
+                                limits.maxChangedBlocks(),
+                                limits.undoHistoryPerWorld()),
+                        new PaperCommandRunner(
+                                this,
+                                limits.maxCommandsPerRequest(),
+                                limits.maxCommandFeedbackCharacters()),
+                        getLogger());
 
         try {
             this.apiServer.start();
         } catch (IOException exception) {
             this.apiServer = null;
             throw new IllegalStateException(
-                    "Could not start the Dirt MCP bridge on 127.0.0.1:"
-                            + settings.bridge().port(),
+                    "Could not start the Dirt MCP bridge on 127.0.0.1:" + settings.bridge().port(),
                     exception);
         }
 
-        getLogger().info(
-                "Dirt MCP bridge listening on http://127.0.0.1:"
-                        + settings.bridge().port());
+        if (getLogger().isLoggable(Level.INFO)) {
+            getLogger()
+                    .info(
+                            "Dirt MCP bridge listening on http://127.0.0.1:"
+                                    + settings.bridge().port());
+        }
     }
 
     @Override

@@ -21,7 +21,6 @@ ordered by priority.
 
 ## 3. Enforce contract consistency
 
-- Lint and validate `protocol/openapi.yaml` in CI.
 - Add checks that keep Java endpoints and error envelopes, OpenAPI schemas, and
   TypeScript/Zod schemas synchronized.
 - Fail CI when implemented behavior is added to only one layer.

@@ -24,8 +24,7 @@ final class BearerAuthenticationTest {
     @Test
     void rejectsShortTokens() {
         assertThrows(
-                IllegalArgumentException.class,
-                () -> new BearerAuthentication("too-short", 32));
+                IllegalArgumentException.class, () -> new BearerAuthentication("too-short", 32));
     }
 
     @Test

@@ -4,21 +4,39 @@
   "private": true,
   "description": "AI access to live Minecraft worlds",
   "license": "Apache-2.0",
-  "engines": {
-    "node": ">=24"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kkd16/dirt-mcp.git"
   },
-  "packageManager": "npm@11.17.0",
   "workspaces": [
     "mcp-server"
   ],
   "scripts": {
     "build": "npm run build --workspace=@dirt-mcp/server",
-    "check": "npm run check --workspace=@dirt-mcp/server",
+    "check": "npm run format:check && npm run lint && npm run validate && npm test && npm run package:check",
     "clean": "npm run clean --workspace=@dirt-mcp/server",
-    "test": "npm test --workspace=@dirt-mcp/server"
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "lint": "npm run lint:code && npm run lint:shell && npm run lint:workflows && npm run lint:markdown",
+    "lint:code": "oxlint mcp-server/src --type-aware --deny-warnings --report-unused-disable-directives && oxlint mcp-server/test scripts/*.mjs --deny-warnings --report-unused-disable-directives",
+    "lint:markdown": "markdownlint-cli2",
+    "lint:shell": "shellcheck scripts/dev-paper scripts/run-dirt-mcp scripts/run-paper-dev scripts/validate-paper-jar scripts/validate-paper-log",
+    "lint:workflows": "actionlint",
+    "package:check": "publint --strict mcp-server && npm pack --workspace=@dirt-mcp/server --dry-run",
+    "test": "npm test --workspace=@dirt-mcp/server",
+    "validate": "npm run validate:openapi",
+    "validate:openapi": "redocly check-config && redocly lint"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/kkd16/dirt-mcp.git"
-  }
+  "devDependencies": {
+    "@redocly/cli": "2.46.1",
+    "markdownlint-cli2": "0.23.2",
+    "oxfmt": "0.64.0",
+    "oxlint": "1.79.0",
+    "oxlint-tsgolint": "7.0.2001",
+    "publint": "0.3.23"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "npm@11.17.0"
 }

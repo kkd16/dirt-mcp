@@ -29,9 +29,7 @@ public final class PaperCommandRunner implements CommandRunner {
     private final int maxFeedbackCharacters;
 
     public PaperCommandRunner(
-            JavaPlugin plugin,
-            int maxCommandsPerRequest,
-            int maxFeedbackCharacters) {
+            JavaPlugin plugin, int maxCommandsPerRequest, int maxFeedbackCharacters) {
         if (maxCommandsPerRequest < 1 || maxFeedbackCharacters < 1) {
             throw new IllegalArgumentException("Command limits must be positive");
         }
@@ -43,18 +41,18 @@ public final class PaperCommandRunner implements CommandRunner {
     @Override
     public RunCommandsResult runCommands(RunCommandsRequest request) throws CommandRunnerException {
         List<String> commands = normalize(request, this.maxCommandsPerRequest);
-        Future<RunCommandsResult> result = this.plugin.getServer()
-                .getScheduler()
-                .callSyncMethod(this.plugin, () -> runOnMainThread(commands));
+        Future<RunCommandsResult> result =
+                this.plugin
+                        .getServer()
+                        .getScheduler()
+                        .callSyncMethod(this.plugin, () -> runOnMainThread(commands));
         try {
             return result.get();
         } catch (InterruptedException exception) {
             result.cancel(false);
             Thread.currentThread().interrupt();
             throw new CommandRunnerException(
-                    Failure.SERVER_UNAVAILABLE,
-                    "Command execution was interrupted",
-                    exception);
+                    Failure.SERVER_UNAVAILABLE, "Command execution was interrupted", exception);
         } catch (ExecutionException exception) {
             if (exception.getCause() instanceof CommandRunnerException runnerException) {
                 throw runnerException;
@@ -99,8 +97,7 @@ public final class PaperCommandRunner implements CommandRunner {
     private RunCommandsResult runOnMainThread(List<String> commands) throws CommandRunnerException {
         if (!this.plugin.isEnabled()) {
             throw new CommandRunnerException(
-                    Failure.SERVER_UNAVAILABLE,
-                    "The Dirt MCP plugin is not enabled");
+                    Failure.SERVER_UNAVAILABLE, "The Dirt MCP plugin is not enabled");
         }
 
         Server server = this.plugin.getServer();
@@ -110,10 +107,11 @@ public final class PaperCommandRunner implements CommandRunner {
                     Failure.SERVER_UNAVAILABLE,
                     "Paper did not provide an operator-level non-player command sender");
         }
-        Sender senderDescription = new Sender(
-                descriptionSender.getName(),
-                descriptionSender.isOp(),
-                descriptionSender instanceof Player);
+        Sender senderDescription =
+                new Sender(
+                        descriptionSender.getName(),
+                        descriptionSender.isOp(),
+                        descriptionSender instanceof Player);
         return runBatch(
                 commands,
                 this.maxFeedbackCharacters,
@@ -136,30 +134,31 @@ public final class PaperCommandRunner implements CommandRunner {
             List<String> feedback = Collections.synchronizedList(new ArrayList<>());
             try {
                 if (dispatch.dispatch(command, component -> budget.capture(component, feedback))) {
-                    results.add(new CommandResult(
-                            command,
-                            CommandOutcome.DISPATCHED,
-                            snapshot(feedback),
-                            null,
-                            null));
+                    results.add(
+                            new CommandResult(
+                                    command,
+                                    CommandOutcome.DISPATCHED,
+                                    snapshot(feedback),
+                                    null,
+                                    null));
                 } else {
-                    results.add(new CommandResult(
-                            command,
-                            CommandOutcome.NOT_FOUND,
-                            snapshot(feedback),
-                            NOT_FOUND_MESSAGE,
-                            null));
+                    results.add(
+                            new CommandResult(
+                                    command,
+                                    CommandOutcome.NOT_FOUND,
+                                    snapshot(feedback),
+                                    NOT_FOUND_MESSAGE,
+                                    null));
                 }
             } catch (CommandException exception) {
-                String rawMessage = messageOrDefault(
-                        exception,
-                        "Paper command dispatch failed");
-                results.add(new CommandResult(
-                        command,
-                        CommandOutcome.DISPATCH_FAILED,
-                        snapshot(feedback),
-                        actionableMessage(exception, rawMessage),
-                        rawMessage));
+                String rawMessage = messageOrDefault(exception, "Paper command dispatch failed");
+                results.add(
+                        new CommandResult(
+                                command,
+                                CommandOutcome.DISPATCH_FAILED,
+                                snapshot(feedback),
+                                actionableMessage(exception, rawMessage),
+                                rawMessage));
             }
         }
 

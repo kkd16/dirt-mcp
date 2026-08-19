@@ -54,62 +54,77 @@ public final class ApiServer implements AutoCloseable {
     private static final String CALL_ID_HEADER = "X-Dirt-Call-Id";
     private static final String STATUS_ATTRIBUTE = ApiServer.class.getName() + ".status";
     private static final String WORLD_ATTRIBUTE = ApiServer.class.getName() + ".world";
-    private static final Pattern CALL_ID_PATTERN = Pattern.compile(
-            "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}");
+    private static final Pattern CALL_ID_PATTERN =
+            Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}");
     private static final Set<String> BLOCK_STATE_COUNT_FIELDS = Set.of("world", "min", "max");
     private static final Set<String> REGION_BLOCKS_REQUIRED_FIELDS = Set.of("world", "min", "max");
-    private static final Set<String> REGION_BLOCKS_FIELDS = Set.of(
-            "world",
-            "min",
-            "max",
-            "includeBlockStatePatterns",
-            "excludeBlockStatePatterns",
-            "includeAir",
-            "maxResults",
-            "format");
-    private static final Set<String> ORTHOGRAPHIC_VIEW_REQUIRED_FIELDS = Set.of(
-            "world",
-            "origin",
-            "direction",
-            "horizontalRadius",
-            "verticalRadius",
-            "maxDistance");
-    private static final Set<String> ORTHOGRAPHIC_VIEW_FIELDS = Set.of(
-            "world",
-            "origin",
-            "direction",
-            "horizontalRadius",
-            "verticalRadius",
-            "maxDistance",
-            "maxResults");
+    private static final Set<String> REGION_BLOCKS_FIELDS =
+            Set.of(
+                    "world",
+                    "min",
+                    "max",
+                    "includeBlockStatePatterns",
+                    "excludeBlockStatePatterns",
+                    "includeAir",
+                    "maxResults",
+                    "format");
+    private static final Set<String> ORTHOGRAPHIC_VIEW_REQUIRED_FIELDS =
+            Set.of(
+                    "world",
+                    "origin",
+                    "direction",
+                    "horizontalRadius",
+                    "verticalRadius",
+                    "maxDistance");
+    private static final Set<String> ORTHOGRAPHIC_VIEW_FIELDS =
+            Set.of(
+                    "world",
+                    "origin",
+                    "direction",
+                    "horizontalRadius",
+                    "verticalRadius",
+                    "maxDistance",
+                    "maxResults");
     private static final Set<String> REPLACE_REGION_BLOCKS_REQUIRED_FIELDS =
             Set.of("world", "min", "max", "sourceBlockStatePatterns", "destinationPalette");
-    private static final Set<String> REPLACE_REGION_BLOCKS_FIELDS = Set.of(
-            "world", "min", "max", "sourceBlockStatePatterns", "destinationPalette", "seed", "dryRun");
+    private static final Set<String> REPLACE_REGION_BLOCKS_FIELDS =
+            Set.of(
+                    "world",
+                    "min",
+                    "max",
+                    "sourceBlockStatePatterns",
+                    "destinationPalette",
+                    "seed",
+                    "dryRun");
     private static final Set<String> FILL_REGION_REQUIRED_FIELDS =
             Set.of("world", "min", "max", "destinationPalette");
     private static final Set<String> FILL_REGION_FIELDS =
             Set.of("world", "min", "max", "destinationPalette", "seed", "dryRun");
-    private static final Set<String> DESTINATION_PALETTE_ENTRY_REQUIRED_FIELDS = Set.of("blockState");
-    private static final Set<String> DESTINATION_PALETTE_ENTRY_FIELDS = Set.of("blockState", "weight");
+    private static final Set<String> DESTINATION_PALETTE_ENTRY_REQUIRED_FIELDS =
+            Set.of("blockState");
+    private static final Set<String> DESTINATION_PALETTE_ENTRY_FIELDS =
+            Set.of("blockState", "weight");
     private static final Set<String> SET_BLOCKS_REQUIRED_FIELDS = Set.of("world", "changes");
     private static final Set<String> SET_BLOCKS_FIELDS = Set.of("world", "changes", "dryRun");
     private static final Set<String> BLOCK_CHANGE_FIELDS = Set.of("position", "blockState");
     private static final Set<String> UNDO_FIELDS = Set.of("world");
     private static final Set<String> RUN_COMMANDS_FIELDS = Set.of("commands");
     private static final Set<String> POSITION_FIELDS = Set.of("x", "y", "z");
-    private static final Gson GSON = new GsonBuilder()
-            .serializeNulls()
-            .registerTypeAdapter(DestinationPaletteEntry.class, (JsonSerializer<DestinationPaletteEntry>)
-                    (entry, ignoredType, ignoredContext) -> {
-                        JsonObject object = new JsonObject();
-                        object.addProperty("blockState", entry.blockState());
-                        if (entry.weight() != null) {
-                            object.addProperty("weight", entry.weight());
-                        }
-                        return object;
-                    })
-            .create();
+    private static final Gson GSON =
+            new GsonBuilder()
+                    .serializeNulls()
+                    .registerTypeAdapter(
+                            DestinationPaletteEntry.class,
+                            (JsonSerializer<DestinationPaletteEntry>)
+                                    (entry, ignoredType, ignoredContext) -> {
+                                        JsonObject object = new JsonObject();
+                                        object.addProperty("blockState", entry.blockState());
+                                        if (entry.weight() != null) {
+                                            object.addProperty("weight", entry.weight());
+                                        }
+                                        return object;
+                                    })
+                    .create();
 
     private final PluginSettings settings;
     private final BearerAuthentication authentication;
@@ -132,8 +147,8 @@ public final class ApiServer implements AutoCloseable {
             Logger logger) {
         this.settings = settings;
         this.logger = logger;
-        this.authentication = new BearerAuthentication(
-                bearerToken, settings.bridge().minimumTokenBytes());
+        this.authentication =
+                new BearerAuthentication(bearerToken, settings.bridge().minimumTokenBytes());
         this.serverContext = serverContext;
         this.regionInspector = regionInspector;
         this.regionEditor = regionEditor;
@@ -145,9 +160,10 @@ public final class ApiServer implements AutoCloseable {
             throw new IllegalStateException("Dirt MCP bridge is already running");
         }
 
-        HttpServer newServer = HttpServer.create(
-                new InetSocketAddress(LOOPBACK_ADDRESS, this.settings.bridge().port()),
-                this.settings.bridge().backlog());
+        HttpServer newServer =
+                HttpServer.create(
+                        new InetSocketAddress(LOOPBACK_ADDRESS, this.settings.bridge().port()),
+                        this.settings.bridge().backlog());
         ExecutorService newExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
         try {
@@ -156,22 +172,35 @@ public final class ApiServer implements AutoCloseable {
                     exchange -> handleAudited("ping_server", exchange, this::handlePing));
             newServer.createContext(
                     "/v1/server-status",
-                    exchange -> handleAudited("get_server_status", exchange, this::handleGetServerStatus));
+                    exchange ->
+                            handleAudited(
+                                    "get_server_status", exchange, this::handleGetServerStatus));
             newServer.createContext(
                     "/v1/count-region-block-states",
-                    exchange -> handleAudited(
-                            "count_region_block_states", exchange, this::handleCountRegionBlockStates));
+                    exchange ->
+                            handleAudited(
+                                    "count_region_block_states",
+                                    exchange,
+                                    this::handleCountRegionBlockStates));
             newServer.createContext(
                     "/v1/get-region-blocks",
-                    exchange -> handleAudited("get_region_blocks", exchange, this::handleGetRegionBlocks));
+                    exchange ->
+                            handleAudited(
+                                    "get_region_blocks", exchange, this::handleGetRegionBlocks));
             newServer.createContext(
                     "/v1/scan-orthographic-view",
-                    exchange -> handleAudited(
-                            "scan_orthographic_view", exchange, this::handleScanOrthographicView));
+                    exchange ->
+                            handleAudited(
+                                    "scan_orthographic_view",
+                                    exchange,
+                                    this::handleScanOrthographicView));
             newServer.createContext(
                     "/v1/replace-region-blocks",
-                    exchange -> handleAudited(
-                            "replace_region_blocks", exchange, this::handleReplaceRegionBlocks));
+                    exchange ->
+                            handleAudited(
+                                    "replace_region_blocks",
+                                    exchange,
+                                    this::handleReplaceRegionBlocks));
             newServer.createContext(
                     "/v1/fill-region",
                     exchange -> handleAudited("fill_region", exchange, this::handleFillRegion));
@@ -180,12 +209,16 @@ public final class ApiServer implements AutoCloseable {
                     exchange -> handleAudited("set_blocks", exchange, this::handleSetBlocks));
             newServer.createContext(
                     "/v1/undo-last-dirt-edit",
-                    exchange -> handleAudited(
-                            "undo_last_dirt_edit", exchange, this::handleUndoLastDirtEdit));
+                    exchange ->
+                            handleAudited(
+                                    "undo_last_dirt_edit", exchange, this::handleUndoLastDirtEdit));
             newServer.createContext(
                     "/v1/run-minecraft-commands",
-                    exchange -> handleAudited(
-                            "run_minecraft_commands", exchange, this::handleRunMinecraftCommands));
+                    exchange ->
+                            handleAudited(
+                                    "run_minecraft_commands",
+                                    exchange,
+                                    this::handleRunMinecraftCommands));
             newServer.setExecutor(newExecutor);
             newServer.start();
         } catch (RuntimeException exception) {
@@ -269,24 +302,27 @@ public final class ApiServer implements AutoCloseable {
         try {
             handler.handle(exchange);
         } finally {
-            Object status = exchange.getAttribute(STATUS_ATTRIBUTE);
-            Object world = exchange.getAttribute(WORLD_ATTRIBUTE);
-            String callId = exchange.getRequestHeaders().getFirst(CALL_ID_HEADER);
-            StringBuilder message = new StringBuilder("Dirt MCP bridge_call operation=")
-                    .append(operation)
-                    .append(" method=")
-                    .append(exchange.getRequestMethod())
-                    .append(" status=")
-                    .append(status instanceof Integer ? status : "aborted");
-            if (world instanceof String worldName) {
-                message.append(" world=").append(GSON.toJson(worldName));
+            if (this.logger.isLoggable(Level.INFO)) {
+                Object status = exchange.getAttribute(STATUS_ATTRIBUTE);
+                Object world = exchange.getAttribute(WORLD_ATTRIBUTE);
+                String callId = exchange.getRequestHeaders().getFirst(CALL_ID_HEADER);
+                StringBuilder message =
+                        new StringBuilder("Dirt MCP bridge_call operation=")
+                                .append(operation)
+                                .append(" method=")
+                                .append(exchange.getRequestMethod())
+                                .append(" status=")
+                                .append(status instanceof Integer ? status : "aborted");
+                if (world instanceof String worldName) {
+                    message.append(" world=").append(GSON.toJson(worldName));
+                }
+                if (callId != null && CALL_ID_PATTERN.matcher(callId).matches()) {
+                    message.append(" call=").append(callId);
+                }
+                message.append(" duration_ms=")
+                        .append(Math.max(0, (System.nanoTime() - started) / 1_000_000));
+                this.logger.info(message.toString());
             }
-            if (callId != null && CALL_ID_PATTERN.matcher(callId).matches()) {
-                message.append(" call=").append(callId);
-            }
-            message.append(" duration_ms=")
-                    .append(Math.max(0, (System.nanoTime() - started) / 1_000_000));
-            this.logger.info(message.toString());
         }
     }
 
@@ -309,8 +345,13 @@ public final class ApiServer implements AutoCloseable {
         } catch (InspectionException exception) {
             sendInspectionError(exchange, exception);
         } catch (RuntimeException exception) {
-            this.logger.log(Level.SEVERE, "Unexpected count-region-block-states failure", exception);
-            sendError(exchange, 500, "internal_error", "The region's block states could not be counted");
+            this.logger.log(
+                    Level.SEVERE, "Unexpected count-region-block-states failure", exception);
+            sendError(
+                    exchange,
+                    500,
+                    "internal_error",
+                    "The region's block states could not be counted");
         }
     }
 
@@ -358,7 +399,8 @@ public final class ApiServer implements AutoCloseable {
             sendInspectionError(exchange, exception);
         } catch (RuntimeException exception) {
             this.logger.log(Level.SEVERE, "Unexpected scan-orthographic-view failure", exception);
-            sendError(exchange, 500, "internal_error", "The orthographic view could not be scanned");
+            sendError(
+                    exchange, 500, "internal_error", "The orthographic view could not be scanned");
         }
     }
 
@@ -451,9 +493,10 @@ public final class ApiServer implements AutoCloseable {
             sendError(exchange, 400, "invalid_request", exception.getMessage());
         } catch (CommandRunnerException exception) {
             int status = exception.failure() == CommandRunner.Failure.INVALID_REQUEST ? 400 : 503;
-            String code = exception.failure() == CommandRunner.Failure.INVALID_REQUEST
-                    ? "invalid_request"
-                    : "server_unavailable";
+            String code =
+                    exception.failure() == CommandRunner.Failure.INVALID_REQUEST
+                            ? "invalid_request"
+                            : "server_unavailable";
             sendError(exchange, status, code, exception.getMessage());
         } catch (RuntimeException exception) {
             this.logger.log(Level.SEVERE, "Unexpected run-minecraft-commands failure", exception);
@@ -516,9 +559,10 @@ public final class ApiServer implements AutoCloseable {
                     || !REGION_BLOCKS_FIELDS.containsAll(object.keySet())) {
                 throw new InvalidRequestException("Request contains missing or unknown fields");
             }
-            int maxResults = object.has("maxResults")
-                    ? parseInteger(object.get("maxResults"), "maxResults")
-                    : this.settings.limits().defaultInspectionResultLimit();
+            int maxResults =
+                    object.has("maxResults")
+                            ? parseInteger(object.get("maxResults"), "maxResults")
+                            : this.settings.limits().defaultInspectionResultLimit();
             if (maxResults < 1 || maxResults > this.settings.limits().maxInspectionResultLimit()) {
                 throw new InvalidRequestException(
                         "maxResults must be between 1 and "
@@ -544,7 +588,8 @@ public final class ApiServer implements AutoCloseable {
                     maxResults,
                     object.has("format")
                             ? parseRegionBlocksFormat(object.get("format"))
-                            : parseRegionBlocksFormat(this.settings.defaults().regionBlocksFormat()));
+                            : parseRegionBlocksFormat(
+                                    this.settings.defaults().regionBlocksFormat()));
         } catch (JsonParseException | NumberFormatException | ArithmeticException exception) {
             throw new InvalidRequestException("Request body must contain valid JSON values");
         }
@@ -561,9 +606,10 @@ public final class ApiServer implements AutoCloseable {
             int horizontalRadius = parseInteger(object.get("horizontalRadius"), "horizontalRadius");
             int verticalRadius = parseInteger(object.get("verticalRadius"), "verticalRadius");
             int maxDistance = parseInteger(object.get("maxDistance"), "maxDistance");
-            int maxResults = object.has("maxResults")
-                    ? parseInteger(object.get("maxResults"), "maxResults")
-                    : this.settings.limits().defaultInspectionResultLimit();
+            int maxResults =
+                    object.has("maxResults")
+                            ? parseInteger(object.get("maxResults"), "maxResults")
+                            : this.settings.limits().defaultInspectionResultLimit();
             if (horizontalRadius < 0 || verticalRadius < 0) {
                 throw new InvalidRequestException(
                         "horizontalRadius and verticalRadius must be non-negative");
@@ -571,8 +617,7 @@ public final class ApiServer implements AutoCloseable {
             if (maxDistance < 1) {
                 throw new InvalidRequestException("maxDistance must be positive");
             }
-            if (maxResults < 1
-                    || maxResults > this.settings.limits().maxInspectionResultLimit()) {
+            if (maxResults < 1 || maxResults > this.settings.limits().maxInspectionResultLimit()) {
                 throw new InvalidRequestException(
                         "maxResults must be between 1 and "
                                 + this.settings.limits().maxInspectionResultLimit());
@@ -694,9 +739,13 @@ public final class ApiServer implements AutoCloseable {
             }
             JsonObject object = entry.getAsJsonObject();
             requireFields(object, BLOCK_CHANGE_FIELDS, "changes[" + index + "]");
-            changes.add(new BlockChange(
-                    parsePosition(object.get("position"), "changes[" + index + "].position"),
-                    parseString(object.get("blockState"), "changes[" + index + "].blockState")));
+            changes.add(
+                    new BlockChange(
+                            parsePosition(
+                                    object.get("position"), "changes[" + index + "].position"),
+                            parseString(
+                                    object.get("blockState"),
+                                    "changes[" + index + "].blockState")));
         }
         return List.copyOf(changes);
     }
@@ -705,7 +754,11 @@ public final class ApiServer implements AutoCloseable {
             throws IOException, InvalidRequestException {
         String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
         if (contentType == null
-                || !contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT).equals("application/json")) {
+                || !contentType
+                        .split(";", 2)[0]
+                        .trim()
+                        .toLowerCase(Locale.ROOT)
+                        .equals("application/json")) {
             throw new InvalidRequestException("Content-Type must be application/json");
         }
         int maximumRequestBytes = this.settings.limits().maxRequestBytes();
@@ -721,7 +774,8 @@ public final class ApiServer implements AutoCloseable {
         return document.getAsJsonObject();
     }
 
-    private static String parseString(JsonElement element, String name) throws InvalidRequestException {
+    private static String parseString(JsonElement element, String name)
+            throws InvalidRequestException {
         if (!(element instanceof JsonPrimitive primitive)
                 || !primitive.isString()
                 || primitive.getAsString().isBlank()) {
@@ -730,7 +784,8 @@ public final class ApiServer implements AutoCloseable {
         return primitive.getAsString();
     }
 
-    private static boolean parseBoolean(JsonElement element, String name) throws InvalidRequestException {
+    private static boolean parseBoolean(JsonElement element, String name)
+            throws InvalidRequestException {
         if (!(element instanceof JsonPrimitive primitive) || !primitive.isBoolean()) {
             throw new InvalidRequestException(name + " must be a boolean");
         }
@@ -770,7 +825,8 @@ public final class ApiServer implements AutoCloseable {
         for (int index = 0; index < element.getAsJsonArray().size(); index++) {
             JsonElement value = element.getAsJsonArray().get(index);
             if (!value.isJsonObject()) {
-                throw new InvalidRequestException("destinationPalette[" + index + "] must be an object");
+                throw new InvalidRequestException(
+                        "destinationPalette[" + index + "] must be an object");
             }
             JsonObject object = value.getAsJsonObject();
             if (!object.keySet().containsAll(DESTINATION_PALETTE_ENTRY_REQUIRED_FIELDS)
@@ -780,7 +836,9 @@ public final class ApiServer implements AutoCloseable {
             }
             Integer weight = null;
             if (object.has("weight")) {
-                weight = parseInteger(object.get("weight"), "destinationPalette[" + index + "].weight");
+                weight =
+                        parseInteger(
+                                object.get("weight"), "destinationPalette[" + index + "].weight");
                 if (weight < 1 || weight > 100) {
                     throw new InvalidRequestException(
                             "destinationPalette[" + index + "].weight must be between 1 and 100");
@@ -790,9 +848,12 @@ public final class ApiServer implements AutoCloseable {
             } else {
                 hasUnweightedEntries = true;
             }
-            entries.add(new DestinationPaletteEntry(
-                    parseString(object.get("blockState"), "destinationPalette[" + index + "].blockState"),
-                    weight));
+            entries.add(
+                    new DestinationPaletteEntry(
+                            parseString(
+                                    object.get("blockState"),
+                                    "destinationPalette[" + index + "].blockState"),
+                            weight));
         }
         if (hasWeights && hasUnweightedEntries) {
             throw new InvalidRequestException(
@@ -828,8 +889,9 @@ public final class ApiServer implements AutoCloseable {
             case "west" -> OrthographicViewDirection.WEST;
             case "up" -> OrthographicViewDirection.UP;
             case "down" -> OrthographicViewDirection.DOWN;
-            default -> throw new InvalidRequestException(
-                    "direction must be north, east, south, west, up, or down");
+            default ->
+                    throw new InvalidRequestException(
+                            "direction must be north, east, south, west, up, or down");
         };
     }
 
@@ -846,7 +908,8 @@ public final class ApiServer implements AutoCloseable {
                 parseInteger(object.get("z"), name + ".z"));
     }
 
-    private static int parseInteger(JsonElement element, String name) throws InvalidRequestException {
+    private static int parseInteger(JsonElement element, String name)
+            throws InvalidRequestException {
         if (!(element instanceof JsonPrimitive primitive) || !primitive.isNumber()) {
             throw new InvalidRequestException(name + " must be a signed 32-bit integer");
         }
@@ -867,23 +930,27 @@ public final class ApiServer implements AutoCloseable {
     private static void sendInspectionError(HttpExchange exchange, InspectionException exception)
             throws IOException {
         Failure failure = exception.failure();
-        int status = switch (failure) {
-            case INVALID_REQUEST -> 400;
-            case WORLD_NOT_FOUND -> 404;
-            case REGION_TOO_LARGE, RESULT_TOO_LARGE -> 413;
-            case WORLD_UNAVAILABLE -> 503;
-        };
-        sendError(exchange, status, failure.name().toLowerCase(Locale.ROOT), exception.getMessage());
+        int status =
+                switch (failure) {
+                    case INVALID_REQUEST -> 400;
+                    case WORLD_NOT_FOUND -> 404;
+                    case REGION_TOO_LARGE, RESULT_TOO_LARGE -> 413;
+                    case WORLD_UNAVAILABLE -> 503;
+                };
+        sendError(
+                exchange, status, failure.name().toLowerCase(Locale.ROOT), exception.getMessage());
     }
 
-    private static void sendEditError(HttpExchange exchange, EditException exception) throws IOException {
-        int status = switch (exception.failure()) {
-            case INVALID_REQUEST -> 400;
-            case WORLD_NOT_FOUND -> 404;
-            case NOTHING_TO_UNDO, WORLD_BUSY -> 409;
-            case CHANGE_LIMIT_EXCEEDED, REGION_TOO_LARGE -> 413;
-            case WORLD_UNAVAILABLE -> 503;
-        };
+    private static void sendEditError(HttpExchange exchange, EditException exception)
+            throws IOException {
+        int status =
+                switch (exception.failure()) {
+                    case INVALID_REQUEST -> 400;
+                    case WORLD_NOT_FOUND -> 404;
+                    case NOTHING_TO_UNDO, WORLD_BUSY -> 409;
+                    case CHANGE_LIMIT_EXCEEDED, REGION_TOO_LARGE -> 413;
+                    case WORLD_UNAVAILABLE -> 503;
+                };
         sendError(
                 exchange,
                 status,
@@ -891,19 +958,21 @@ public final class ApiServer implements AutoCloseable {
                 exception.getMessage());
     }
 
-    private static void sendError(HttpExchange exchange, int statusCode, String code, String message)
-            throws IOException {
+    private static void sendError(
+            HttpExchange exchange, int statusCode, String code, String message) throws IOException {
         send(exchange, statusCode, GSON.toJson(new ErrorEnvelope(new ErrorDetail(code, message))));
     }
 
-    private static void send(HttpExchange exchange, int statusCode, String body) throws IOException {
+    private static void send(HttpExchange exchange, int statusCode, String body)
+            throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.setAttribute(STATUS_ATTRIBUTE, statusCode);
         exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
         exchange.getResponseHeaders().set("Cache-Control", "no-store");
         exchange.sendResponseHeaders(statusCode, bytes.length);
 
-        try (exchange; var output = exchange.getResponseBody()) {
+        try (exchange;
+                var output = exchange.getResponseBody()) {
             output.write(bytes);
         }
     }
@@ -913,8 +982,7 @@ public final class ApiServer implements AutoCloseable {
     private record ErrorDetail(String code, String message) {}
 
     private static final class InvalidRequestException extends Exception {
-        @Serial
-        private static final long serialVersionUID = 1L;
+        @Serial private static final long serialVersionUID = 1L;
 
         private InvalidRequestException(String message) {
             super(message);

@@ -474,6 +474,12 @@ paths:
                 $ref: '#/components/schemas/Error'
 components:
   responses:
+    InternalError:
+      description: Unexpected internal failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
     Unauthorized:
       description: Missing or invalid bearer token
       headers:

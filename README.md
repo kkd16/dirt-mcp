@@ -21,7 +21,8 @@ Dirt MCP tracks the latest stable Paper release only. The current baseline is:
 - Node.js 24 LTS or newer.
 
 Older Paper or Minecraft versions are not supported.
-Source development also requires GNU Make, curl, and tmux.
+Source development also requires GNU Make, curl, tmux, ShellCheck 0.11 or newer,
+and actionlint 1.7.12 or newer.
 
 ## Installation from source
 
@@ -184,10 +185,11 @@ Useful commands:
 
 ```text
 make verify    Run the complete incremental local gate, including live smoke coverage
-make check     Run the incremental offline Java and MCP test suite
+make check     Run all offline builds, tests, lint, formatting, and validation
 make smoke     Restart Paper and run live integration and lifecycle validation
-make ci        Run the clean offline gate used by GitHub Actions
+make ci        Run the clean complete gate used by GitHub Actions, including smoke
 make build     Build the Paper plugin and MCP server
+make format    Apply the repository's Java, TypeScript, and configuration formatters
 make reload    Incrementally rebuild and gracefully restart Paper
 make up        Start or reuse the managed Paper server
 make down      Stop the managed Paper server cleanly
@@ -205,10 +207,11 @@ the canonical disposable development world: reuse and mutate it freely instead
 of creating temporary Paper servers. Normal builds, reloads, and cleans preserve
 the world.
 
-`make verify` is the standard pre-handoff gate. It runs cached offline checks,
-validates the built Paper JAR, restarts the managed server, runs live bridge,
-Paper, and FAWE coverage, and rejects serious lifecycle log failures. The live
-suite temporarily force-loads chunk `0,0`, verifies status and inspection paths,
+`make verify` is the standard pre-handoff gate. It runs all Java, TypeScript,
+Node, MCP, contract, configuration, package, and formatting checks, validates
+the built Paper JAR, restarts the managed server, runs live bridge, Paper, and
+FAWE coverage, and rejects serious lifecycle log failures. The live suite
+temporarily force-loads chunk `0,0`, verifies status and inspection paths,
 mutates a bounded fixture through fill, replacement, sparse setting, and command
 dispatch, checks result caps, exact states, no-ops, and undo, then restores the
 prior world state. Run it without concurrent Dirt MCP edits.
@@ -225,9 +228,10 @@ Before handing off a local change:
 make verify
 ```
 
-GitHub Actions runs `make ci` separately from a clean dependency and build state.
-Use the focused `make check` and `make smoke` targets during iteration when the
-complete gate is unnecessary.
+GitHub Actions runs `make ci` from a clean dependency and build state, including
+the same managed Paper smoke suite. It retains no dependency cache or uploaded
+artifacts. Use focused native checks during iteration when the complete gate is
+unnecessary.
 
 Read [`AGENTS.md`](AGENTS.md) for repository engineering rules and
 [`docs/`](docs/README.md) for the v1 product design.

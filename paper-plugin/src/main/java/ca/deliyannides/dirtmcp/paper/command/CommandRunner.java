@@ -4,15 +4,14 @@ import com.google.gson.annotations.SerializedName;
 import java.io.Serial;
 import java.util.List;
 
+@FunctionalInterface
 public interface CommandRunner {
     RunCommandsResult runCommands(RunCommandsRequest request) throws CommandRunnerException;
 
     record RunCommandsRequest(List<String> commands) {}
 
     record RunCommandsResult(
-            Sender sender,
-            boolean feedbackTruncated,
-            List<CommandResult> results) {}
+            Sender sender, boolean feedbackTruncated, List<CommandResult> results) {}
 
     record Sender(String name, boolean isOperator, boolean isPlayer) {}
 
@@ -38,8 +37,7 @@ public interface CommandRunner {
     }
 
     final class CommandRunnerException extends Exception {
-        @Serial
-        private static final long serialVersionUID = 1L;
+        @Serial private static final long serialVersionUID = 1L;
 
         private final Failure failure;
 

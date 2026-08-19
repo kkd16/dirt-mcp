@@ -24,6 +24,12 @@ interface ToolModule {
   registerTools(server: McpServer, config: BridgeConfig, registrations: RegisteredTool[]): void;
 }
 
+function isToolModule(value: unknown): value is ToolModule {
+  return (
+    typeof value === 'object' && value !== null && 'registerTools' in value && typeof value.registerTools === 'function'
+  );
+}
+
 function bridgeConfig(): BridgeConfig {
   const token = process.env.DIRT_MCP_BRIDGE_TOKEN;
   if (token === undefined || token.length === 0) {
@@ -39,20 +45,13 @@ function bridgeConfig(): BridgeConfig {
 
 async function loadToolModule(version: number): Promise<ToolModule> {
   const loaded: unknown = await import(`${TOOL_MODULE_URL.href}?version=${version}`);
-  if (typeof loaded !== 'object'
-      || loaded === null
-      || !('registerTools' in loaded)
-      || typeof loaded.registerTools !== 'function') {
+  if (!isToolModule(loaded)) {
     throw new Error('Tool module must export registerTools');
   }
-  return loaded as ToolModule;
+  return loaded;
 }
 
-function installTools(
-  server: McpServer,
-  config: BridgeConfig,
-  module: ToolModule,
-): RegisteredTool[] {
+function installTools(server: McpServer, config: BridgeConfig, module: ToolModule): RegisteredTool[] {
   const registrations: RegisteredTool[] = [];
   try {
     module.registerTools(server, config, registrations);
@@ -67,10 +66,7 @@ function installTools(
 
 async function createServer(): Promise<McpServer> {
   const config = bridgeConfig();
-  const server = new McpServer(
-    { name: 'dirt-mcp', version: '0.1.0' },
-    { instructions: SERVER_INSTRUCTIONS },
-  );
+  const server = new McpServer({ name: 'dirt-mcp', version: '0.1.0' }, { instructions: SERVER_INSTRUCTIONS });
   let activeModule = await loadToolModule(0);
   let activeTools = installTools(server, config, activeModule);
 
@@ -98,9 +94,12 @@ async function createServer(): Promise<McpServer> {
         } catch (error: unknown) {
           console.error('Could not reload Dirt MCP tools:', error);
         }
+        return undefined;
       });
     });
     watcher.unref();
+    // MCP's Protocol API exposes an onclose callback property, not EventTarget methods.
+    // oxlint-disable-next-line unicorn/prefer-add-event-listener
     server.server.onclose = () => unwatchFile(TOOL_MODULE_URL);
   }
 

@@ -1,0 +1,6 @@
+apis:
+  dirt@v1:
+    root: protocol/openapi.yaml
+
+extends:
+  - recommended-strict

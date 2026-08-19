@@ -5,11 +5,13 @@ import java.util.List;
 import java.util.Map;
 
 public interface RegionInspector {
-    BlockStateCountResult countRegionBlockStates(BlockStateCountRequest request) throws InspectionException;
+    BlockStateCountResult countRegionBlockStates(BlockStateCountRequest request)
+            throws InspectionException;
 
     RegionBlocksResult getRegionBlocks(RegionBlocksRequest request) throws InspectionException;
 
-    OrthographicViewResult scanOrthographicView(OrthographicViewRequest request) throws InspectionException;
+    OrthographicViewResult scanOrthographicView(OrthographicViewRequest request)
+            throws InspectionException;
 
     record BlockPosition(int x, int y, int z) {}
 
@@ -63,7 +65,8 @@ public interface RegionInspector {
             long volume,
             long matchedBlockCount,
             String format,
-            List<InspectedBlock> blocks) implements RegionBlocksResult {}
+            List<InspectedBlock> blocks)
+            implements RegionBlocksResult {}
 
     record RegionBlockRunsResult(
             String world,
@@ -71,7 +74,8 @@ public interface RegionInspector {
             long volume,
             long matchedBlockCount,
             String format,
-            List<BlockRun> runs) implements RegionBlocksResult {}
+            List<BlockRun> runs)
+            implements RegionBlocksResult {}
 
     enum OrthographicViewDirection {
         NORTH,
@@ -122,8 +126,7 @@ public interface RegionInspector {
     }
 
     final class InspectionException extends Exception {
-        @Serial
-        private static final long serialVersionUID = 1L;
+        @Serial private static final long serialVersionUID = 1L;
 
         private final Failure failure;
 

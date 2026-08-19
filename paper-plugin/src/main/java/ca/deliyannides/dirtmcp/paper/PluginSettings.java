@@ -4,10 +4,7 @@ import java.util.Locale;
 import java.util.Set;
 import org.bukkit.configuration.file.FileConfiguration;
 
-public record PluginSettings(
-        Bridge bridge,
-        Limits limits,
-        Defaults defaults) {
+public record PluginSettings(Bridge bridge, Limits limits, Defaults defaults) {
     private static final Set<String> REGION_BLOCKS_FORMATS = Set.of("blocks", "runs");
 
     public static PluginSettings load(FileConfiguration config, String portOverride) {
@@ -23,20 +20,18 @@ public record PluginSettings(
                     "limits.max-request-bytes must be less than " + Integer.MAX_VALUE);
         }
 
-        Bridge bridge = new Bridge(
-                port,
-                nonNegativeInteger(config, "bridge.backlog"),
-                nonNegativeInteger(config, "bridge.shutdown-delay-seconds"),
-                positiveInteger(config, "bridge.minimum-token-bytes"));
+        Bridge bridge =
+                new Bridge(
+                        port,
+                        nonNegativeInteger(config, "bridge.backlog"),
+                        nonNegativeInteger(config, "bridge.shutdown-delay-seconds"),
+                        positiveInteger(config, "bridge.minimum-token-bytes"));
 
         int maximumRegionVolume = positiveInteger(config, "limits.max-region-volume");
         int maximumChangedBlocks = positiveInteger(config, "limits.max-changed-blocks");
-        int maximumInspectionVolume = positiveInteger(
-                config, "limits.max-inspection-volume");
-        int maximumInspectionResults = positiveInteger(
-                config, "limits.max-inspection-results");
-        int defaultInspectionResults = positiveInteger(
-                config, "limits.default-inspection-results");
+        int maximumInspectionVolume = positiveInteger(config, "limits.max-inspection-volume");
+        int maximumInspectionResults = positiveInteger(config, "limits.max-inspection-results");
+        int defaultInspectionResults = positiveInteger(config, "limits.default-inspection-results");
         requireAtMost(
                 "limits.max-changed-blocks",
                 maximumChangedBlocks,
@@ -58,27 +53,29 @@ public record PluginSettings(
                 "limits.max-inspection-volume",
                 maximumInspectionVolume);
 
-        Limits limits = new Limits(
-                maximumRequestBytes,
-                maximumRegionVolume,
-                maximumChangedBlocks,
-                maximumInspectionVolume,
-                defaultInspectionResults,
-                maximumInspectionResults,
-                positiveInteger(config, "limits.max-commands-per-request"),
-                positiveInteger(config, "limits.max-command-feedback-characters"),
-                nonNegativeInteger(config, "limits.undo-history-per-world"));
+        Limits limits =
+                new Limits(
+                        maximumRequestBytes,
+                        maximumRegionVolume,
+                        maximumChangedBlocks,
+                        maximumInspectionVolume,
+                        defaultInspectionResults,
+                        maximumInspectionResults,
+                        positiveInteger(config, "limits.max-commands-per-request"),
+                        positiveInteger(config, "limits.max-command-feedback-characters"),
+                        nonNegativeInteger(config, "limits.undo-history-per-world"));
 
-        String regionBlocksFormat = requiredString(config, "defaults.region-blocks-format")
-                .toLowerCase(Locale.ROOT);
+        String regionBlocksFormat =
+                requiredString(config, "defaults.region-blocks-format").toLowerCase(Locale.ROOT);
         if (!REGION_BLOCKS_FORMATS.contains(regionBlocksFormat)) {
             throw new IllegalArgumentException(
                     "defaults.region-blocks-format must be blocks or runs");
         }
-        Defaults defaults = new Defaults(
-                requiredBoolean(config, "defaults.region-blocks-include-air"),
-                regionBlocksFormat,
-                requiredBoolean(config, "defaults.edit-dry-run"));
+        Defaults defaults =
+                new Defaults(
+                        requiredBoolean(config, "defaults.region-blocks-include-air"),
+                        regionBlocksFormat,
+                        requiredBoolean(config, "defaults.edit-dry-run"));
 
         return new PluginSettings(bridge, limits, defaults);
     }
@@ -141,21 +138,13 @@ public record PluginSettings(
         return value;
     }
 
-    private static void requireAtMost(
-            String lowerPath,
-            int lower,
-            String upperPath,
-            int upper) {
+    private static void requireAtMost(String lowerPath, int lower, String upperPath, int upper) {
         if (lower > upper) {
             throw new IllegalArgumentException(lowerPath + " must not exceed " + upperPath);
         }
     }
 
-    public record Bridge(
-            int port,
-            int backlog,
-            int shutdownDelaySeconds,
-            int minimumTokenBytes) {}
+    public record Bridge(int port, int backlog, int shutdownDelaySeconds, int minimumTokenBytes) {}
 
     public record Limits(
             int maxRequestBytes,
@@ -169,7 +158,5 @@ public record PluginSettings(
             int undoHistoryPerWorld) {}
 
     public record Defaults(
-            boolean regionBlocksIncludeAir,
-            String regionBlocksFormat,
-            boolean editDryRun) {}
+            boolean regionBlocksIncludeAir, String regionBlocksFormat, boolean editDryRun) {}
 }

@@ -8,13 +8,13 @@ import { fileURLToPath } from 'node:url';
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 const runDirectory = `${repositoryRoot}/paper-plugin/run`;
 const token = (await readFile(`${runDirectory}/.dirt-mcp-token`, 'utf8')).trim();
-const state = Object.fromEntries(
+const runtimeState = Object.fromEntries(
   (await readFile(`${runDirectory}/.dirt-mcp-dev-state`, 'utf8'))
     .trim()
     .split('\n')
     .map((line) => line.split('=', 2)),
 );
-const bridgePort = Number(state.BRIDGE_PORT);
+const bridgePort = Number(runtimeState.BRIDGE_PORT);
 assert.ok(Number.isInteger(bridgePort) && bridgePort > 0 && bridgePort <= 65_535, 'Invalid bridge port');
 
 const world = 'world';
@@ -61,7 +61,9 @@ async function bridgeRequest(path, body) {
 
 async function paperCommand(command) {
   await new Promise((resolve, reject) => {
-    const child = spawn(`${repositoryRoot}/scripts/dev-paper`, ['command', command], { stdio: 'inherit' });
+    const child = spawn(`${repositoryRoot}/scripts/dev-paper`, ['command', command], {
+      stdio: 'inherit',
+    });
     child.once('error', reject);
     child.once('exit', (code) => {
       if (code === 0) {
@@ -75,9 +77,9 @@ async function paperCommand(command) {
 
 async function bridgeSetBlocks(blocks) {
   const result = await bridgeRequest('/v1/run-minecraft-commands', {
-    commands: blocks.map(({ position, blockState }) => (
-      `setblock ${position.x} ${position.y} ${position.z} ${blockState} replace`
-    )),
+    commands: blocks.map(
+      ({ position, blockState }) => `setblock ${position.x} ${position.y} ${position.z} ${blockState} replace`,
+    ),
   });
   assert.ok(result.results.every(({ outcome }) => outcome === 'dispatched'));
 }
@@ -86,9 +88,12 @@ async function waitForRegion(region) {
   let lastError;
   for (let attempt = 0; attempt < 20; attempt += 1) {
     try {
+      // Readiness retries must be serial so each attempt observes the latest server state.
+      // oxlint-disable-next-line eslint/no-await-in-loop
       return await bridgeRequest('/v1/count-region-block-states', region);
     } catch (error) {
       lastError = error;
+      // oxlint-disable-next-line eslint/no-await-in-loop
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
@@ -102,7 +107,7 @@ function normalizedJson(value) {
   if (value !== null && typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
+        .toSorted(([left], [right]) => left.localeCompare(right))
         .map(([key, entry]) => [key, normalizedJson(entry)]),
     );
   }
@@ -110,21 +115,19 @@ function normalizedJson(value) {
 }
 
 function sortedBlockKeys(blocks) {
-  return blocks
-    .map(({ position, blockState }) => `${position.x},${position.y},${position.z}:${blockState}`)
-    .sort();
+  return blocks.map(({ position, blockState }) => `${position.x},${position.y},${position.z}:${blockState}`).toSorted();
 }
 
-function expectedBlockKeys(state) {
+function expectedBlockKeys(blockState) {
   const blocks = [];
   for (let y = min.y; y <= max.y; y += 1) {
     for (let z = min.z; z <= max.z; z += 1) {
       for (let x = min.x; x <= max.x; x += 1) {
-        blocks.push(`${x},${y},${z}:${state}`);
+        blocks.push(`${x},${y},${z}:${blockState}`);
       }
     }
   }
-  return blocks.sort();
+  return blocks.toSorted();
 }
 
 function expandedRunKeys(runs) {
@@ -141,15 +144,15 @@ function expandedRunKeys(runs) {
       }
     }
   }
-  return blocks.sort();
+  return blocks.toSorted();
 }
 
-function assertExactBlocks(inspection, state) {
+function assertExactBlocks(inspection, blockState) {
   assert.equal(inspection.format, 'blocks');
   assert.equal(inspection.volume, 8);
   assert.equal(inspection.matchedBlockCount, 8);
   assert.deepEqual(inspection.bounds, { min, max });
-  assert.deepEqual(sortedBlockKeys(inspection.blocks), expectedBlockKeys(state));
+  assert.deepEqual(sortedBlockKeys(inspection.blocks), expectedBlockKeys(blockState));
 }
 
 const region = { world, min, max };
@@ -170,10 +173,7 @@ try {
   assert.ok(serverStatus.worlds.some((entry) => entry.name === world));
   assert.ok(serverStatus.limits.maxRequestBytes > 0);
   assert.ok(serverStatus.limits.maxRegionVolume > 0);
-  assert.ok(
-    serverStatus.limits.defaultInspectionResultLimit
-      <= serverStatus.limits.maxInspectionResultLimit,
-  );
+  assert.ok(serverStatus.limits.defaultInspectionResultLimit <= serverStatus.limits.maxInspectionResultLimit);
   assert.ok(serverStatus.limits.maxCommandsPerRequest > 0);
   assert.ok(serverStatus.limits.maxCommandFeedbackCharacters > 0);
 
@@ -200,7 +200,10 @@ try {
     isPlayer: false,
   });
   assert.equal(commandRun.feedbackTruncated, false);
-  assert.deepEqual(commandRun.results.map(({ outcome }) => outcome), ['dispatched', 'dispatched']);
+  assert.deepEqual(
+    commandRun.results.map(({ outcome }) => outcome),
+    ['dispatched', 'dispatched'],
+  );
   assert.ok(commandRun.results.every(({ feedback }) => feedback.length > 0));
   const afterCommandRun = await bridgeRequest('/v1/get-region-blocks', {
     world,
@@ -254,10 +257,12 @@ try {
   assert.ok(invalidSyntaxRun.results[0].rawMessage.length > 0);
   assert.notEqual(invalidSyntaxRun.results[0].message, invalidSyntaxRun.results[0].rawMessage);
 
-  await bridgeSetBlocks([{
-    position: commandPosition,
-    blockState: originalCommandFixture.blocks[0].blockState,
-  }]);
+  await bridgeSetBlocks([
+    {
+      position: commandPosition,
+      blockState: originalCommandFixture.blocks[0].blockState,
+    },
+  ]);
   originalCommandFixture = undefined;
 
   originalSparseFixture = await bridgeRequest('/v1/get-region-blocks', {
@@ -267,20 +272,20 @@ try {
     includeAir: true,
   });
   assert.equal(originalSparseFixture.matchedBlockCount, 2);
-  const originalSparseStates = new Map(originalSparseFixture.blocks.map((block) => [
-    `${block.position.x},${block.position.y},${block.position.z}`,
-    block.blockState,
-  ]));
+  const originalSparseStates = new Map(
+    originalSparseFixture.blocks.map((block) => [
+      `${block.position.x},${block.position.y},${block.position.z}`,
+      block.blockState,
+    ]),
+  );
   const firstOriginalState = originalSparseStates.get('5,0,0');
   const secondOriginalState = originalSparseStates.get('6,0,0');
   assert.ok(firstOriginalState);
   assert.ok(secondOriginalState);
-  const firstSparseState = firstOriginalState === 'minecraft:diamond_block'
-    ? 'minecraft:gold_block'
-    : 'minecraft:diamond_block';
-  const secondSparseState = secondOriginalState === 'minecraft:emerald_block'
-    ? 'minecraft:redstone_block'
-    : 'minecraft:emerald_block';
+  const firstSparseState =
+    firstOriginalState === 'minecraft:diamond_block' ? 'minecraft:gold_block' : 'minecraft:diamond_block';
+  const secondSparseState =
+    secondOriginalState === 'minecraft:emerald_block' ? 'minecraft:redstone_block' : 'minecraft:emerald_block';
 
   const sparsePreview = await bridgeRequest('/v1/set-blocks', {
     world,
@@ -323,10 +328,7 @@ try {
     max: sparsePosition,
     includeAir: true,
   });
-  assert.deepEqual(
-    sortedBlockKeys(afterInvalidSparse.blocks),
-    sortedBlockKeys(originalSparseFixture.blocks),
-  );
+  assert.deepEqual(sortedBlockKeys(afterInvalidSparse.blocks), sortedBlockKeys(originalSparseFixture.blocks));
 
   const sparseSet = await bridgeRequest('/v1/set-blocks', {
     world,
@@ -348,13 +350,7 @@ try {
     min: commandPosition,
     max: sparsePosition,
   });
-  assert.deepEqual(
-    sortedBlockKeys(afterSparseSet.blocks),
-    [
-      `5,0,0:${firstSparseState}`,
-      `6,0,0:${secondSparseState}`,
-    ],
-  );
+  assert.deepEqual(sortedBlockKeys(afterSparseSet.blocks), [`5,0,0:${firstSparseState}`, `6,0,0:${secondSparseState}`]);
   const sparseUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
   editsToUndo -= 1;
   assert.equal(sparseUndone.changedBlockCount, 2);
@@ -364,16 +360,14 @@ try {
     max: sparsePosition,
     includeAir: true,
   });
-  assert.deepEqual(
-    sortedBlockKeys(afterSparseUndo.blocks),
-    sortedBlockKeys(originalSparseFixture.blocks),
-  );
+  assert.deepEqual(sortedBlockKeys(afterSparseUndo.blocks), sortedBlockKeys(originalSparseFixture.blocks));
   originalSparseFixture = undefined;
 
   const originalStates = Object.keys(original.blockStateCounts);
-  const fillBlockState = originalStates.length === 1 && originalStates[0].startsWith('minecraft:barrier')
-    ? 'minecraft:amethyst_block'
-    : 'minecraft:barrier';
+  const fillBlockState =
+    originalStates.length === 1 && originalStates[0].startsWith('minecraft:barrier')
+      ? 'minecraft:amethyst_block'
+      : 'minecraft:barrier';
 
   const preview = await bridgeRequest('/v1/fill-region', {
     ...region,
@@ -432,11 +426,13 @@ try {
   });
   assert.equal(view.scannedVolume, 2);
   assert.equal(view.visibleBlockCount, 1);
-  assert.deepEqual(view.blocks, [{
-    position: { x: 0, y: 0, z: 1 },
-    offset: { horizontal: 0, vertical: 0, distance: 1 },
-    blockState: filledState,
-  }]);
+  assert.deepEqual(view.blocks, [
+    {
+      position: { x: 0, y: 0, z: 1 },
+      offset: { horizontal: 0, vertical: 0, distance: 1 },
+      blockState: filledState,
+    },
+  ]);
 
   const limitedView = await bridgeResponse('/v1/scan-orthographic-view', {
     ...viewRequest,
@@ -499,10 +495,7 @@ try {
   assert.equal(replaced.dryRun, false);
   assert.equal(replaced.matchedBlockCount, replacePreview.matchedBlockCount);
   assert.equal(replaced.changedBlockCount, replacePreview.changedBlockCount);
-  assertExactBlocks(
-    await bridgeRequest('/v1/get-region-blocks', region),
-    replaced.destinationPalette[0].blockState,
-  );
+  assertExactBlocks(await bridgeRequest('/v1/get-region-blocks', region), replaced.destinationPalette[0].blockState);
 
   const replacementUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
   editsToUndo -= 1;
@@ -562,9 +555,11 @@ try {
     includeBlockStatePatterns: ['minecraft:gold_block', 'minecraft:diamond_block'],
   });
   assert.equal(exactStateBlocks.matchedBlockCount, 3);
-  assert.ok(exactStateBlocks.blocks.every(({ blockState }) => (
-    blockState === 'minecraft:gold_block' || blockState === 'minecraft:diamond_block'
-  )));
+  assert.ok(
+    exactStateBlocks.blocks.every(
+      ({ blockState }) => blockState === 'minecraft:gold_block' || blockState === 'minecraft:diamond_block',
+    ),
+  );
   const firstSeededLayout = sortedBlockKeys(exactStateBlocks.blocks);
 
   const exactStateReplacementUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
@@ -614,10 +609,9 @@ try {
     min: stairMin,
     max: stairMin,
   });
-  assert.deepEqual(
-    sortedBlockKeys(propertyFillBlocks.blocks),
-    [`${stairMin.x},${stairMin.y},${stairMin.z}:${southStairs}`],
-  );
+  assert.deepEqual(sortedBlockKeys(propertyFillBlocks.blocks), [
+    `${stairMin.x},${stairMin.y},${stairMin.z}:${southStairs}`,
+  ]);
 
   const propertyFillUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
   editsToUndo -= 1;
@@ -630,6 +624,8 @@ try {
   if (editsToUndo > 0) {
     try {
       while (editsToUndo > 0) {
+        // Undo is deliberately serial because every request consumes the previous history entry.
+        // oxlint-disable-next-line eslint/no-await-in-loop
         await bridgeRequest('/v1/undo-last-dirt-edit', { world });
         editsToUndo -= 1;
       }
@@ -646,10 +642,12 @@ try {
   }
   if (originalCommandFixture) {
     try {
-      await bridgeSetBlocks([{
-        position: commandPosition,
-        blockState: originalCommandFixture.blocks[0].blockState,
-      }]);
+      await bridgeSetBlocks([
+        {
+          position: commandPosition,
+          blockState: originalCommandFixture.blocks[0].blockState,
+        },
+      ]);
     } catch (error) {
       process.stderr.write(`Could not restore command fixture: ${error.message}\n`);
     }

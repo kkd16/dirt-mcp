@@ -1,7 +1,12 @@
+import com.github.spotbugs.snom.Confidence
+import com.github.spotbugs.snom.Effort
 import org.gradle.api.tasks.bundling.AbstractArchiveTask
 
 plugins {
     java
+    pmd
+    id("com.diffplug.spotless")
+    id("com.github.spotbugs")
     id("xyz.jpenilla.run-paper") version "3.1.0"
 }
 
@@ -45,6 +50,31 @@ java {
     toolchain.languageVersion = JavaLanguageVersion.of(25)
 }
 
+spotless {
+    java {
+        googleJavaFormat("1.36.1").aosp()
+        formatAnnotations()
+    }
+}
+
+pmd {
+    toolVersion = "7.26.0"
+    isConsoleOutput = true
+    rulesMinimumPriority = 2
+    ruleSets =
+        listOf(
+            "category/java/errorprone.xml",
+            "category/java/bestpractices.xml",
+        )
+}
+
+spotbugs {
+    toolVersion = "4.10.3"
+    effort = Effort.MAX
+    reportLevel = Confidence.HIGH
+    ignoreFailures = false
+}
+
 tasks {
     compileJava {
         options.encoding = "UTF-8"
@@ -53,10 +83,11 @@ tasks {
     }
 
     processResources {
-        val properties = mapOf(
-            "version" to project.version,
-            "paperVersion" to paperVersion,
-        )
+        val properties =
+            mapOf(
+                "version" to project.version,
+                "paperVersion" to paperVersion,
+            )
         inputs.properties(properties)
         filteringCharset = "UTF-8"
 
@@ -86,7 +117,12 @@ tasks {
         args("--host", "0.0.0.0", "--port", devServerPort.get())
         jvmArgs("-Djava.net.preferIPv4Stack=true")
 
-        if (providers.environmentVariable("PAPER_EULA").map(String::toBoolean).orElse(false).get()) {
+        if (providers
+                .environmentVariable("PAPER_EULA")
+                .map(String::toBoolean)
+                .orElse(false)
+                .get()
+        ) {
             jvmArgs("-Dcom.mojang.eula.agree=true")
         }
     }

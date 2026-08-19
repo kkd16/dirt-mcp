@@ -7,28 +7,38 @@ BRIDGE_PORT ?= 8765
 DEV_TOKEN_FILE := paper-plugin/run/.dirt-mcp-token
 NODE_INSTALL_MARKER := node_modules/.package-lock.json
 
-.PHONY: help doctor install node-deps build build-java build-mcp dev-build paper-runtime check verify ci dev-token up reload down status logs console command smoke mcp health clean
+.PHONY: help doctor install node-deps build build-java build-mcp dev-build paper-runtime check verify ci format dev-token up reload down status logs console command smoke mcp health clean
 
 help: ## Show the available development commands.
 	@awk 'BEGIN { FS = ":.*## "; printf "Dirt MCP development commands:\n\n" } /^[a-zA-Z_-]+:.*## / { printf "  %-14s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 	@printf '\nOverrides: MC_PORT=%s BRIDGE_PORT=%s\n' "$(MC_PORT)" "$(BRIDGE_PORT)"
 
-doctor: ## Verify the required Java, Node.js, npm, Gradle, curl, and tmux tools.
+doctor: ## Verify the required Java, Node.js, npm, Gradle, curl, tmux, and lint tools.
 	@command -v java >/dev/null || { printf 'Java 25 is required.\n' >&2; exit 1; }
 	@command -v jar >/dev/null || { printf 'The Java 25 JDK jar tool is required.\n' >&2; exit 1; }
 	@command -v node >/dev/null || { printf 'Node.js 24 LTS or newer is required.\n' >&2; exit 1; }
 	@command -v npm >/dev/null || { printf 'npm is required.\n' >&2; exit 1; }
 	@command -v curl >/dev/null || { printf 'curl is required.\n' >&2; exit 1; }
 	@command -v tmux >/dev/null || { printf 'tmux is required for the managed development server.\n' >&2; exit 1; }
+	@command -v shellcheck >/dev/null || { printf 'ShellCheck 0.11.0 or newer is required.\n' >&2; exit 1; }
+	@command -v actionlint >/dev/null || { printf 'actionlint 1.7.12 or newer is required.\n' >&2; exit 1; }
 	@if ! ./gradlew -q javaToolchains | grep -Eq 'Language Version:[[:space:]]+25'; then \
 	  printf 'Gradle could not resolve the Java 25 toolchain required by Paper 26.2.\n' >&2; exit 1; fi
 	@node_major="$$(node -p "process.versions.node.split('.')[0]")"; \
 	  if (( node_major < 24 )); then printf 'Expected Node.js 24 or newer, found Node.js %s.\n' "$$(node --version)" >&2; exit 1; fi
+	@shellcheck_version="$$(shellcheck --version | awk '/^version:/ { print $$2 }')"; \
+	  if [[ "$$(printf '%s\n%s\n' 0.11.0 "$$shellcheck_version" | sort -V | head -n 1)" != 0.11.0 ]]; then \
+	    printf 'Expected ShellCheck 0.11.0 or newer, found %s.\n' "$$shellcheck_version" >&2; exit 1; fi
+	@actionlint_version="$$(actionlint -version | awk 'NR == 1 { print $$1 }')"; \
+	  if [[ "$$(printf '%s\n%s\n' 1.7.12 "$$actionlint_version" | sort -V | head -n 1)" != 1.7.12 ]]; then \
+	    printf 'Expected actionlint 1.7.12 or newer, found %s.\n' "$$actionlint_version" >&2; exit 1; fi
 	@printf 'Java launcher: '; java -version 2>&1 | head -n 1
 	@printf 'Paper toolchain: Java 25\n'
 	@printf 'Node.js: %s\n' "$$(node --version)"
 	@printf 'npm: %s\n' "$$(npm --version)"
 	@printf 'Gradle: '; ./gradlew --version | awk '/^Gradle / { print $$2; exit }'
+	@printf 'ShellCheck: %s\n' "$$(shellcheck --version | awk '/^version:/ { print $$2 }')"
+	@printf 'actionlint: %s\n' "$$(actionlint -version | awk 'NR == 1 { print $$1 }')"
 
 install: doctor ## Install the locked Node.js dependencies.
 	npm ci
@@ -56,23 +66,23 @@ paper-runtime:
 	./gradlew :paper-plugin:jar
 	@scripts/validate-paper-jar
 
-check: node-deps ## Run the incremental offline Java and MCP test suite.
-	./gradlew check
+check: node-deps ## Run every offline build, test, lint, format, and validation gate.
+	./gradlew build
+	@scripts/validate-paper-jar
 	npm run check
-	npm run build
-	npm test
 
 verify: ## Run the complete incremental local gate, including managed Paper smoke coverage.
 	@$(MAKE) --no-print-directory check
 	@$(MAKE) --no-print-directory smoke
 
-ci: ## Run the clean offline gate used by continuous integration.
+ci: doctor ## Run the clean complete gate used by continuous integration.
 	npm ci
-	./gradlew --no-daemon clean build
-	@scripts/validate-paper-jar
-	npm run check
-	npm run build
-	npm test
+	@$(MAKE) --no-print-directory clean
+	@$(MAKE) --no-print-directory verify
+
+format: node-deps ## Apply the repository's Java, TypeScript, and configuration formatters.
+	./gradlew spotlessApply
+	npm run format
 
 dev-token: ## Create the ignored bearer token used by local development.
 	@mkdir -p "$(dir $(DEV_TOKEN_FILE))"

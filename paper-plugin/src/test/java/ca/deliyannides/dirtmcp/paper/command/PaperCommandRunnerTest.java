@@ -22,37 +22,38 @@ final class PaperCommandRunnerTest {
         assertEquals(
                 List.of("say hello", "/set stone"),
                 PaperCommandRunner.normalize(
-                        new RunCommandsRequest(List.of(" /say hello ", " //set stone ")),
-                        2));
+                        new RunCommandsRequest(List.of(" /say hello ", " //set stone ")), 2));
 
         assertThrows(
                 CommandRunnerException.class,
                 () -> PaperCommandRunner.normalize(new RunCommandsRequest(List.of()), 2));
         assertThrows(
                 CommandRunnerException.class,
-                () -> PaperCommandRunner.normalize(
-                        new RunCommandsRequest(List.of("say one", "say two", "say three")),
-                        2));
+                () ->
+                        PaperCommandRunner.normalize(
+                                new RunCommandsRequest(List.of("say one", "say two", "say three")),
+                                2));
         assertThrows(
                 CommandRunnerException.class,
-                () -> PaperCommandRunner.normalize(
-                        new RunCommandsRequest(List.of("say one\nsay two")),
-                        2));
+                () ->
+                        PaperCommandRunner.normalize(
+                                new RunCommandsRequest(List.of("say one\nsay two")), 2));
     }
 
     @Test
     void dispatchesEveryCommandInOrderAfterANotFoundCommand() {
         List<String> attempted = new ArrayList<>();
 
-        RunCommandsResult result = PaperCommandRunner.runBatch(
-                List.of("say first", "missing", "say third"),
-                100,
-                SENDER,
-                (command, feedback) -> {
-                    attempted.add(command);
-                    feedback.accept(Component.text("feedback " + command));
-                    return !command.equals("missing");
-                });
+        RunCommandsResult result =
+                PaperCommandRunner.runBatch(
+                        List.of("say first", "missing", "say third"),
+                        100,
+                        SENDER,
+                        (command, feedback) -> {
+                            attempted.add(command);
+                            feedback.accept(Component.text("feedback " + command));
+                            return !command.equals("missing");
+                        });
 
         assertEquals(List.of("say first", "missing", "say third"), attempted);
         assertEquals(
@@ -67,17 +68,18 @@ final class PaperCommandRunnerTest {
 
     @Test
     void capturesBoundedFeedbackAndContinuesAfterDispatchExceptions() {
-        RunCommandsResult result = PaperCommandRunner.runBatch(
-                List.of("first", "broken", "last"),
-                5,
-                SENDER,
-                (command, feedback) -> {
-                    feedback.accept(Component.text("abcdef"));
-                    if (command.equals("broken")) {
-                        throw new CommandException("boom");
-                    }
-                    return true;
-                });
+        RunCommandsResult result =
+                PaperCommandRunner.runBatch(
+                        List.of("first", "broken", "last"),
+                        5,
+                        SENDER,
+                        (command, feedback) -> {
+                            feedback.accept(Component.text("abcdef"));
+                            if (command.equals("broken")) {
+                                throw new CommandException("boom");
+                            }
+                            return true;
+                        });
 
         assertEquals(true, result.feedbackTruncated());
         assertEquals(List.of("abcde"), result.results().getFirst().feedback());
@@ -89,21 +91,21 @@ final class PaperCommandRunnerTest {
 
     @Test
     void reportsTheUnderlyingFailureAndPreservesPapersRawMessage() {
-        RunCommandsResult result = PaperCommandRunner.runBatch(
-                List.of("time query daytime"),
-                100,
-                SENDER,
-                (command, feedback) -> {
-                    throw new CommandException(
-                            "Unhandled exception executing 'time query daytime'",
-                            new IllegalArgumentException("Incorrect argument at position 11"));
-                });
+        RunCommandsResult result =
+                PaperCommandRunner.runBatch(
+                        List.of("time query daytime"),
+                        100,
+                        SENDER,
+                        (command, feedback) -> {
+                            throw new CommandException(
+                                    "Unhandled exception executing 'time query daytime'",
+                                    new IllegalArgumentException(
+                                            "Incorrect argument at position 11"));
+                        });
 
         CommandRunner.CommandResult failure = result.results().getFirst();
         assertEquals(CommandOutcome.DISPATCH_FAILED, failure.outcome());
         assertEquals("Incorrect argument at position 11", failure.message());
-        assertEquals(
-                "Unhandled exception executing 'time query daytime'",
-                failure.rawMessage());
+        assertEquals("Unhandled exception executing 'time query daytime'", failure.rawMessage());
     }
 }

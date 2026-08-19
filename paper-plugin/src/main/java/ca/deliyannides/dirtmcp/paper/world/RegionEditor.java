@@ -6,7 +6,8 @@ import java.io.Serial;
 import java.util.List;
 
 public interface RegionEditor {
-    ReplaceRegionBlocksResult replaceRegionBlocks(ReplaceRegionBlocksRequest request) throws EditException;
+    ReplaceRegionBlocksResult replaceRegionBlocks(ReplaceRegionBlocksRequest request)
+            throws EditException;
 
     FillRegionResult fillRegion(FillRegionRequest request) throws EditException;
 
@@ -52,10 +53,7 @@ public interface RegionEditor {
 
     record DestinationPaletteEntry(String blockState, Integer weight) {}
 
-    record SetBlocksRequest(
-            String world,
-            List<BlockChange> changes,
-            boolean dryRun) {}
+    record SetBlocksRequest(String world, List<BlockChange> changes, boolean dryRun) {}
 
     record BlockChange(BlockPosition position, String blockState) {}
 
@@ -81,8 +79,7 @@ public interface RegionEditor {
     }
 
     final class EditException extends Exception {
-        @Serial
-        private static final long serialVersionUID = 1L;
+        @Serial private static final long serialVersionUID = 1L;
 
         private final Failure failure;
 

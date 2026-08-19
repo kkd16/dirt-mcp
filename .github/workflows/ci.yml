@@ -2,36 +2,75 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build and test
+  verify:
+    name: Verify
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
-
-      - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@v6
 
       - name: Set up Java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '25'
-          cache: gradle
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
           node-version: '24'
-          cache: npm
 
-      - name: Build and test
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-disabled: true
+          dependency-graph: disabled
+
+      - name: Install live-test and lint tools
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          SHELLCHECK_VERSION: 0.11.0
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes tmux
+          ci_tool_dir="$(mktemp -d)"
+
+          curl --fail --location --silent --show-error \
+            --output "${ci_tool_dir}/actionlint.tar.gz" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  ${ci_tool_dir}/actionlint.tar.gz" \
+            | sha256sum --check
+          tar --extract --gzip --file "${ci_tool_dir}/actionlint.tar.gz" --directory "${ci_tool_dir}" actionlint
+          sudo install --mode 0755 "${ci_tool_dir}/actionlint" /usr/local/bin/actionlint
+
+          curl --fail --location --silent --show-error \
+            --output "${ci_tool_dir}/shellcheck.tar.gz" \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.gz"
+          echo "b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6  ${ci_tool_dir}/shellcheck.tar.gz" \
+            | sha256sum --check
+          tar --extract --gzip --file "${ci_tool_dir}/shellcheck.tar.gz" --directory "${ci_tool_dir}"
+          sudo install --mode 0755 \
+            "${ci_tool_dir}/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" \
+            /usr/local/bin/shellcheck
+
+      - name: Verify every component
         run: make ci
+
+      - name: Stop the managed Paper server
+        if: always()
+        run: make down

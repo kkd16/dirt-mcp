@@ -18,16 +18,7 @@ final class PluginSettingsTest {
 
         assertEquals(new Bridge(8_765, 0, 0, 32), settings.bridge());
         assertEquals(
-                new Limits(
-                        262_144,
-                        262_144,
-                        65_536,
-                        16_384,
-                        512,
-                        2_048,
-                        10,
-                        8_192,
-                        20),
+                new Limits(262_144, 262_144, 65_536, 16_384, 512, 2_048, 10, 8_192, 20),
                 settings.limits());
         assertEquals(new Defaults(false, "blocks", false), settings.defaults());
     }

@@ -42,21 +42,25 @@ public final class PaperServerContext implements ServerContext {
         try {
             WorldEdit worldEdit = WorldEdit.getInstance();
             worldEdit.getPlatformManager().queryCapability(Capability.WORLD_EDITING);
-            try (EditSession session = worldEdit.newEditSessionBuilder()
-                    .world(world)
-                    .maxBlocks(1)
-                    .allowedRegionsEverywhere()
-                    .fastMode(true)
-                    .changeSetNull()
-                    .build()) {
-                // Opening a Paper-backed FAWE session validates the integration without mutating the world.
+            try (EditSession session =
+                    worldEdit
+                            .newEditSessionBuilder()
+                            .world(world)
+                            .maxBlocks(1)
+                            .allowedRegionsEverywhere()
+                            .fastMode(true)
+                            .changeSetNull()
+                            .build()) {
+                // Opening a Paper-backed FAWE session validates the integration without mutating
+                // the world.
                 if (session.getWorld() == null) {
                     throw new IllegalStateException("FAWE session has no Paper world");
                 }
             }
             return new PingResult("ok");
         } catch (RuntimeException exception) {
-            throw new ServerContextException("Dirt MCP could not open a Paper-backed FAWE session", exception);
+            throw new ServerContextException(
+                    "Dirt MCP could not open a Paper-backed FAWE session", exception);
         }
     }
 
@@ -88,13 +92,13 @@ public final class PaperServerContext implements ServerContext {
             throw new ServerContextException("FastAsyncWorldEdit is not enabled");
         }
 
-        List<OnlinePlayer> players = server.getOnlinePlayers().stream()
-                .map(PaperServerContext::onlinePlayer)
-                .sorted((left, right) -> left.name().compareToIgnoreCase(right.name()))
-                .toList();
-        List<WorldStatus> worlds = server.getWorlds().stream()
-                .map(PaperServerContext::worldStatus)
-                .toList();
+        List<OnlinePlayer> players =
+                server.getOnlinePlayers().stream()
+                        .map(PaperServerContext::onlinePlayer)
+                        .sorted((left, right) -> left.name().compareToIgnoreCase(right.name()))
+                        .toList();
+        List<WorldStatus> worlds =
+                server.getWorlds().stream().map(PaperServerContext::worldStatus).toList();
         double[] tps = server.getTPS();
         return new ServerStatus(
                 new Builds(
@@ -136,7 +140,8 @@ public final class PaperServerContext implements ServerContext {
     }
 
     private <T> T onMainThread(CheckedSupplier<T> action) throws ServerContextException {
-        Future<T> result = this.plugin.getServer().getScheduler().callSyncMethod(this.plugin, action::get);
+        Future<T> result =
+                this.plugin.getServer().getScheduler().callSyncMethod(this.plugin, action::get);
         try {
             return result.get();
         } catch (InterruptedException exception) {
@@ -147,7 +152,8 @@ public final class PaperServerContext implements ServerContext {
             if (exception.getCause() instanceof ServerContextException contextException) {
                 throw contextException;
             }
-            throw new ServerContextException("Could not read Paper server context", exception.getCause());
+            throw new ServerContextException(
+                    "Could not read Paper server context", exception.getCause());
         }
     }
 

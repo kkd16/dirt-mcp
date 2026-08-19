@@ -90,39 +90,43 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     players: {
       online: 1,
       maximum: 20,
-      entries: [{
-        name: 'Builder',
-        world: 'world',
-        gameMode: 'creative',
-        blockPosition: { x: 12, y: 70, z: -4 },
-      }],
+      entries: [
+        {
+          name: 'Builder',
+          world: 'world',
+          gameMode: 'creative',
+          blockPosition: { x: 12, y: 70, z: -4 },
+        },
+      ],
     },
-    worlds: [{
-      name: 'world',
-      environment: 'normal',
-      minY: -64,
-      maxY: 319,
-      spawn: { x: 0, y: 64, z: 0 },
-      timeOfDay: 6000,
-      storm: false,
-      thundering: false,
-      playerCount: 1,
-    }],
+    worlds: [
+      {
+        name: 'world',
+        environment: 'normal',
+        minY: -64,
+        maxY: 319,
+        spawn: { x: 0, y: 64, z: 0 },
+        timeOfDay: 6000,
+        storm: false,
+        thundering: false,
+        playerCount: 1,
+      },
+    ],
     limits: {
-        maxRequestBytes: 262_144,
-        maxRegionVolume: 1_000_000,
-        maxChangedBlocks: 250_000,
-        maxInspectionVolume: 32_768,
-        defaultInspectionResultLimit: 512,
-        maxInspectionResultLimit: 2_048,
-        maxCommandsPerRequest: 20,
-        maxCommandFeedbackCharacters: 32_768,
-        undoHistoryPerWorld: 20,
+      maxRequestBytes: 262_144,
+      maxRegionVolume: 1_000_000,
+      maxChangedBlocks: 250_000,
+      maxInspectionVolume: 32_768,
+      defaultInspectionResultLimit: 512,
+      maxInspectionResultLimit: 2_048,
+      maxCommandsPerRequest: 20,
+      maxCommandFeedbackCharacters: 32_768,
+      undoHistoryPerWorld: 20,
     },
     defaults: {
-        regionBlocksIncludeAir: false,
-        regionBlocksFormat: 'blocks',
-        editDryRun: false,
+      regionBlocksIncludeAir: false,
+      regionBlocksFormat: 'blocks',
+      editDryRun: false,
     },
   };
   const regionBlocks = {
@@ -193,11 +197,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     scannedVolume: view.scannedVolume,
     visibleBlockCount: view.visibleBlockCount,
     format: 'grid',
-    blockStatePalette: [
-      'minecraft:stone',
-      'minecraft:oak_stairs[facing=north]',
-      'minecraft:gold_block',
-    ],
+    blockStatePalette: ['minecraft:stone', 'minecraft:oak_stairs[facing=north]', 'minecraft:gold_block'],
     blockStateIndexRows: [
       [1, 0, 2],
       [0, 3, 0],
@@ -272,9 +272,11 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       response.end(JSON.stringify(view));
     } else if (request.url === '/v1/fill-region') {
       response.statusCode = 413;
-      response.end(JSON.stringify({
-        error: { code: 'change_limit_exceeded', message: 'Too many changes' },
-      }));
+      response.end(
+        JSON.stringify({
+          error: { code: 'change_limit_exceeded', message: 'Too many changes' },
+        }),
+      );
     } else if (request.url === '/v1/replace-region-blocks') {
       response.end(JSON.stringify(replacement));
     } else if (request.url === '/v1/set-blocks') {
@@ -290,9 +292,12 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   });
   bridge.listen(0, '127.0.0.1');
   await once(bridge, 'listening');
-  context.after(() => new Promise((resolve, reject) => {
-    bridge.close((error) => (error === undefined ? resolve() : reject(error)));
-  }));
+  context.after(
+    () =>
+      new Promise((resolve, reject) => {
+        bridge.close((error) => (error === undefined ? resolve() : reject(error)));
+      }),
+  );
 
   const address = bridge.address();
   const child = spawn(process.execPath, [join(packageDirectory, 'dist/index.js')], {
@@ -318,10 +323,13 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     params: modernParams({ name: 'ping_server', arguments: {} }),
   });
   const pinged = await waitFor(messages, 2);
-  assert.deepEqual(pinged.result, modernResult({
-    content: [{ type: 'text', text: 'ok' }],
-    structuredContent: ping,
-  }));
+  assert.deepEqual(
+    pinged.result,
+    modernResult({
+      content: [{ type: 'text', text: 'ok' }],
+      structuredContent: ping,
+    }),
+  );
 
   const region = {
     world: 'world',
@@ -335,10 +343,13 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     params: modernParams({ name: 'get_region_blocks', arguments: region }),
   });
   const inspected = await waitFor(messages, 3);
-  assert.deepEqual(inspected.result, modernResult({
-    content: [{ type: 'text', text: 'Matching blocks: 1; block entries: 1; world: world.' }],
-    structuredContent: regionBlocks,
-  }));
+  assert.deepEqual(
+    inspected.result,
+    modernResult({
+      content: [{ type: 'text', text: 'Matching blocks: 1; block entries: 1; world: world.' }],
+      structuredContent: regionBlocks,
+    }),
+  );
 
   const viewInput = {
     world: 'world',
@@ -355,10 +366,13 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     params: modernParams({ name: 'scan_orthographic_view', arguments: viewInput }),
   });
   const viewed = await waitFor(messages, 4);
-  assert.deepEqual(viewed.result, modernResult({
-    content: [{ type: 'text', text: 'Scanned view in world: 3 visible blocks returned explicitly.' }],
-    structuredContent: view,
-  }));
+  assert.deepEqual(
+    viewed.result,
+    modernResult({
+      content: [{ type: 'text', text: 'Scanned view in world: 3 visible blocks returned explicitly.' }],
+      structuredContent: view,
+    }),
+  );
 
   send(child, {
     jsonrpc: '2.0',
@@ -370,13 +384,18 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     }),
   });
   const gridViewed = await waitFor(messages, 5);
-  assert.deepEqual(gridViewed.result, modernResult({
-    content: [{
-      type: 'text',
-      text: 'Scanned 3x3 view: 3 visible blocks using 3 block states.',
-    }],
-    structuredContent: gridView,
-  }));
+  assert.deepEqual(
+    gridViewed.result,
+    modernResult({
+      content: [
+        {
+          type: 'text',
+          text: 'Scanned 3x3 view: 3 visible blocks using 3 block states.',
+        },
+      ],
+      structuredContent: gridView,
+    }),
+  );
 
   send(child, {
     jsonrpc: '2.0',
@@ -391,16 +410,21 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     }),
   });
   const failedFill = await waitFor(messages, 6);
-  assert.deepEqual(failedFill.result, modernResult({
-    isError: true,
-    content: [{
-      type: 'text',
-      text: 'Could not fill the region: Too many changes',
-    }],
-    structuredContent: {
-      error: { code: 'change_limit_exceeded', message: 'Too many changes' },
-    },
-  }));
+  assert.deepEqual(
+    failedFill.result,
+    modernResult({
+      isError: true,
+      content: [
+        {
+          type: 'text',
+          text: 'Could not fill the region: Too many changes',
+        },
+      ],
+      structuredContent: {
+        error: { code: 'change_limit_exceeded', message: 'Too many changes' },
+      },
+    }),
+  );
   await waitForValue(errors, (line) => line.includes('tool=fill_region'));
 
   send(child, {
@@ -410,13 +434,18 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     params: modernParams({ name: 'get_server_status', arguments: {} }),
   });
   const status = await waitFor(messages, 7);
-  assert.deepEqual(status.result, modernResult({
-    content: [{
-      type: 'text',
-      text: 'Paper 26.2-112-main; players 1/20; loaded worlds: world.',
-    }],
-    structuredContent: serverStatus,
-  }));
+  assert.deepEqual(
+    status.result,
+    modernResult({
+      content: [
+        {
+          type: 'text',
+          text: 'Paper 26.2-112-main; players 1/20; loaded worlds: world.',
+        },
+      ],
+      structuredContent: serverStatus,
+    }),
+  );
 
   const sparseChanges = [
     { position: { x: 1, y: 2, z: 3 }, blockState: 'minecraft:stone' },
@@ -432,13 +461,18 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     }),
   });
   const blocksSet = await waitFor(messages, 8);
-  assert.deepEqual(blocksSet.result, modernResult({
-    content: [{
-      type: 'text',
-      text: 'Changed 1 of 2 explicitly listed blocks in world.',
-    }],
-    structuredContent: setBlocks,
-  }));
+  assert.deepEqual(
+    blocksSet.result,
+    modernResult({
+      content: [
+        {
+          type: 'text',
+          text: 'Changed 1 of 2 explicitly listed blocks in world.',
+        },
+      ],
+      structuredContent: setBlocks,
+    }),
+  );
 
   send(child, {
     jsonrpc: '2.0',
@@ -450,14 +484,19 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     }),
   });
   const commands = await waitFor(messages, 9);
-  assert.deepEqual(commands.result, modernResult({
-    isError: true,
-    content: [{
-      type: 'text',
-      text: 'Dispatched 1 of 3 command(s); see per-command outcomes.',
-    }],
-    structuredContent: commandRun,
-  }));
+  assert.deepEqual(
+    commands.result,
+    modernResult({
+      isError: true,
+      content: [
+        {
+          type: 'text',
+          text: 'Dispatched 1 of 3 command(s); see per-command outcomes.',
+        },
+      ],
+      structuredContent: commandRun,
+    }),
+  );
 
   send(child, {
     jsonrpc: '2.0',
@@ -466,10 +505,13 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     params: modernParams({ name: 'count_region_block_states', arguments: region }),
   });
   const counted = await waitFor(messages, 10);
-  assert.deepEqual(counted.result, modernResult({
-    content: [{ type: 'text', text: 'Counted 2 blocks across 2 block states in world.' }],
-    structuredContent: blockStateCount,
-  }));
+  assert.deepEqual(
+    counted.result,
+    modernResult({
+      content: [{ type: 'text', text: 'Counted 2 blocks across 2 block states in world.' }],
+      structuredContent: blockStateCount,
+    }),
+  );
 
   send(child, {
     jsonrpc: '2.0',
@@ -487,13 +529,18 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     }),
   });
   const replaced = await waitFor(messages, 11);
-  assert.deepEqual(replaced.result, modernResult({
-    content: [{
-      type: 'text',
-      text: 'Would change 1 of 1 matching blocks in world using seed 123.',
-    }],
-    structuredContent: replacement,
-  }));
+  assert.deepEqual(
+    replaced.result,
+    modernResult({
+      content: [
+        {
+          type: 'text',
+          text: 'Would change 1 of 1 matching blocks in world using seed 123.',
+        },
+      ],
+      structuredContent: replacement,
+    }),
+  );
 
   send(child, {
     jsonrpc: '2.0',
@@ -502,10 +549,13 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     params: modernParams({ name: 'undo_last_dirt_edit', arguments: { world: 'world' } }),
   });
   const undo = await waitFor(messages, 12);
-  assert.deepEqual(undo.result, modernResult({
-    content: [{ type: 'text', text: 'Undid the last Dirt edit in world, restoring 1 blocks.' }],
-    structuredContent: undone,
-  }));
+  assert.deepEqual(
+    undo.result,
+    modernResult({
+      content: [{ type: 'text', text: 'Undid the last Dirt edit in world, restoring 1 blocks.' }],
+      structuredContent: undone,
+    }),
+  );
 
   assert.deepEqual(
     requests.map(({ method, path }) => ({ method, path })),
@@ -583,8 +633,10 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     const world = includesWorld ? ' world="world"' : '';
     assert.match(
       auditLines[index],
-      new RegExp(`^Dirt MCP tool_call tool=${tool} call=${callIds[index]} request=${requestId} `
-        + `client="bridge-test/1"${world} outcome=${outcome} duration_ms=\\d+$`),
+      new RegExp(
+        `^Dirt MCP tool_call tool=${tool} call=${callIds[index]} request=${requestId} ` +
+          `client="bridge-test/1"${world} outcome=${outcome} duration_ms=\\d+$`,
+      ),
     );
   });
 

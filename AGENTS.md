@@ -43,7 +43,8 @@ make doctor   Check required development tools
 make build    Build Java and TypeScript
 make check    Run offline Java and MCP checks
 make verify   Run the complete local gate, including live smoke tests
-make ci       Run the clean offline CI build
+make ci       Run the clean complete CI gate, including live smoke tests
+make format   Apply all repository formatters
 make up       Start or reuse the managed Paper server
 make reload   Rebuild and restart the managed server
 make down     Stop the managed server
@@ -54,7 +55,7 @@ port `8765`. Reuse it for live tests; its world is disposable. Do not commit or
 hand-edit generated runtime files. Paper plugin reload is unsupported, so use
 `make reload` after plugin changes.
 
-- During iteration, run only the smallest relevant test or type-check target.
+- During iteration, run only the smallest relevant test, lint, or type-check target.
 - Before handing off code or contract changes, run `make verify` once. It already
   includes `make check` and `make smoke`; do not run those immediately beforehand.
 - After an interrupted command, confirm it stopped before starting it again.
