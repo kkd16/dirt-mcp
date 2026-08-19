@@ -41,10 +41,9 @@ jobs:
           cache-disabled: true
           dependency-graph: disabled
 
-      - name: Install live-test and lint tools
+      - name: Install tmux and actionlint
         env:
           ACTIONLINT_VERSION: 1.7.12
-          SHELLCHECK_VERSION: 0.11.0
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes tmux
@@ -57,16 +56,6 @@ jobs:
             | sha256sum --check
           tar --extract --gzip --file "${ci_tool_dir}/actionlint.tar.gz" --directory "${ci_tool_dir}" actionlint
           sudo install --mode 0755 "${ci_tool_dir}/actionlint" /usr/local/bin/actionlint
-
-          curl --fail --location --silent --show-error \
-            --output "${ci_tool_dir}/shellcheck.tar.gz" \
-            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.gz"
-          echo "b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6  ${ci_tool_dir}/shellcheck.tar.gz" \
-            | sha256sum --check
-          tar --extract --gzip --file "${ci_tool_dir}/shellcheck.tar.gz" --directory "${ci_tool_dir}"
-          sudo install --mode 0755 \
-            "${ci_tool_dir}/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" \
-            /usr/local/bin/shellcheck
 
       - name: Verify every component
         run: make ci

@@ -20,15 +20,15 @@ doctor: ## Verify the required Java, Node.js, npm, Gradle, curl, tmux, and lint 
 	@command -v npm >/dev/null || { printf 'npm is required.\n' >&2; exit 1; }
 	@command -v curl >/dev/null || { printf 'curl is required.\n' >&2; exit 1; }
 	@command -v tmux >/dev/null || { printf 'tmux is required for the managed development server.\n' >&2; exit 1; }
-	@command -v shellcheck >/dev/null || { printf 'ShellCheck 0.11.0 or newer is required.\n' >&2; exit 1; }
+	@command -v shellcheck >/dev/null || { printf 'ShellCheck 0.9.0 or newer is required.\n' >&2; exit 1; }
 	@command -v actionlint >/dev/null || { printf 'actionlint 1.7.12 or newer is required.\n' >&2; exit 1; }
 	@if ! ./gradlew -q javaToolchains | grep -Eq 'Language Version:[[:space:]]+25'; then \
 	  printf 'Gradle could not resolve the Java 25 toolchain required by Paper 26.2.\n' >&2; exit 1; fi
 	@node_major="$$(node -p "process.versions.node.split('.')[0]")"; \
 	  if (( node_major < 24 )); then printf 'Expected Node.js 24 or newer, found Node.js %s.\n' "$$(node --version)" >&2; exit 1; fi
 	@shellcheck_version="$$(shellcheck --version | awk '/^version:/ { print $$2 }')"; \
-	  if [[ "$$(printf '%s\n%s\n' 0.11.0 "$$shellcheck_version" | sort -V | head -n 1)" != 0.11.0 ]]; then \
-	    printf 'Expected ShellCheck 0.11.0 or newer, found %s.\n' "$$shellcheck_version" >&2; exit 1; fi
+	  if [[ "$$(printf '%s\n%s\n' 0.9.0 "$$shellcheck_version" | sort -V | head -n 1)" != 0.9.0 ]]; then \
+	    printf 'Expected ShellCheck 0.9.0 or newer, found %s.\n' "$$shellcheck_version" >&2; exit 1; fi
 	@actionlint_version="$$(actionlint -version | awk 'NR == 1 { print $$1 }')"; \
 	  if [[ "$$(printf '%s\n%s\n' 1.7.12 "$$actionlint_version" | sort -V | head -n 1)" != 1.7.12 ]]; then \
 	    printf 'Expected actionlint 1.7.12 or newer, found %s.\n' "$$actionlint_version" >&2; exit 1; fi

@@ -21,7 +21,7 @@ Dirt MCP tracks the latest stable Paper release only. The current baseline is:
 - Node.js 24 LTS or newer.
 
 Older Paper or Minecraft versions are not supported.
-Source development also requires GNU Make, curl, tmux, ShellCheck 0.11 or newer,
+Source development also requires GNU Make, curl, tmux, ShellCheck 0.9 or newer,
 and actionlint 1.7.12 or newer.
 
 ## Installation from source
