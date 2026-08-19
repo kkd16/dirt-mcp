@@ -10,15 +10,19 @@ startup_timeout=120
 shutdown_timeout=120
 
 usage() {
-  printf 'Usage: %s {up MC_PORT BRIDGE_PORT|restart|down|status|health|logs [LINES]|console|command COMMAND}\n' "$0" >&2
+  printf 'Usage: %s {up MC_PORT BRIDGE_PORT|restart MC_PORT BRIDGE_PORT|down|status|health|logs [LINES]|console|command COMMAND}\n' "$0" >&2
   exit 2
 }
 
-require_runtime() {
+require_tmux() {
   command -v tmux >/dev/null || {
     printf 'tmux is required for the managed development server.\n' >&2
     exit 1
   }
+}
+
+require_bridge_runtime() {
+  require_tmux
   command -v curl >/dev/null || {
     printf 'curl is required for development server health checks.\n' >&2
     exit 1
@@ -70,7 +74,7 @@ read_state() {
 }
 
 session_exists() {
-  tmux has-session -t "${session_name}" 2>/dev/null
+  command -v tmux >/dev/null && tmux has-session -t "${session_name}" 2>/dev/null
 }
 
 send_console_command() {
@@ -175,6 +179,36 @@ stop_server() {
   exit 1
 }
 
+restart_server() {
+  local default_mc_port="$1"
+  local default_bridge_port="$2"
+  local mc_port="${default_mc_port}"
+  local bridge_port="${default_bridge_port}"
+
+  validate_port MC_PORT "${default_mc_port}"
+  validate_port BRIDGE_PORT "${default_bridge_port}"
+  if [[ -f "${state_file}" ]]; then
+    read_state
+    mc_port="${state_mc_port}"
+    bridge_port="${state_bridge_port}"
+  fi
+
+  local was_running=false
+  local shutdown_log_start=0
+  if session_exists; then
+    was_running=true
+    if [[ -f "${run_dir}/logs/latest.log" ]]; then
+      shutdown_log_start="$(wc -l < "${run_dir}/logs/latest.log")"
+    fi
+    send_console_command 'kick @a Server restarting for a Dirt MCP update. Please reconnect in a moment.'
+  fi
+  stop_server
+  if [[ "${was_running}" == true ]]; then
+    "${repo_root}/scripts/validate-paper-log" shutdown "${shutdown_log_start}"
+  fi
+  start_server "${mc_port}" "${bridge_port}"
+}
+
 status_server() {
   read_state
   if ! session_exists; then
@@ -203,34 +237,30 @@ health_server() {
   printf '\n'
 }
 
-require_runtime
-
 case "${1:-}" in
   up)
     [[ $# -eq 3 ]] || usage
+    require_bridge_runtime
     start_server "$2" "$3"
     ;;
   restart)
-    [[ $# -eq 1 ]] || usage
-    read_state
-    mc_port="${state_mc_port}"
-    bridge_port="${state_bridge_port}"
-    if session_exists; then
-      send_console_command 'kick @a Server restarting for a Dirt MCP update. Please reconnect in a moment.'
-    fi
-    stop_server
-    start_server "${mc_port}" "${bridge_port}"
+    [[ $# -eq 3 ]] || usage
+    require_bridge_runtime
+    restart_server "$2" "$3"
     ;;
   down)
     [[ $# -eq 1 ]] || usage
+    require_tmux
     stop_server
     ;;
   status)
     [[ $# -eq 1 ]] || usage
+    require_bridge_runtime
     status_server
     ;;
   health)
     [[ $# -eq 1 ]] || usage
+    require_bridge_runtime
     health_server
     ;;
   logs)
@@ -241,6 +271,7 @@ case "${1:-}" in
     ;;
   console)
     [[ $# -eq 1 ]] || usage
+    require_tmux
     session_exists || {
       printf 'Dirt MCP development server is not running.\n' >&2
       exit 1
@@ -249,6 +280,7 @@ case "${1:-}" in
     ;;
   command)
     [[ $# -ge 2 ]] || usage
+    require_tmux
     session_exists || {
       printf 'Dirt MCP development server is not running.\n' >&2
       exit 1

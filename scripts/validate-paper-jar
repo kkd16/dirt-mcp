@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+project_version="$(sed -n 's/^projectVersion=//p' "${repo_root}/gradle.properties")"
+
+if [[ -z "${project_version}" || "${project_version}" == *$'\n'* ]]; then
+  printf 'Could not resolve one projectVersion from gradle.properties.\n' >&2
+  exit 1
+fi
+
+jar_file="${repo_root}/paper-plugin/build/libs/dirt-mcp-paper-${project_version}.jar"
+if [[ ! -f "${jar_file}" ]]; then
+  printf 'Built Paper JAR is missing: %s\n' "${jar_file#"${repo_root}/"}" >&2
+  exit 1
+fi
+entries="$(jar tf "${jar_file}")"
+required_entries=(
+  'plugin.yml'
+  'config.yml'
+  'ca/deliyannides/dirtmcp/paper/DirtMcpPlugin.class'
+)
+for entry in "${required_entries[@]}"; do
+  if ! grep -Fqx "${entry}" <<<"${entries}"; then
+    printf 'Built Paper JAR is missing required entry: %s\n' "${entry}" >&2
+    exit 1
+  fi
+done
+
+if grep -Eq '^(com/sk89q|com/fastasyncworldedit|org/bukkit|io/papermc)/' <<<"${entries}"; then
+  printf 'Built Paper JAR must not bundle Paper, Bukkit, WorldEdit, or FAWE classes.\n' >&2
+  exit 1
+fi
+if grep -Eq '(^|/)(\.dirt-mcp-token|\.dirt-mcp-dev-state)$|^paper-plugin/run/' <<<"${entries}"; then
+  printf 'Built Paper JAR contains development runtime state or credentials.\n' >&2
+  exit 1
+fi
+
+printf 'Paper JAR validation passed: %s\n' "${jar_file#"${repo_root}/"}"

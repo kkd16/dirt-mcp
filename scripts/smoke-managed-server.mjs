@@ -21,7 +21,7 @@ const world = 'world';
 const min = { x: 0, y: 0, z: 0 };
 const max = { x: 1, y: 1, z: 1 };
 const stairMin = { x: 2, y: 0, z: 0 };
-const stairMax = { x: 3, y: 0, z: 0 };
+const stairMax = { x: 4, y: 0, z: 0 };
 const northStairs = 'minecraft:dark_oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]';
 const southStairs = 'minecraft:dark_oak_stairs[facing=south,half=bottom,shape=straight,waterlogged=false]';
 const baseUrl = `http://127.0.0.1:${bridgePort}`;
@@ -320,7 +320,7 @@ try {
     ...stairRegion,
     includeAir: true,
   });
-  assert.equal(originalStairFixture.matchedBlockCount, 2);
+  assert.equal(originalStairFixture.matchedBlockCount, 3);
   await paperSetBlock(stairMin, northStairs);
   await paperSetBlock(stairMax, southStairs);
 
@@ -341,7 +341,10 @@ try {
   editsToUndo += exactStateReplacement.changedBlockCount > 0 ? 1 : 0;
   assert.equal(exactStateReplacement.matchedBlockCount, 1);
   assert.equal(exactStateReplacement.changedBlockCount, 1);
-  const exactStateBlocks = await bridgeRequest('/v1/get-region-blocks', stairRegion);
+  const exactStateBlocks = await bridgeRequest('/v1/get-region-blocks', {
+    ...stairRegion,
+    includeBlockStatePatterns: ['minecraft:gold_block', southStairs],
+  });
   assert.deepEqual(
     sortedBlockKeys(exactStateBlocks.blocks),
     [
@@ -389,7 +392,7 @@ try {
     await paperSetBlock(block.position, block.blockState);
   }
   originalStairFixture = undefined;
-  process.stdout.write(`managed bridge smoke test passed in ${world}\n`);
+  process.stdout.write(`managed server smoke test passed in ${world}\n`);
 } finally {
   if (editsToUndo > 0) {
     try {

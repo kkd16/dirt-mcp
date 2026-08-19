@@ -5,15 +5,17 @@ SHELL := /bin/bash
 MC_PORT ?= 25566
 BRIDGE_PORT ?= 8765
 DEV_TOKEN_FILE := paper-plugin/run/.dirt-mcp-token
+NODE_INSTALL_MARKER := node_modules/.package-lock.json
 
-.PHONY: help doctor install build build-java build-mcp dev-build check ci dev-token up reload down status logs console command smoke-fill mcp health clean
+.PHONY: help doctor install node-deps build build-java build-mcp dev-build paper-runtime check verify ci dev-token up reload down status logs console command smoke mcp health clean
 
 help: ## Show the available development commands.
-	@awk 'BEGIN { FS = ":.*## "; printf "Dirt MCP development commands:\n\n" } /^[a-zA-Z_-]+:.*## / { printf "  %-12s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@awk 'BEGIN { FS = ":.*## "; printf "Dirt MCP development commands:\n\n" } /^[a-zA-Z_-]+:.*## / { printf "  %-14s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 	@printf '\nOverrides: MC_PORT=%s BRIDGE_PORT=%s\n' "$(MC_PORT)" "$(BRIDGE_PORT)"
 
 doctor: ## Verify the required Java, Node.js, npm, Gradle, curl, and tmux tools.
 	@command -v java >/dev/null || { printf 'Java 25 is required.\n' >&2; exit 1; }
+	@command -v jar >/dev/null || { printf 'The Java 25 JDK jar tool is required.\n' >&2; exit 1; }
 	@command -v node >/dev/null || { printf 'Node.js 24 LTS or newer is required.\n' >&2; exit 1; }
 	@command -v npm >/dev/null || { printf 'npm is required.\n' >&2; exit 1; }
 	@command -v curl >/dev/null || { printf 'curl is required.\n' >&2; exit 1; }
@@ -31,27 +33,43 @@ doctor: ## Verify the required Java, Node.js, npm, Gradle, curl, and tmux tools.
 install: doctor ## Install the locked Node.js dependencies.
 	npm ci
 
+node-deps: $(NODE_INSTALL_MARKER)
+
+$(NODE_INSTALL_MARKER): package-lock.json package.json mcp-server/package.json
+	npm ci
+
 build: build-java build-mcp ## Build the Paper plugin and MCP server.
 
 build-java: ## Compile and test the Paper plugin.
 	./gradlew build
+	@scripts/validate-paper-jar
 
-build-mcp: ## Compile the MCP server.
+build-mcp: node-deps ## Compile the MCP server.
 	npm run build
 
-dev-build: ## Incrementally compile the Paper plugin and MCP server without tests.
+dev-build: node-deps ## Incrementally compile the Paper plugin and MCP server without tests.
 	./gradlew :paper-plugin:jar
+	@scripts/validate-paper-jar
 	npm run build
 
-check: ## Run all static checks and Java tests.
+paper-runtime:
+	./gradlew :paper-plugin:jar
+	@scripts/validate-paper-jar
+
+check: node-deps ## Run the incremental offline Java and MCP test suite.
 	./gradlew check
 	npm run check
 	npm run build
 	npm test
 
-ci: ## Reproduce the clean continuous-integration build.
+verify: ## Run the complete incremental local gate, including managed Paper smoke coverage.
+	@$(MAKE) --no-print-directory check
+	@$(MAKE) --no-print-directory smoke
+
+ci: ## Run the clean offline gate used by continuous integration.
 	npm ci
 	./gradlew --no-daemon clean build
+	@scripts/validate-paper-jar
 	npm run check
 	npm run build
 	npm test
@@ -70,22 +88,22 @@ up: ## Start the managed Paper development server and wait until it is ready.
 	@if scripts/dev-paper status >/dev/null 2>&1; then \
 	  scripts/dev-paper status; \
 	else \
-	  $(MAKE) --no-print-directory install; \
-	  $(MAKE) --no-print-directory build; \
+	  $(MAKE) --no-print-directory dev-build; \
 	  scripts/dev-paper up "$(MC_PORT)" "$(BRIDGE_PORT)"; \
 	fi
 
 reload: ## Rebuild and gracefully restart the managed development server.
+	@$(MAKE) --no-print-directory dev-token
 	@$(MAKE) --no-print-directory dev-build
-	@scripts/dev-paper restart
+	@scripts/dev-paper restart "$(MC_PORT)" "$(BRIDGE_PORT)"
 
-down: dev-token ## Stop the managed development server cleanly.
+down: ## Stop the managed development server cleanly.
 	@scripts/dev-paper down
 
 status: dev-token ## Report managed Paper process and bridge health.
 	@scripts/dev-paper status
 
-logs: dev-token ## Print recent managed Paper console output (override with LINES=...).
+logs: ## Print recent managed Paper console output (override with LINES=...).
 	@scripts/dev-paper logs "$(or $(LINES),100)"
 
 console: dev-token ## Attach to the managed Paper console; detach with Ctrl-b d.
@@ -96,8 +114,15 @@ command: dev-token ## Send one Paper console command with CMD='...'.
 	@test -n "$$DIRT_MCP_DEV_COMMAND" || { printf 'Usage: make command CMD='\''version'\''\n' >&2; exit 2; }
 	@scripts/dev-paper command "$$DIRT_MCP_DEV_COMMAND"
 
-smoke-fill: dev-token ## Exercise live inspection, views, edits, result caps, no-ops, and undo.
-	@node scripts/smoke-fill-region.mjs
+smoke: ## Restart Paper and run the complete managed-server integration gate.
+	@$(MAKE) --no-print-directory dev-token
+	@$(MAKE) --no-print-directory paper-runtime
+	@scripts/dev-paper restart "$(MC_PORT)" "$(BRIDGE_PORT)"
+	@node scripts/smoke-managed-server.mjs || { \
+	  scripts/dev-paper logs 120 >&2; \
+	  exit 1; \
+	}
+	@scripts/validate-paper-log running
 
 mcp: build-mcp dev-token ## Run the MCP stdio server for an MCP host.
 	@scripts/run-dirt-mcp

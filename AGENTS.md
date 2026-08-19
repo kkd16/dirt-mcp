@@ -62,8 +62,10 @@ Use the root commands rather than duplicating build invocations:
 ```text
 make doctor   Verify Java, Node, npm, Gradle, curl, and tmux
 make build    Build Java and TypeScript
-make check    Run Java and MCP checks and tests
-make ci       Perform the clean CI-equivalent build
+make verify   Run the complete incremental local gate, including live smoke tests
+make check    Run the incremental offline Java and MCP test suite
+make smoke    Restart Paper and run live integration and lifecycle validation
+make ci       Perform the clean offline build used by CI
 make up       Start or reuse the managed Paper integration server
 make reload   Rebuild and gracefully restart the managed server
 make down     Stop the managed server cleanly
@@ -85,12 +87,13 @@ Validation expectations:
 
 - Documentation-only changes: check links, commands, formatting, and stale
   references.
-- TypeScript-only changes: `make check` and relevant MCP protocol smoke tests.
-- Java or contract changes: `make ci`, inspect the built JAR, and run focused
-  tests.
-- Plugin lifecycle, Paper API, networking, configuration, or FAWE changes:
-  exercise the changed path on the managed server, run `make reload` when the
-  plugin changes, and verify clean lifecycle logs.
+- Use focused `make check` or `make smoke` runs while iterating.
+- Before handing off code or contract changes, run `make verify`; it includes
+  Java/JUnit and MCP tests, Paper JAR inspection, a clean managed-server restart,
+  live bridge/Paper/FAWE coverage, world-fixture restoration, and lifecycle-log
+  validation.
+- `make ci` is the clean offline build used by GitHub Actions; do not repeat it
+  locally after a successful `make verify` unless clean-build behavior changed.
 
 Keep documentation concise and durable. Record the present design and supported
 behavior, not conversation history, implementation diaries, review reports, or

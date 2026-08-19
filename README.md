@@ -154,9 +154,9 @@ make doctor
 make up
 ```
 
-`make up` installs locked dependencies, builds and tests both components,
-downloads the pinned FAWE development dependency, creates an ignored local
-bearer token when needed, and accepts Mojang's EULA on the command line. It
+`make up` installs locked dependencies when needed, incrementally builds both
+components, downloads the pinned FAWE development dependency, creates an ignored
+local bearer token when needed, and accepts Mojang's EULA on the command line. It
 starts one persistent Paper process in a detached tmux session, waits for the
 authenticated bridge to become healthy, and returns. Paper listens on port
 `25566` with an IPv4 listener suitable for Windows and WSL. Connect at
@@ -188,18 +188,18 @@ the bridge port so its MCP process reads the new development state.
 Useful commands:
 
 ```text
-make help      List commands and configuration overrides
+make verify    Run the complete incremental local gate, including live smoke coverage
+make check     Run the incremental offline Java and MCP test suite
+make smoke     Restart Paper and run live integration and lifecycle validation
+make ci        Run the clean offline gate used by GitHub Actions
 make build     Build the Paper plugin and MCP server
 make reload    Incrementally rebuild and gracefully restart Paper
+make up        Start or reuse the managed Paper server
 make down      Stop the managed Paper server cleanly
 make status    Report Paper and authenticated bridge health
 make logs      Print recent Paper console output
 make console   Attach to Paper; detach without stopping with Ctrl-b d
 make command   Send one console command with CMD='...'
-make smoke-fill Exercise live inspection, views, edits, result caps, no-ops, and undo
-make check     Run Java and MCP checks and tests
-make ci        Reproduce the clean CI build
-make dev-token Create the ignored local bearer token
 make health    Run the authenticated end-to-end Dirt/Paper/FAWE ping
 make mcp       Run the MCP stdio process
 make clean     Remove build outputs, preserving the development world
@@ -210,10 +210,13 @@ the canonical disposable development world: reuse and mutate it freely instead
 of creating temporary Paper servers. Normal builds, reloads, and cleans preserve
 the world.
 
-Run `make smoke-fill` without concurrent Dirt MCP edits. It temporarily
-force-loads chunk `0,0`, verifies exact block, run, and view inspection, mutates
-eight blocks through fill and replacement, checks result caps and no-ops, then
-restores their exact prior state.
+`make verify` is the standard pre-handoff gate. It runs cached offline checks,
+validates the built Paper JAR, restarts the managed server, runs live bridge,
+Paper, and FAWE coverage, and rejects serious lifecycle log failures. The live
+suite temporarily force-loads chunk `0,0`, verifies status and inspection paths,
+mutates a bounded fixture through fill and replacement, checks result caps,
+exact block states, no-ops, and undo, then restores the prior world state. Run it
+without concurrent Dirt MCP edits.
 
 ## Contributing
 
@@ -221,15 +224,15 @@ Keep changes focused and implement behavior vertically across Java, OpenAPI,
 TypeScript, tests, and documentation. Do not add empty packages or document
 unimplemented endpoints as available.
 
-Before opening a pull request:
+Before handing off a local change:
 
 ```bash
-make ci
+make verify
 ```
 
-Changes affecting plugin startup, configuration, networking, Paper APIs, or
-FAWE must also be exercised on the managed Paper server and cycled with
-`make reload` when plugin code changes.
+GitHub Actions runs `make ci` separately from a clean dependency and build state.
+Use the focused `make check` and `make smoke` targets during iteration when the
+complete gate is unnecessary.
 
 Read [`AGENTS.md`](AGENTS.md) for repository engineering rules and
 [`docs/`](docs/README.md) for the v1 product design.
