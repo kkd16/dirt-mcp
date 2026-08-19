@@ -12,21 +12,52 @@ servers:
 security:
   - bearerAuth: []
 paths:
-  /v1/server-info:
+  /v1/ping:
     get:
-      operationId: getServerInfo
-      summary: Report bridge availability, versions, and active non-secret configuration
+      operationId: pingServer
+      summary: Verify the authenticated Dirt-to-Paper-to-FAWE path without mutation
       responses:
         '200':
-          description: Server and bridge information
+          description: Every Dirt MCP runtime layer is ready
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ServerInfo'
+                $ref: '#/components/schemas/PingResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '405':
           $ref: '#/components/responses/GetMethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          description: Dirt, Paper, or FAWE is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/server-status:
+    get:
+      operationId: getServerStatus
+      summary: Report current server, player, world, build, and tool-limit context
+      responses:
+        '200':
+          description: Lightweight current server context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerStatusResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/GetMethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          description: Current Paper context is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v1/count-region-block-states:
     post:
       operationId: countRegionBlockStates
@@ -964,37 +995,6 @@ components:
           type: integer
           format: int64
           minimum: 1
-    BridgeConfiguration:
-      type: object
-      additionalProperties: false
-      required:
-        - port
-        - backlog
-        - shutdownDelaySeconds
-        - maxRequestBytes
-        - minimumTokenBytes
-      properties:
-        port:
-          type: integer
-          format: int32
-          minimum: 1
-          maximum: 65535
-        backlog:
-          type: integer
-          format: int32
-          minimum: 0
-        shutdownDelaySeconds:
-          type: integer
-          format: int32
-          minimum: 0
-        maxRequestBytes:
-          type: integer
-          format: int32
-          minimum: 1
-        minimumTokenBytes:
-          type: integer
-          format: int32
-          minimum: 1
     LimitConfiguration:
       type: object
       additionalProperties: false
@@ -1065,37 +1065,157 @@ components:
           type: boolean
         fillRegionDryRun:
           type: boolean
-    PluginConfiguration:
-      type: object
-      additionalProperties: false
-      required:
-        - bridge
-        - limits
-        - defaults
-      properties:
-        bridge:
-          $ref: '#/components/schemas/BridgeConfiguration'
-        limits:
-          $ref: '#/components/schemas/LimitConfiguration'
-        defaults:
-          $ref: '#/components/schemas/DefaultConfiguration'
-    ServerInfo:
+    PingResponse:
       type: object
       additionalProperties: false
       required:
         - status
-        - service
-        - pluginVersion
-        - minecraftVersion
-        - configuration
       properties:
         status:
           const: ok
-        service:
-          const: dirt-mcp-paper
-        pluginVersion:
+    ServerBuilds:
+      type: object
+      additionalProperties: false
+      required:
+        - minecraft
+        - paper
+        - dirtMcp
+        - fawe
+      properties:
+        minecraft:
           type: string
-        minecraftVersion:
+          minLength: 1
+        paper:
           type: string
-        configuration:
-          $ref: '#/components/schemas/PluginConfiguration'
+          minLength: 1
+        dirtMcp:
+          type: string
+          minLength: 1
+        fawe:
+          type: string
+          minLength: 1
+    ServerPerformance:
+      type: object
+      additionalProperties: false
+      required:
+        - tpsOneMinute
+        - averageTickTimeMillis
+      properties:
+        tpsOneMinute:
+          type: number
+          format: double
+          minimum: 0
+        averageTickTimeMillis:
+          type: number
+          format: double
+          minimum: 0
+    OnlinePlayer:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - world
+        - gameMode
+        - blockPosition
+      properties:
+        name:
+          type: string
+          minLength: 1
+        world:
+          type: string
+          minLength: 1
+        gameMode:
+          type: string
+          enum:
+            - survival
+            - creative
+            - adventure
+            - spectator
+        blockPosition:
+          $ref: '#/components/schemas/BlockPosition'
+    PlayerSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - online
+        - maximum
+        - entries
+      properties:
+        online:
+          type: integer
+          format: int32
+          minimum: 0
+        maximum:
+          type: integer
+          format: int32
+          minimum: 0
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/OnlinePlayer'
+    WorldStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - environment
+        - minY
+        - maxY
+        - spawn
+        - timeOfDay
+        - storm
+        - thundering
+        - playerCount
+      properties:
+        name:
+          type: string
+          minLength: 1
+        environment:
+          type: string
+          minLength: 1
+        minY:
+          type: integer
+          format: int32
+        maxY:
+          type: integer
+          format: int32
+        spawn:
+          $ref: '#/components/schemas/BlockPosition'
+        timeOfDay:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 23999
+        storm:
+          type: boolean
+        thundering:
+          type: boolean
+        playerCount:
+          type: integer
+          format: int32
+          minimum: 0
+    ServerStatusResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - builds
+        - performance
+        - players
+        - worlds
+        - limits
+        - defaults
+      properties:
+        builds:
+          $ref: '#/components/schemas/ServerBuilds'
+        performance:
+          $ref: '#/components/schemas/ServerPerformance'
+        players:
+          $ref: '#/components/schemas/PlayerSummary'
+        worlds:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorldStatus'
+        limits:
+          $ref: '#/components/schemas/LimitConfiguration'
+        defaults:
+          $ref: '#/components/schemas/DefaultConfiguration'

@@ -85,7 +85,7 @@ test('reloads tools without replacing the stdio process', async (context) => {
 
   send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: modernParams({}) });
   const initial = await waitFor(messages, (message) => message.id === 2);
-  assert.equal(initial.result.tools[0].title, 'Get Dirt server info');
+  assert.equal(initial.result.tools[0].title, 'Ping Dirt server');
   assert.deepEqual(
     initial.result.tools.find((tool) => tool.name === 'scan_orthographic_view').annotations,
     {
@@ -98,11 +98,17 @@ test('reloads tools without replacing the stdio process', async (context) => {
   assert.deepEqual(
     Object.fromEntries(initial.result.tools.map((tool) => [tool.name, tool.annotations])),
     {
-      get_server_info: {
+      ping_server: {
         readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,
-        openWorldHint: false,
+        openWorldHint: true,
+      },
+      get_server_status: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
       },
       count_region_block_states: {
         readOnlyHint: true,
@@ -148,7 +154,8 @@ test('reloads tools without replacing the stdio process', async (context) => {
       'count_region_block_states',
       'fill_region',
       'get_region_blocks',
-      'get_server_info',
+      'get_server_status',
+      'ping_server',
       'replace_region_blocks',
       'scan_orthographic_view',
       'undo_last_dirt_edit',
@@ -156,20 +163,20 @@ test('reloads tools without replacing the stdio process', async (context) => {
   );
 
   const toolsSource = await readFile(toolsPath, 'utf8');
-  const changedSource = toolsSource.replace('Get Dirt server info', 'Reloaded Dirt server info');
+  const changedSource = toolsSource.replace('Ping Dirt server', 'Reloaded Dirt server ping');
   assert.notEqual(changedSource, toolsSource);
   await writeFile(toolsPath, changedSource);
 
   await waitFor(errors, (line) => line.includes('Reloaded Dirt MCP tools'));
   send({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: modernParams({}) });
   const reloaded = await waitFor(messages, (message) => message.id === 3);
-  assert.equal(reloaded.result.tools[0].title, 'Reloaded Dirt server info');
+  assert.equal(reloaded.result.tools[0].title, 'Reloaded Dirt server ping');
 
   await writeFile(toolsPath, 'this is not valid JavaScript');
   await waitFor(errors, (line) => line.includes('Could not reload Dirt MCP tools'));
   send({ jsonrpc: '2.0', id: 4, method: 'tools/list', params: modernParams({}) });
   const retained = await waitFor(messages, (message) => message.id === 4);
-  assert.equal(retained.result.tools[0].title, 'Reloaded Dirt server info');
+  assert.equal(retained.result.tools[0].title, 'Reloaded Dirt server ping');
 
   child.stdin.end();
   await new Promise((resolve, reject) => {

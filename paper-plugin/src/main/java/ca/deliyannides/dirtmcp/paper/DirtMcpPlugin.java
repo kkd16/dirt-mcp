@@ -1,6 +1,7 @@
 package ca.deliyannides.dirtmcp.paper;
 
 import ca.deliyannides.dirtmcp.paper.api.ApiServer;
+import ca.deliyannides.dirtmcp.paper.server.PaperServerContext;
 import ca.deliyannides.dirtmcp.paper.world.FaweRegionEditor;
 import ca.deliyannides.dirtmcp.paper.world.PaperRegionInspector;
 import java.io.IOException;
@@ -28,9 +29,8 @@ public final class DirtMcpPlugin extends JavaPlugin {
         PluginSettings.Limits limits = settings.limits();
         this.apiServer = new ApiServer(
                 settings,
-                getPluginMeta().getVersion(),
-                getServer().getMinecraftVersion(),
                 bridgeToken(),
+                new PaperServerContext(this, settings),
                 new PaperRegionInspector(
                         this,
                         limits.maxRegionVolume(),

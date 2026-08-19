@@ -105,8 +105,8 @@ The bridge always binds to `127.0.0.1`; do not proxy or expose it publicly. Give
 the same `DIRT_MCP_BRIDGE_TOKEN` to the MCP process. Tokens must satisfy the
 configured byte minimum, which defaults to 32; lowering it weakens
 authentication. Never commit or log tokens. All settings are validated at
-startup and reported without secrets by
-`get_server_info`; restart Paper after changing them. Existing configuration files
+startup; active tool limits and defaults are reported by `get_server_status`.
+Restart Paper after changing them. Existing configuration files
 receive newly introduced default keys without replacing operator values.
 
 The repository includes a project-scoped Codex configuration in
@@ -134,7 +134,8 @@ For another MCP host, configure it to launch the source build:
 ```
 
 Once npm publishing exists, a global installation will provide the equivalent
-`dirt-mcp` command. The current tool surface contains `get_server_info`,
+`dirt-mcp` command. The current tool surface contains `ping_server`,
+`get_server_status`,
 `count_region_block_states`, `get_region_blocks`, `scan_orthographic_view`,
 `replace_region_blocks`, `fill_region`, and `undo_last_dirt_edit`.
 
@@ -199,7 +200,7 @@ make smoke-fill Exercise live inspection, views, edits, result caps, no-ops, and
 make check     Run Java and MCP checks and tests
 make ci        Reproduce the clean CI build
 make dev-token Create the ignored local bearer token
-make health    Query a running bridge
+make health    Run the authenticated end-to-end Dirt/Paper/FAWE ping
 make mcp       Run the MCP stdio process
 make clean     Remove build outputs, preserving the development world
 ```

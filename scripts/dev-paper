@@ -91,7 +91,7 @@ bridge_healthy() {
     --connect-timeout 1 \
     --max-time 2 \
     --header "Authorization: Bearer ${token}" \
-    "http://127.0.0.1:${bridge_port}/v1/server-info"
+    "http://127.0.0.1:${bridge_port}/v1/ping"
 }
 
 recent_logs() {
@@ -199,7 +199,7 @@ health_server() {
     --connect-timeout 1 \
     --max-time 2 \
     --header "Authorization: Bearer ${token}" \
-    "http://127.0.0.1:${state_bridge_port}/v1/server-info"
+    "http://127.0.0.1:${state_bridge_port}/v1/ping"
   printf '\n'
 }
 

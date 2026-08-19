@@ -346,8 +346,16 @@ Undo returns `invalid_request` (400), `unauthorized` (401), `world_not_found`
 (404), `nothing_to_undo` (409), `world_busy` (409), `world_unavailable`
 (503), or `internal_error` (500).
 
-`get_server_info` calls `GET /v1/server-info` and reports bridge readiness,
-`pluginVersion`, the Minecraft version, active limits, and non-secret defaults.
+`ping_server` calls `GET /v1/ping`. It returns only `{ "status": "ok" }` after
+the authenticated bridge, Dirt plugin, Paper world integration, FAWE
+world-editing platform, and a non-mutating Paper-backed FAWE edit session are
+all ready.
+
+`get_server_status` calls `GET /v1/server-status` and returns lightweight
+grounding context: the Minecraft, Paper, Dirt MCP, and FAWE builds; current TPS
+and tick time; online players with worlds, game modes, and block positions;
+loaded-world bounds, spawn, time, and weather; and active Dirt tool limits and
+defaults.
 
 ## Common rules
 

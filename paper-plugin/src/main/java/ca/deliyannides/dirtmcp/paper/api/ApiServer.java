@@ -1,6 +1,8 @@
 package ca.deliyannides.dirtmcp.paper.api;
 
 import ca.deliyannides.dirtmcp.paper.PluginSettings;
+import ca.deliyannides.dirtmcp.paper.server.ServerContext;
+import ca.deliyannides.dirtmcp.paper.server.ServerContext.ServerContextException;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRegionRequest;
@@ -84,8 +86,8 @@ public final class ApiServer implements AutoCloseable {
     private static final Gson GSON = new Gson();
 
     private final PluginSettings settings;
-    private final String serverInfoResponseBody;
     private final BearerAuthentication authentication;
+    private final ServerContext serverContext;
     private final RegionInspector regionInspector;
     private final RegionEditor regionEditor;
     private final Logger logger;
@@ -95,9 +97,8 @@ public final class ApiServer implements AutoCloseable {
 
     public ApiServer(
             PluginSettings settings,
-            String pluginVersion,
-            String minecraftVersion,
             String bearerToken,
+            ServerContext serverContext,
             RegionInspector regionInspector,
             RegionEditor regionEditor,
             Logger logger) {
@@ -105,14 +106,9 @@ public final class ApiServer implements AutoCloseable {
         this.logger = logger;
         this.authentication = new BearerAuthentication(
                 bearerToken, settings.bridge().minimumTokenBytes());
+        this.serverContext = serverContext;
         this.regionInspector = regionInspector;
         this.regionEditor = regionEditor;
-        this.serverInfoResponseBody = GSON.toJson(new ServerInfoResponse(
-                "ok",
-                "dirt-mcp-paper",
-                pluginVersion,
-                minecraftVersion,
-                settings));
     }
 
     public void start() throws IOException {
@@ -127,8 +123,11 @@ public final class ApiServer implements AutoCloseable {
 
         try {
             newServer.createContext(
-                    "/v1/server-info",
-                    exchange -> handleAudited("get_server_info", exchange, this::handleGetServerInfo));
+                    "/v1/ping",
+                    exchange -> handleAudited("ping_server", exchange, this::handlePing));
+            newServer.createContext(
+                    "/v1/server-status",
+                    exchange -> handleAudited("get_server_status", exchange, this::handleGetServerStatus));
             newServer.createContext(
                     "/v1/count-region-block-states",
                     exchange -> handleAudited(
@@ -186,7 +185,7 @@ public final class ApiServer implements AutoCloseable {
         this.logger.info("Dirt MCP bridge stopped.");
     }
 
-    private void handleGetServerInfo(HttpExchange exchange) throws IOException {
+    private void handlePing(HttpExchange exchange) throws IOException {
         if (!authenticate(exchange)) {
             return;
         }
@@ -197,7 +196,35 @@ public final class ApiServer implements AutoCloseable {
             return;
         }
 
-        send(exchange, 200, this.serverInfoResponseBody);
+        try {
+            send(exchange, 200, GSON.toJson(this.serverContext.ping()));
+        } catch (ServerContextException exception) {
+            sendError(exchange, 503, "unhealthy", exception.getMessage());
+        } catch (RuntimeException exception) {
+            this.logger.log(Level.SEVERE, "Unexpected ping failure", exception);
+            sendError(exchange, 500, "internal_error", "The end-to-end health check failed");
+        }
+    }
+
+    private void handleGetServerStatus(HttpExchange exchange) throws IOException {
+        if (!authenticate(exchange)) {
+            return;
+        }
+
+        if (!"GET".equals(exchange.getRequestMethod())) {
+            exchange.getResponseHeaders().set("Allow", "GET");
+            sendError(exchange, 405, "method_not_allowed", "Method must be GET");
+            return;
+        }
+
+        try {
+            send(exchange, 200, GSON.toJson(this.serverContext.getStatus()));
+        } catch (ServerContextException exception) {
+            sendError(exchange, 503, "server_unavailable", exception.getMessage());
+        } catch (RuntimeException exception) {
+            this.logger.log(Level.SEVERE, "Unexpected server-status failure", exception);
+            sendError(exchange, 500, "internal_error", "Server status could not be returned");
+        }
     }
 
     private void handleAudited(String operation, HttpExchange exchange, HttpHandler handler)
@@ -680,13 +707,6 @@ public final class ApiServer implements AutoCloseable {
             output.write(bytes);
         }
     }
-
-    private record ServerInfoResponse(
-            String status,
-            String service,
-            String pluginVersion,
-            String minecraftVersion,
-            PluginSettings configuration) {}
 
     private record ErrorEnvelope(ErrorDetail error) {}
 

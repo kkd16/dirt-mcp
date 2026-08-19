@@ -102,7 +102,7 @@ smoke-fill: dev-token ## Exercise live inspection, views, edits, result caps, no
 mcp: build-mcp dev-token ## Run the MCP stdio server for an MCP host.
 	@scripts/run-dirt-mcp
 
-health: dev-token ## Query the running Paper bridge server-info endpoint.
+health: dev-token ## Run the authenticated end-to-end Dirt/Paper/FAWE ping.
 	@scripts/dev-paper health
 
 clean: ## Remove generated build outputs; preserve the local Paper world.

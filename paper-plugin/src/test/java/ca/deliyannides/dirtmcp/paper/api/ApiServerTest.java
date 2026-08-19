@@ -9,6 +9,14 @@ import ca.deliyannides.dirtmcp.paper.PluginSettings;
 import ca.deliyannides.dirtmcp.paper.PluginSettings.Bridge;
 import ca.deliyannides.dirtmcp.paper.PluginSettings.Defaults;
 import ca.deliyannides.dirtmcp.paper.PluginSettings.Limits;
+import ca.deliyannides.dirtmcp.paper.server.ServerContext;
+import ca.deliyannides.dirtmcp.paper.server.ServerContext.Builds;
+import ca.deliyannides.dirtmcp.paper.server.ServerContext.OnlinePlayer;
+import ca.deliyannides.dirtmcp.paper.server.ServerContext.Performance;
+import ca.deliyannides.dirtmcp.paper.server.ServerContext.PingResult;
+import ca.deliyannides.dirtmcp.paper.server.ServerContext.PlayerSummary;
+import ca.deliyannides.dirtmcp.paper.server.ServerContext.ServerStatus;
+import ca.deliyannides.dirtmcp.paper.server.ServerContext.WorldStatus;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
@@ -63,15 +71,48 @@ final class ApiServerTest {
             new Defaults(false, "blocks", false, false));
     private static final RegionInspector UNUSED_INSPECTOR = new TestInspector() {};
     private static final RegionEditor UNUSED_EDITOR = new TestEditor() {};
+    private static final ServerContext SERVER_CONTEXT = new ServerContext() {
+        @Override
+        public PingResult ping() {
+            return new PingResult("ok");
+        }
+
+        @Override
+        public ServerStatus getStatus() {
+            return new ServerStatus(
+                    new Builds("26.2", "26.2-112-main", "0.1.0-test", "2.15.4-test"),
+                    new Performance(19.98, 4.25),
+                    new PlayerSummary(
+                            1,
+                            20,
+                            List.of(new OnlinePlayer(
+                                    "Builder",
+                                    "world",
+                                    "creative",
+                                    new ServerContext.BlockPosition(12, 70, -4)))),
+                    List.of(new WorldStatus(
+                            "world",
+                            "normal",
+                            -64,
+                            319,
+                            new ServerContext.BlockPosition(0, 64, 0),
+                            6000,
+                            false,
+                            false,
+                            1)),
+                    SETTINGS.limits(),
+                    SETTINGS.defaults());
+        }
+    };
 
     @Test
-    void reportsServerInfoOnLoopback() throws Exception {
+    void reportsEndToEndPingOnLoopback() throws Exception {
         try (ApiServer server = server(UNUSED_INSPECTOR);
                 HttpClient client = HttpClient.newHttpClient()) {
             server.start();
 
             HttpResponse<String> response = client.send(
-                    authorizedRequest(serverInfoUri(server)).GET().build(),
+                    authorizedRequest(pingUri(server)).GET().build(),
                     HttpResponse.BodyHandlers.ofString());
 
             assertEquals(200, response.statusCode());
@@ -79,18 +120,38 @@ final class ApiServerTest {
                     "application/json; charset=utf-8",
                     response.headers().firstValue("Content-Type").orElseThrow());
             assertEquals("no-store", response.headers().firstValue("Cache-Control").orElseThrow());
+            assertEquals("{\"status\":\"ok\"}", response.body());
+        }
+    }
+
+    @Test
+    void reportsCurrentServerStatus() throws Exception {
+        try (ApiServer server = server(UNUSED_INSPECTOR);
+                HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> response = client.send(
+                    authorizedRequest(serverStatusUri(server)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, response.statusCode());
             assertEquals(
-                    "{\"status\":\"ok\",\"service\":\"dirt-mcp-paper\",\"pluginVersion\":\"0.1.0-test\","
-                            + "\"minecraftVersion\":\"26.2\",\"configuration\":{"
-                            + "\"bridge\":{\"port\":0,\"backlog\":0,\"shutdownDelaySeconds\":0,"
-                            + "\"maxRequestBytes\":8192,\"minimumTokenBytes\":32},"
+                    "{\"builds\":{\"minecraft\":\"26.2\",\"paper\":\"26.2-112-main\","
+                            + "\"dirtMcp\":\"0.1.0-test\",\"fawe\":\"2.15.4-test\"},"
+                            + "\"performance\":{\"tpsOneMinute\":19.98,\"averageTickTimeMillis\":4.25},"
+                            + "\"players\":{\"online\":1,\"maximum\":20,\"entries\":[{"
+                            + "\"name\":\"Builder\",\"world\":\"world\",\"gameMode\":\"creative\","
+                            + "\"blockPosition\":{\"x\":12,\"y\":70,\"z\":-4}}]},\"worlds\":[{"
+                            + "\"name\":\"world\",\"environment\":\"normal\",\"minY\":-64,\"maxY\":319,"
+                            + "\"spawn\":{\"x\":0,\"y\":64,\"z\":0},\"timeOfDay\":6000,"
+                            + "\"storm\":false,\"thundering\":false,\"playerCount\":1}],"
                             + "\"limits\":{\"maxRegionVolume\":1000000,\"maxChangedBlocks\":250000,"
                             + "\"maxRegionBlocksVolume\":32768,\"defaultRegionBlocksResultLimit\":321,"
                             + "\"maxRegionBlocksResultLimit\":654,\"maxOrthographicViewVolume\":32768,"
                             + "\"defaultOrthographicViewResultLimit\":123,\"maxOrthographicViewResultLimit\":456,"
-                            + "\"undoHistoryPerWorld\":20},\"defaults\":{"
-                            + "\"regionBlocksIncludeAir\":false,\"regionBlocksFormat\":\"blocks\","
-                            + "\"replaceRegionBlocksDryRun\":false,\"fillRegionDryRun\":false}}}",
+                            + "\"undoHistoryPerWorld\":20},\"defaults\":{\"regionBlocksIncludeAir\":false,"
+                            + "\"regionBlocksFormat\":\"blocks\",\"replaceRegionBlocksDryRun\":false,"
+                            + "\"fillRegionDryRun\":false}}",
                     response.body());
         }
     }
@@ -102,7 +163,7 @@ final class ApiServerTest {
             server.start();
 
             HttpResponse<String> response = client.send(
-                    HttpRequest.newBuilder(serverInfoUri(server)).GET().build(),
+                    HttpRequest.newBuilder(pingUri(server)).GET().build(),
                     HttpResponse.BodyHandlers.ofString());
 
             assertEquals(401, response.statusCode());
@@ -123,7 +184,7 @@ final class ApiServerTest {
             server.start();
 
             HttpResponse<String> response = client.send(
-                    authorizedRequest(serverInfoUri(server))
+                    authorizedRequest(pingUri(server))
                             .POST(HttpRequest.BodyPublishers.noBody())
                             .build(),
                     HttpResponse.BodyHandlers.ofString());
@@ -928,7 +989,7 @@ final class ApiServerTest {
             RegionInspector inspector,
             RegionEditor editor,
             Logger logger) {
-        return new ApiServer(settings, "0.1.0-test", "26.2", TOKEN, inspector, editor, logger);
+        return new ApiServer(settings, TOKEN, SERVER_CONTEXT, inspector, editor, logger);
     }
 
     private static HttpRequest blockStateCountRequest(ApiServer server, String body) {
@@ -977,8 +1038,12 @@ final class ApiServerTest {
         return HttpRequest.newBuilder(uri).header("Authorization", "Bearer " + TOKEN);
     }
 
-    private static URI serverInfoUri(ApiServer server) {
-        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/server-info");
+    private static URI pingUri(ApiServer server) {
+        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/ping");
+    }
+
+    private static URI serverStatusUri(ApiServer server) {
+        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/server-status");
     }
 
     private static URI countRegionBlockStatesUri(ApiServer server) {

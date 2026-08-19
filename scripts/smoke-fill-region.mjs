@@ -26,8 +26,8 @@ const northStairs = 'minecraft:dark_oak_stairs[facing=north,half=bottom,shape=st
 const southStairs = 'minecraft:dark_oak_stairs[facing=south,half=bottom,shape=straight,waterlogged=false]';
 const baseUrl = `http://127.0.0.1:${bridgePort}`;
 
-async function getServerInfo() {
-  const response = await fetch(`${baseUrl}/v1/server-info`, {
+async function bridgeGet(path) {
+  const response = await fetch(`${baseUrl}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   assert.equal(response.status, 200);
@@ -150,17 +150,22 @@ let editsToUndo = 0;
 let fixtureIsForceLoaded = false;
 let originalStairFixture;
 try {
-  const serverInfo = await getServerInfo();
-  assert.equal(serverInfo.configuration.bridge.port, bridgePort);
-  assert.ok(serverInfo.configuration.bridge.maxRequestBytes > 0);
-  assert.ok(serverInfo.configuration.limits.maxRegionVolume > 0);
+  assert.deepEqual(await bridgeGet('/v1/ping'), { status: 'ok' });
+  const serverStatus = await bridgeGet('/v1/server-status');
+  assert.ok(serverStatus.builds.minecraft.length > 0);
+  assert.ok(serverStatus.builds.paper.length > 0);
+  assert.ok(serverStatus.builds.dirtMcp.length > 0);
+  assert.ok(serverStatus.builds.fawe.length > 0);
+  assert.ok(serverStatus.performance.tpsOneMinute >= 0);
+  assert.ok(serverStatus.worlds.some((entry) => entry.name === world));
+  assert.ok(serverStatus.limits.maxRegionVolume > 0);
   assert.ok(
-    serverInfo.configuration.limits.defaultRegionBlocksResultLimit
-      <= serverInfo.configuration.limits.maxRegionBlocksResultLimit,
+    serverStatus.limits.defaultRegionBlocksResultLimit
+      <= serverStatus.limits.maxRegionBlocksResultLimit,
   );
   assert.ok(
-    serverInfo.configuration.limits.defaultOrthographicViewResultLimit
-      <= serverInfo.configuration.limits.maxOrthographicViewResultLimit,
+    serverStatus.limits.defaultOrthographicViewResultLimit
+      <= serverStatus.limits.maxOrthographicViewResultLimit,
   );
 
   await paperCommand('forceload add 0 0');

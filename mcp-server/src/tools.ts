@@ -262,50 +262,70 @@ const ErrorSchema = z.object({
   }).strict(),
 }).strict().describe('Structured Dirt error.');
 
-const ServerInfoSchema = z.object({
-  status: z.literal('ok').describe('Bridge readiness status.'),
-  service: z.literal('dirt-mcp-paper').describe('Bridge service identifier.'),
-  pluginVersion: z.string().min(1).describe('Running Dirt Paper plugin version.'),
-  minecraftVersion: z.string().min(1).describe('Running Paper server Minecraft version.'),
-  configuration: z.object({
-    bridge: z.object({
-      port: z.number().int().min(1).max(65_535).describe('Loopback HTTP port.'),
-      backlog: z.number().int().nonnegative().describe('Configured HTTP listen backlog.'),
-      shutdownDelaySeconds: z.number().int().nonnegative().describe('Graceful bridge shutdown delay.'),
-      maxRequestBytes: z.number().int().positive().describe('Maximum accepted request body size.'),
-      minimumTokenBytes: z.number().int().positive().describe('Minimum bearer-token entropy length in bytes.'),
-    }).strict().describe('Non-secret bridge configuration.'),
-    limits: z.object({
-      maxRegionVolume: z.number().int().positive().describe('Maximum mutation and count-region volume.'),
-      maxChangedBlocks: z.number().int().positive().describe('Maximum blocks one edit may change.'),
-      maxRegionBlocksVolume: z.number().int().positive().describe('Maximum get_region_blocks scan volume.'),
-      defaultRegionBlocksResultLimit: z.number().int().positive().describe('Default get_region_blocks result limit.'),
-      maxRegionBlocksResultLimit: z.number().int().positive().describe('Maximum get_region_blocks result limit.'),
-      maxOrthographicViewVolume: z.number().int().positive().describe('Maximum orthographic scan volume.'),
-      defaultOrthographicViewResultLimit: z.number().int().positive().describe('Default orthographic visible-block limit.'),
-      maxOrthographicViewResultLimit: z.number().int().positive().describe('Maximum orthographic visible-block limit.'),
-      undoHistoryPerWorld: z.number().int().nonnegative().describe('In-memory Dirt undo entries retained per world.'),
-    }).strict().describe('Active resource limits.'),
-    defaults: z.object({
-      regionBlocksIncludeAir: z.boolean().describe('Default air inclusion for get_region_blocks.'),
-      regionBlocksFormat: z.enum(['blocks', 'runs']).describe('Default get_region_blocks format.'),
-      replaceRegionBlocksDryRun: z.boolean().describe('Default dry-run behavior for replace_region_blocks.'),
-      fillRegionDryRun: z.boolean().describe('Default dry-run behavior for fill_region.'),
-    }).strict().describe('Active optional-argument defaults.'),
-  }).strict().describe('Active non-secret Paper plugin configuration.'),
-}).strict().describe('Running Dirt bridge, server version, and non-secret configuration.');
+const PingServerOutputSchema = z.object({
+  status: z.literal('ok').describe('All Dirt, Paper, and FAWE health checks passed.'),
+}).strict().describe('Successful end-to-end Dirt server health check.');
+
+const LimitConfigurationSchema = z.object({
+  maxRegionVolume: z.number().int().positive().describe('Maximum mutation and count-region volume.'),
+  maxChangedBlocks: z.number().int().positive().describe('Maximum blocks one edit may change.'),
+  maxRegionBlocksVolume: z.number().int().positive().describe('Maximum get_region_blocks scan volume.'),
+  defaultRegionBlocksResultLimit: z.number().int().positive().describe('Default get_region_blocks result limit.'),
+  maxRegionBlocksResultLimit: z.number().int().positive().describe('Maximum get_region_blocks result limit.'),
+  maxOrthographicViewVolume: z.number().int().positive().describe('Maximum orthographic scan volume.'),
+  defaultOrthographicViewResultLimit: z.number().int().positive().describe('Default orthographic visible-block limit.'),
+  maxOrthographicViewResultLimit: z.number().int().positive().describe('Maximum orthographic visible-block limit.'),
+  undoHistoryPerWorld: z.number().int().nonnegative().describe('In-memory Dirt undo entries retained per world.'),
+}).strict().describe('Active limits that constrain Dirt inspection and mutation tools.');
+
+const DefaultConfigurationSchema = z.object({
+  regionBlocksIncludeAir: z.boolean().describe('Default air inclusion for get_region_blocks.'),
+  regionBlocksFormat: z.enum(['blocks', 'runs']).describe('Default get_region_blocks format.'),
+  replaceRegionBlocksDryRun: z.boolean().describe('Default dry-run behavior for replace_region_blocks.'),
+  fillRegionDryRun: z.boolean().describe('Default dry-run behavior for fill_region.'),
+}).strict().describe('Active optional-argument defaults for Dirt tools.');
+
+const ServerStatusSchema = z.object({
+  builds: z.object({
+    minecraft: z.string().min(1).describe('Running Minecraft build.'),
+    paper: z.string().min(1).describe('Full running Paper build identifier.'),
+    dirtMcp: z.string().min(1).describe('Running Dirt MCP Paper plugin build.'),
+    fawe: z.string().min(1).describe('Running FastAsyncWorldEdit build.'),
+  }).strict().describe('Exact runtime build identifiers.'),
+  performance: z.object({
+    tpsOneMinute: z.number().nonnegative().describe('Paper one-minute ticks per second.'),
+    averageTickTimeMillis: z.number().nonnegative().describe('Paper average tick duration in milliseconds.'),
+  }).strict().describe('Lightweight current Paper performance indicators.'),
+  players: z.object({
+    online: z.number().int().nonnegative().describe('Current online player count.'),
+    maximum: z.number().int().nonnegative().describe('Configured player capacity.'),
+    entries: z.array(z.object({
+      name: z.string().min(1).describe('Current player name.'),
+      world: z.string().min(1).describe('Loaded world containing the player.'),
+      gameMode: z.enum(['survival', 'creative', 'adventure', 'spectator']).describe('Current game mode.'),
+      blockPosition: BlockPositionSchema.describe('Current integer block position.'),
+    }).strict()).describe('Online players sorted by name, with location context.'),
+  }).strict().describe('Current player presence.'),
+  worlds: z.array(z.object({
+    name: z.string().min(1).describe('Exact loaded world name accepted by world tools.'),
+    environment: z.string().min(1).describe('Paper world environment, such as normal or nether.'),
+    minY: z.number().int().describe('Minimum valid block Y.'),
+    maxY: z.number().int().describe('Maximum valid block Y, inclusive.'),
+    spawn: BlockPositionSchema.describe('Current world spawn block.'),
+    timeOfDay: z.number().int().min(0).max(23_999).describe('Current Minecraft time of day.'),
+    storm: z.boolean().describe('Whether the world currently has a storm.'),
+    thundering: z.boolean().describe('Whether the world is currently thundering.'),
+    playerCount: z.number().int().nonnegative().describe('Players currently in this world.'),
+  }).strict()).describe('All currently loaded worlds in Paper order.'),
+  limits: LimitConfigurationSchema,
+  defaults: DefaultConfigurationSchema,
+}).strict().describe('Current lightweight Paper context for grounding subsequent Dirt tool calls.');
 
 const READ_WORLD_ANNOTATIONS: ToolAnnotations = {
   readOnlyHint: true,
   destructiveHint: false,
   idempotentHint: true,
   openWorldHint: true,
-};
-const READ_LOCAL_ANNOTATIONS: ToolAnnotations = {
-  readOnlyHint: true,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: false,
 };
 const MUTATION_ANNOTATIONS: ToolAnnotations = {
   readOnlyHint: false,
@@ -393,18 +413,37 @@ export function registerTools(
 ): void {
   const register: typeof server.registerTool = server.registerTool.bind(server);
 
-  registrations.push(register('get_server_info', {
-    title: 'Get Dirt server info',
-    description: 'Verify the local Paper bridge and return Minecraft/plugin versions, active limits, and non-secret defaults.',
+  registrations.push(register('ping_server', {
+    title: 'Ping Dirt server',
+    description: 'Run a non-mutating end-to-end health check across the authenticated bridge, Dirt plugin, Paper, and a Paper-backed FAWE session. Returns only status ok on success.',
     inputSchema: z.object({}).strict().describe('No arguments.'),
-    outputSchema: ServerInfoSchema,
-    annotations: READ_LOCAL_ANNOTATIONS,
-  }, async (_input, context) => auditToolCall('get_server_info', undefined, context, async (callId) => {
+    outputSchema: PingServerOutputSchema,
+    annotations: READ_WORLD_ANNOTATIONS,
+  }, async (_input, context) => auditToolCall('ping_server', undefined, context, async (callId) => {
     try {
-      const info = await bridgeRequest(config, '/v1/server-info', callId, ServerInfoSchema);
-      return successResult(info, `Dirt bridge ready: Minecraft ${info.minecraftVersion}, plugin ${info.pluginVersion}.`);
+      const result = await bridgeRequest(config, '/v1/ping', callId, PingServerOutputSchema);
+      return successResult(result, 'ok');
     } catch (error: unknown) {
-      return errorResult(error, `Could not get Dirt server info from ${config.baseUrl}`);
+      return errorResult(error, `Dirt server health check failed at ${config.baseUrl}`);
+    }
+  })));
+
+  registrations.push(register('get_server_status', {
+    title: 'Get Dirt server status',
+    description: 'Return current Minecraft, Paper, Dirt MCP, and FAWE builds; TPS; online players and block positions; loaded worlds; and active Dirt limits/defaults. Use this to ground later world operations.',
+    inputSchema: z.object({}).strict().describe('No arguments.'),
+    outputSchema: ServerStatusSchema,
+    annotations: READ_WORLD_ANNOTATIONS,
+  }, async (_input, context) => auditToolCall('get_server_status', undefined, context, async (callId) => {
+    try {
+      const status = await bridgeRequest(config, '/v1/server-status', callId, ServerStatusSchema);
+      const worldNames = status.worlds.map((world) => world.name).join(', ') || 'none';
+      return successResult(
+        status,
+        `Paper ${status.builds.paper}; players ${status.players.online}/${status.players.maximum}; loaded worlds: ${worldNames}.`,
+      );
+    } catch (error: unknown) {
+      return errorResult(error, `Could not get Dirt server status from ${config.baseUrl}`);
     }
   })));
 
