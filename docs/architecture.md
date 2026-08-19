@@ -99,7 +99,9 @@ boundary and record only successful non-empty edits. Sparse edits reject
 duplicate positions and validate every position, state, and chunk before
 opening their single FAWE edit session. Fill and sparse edits count blocks
 already in the destination state before mutation so dry-runs are exact and the
-changed-block limit is checked before execution.
+changed-block limit is checked before execution. Dirt explicitly uses FAWE's
+API side-effect profile for edits, which omits neighbor updates while retaining
+API-appropriate heightmap and lighting work.
 `undo_last_dirt_edit` uses the same world lock, applies the newest history entry
 through a fresh FAWE edit session, and consumes it only after completion.
 

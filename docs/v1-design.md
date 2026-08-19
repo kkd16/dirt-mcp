@@ -355,10 +355,10 @@ exceed `max-region-volume`, and the number that differ from the live world may
 not exceed `max-changed-blocks`.
 
 One FAWE edit session applies the complete list and a successful non-empty batch
-becomes one Dirt undo entry. FAWE placement does not request Bukkit neighbor
-physics; recalculating redstone or other physics-sensitive structures remains a
-separate operation. A dry-run returns the same exact counts without mutation or
-history:
+becomes one Dirt undo entry. Dirt explicitly selects FAWE's API side-effect
+profile, which omits neighbor updates; recalculating redstone or other
+physics-sensitive structures remains a separate operation. A dry-run returns
+the same exact counts without mutation or history:
 
 ```json
 {

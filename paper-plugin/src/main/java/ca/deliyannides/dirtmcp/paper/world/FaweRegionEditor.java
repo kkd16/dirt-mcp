@@ -1,7 +1,7 @@
 package ca.deliyannides.dirtmcp.paper.world;
 
-import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.BlockChange;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.Failure;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRegionRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRegionResult;
@@ -11,10 +11,10 @@ import ca.deliyannides.dirtmcp.paper.world.RegionEditor.SetBlocksRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.SetBlocksResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoLastDirtEditRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoLastDirtEditResult;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Bounds;
 import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.NormalizedRegion;
 import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.RegionTooLargeException;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Bounds;
 import com.fastasyncworldedit.core.function.mask.SingleBlockStateMask;
 import com.sk89q.worldedit.EditSession;
 import com.sk89q.worldedit.MaxChangedBlocksException;
@@ -23,6 +23,8 @@ import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.function.mask.Mask;
 import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldedit.regions.CuboidRegion;
+import com.sk89q.worldedit.util.SideEffect;
+import com.sk89q.worldedit.util.SideEffectSet;
 import com.sk89q.worldedit.world.block.BlockState;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -284,7 +286,8 @@ public final class FaweRegionEditor implements RegionEditor {
                 .newEditSessionBuilder()
                 .world(world)
                 .maxBlocks(this.maxChangedBlocks)
-                .allowedRegionsEverywhere();
+                .allowedRegionsEverywhere()
+                .setSideEffectSet(SideEffectSet.api().without(SideEffect.NEIGHBORS));
         if (recordHistory) {
             return builder.fastMode(false).combineStages(true).changeSet(false, null).build();
         }
@@ -487,27 +490,10 @@ public final class FaweRegionEditor implements RegionEditor {
         List<ChunkPosition> chunks = new ArrayList<>();
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
             for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
-                if (!world.isChunkLoaded(chunkX, chunkZ)) {
-                    throw new EditException(
-                            Failure.WORLD_UNAVAILABLE,
-                            "Region contains an unloaded chunk at " + chunkX + "," + chunkZ);
-                }
                 chunks.add(new ChunkPosition(chunkX, chunkZ));
             }
         }
-
-        List<ChunkPosition> retained = new ArrayList<>(chunks.size());
-        try {
-            for (ChunkPosition chunk : chunks) {
-                if (world.addPluginChunkTicket(chunk.x(), chunk.z(), this.plugin)) {
-                    retained.add(chunk);
-                }
-            }
-        } catch (RuntimeException exception) {
-            removeChunkTickets(world, retained);
-            throw exception;
-        }
-        return new ChunkTickets(world, List.copyOf(retained));
+        return retainLoadedChunks(world, chunks, "Region");
     }
 
     private ChunkTickets retainLoadedChunks(World world, List<BlockPosition> positions)
@@ -516,12 +502,20 @@ public final class FaweRegionEditor implements RegionEditor {
         for (BlockPosition position : positions) {
             chunks.add(new ChunkPosition(position.x() >> 4, position.z() >> 4));
         }
+        return retainLoadedChunks(world, chunks, "Sparse edit");
+    }
 
+    private ChunkTickets retainLoadedChunks(
+            World world,
+            Iterable<ChunkPosition> requestedChunks,
+            String operation) throws EditException {
+        Set<ChunkPosition> chunks = new LinkedHashSet<>();
+        requestedChunks.forEach(chunks::add);
         for (ChunkPosition chunk : chunks) {
             if (!world.isChunkLoaded(chunk.x(), chunk.z())) {
                 throw new EditException(
                         Failure.WORLD_UNAVAILABLE,
-                        "Sparse edit contains an unloaded chunk at " + chunk.x() + "," + chunk.z());
+                        operation + " contains an unloaded chunk at " + chunk.x() + "," + chunk.z());
             }
         }
 
