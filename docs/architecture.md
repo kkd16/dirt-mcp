@@ -76,11 +76,12 @@ its process environment.
 V1 keeps execution intentionally direct:
 
 1. Authenticate and parse the request.
-2. Resolve an already-loaded world and normalize the inclusive region bounds.
+2. Resolve an already-loaded world and validate the requested positions or
+   inclusive region bounds.
 3. Reject invalid block states or requests beyond configured limits.
 4. If `dryRun` is true, calculate and return the effect without mutation.
-5. Otherwise run the FAWE operation, wait for completion, retain its history,
-   and return exact counts.
+5. Otherwise run the FAWE operation, wait for completion, retain non-empty
+   history when enabled, and return exact counts.
 
 There is no persistent job system. One mutation may run per world at a time;
 additional mutations fail as busy rather than racing. Each world retains its
@@ -102,6 +103,7 @@ already in the destination state before mutation so dry-runs are exact and the
 changed-block limit is checked before execution. Dirt explicitly uses FAWE's
 API side-effect profile for edits, which omits neighbor updates while retaining
 API-appropriate heightmap and lighting work.
+
 `undo_last_dirt_edit` uses the same world lock, applies the newest history entry
 through a fresh FAWE edit session, and consumes it only after completion.
 

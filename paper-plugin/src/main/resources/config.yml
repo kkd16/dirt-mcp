@@ -1,6 +1,6 @@
 # Settings are validated and snapshotted when the plugin starts; restart Paper
-# after changing this file. The authenticated health endpoint reports active
-# values but never reports the bearer token.
+# after changing this file. The authenticated server-status endpoint reports
+# active values but never reports the bearer token.
 # The bridge always listens on 127.0.0.1 while the plugin is enabled.
 # DIRT_MCP_BRIDGE_PORT overrides this value.
 bridge:

@@ -7,11 +7,9 @@ for inspecting bounded regions and performing deterministic bulk edits through
 [FastAsyncWorldEdit (FAWE)](https://github.com/IntellectualSites/FastAsyncWorldEdit),
 while Paper remains the owner of the live world.
 
-The repository currently ships the Paper plugin, authenticated loopback bridge,
-and MCP tools for status, bounded summary, exact block inspection, sparse
-orthographic views, FAWE-backed block replacement and filling, and undo.
-It also exposes ordered operator-level Minecraft command dispatch through
-Paper's supported non-player feedback sender.
+The repository ships the Paper plugin, authenticated loopback bridge, and MCP
+tools for server status, bounded inspection, FAWE-backed cuboid and sparse
+edits, undo, and ordered operator-level Minecraft command dispatch.
 
 ## Platform support
 
@@ -25,22 +23,7 @@ Dirt MCP tracks the latest stable Paper release only. The current baseline is:
 Older Paper or Minecraft versions are not supported.
 Source development also requires GNU Make, curl, and tmux.
 
-## Installation
-
-### Release installation
-
-Release publishing is not wired up yet. The intended v1 distribution is:
-
-1. Download `dirt-mcp-paper-<version>.jar` from GitHub Releases.
-2. Install the matching latest release from the
-   [official FAWE download page](https://intellectualsites.github.io/download/fawe.html)
-   on the Paper server.
-3. Place the Dirt MCP JAR in the server's `plugins/` directory.
-4. Install the MCP process with `npm install --global @dirt-mcp/server`.
-
-Until those artifacts are published, install from source.
-
-### Source installation
+## Installation from source
 
 ```bash
 git clone https://github.com/kkd16/dirt-mcp.git
@@ -62,7 +45,9 @@ Copy the Paper plugin into an existing server:
 cp paper-plugin/build/libs/dirt-mcp-paper-*.jar /path/to/paper/plugins/
 ```
 
-FAWE is a required runtime dependency. Dirt MCP will not load without it.
+Install the matching current Paper build from the
+[official FAWE download page](https://intellectualsites.github.io/download/fawe.html).
+FAWE is a required runtime dependency; Dirt MCP will not load without it.
 
 ## Running on a Paper server
 
@@ -138,12 +123,12 @@ For another MCP host, configure it to launch the source build:
 }
 ```
 
-Once npm publishing exists, a global installation will provide the equivalent
-`dirt-mcp` command. The current tool surface contains `ping_server`,
-`get_server_status`,
+The current tool surface contains `ping_server`, `get_server_status`,
 `count_region_block_states`, `get_region_blocks`, `scan_orthographic_view`,
 `replace_region_blocks`, `fill_region`, `set_blocks`, `undo_last_dirt_edit`, and
-`run_minecraft_commands`.
+`run_minecraft_commands`. See the [v1 behavior guide](docs/v1-design.md) for
+selection and execution semantics, and the
+[OpenAPI contract](protocol/openapi.yaml) for exact bridge schemas.
 
 `set_blocks` applies distinct explicitly listed positions and block states
 through one FAWE edit session and records the non-empty batch as one Dirt undo
@@ -155,11 +140,6 @@ order with console-equivalent permissions. Its Paper sender is not a player, so
 player-only commands, `@s`, and relative-position behavior differ from a real
 operator. Command effects are immediate and are not covered by Dirt edit limits
 or `undo_last_dirt_edit`.
-
-`scan_orthographic_view` defaults to explicit visible-block records. MCP
-callers can set `format` to `grid` for a substantially smaller lossless
-response containing a canonical `blockStatePalette` plus aligned
-`blockStateIndexRows` and `distanceRows`.
 
 ## Local development
 
@@ -231,9 +211,9 @@ the world.
 validates the built Paper JAR, restarts the managed server, runs live bridge,
 Paper, and FAWE coverage, and rejects serious lifecycle log failures. The live
 suite temporarily force-loads chunk `0,0`, verifies status and inspection paths,
-mutates a bounded fixture through fill, replacement, and sparse setting, checks result caps,
-exact block states, no-ops, and undo, then restores the prior world state. Run it
-without concurrent Dirt MCP edits.
+mutates a bounded fixture through fill, replacement, sparse setting, and command
+dispatch, checks result caps, exact states, no-ops, and undo, then restores the
+prior world state. Run it without concurrent Dirt MCP edits.
 
 ## Contributing
 
