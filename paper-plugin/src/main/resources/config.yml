@@ -38,4 +38,4 @@ defaults:
   # get_region_blocks format used when format is omitted: blocks or runs.
   region-blocks-format: blocks
   # Dry-run value used when a block-edit request omits dryRun.
-why  edit-dry-run: false
+  edit-dry-run: false
