@@ -137,6 +137,23 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     format: 'blocks',
     blocks: [{ position: { x: 1, y: 2, z: 3 }, blockState: 'minecraft:stone' }],
   };
+  const blockStateCount = {
+    world: 'world',
+    bounds: { min: { x: 1, y: 2, z: 3 }, max: { x: 2, y: 2, z: 3 } },
+    dimensions: { x: 2, y: 1, z: 1 },
+    volume: 2,
+    blockStateCounts: { 'minecraft:stone': 1, 'minecraft:air': 1 },
+  };
+  const replacement = {
+    world: 'world',
+    bounds: blockStateCount.bounds,
+    sourceBlockState: 'minecraft:stone',
+    destinationBlockState: 'minecraft:dirt',
+    dryRun: true,
+    matchedBlockCount: 1,
+    changedBlockCount: 1,
+  };
+  const undone = { world: 'world', changedBlockCount: 1 };
   const view = {
     world: 'world',
     origin: { x: 1, y: 2, z: 4 },
@@ -241,6 +258,8 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       response.end(JSON.stringify(ping));
     } else if (request.url === '/v1/server-status') {
       response.end(JSON.stringify(serverStatus));
+    } else if (request.url === '/v1/count-region-block-states') {
+      response.end(JSON.stringify(blockStateCount));
     } else if (request.url === '/v1/get-region-blocks') {
       response.end(JSON.stringify(regionBlocks));
     } else if (request.url === '/v1/scan-orthographic-view') {
@@ -250,8 +269,12 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       response.end(JSON.stringify({
         error: { code: 'change_limit_exceeded', message: 'Too many changes' },
       }));
+    } else if (request.url === '/v1/replace-region-blocks') {
+      response.end(JSON.stringify(replacement));
     } else if (request.url === '/v1/set-blocks') {
       response.end(JSON.stringify(setBlocks));
+    } else if (request.url === '/v1/undo-last-dirt-edit') {
+      response.end(JSON.stringify(undone));
     } else if (request.url === '/v1/run-minecraft-commands') {
       response.end(JSON.stringify(commandRun));
     } else {
@@ -427,6 +450,50 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     structuredContent: commandRun,
   }));
 
+  send(child, {
+    jsonrpc: '2.0',
+    id: 10,
+    method: 'tools/call',
+    params: modernParams({ name: 'count_region_block_states', arguments: region }),
+  });
+  const counted = await waitFor(messages, 10);
+  assert.deepEqual(counted.result, modernResult({
+    content: [{ type: 'text', text: 'Counted 2 blocks across 2 block states in world.' }],
+    structuredContent: blockStateCount,
+  }));
+
+  send(child, {
+    jsonrpc: '2.0',
+    id: 11,
+    method: 'tools/call',
+    params: modernParams({
+      name: 'replace_region_blocks',
+      arguments: {
+        ...region,
+        sourceBlockState: 'minecraft:stone',
+        destinationBlockState: 'minecraft:dirt',
+        dryRun: true,
+      },
+    }),
+  });
+  const replaced = await waitFor(messages, 11);
+  assert.deepEqual(replaced.result, modernResult({
+    content: [{ type: 'text', text: 'Would change 1 of 1 matching blocks in world.' }],
+    structuredContent: replacement,
+  }));
+
+  send(child, {
+    jsonrpc: '2.0',
+    id: 12,
+    method: 'tools/call',
+    params: modernParams({ name: 'undo_last_dirt_edit', arguments: { world: 'world' } }),
+  });
+  const undo = await waitFor(messages, 12);
+  assert.deepEqual(undo.result, modernResult({
+    content: [{ type: 'text', text: 'Undid the last Dirt edit in world, restoring 1 blocks.' }],
+    structuredContent: undone,
+  }));
+
   assert.deepEqual(
     requests.map(({ method, path }) => ({ method, path })),
     [
@@ -438,6 +505,9 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { method: 'GET', path: '/v1/server-status' },
       { method: 'POST', path: '/v1/set-blocks' },
       { method: 'POST', path: '/v1/run-minecraft-commands' },
+      { method: 'POST', path: '/v1/count-region-block-states' },
+      { method: 'POST', path: '/v1/replace-region-blocks' },
+      { method: 'POST', path: '/v1/undo-last-dirt-edit' },
     ],
   );
   for (const request of requests) {
@@ -449,7 +519,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     );
   }
   const callIds = requests.map((request) => request.headers['x-dirt-call-id']);
-  assert.equal(new Set(callIds).size, 8);
+  assert.equal(new Set(callIds).size, 11);
   assert.deepEqual(requests[1].body, {
     ...region,
     includeBlockStatePatterns: [],
@@ -469,49 +539,38 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.equal(requests[6].headers['content-type'], 'application/json');
   assert.deepEqual(requests[7].body, { commands: ['/say hello', 'missing'] });
   assert.equal(requests[7].headers['content-type'], 'application/json');
+  assert.deepEqual(requests[8].body, region);
+  assert.deepEqual(requests[9].body, {
+    ...region,
+    sourceBlockState: 'minecraft:stone',
+    destinationBlockState: 'minecraft:dirt',
+    dryRun: true,
+  });
+  assert.deepEqual(requests[10].body, { world: 'world' });
 
   const auditLines = errors.values.filter((line) => line.startsWith('Dirt MCP tool_call '));
-  assert.equal(auditLines.length, 8);
-  assert.match(
-    auditLines[0],
-    new RegExp(`^Dirt MCP tool_call tool=ping_server call=${callIds[0]} request=2 `
-      + 'client="bridge-test/1" outcome=ok duration_ms=\\d+$'),
-  );
-  assert.match(
-    auditLines[1],
-    new RegExp(`^Dirt MCP tool_call tool=get_region_blocks call=${callIds[1]} request=3 `
-      + 'client="bridge-test/1" world="world" outcome=ok duration_ms=\\d+$'),
-  );
-  assert.match(
-    auditLines[2],
-    new RegExp(`^Dirt MCP tool_call tool=scan_orthographic_view call=${callIds[2]} request=4 `
-      + 'client="bridge-test/1" world="world" outcome=ok duration_ms=\\d+$'),
-  );
-  assert.match(
-    auditLines[3],
-    new RegExp(`^Dirt MCP tool_call tool=scan_orthographic_view call=${callIds[3]} request=5 `
-      + 'client="bridge-test/1" world="world" outcome=ok duration_ms=\\d+$'),
-  );
-  assert.match(
-    auditLines[4],
-    new RegExp(`^Dirt MCP tool_call tool=fill_region call=${callIds[4]} request=6 `
-      + 'client="bridge-test/1" world="world" outcome=error duration_ms=\\d+$'),
-  );
-  assert.match(
-    auditLines[5],
-    new RegExp(`^Dirt MCP tool_call tool=get_server_status call=${callIds[5]} request=7 `
-      + 'client="bridge-test/1" outcome=ok duration_ms=\\d+$'),
-  );
-  assert.match(
-    auditLines[6],
-    new RegExp(`^Dirt MCP tool_call tool=set_blocks call=${callIds[6]} request=8 `
-      + 'client="bridge-test/1" world="world" outcome=ok duration_ms=\\d+$'),
-  );
-  assert.match(
-    auditLines[7],
-    new RegExp(`^Dirt MCP tool_call tool=run_minecraft_commands call=${callIds[7]} request=9 `
-      + 'client="bridge-test/1" outcome=error duration_ms=\\d+$'),
-  );
+  const expectedAudits = [
+    ['ping_server', 2, false, 'ok'],
+    ['get_region_blocks', 3, true, 'ok'],
+    ['scan_orthographic_view', 4, true, 'ok'],
+    ['scan_orthographic_view', 5, true, 'ok'],
+    ['fill_region', 6, true, 'error'],
+    ['get_server_status', 7, false, 'ok'],
+    ['set_blocks', 8, true, 'ok'],
+    ['run_minecraft_commands', 9, false, 'error'],
+    ['count_region_block_states', 10, true, 'ok'],
+    ['replace_region_blocks', 11, true, 'ok'],
+    ['undo_last_dirt_edit', 12, true, 'ok'],
+  ];
+  assert.equal(auditLines.length, expectedAudits.length);
+  expectedAudits.forEach(([tool, requestId, includesWorld, outcome], index) => {
+    const world = includesWorld ? ' world="world"' : '';
+    assert.match(
+      auditLines[index],
+      new RegExp(`^Dirt MCP tool_call tool=${tool} call=${callIds[index]} request=${requestId} `
+        + `client="bridge-test/1"${world} outcome=${outcome} duration_ms=\\d+$`),
+    );
+  });
 
   const exited = once(child, 'exit');
   child.stdin.end();
@@ -529,6 +588,9 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
     } else if (behavior === 'invalid') {
       response.setHeader('Content-Type', 'application/json');
       response.end('{}');
+    } else if (behavior === 'malformed') {
+      response.setHeader('Content-Type', 'application/json');
+      response.end('{');
     } else {
       response.statusCode = 502;
       response.setHeader('Content-Type', 'text/plain');
@@ -586,8 +648,18 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
     },
   });
 
+  behavior = 'malformed';
+  const malformed = await callPing(12);
+  assert.equal(malformed.result.isError, true);
+  assert.deepEqual(malformed.result.structuredContent, {
+    error: {
+      code: 'bridge_invalid_response',
+      message: 'Paper bridge returned invalid JSON.',
+    },
+  });
+
   behavior = 'unstructured';
-  const unstructured = await callPing(12);
+  const unstructured = await callPing(13);
   assert.equal(unstructured.result.isError, true);
   assert.deepEqual(unstructured.result.structuredContent, {
     error: {
@@ -599,7 +671,7 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
   await new Promise((resolve, reject) => {
     bridge.close((error) => (error === undefined ? resolve() : reject(error)));
   });
-  const unavailable = await callPing(13);
+  const unavailable = await callPing(14);
   assert.equal(unavailable.result.isError, true);
   assert.equal(unavailable.result.structuredContent.error.code, 'bridge_unavailable');
 

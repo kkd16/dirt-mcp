@@ -19,12 +19,12 @@ ordered by priority.
 - Verify edit-session and chunk-ticket cleanup on success, failure, interruption,
   and plugin shutdown.
 
-## 3. Complete MCP forwarding coverage
+## 3. Strengthen MCP bridge failure coverage
 
-- Add successful request and response tests for `count_region_block_states`,
-  `replace_region_blocks`, `fill_region`, and `undo_last_dirt_edit`.
-- Cover malformed bridge responses, timeouts, unavailable bridges, and every
-  structured bridge error used by the MCP tools.
+- Add a deterministic request-timeout test without materially slowing the
+  offline suite.
+- Cover tool hot-reload rollback when a syntactically valid replacement module
+  fails partway through registration.
 
 ## 4. Enforce contract consistency
 

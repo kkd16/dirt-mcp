@@ -87,15 +87,6 @@ test('reloads tools without replacing the stdio process', async (context) => {
   const initial = await waitFor(messages, (message) => message.id === 2);
   assert.equal(initial.result.tools[0].title, 'Ping Dirt server');
   assert.deepEqual(
-    initial.result.tools.find((tool) => tool.name === 'scan_orthographic_view').annotations,
-    {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-  );
-  assert.deepEqual(
     Object.fromEntries(initial.result.tools.map((tool) => [tool.name, tool.annotations])),
     {
       ping_server: {
