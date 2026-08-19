@@ -8,35 +8,37 @@
     "type": "git",
     "url": "git+https://github.com/kkd16/dirt-mcp.git"
   },
-  "workspaces": [
-    "mcp-server"
-  ],
   "scripts": {
-    "build": "npm run build --workspace=@dirt-mcp/server",
-    "check": "npm run format:check && npm run lint && npm run validate && npm test && npm run package:check",
-    "clean": "npm run clean --workspace=@dirt-mcp/server",
+    "build": "pnpm --filter @dirt-mcp/server run build",
+    "check": "pnpm run format:check && pnpm run lint && pnpm run validate && pnpm run test && pnpm run package:check",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
-    "lint": "npm run lint:code && npm run lint:shell && npm run lint:workflows && npm run lint:markdown",
+    "lint": "pnpm run lint:code && pnpm run lint:shell && pnpm run lint:workflows && pnpm run lint:markdown",
     "lint:code": "oxlint mcp-server/src --type-aware --deny-warnings --report-unused-disable-directives && oxlint mcp-server/test scripts/*.mjs --deny-warnings --report-unused-disable-directives",
     "lint:markdown": "markdownlint-cli2",
     "lint:shell": "shellcheck scripts/dev-paper scripts/run-dirt-mcp scripts/run-paper-dev scripts/validate-paper-jar scripts/validate-paper-log",
     "lint:workflows": "actionlint",
-    "package:check": "publint --strict mcp-server && npm pack --workspace=@dirt-mcp/server --dry-run",
-    "test": "npm test --workspace=@dirt-mcp/server",
-    "validate": "npm run validate:openapi",
+    "package:check": "publint --strict mcp-server && pnpm --filter @dirt-mcp/server pack --dry-run",
+    "test": "pnpm --filter @dirt-mcp/server run test",
+    "validate": "pnpm run validate:openapi",
     "validate:openapi": "redocly check-config && redocly lint"
   },
   "devDependencies": {
     "@redocly/cli": "2.46.1",
     "markdownlint-cli2": "0.23.2",
-    "oxfmt": "0.64.0",
-    "oxlint": "1.79.0",
+    "oxfmt": "0.63.0",
+    "oxlint": "1.78.0",
     "oxlint-tsgolint": "7.0.2001",
     "publint": "0.3.23"
   },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^11.22.0",
+      "onFail": "download"
+    }
+  },
   "engines": {
     "node": ">=26"
-  },
-  "packageManager": "npm@12.0.2"
+  }
 }

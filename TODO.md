@@ -30,7 +30,7 @@ ordered by priority.
 - Establish one non-snapshot version shared by the Paper plugin, bridge contract,
   and MCP package.
 - Publish the Paper JAR through GitHub Releases with checksums.
-- Make `@dirt-mcp/server` publishable and publish the matching npm package.
+- Make `@dirt-mcp/server` publishable and publish the matching registry package.
 - Add a release workflow that builds, tests, inspects, and publishes artifacts.
 - Verify the documented clean installation flow using only published artifacts.
 

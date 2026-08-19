@@ -12,7 +12,6 @@ replay_pid*
 # Node.js
 node_modules/
 **/dist/
-npm-debug.log*
 
 # Local Paper runtime
 paper-plugin/run/

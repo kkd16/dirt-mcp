@@ -3,5 +3,5 @@
     "MD013": false,
   },
   "globs": ["**/*.md"],
-  "ignores": ["node_modules/**", "paper-plugin/run/**"],
+  "ignores": ["**/node_modules/**", "paper-plugin/run/**"],
 }

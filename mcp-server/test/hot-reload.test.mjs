@@ -58,7 +58,7 @@ function collectLines(stream, parse) {
 }
 
 test('reloads tools without replacing the stdio process', async (context) => {
-  const temporaryDirectory = await mkdtemp(join(repositoryRoot, 'node_modules/.dirt-mcp-reload-'));
+  const temporaryDirectory = await mkdtemp(join(packageDirectory, 'node_modules/.dirt-mcp-reload-'));
   await copyFile(join(packageDirectory, 'dist/index.js'), join(temporaryDirectory, 'index.js'));
   const toolsPath = join(temporaryDirectory, 'tools.js');
   await copyFile(join(packageDirectory, 'dist/tools.js'), toolsPath);

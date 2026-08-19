@@ -7,8 +7,10 @@ updates:
       day: monday
       time: '09:00'
       timezone: America/Vancouver
+    cooldown:
+      default-days: 1
     groups:
-      npm-minor-and-patch:
+      pnpm-minor-and-patch:
         patterns:
           - '*'
         update-types:

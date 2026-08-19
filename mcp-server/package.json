@@ -17,8 +17,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
-    "pretest": "npm run build",
+    "pretest": "pnpm run build",
     "start": "node dist/index.js",
     "test": "node --test"
   },
