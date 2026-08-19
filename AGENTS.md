@@ -1,100 +1,65 @@
 # Repository instructions
 
-## Product context
+## Product and architecture
 
-Dirt MCP is a local-first MCP interface for inspecting and editing a live Paper
-world. The MCP process talks over authenticated loopback HTTP to a Paper plugin;
-the plugin owns all Minecraft and FAWE access.
+Dirt MCP is a local-first interface for inspecting and editing a live Paper
+world. The MCP server communicates over authenticated loopback HTTP with a Paper
+plugin, which owns Minecraft and FAWE access. `protocol/openapi.yaml` documents
+implemented bridge behavior; `docs/v1-design.md` documents the product design.
 
-Read `README.md` and `docs/` before changing behavior. The OpenAPI file describes
-implemented bridge behavior; the v1 design describes the intended product.
+- Support only the latest stable Paper release. Verify official sources before
+  changing Paper, Java, Gradle, FAWE, or MCP dependencies.
+- Keep the bridge on `127.0.0.1`, require bearer authentication for world
+  endpoints, and never log or commit tokens.
+- Paper owns live worlds. Never edit world files or `.mca` data behind a running
+  server.
+- FAWE is required for edits. Keep FAWE types and behavior behind Dirt-owned
+  Java services; wire schemas must remain implementation-neutral.
+- Keep Paper/FAWE code in `paper-plugin`, MCP code in `mcp-server`, and wire
+  contracts in `protocol`.
+- Keep v1 synchronous and local: one mutation per world, bounded in-memory undo,
+  and no persistent jobs, database, remote transport, permission integrations,
+  renderer, web UI, or speculative extension points.
 
-The current implementation contains plugin lifecycle, authenticated health and
-region inspection, plus FAWE-backed block replacement and undo. Do not present
-the planned fill tool as working.
+## Engineering
 
-## Product rules
+- Implement bridge operations as vertical slices: Java behavior, OpenAPI,
+  TypeScript/Zod schemas, MCP exposure, tests, and concise documentation.
+- Keep blocking FAWE work off Paper's main thread. Use an explicit scheduler
+  boundary for Paper-owned APIs.
+- Close edit sessions and other resources on every path. Report completion only
+  after the edit and undo history are complete.
+- Prefer small concrete implementations. Preserve standard project metadata,
+  wrappers, configuration, and scripts unless they are obsolete or harmful.
+- MCP stdio stdout is protocol-only; diagnostics go to stderr.
+- Preserve user changes. Commit only when asked.
 
-- Support the latest stable Paper release only. Do not add compatibility layers
-  for older Paper versions without an explicit decision.
-- FAWE is required for v1 edits and must be isolated behind Dirt-owned Java
-  services. FAWE types must not enter HTTP or MCP schemas.
-- Paper owns live worlds. Never mutate `.mca` files or world directories behind
-  a running server.
-- Keep the bridge on `127.0.0.1`. Remote/cloud transport is outside v1.
-- World endpoints require bearer authentication. Never log or commit tokens.
-- Do not add permission or land-policy integrations. Configurable volume and
-  changed-block caps exist only to bound resource use.
-- `replace_region_blocks` and `fill_region` may execute immediately; `dryRun` is an
-  option, not a mandatory approval stage.
-- Keep v1 synchronous and simple: one mutation per world, at most 20 in-memory
-  undo entries per world, and no persistent jobs or database.
-- Do not add renderers, Mineflayer, schematics, terrain systems, web UI, Docker,
-  or speculative extension points unless the product scope changes explicitly.
+## Workflow
 
-## Engineering rules
-
-- Implement vertical slices. A bridge operation lands with Java behavior,
-  OpenAPI, TypeScript/Zod schemas, MCP exposure, tests, and concise docs.
-- `protocol/openapi.yaml` contains implemented behavior only.
-- Keep Paper/FAWE logic in `paper-plugin`, MCP concerns in `mcp-server`, and wire
-  types in `protocol`.
-- Keep blocking FAWE work off Paper's main tick thread. Cross into Paper-owned
-  APIs through an explicit scheduler boundary when required.
-- Close FAWE edit sessions and other resources on success and failure. Report an
-  edit complete only after FAWE completion and history capture.
-- Prefer small concrete implementations over empty packages, placeholder types,
-  factories, or dependency-heavy frameworks.
-- Preserve conventional project infrastructure, metadata, wrapper/config files,
-  and standard scripts even when the current build could work without them.
-  Remove them only when they are obsolete or actively harmful, not merely
-  redundant.
-- Pin compatibility-sensitive dependencies. Before upgrading Paper, Java,
-  Gradle, FAWE, or MCP, verify current official documentation and artifact
-  metadata, then update code, lockfiles, CI, and docs together.
-- MCP stdio stdout is protocol-only. Send diagnostics to stderr.
-- Preserve existing user changes and do not commit unless asked.
-
-## Development workflow
-
-Use the root commands rather than duplicating build invocations:
+Use the root commands:
 
 ```text
-make doctor   Verify Java, Node, npm, Gradle, curl, and tmux
+make doctor   Check required development tools
 make build    Build Java and TypeScript
-make verify   Run the complete incremental local gate, including live smoke tests
-make check    Run the incremental offline Java and MCP test suite
-make smoke    Restart Paper and run live integration and lifecycle validation
-make ci       Perform the clean offline build used by CI
-make up       Start or reuse the managed Paper integration server
-make reload   Rebuild and gracefully restart the managed server
-make down     Stop the managed server cleanly
+make check    Run offline Java and MCP checks
+make verify   Run the complete local gate, including live smoke tests
+make ci       Run the clean offline CI build
+make up       Start or reuse the managed Paper server
+make reload   Rebuild and restart the managed server
+make down     Stop the managed server
 ```
 
-`make up` uses `paper-plugin/run/`, Minecraft port `25566`, and bridge port
-`8765`. It returns after the authenticated bridge is healthy; use `make status`,
-`make logs`, `make command CMD='...'`, or `make console` to operate it. Reuse
-this server for live tests rather than creating disposable Paper instances. Its
-world is disposable development data and may be mutated freely, while normal
-commands preserve it. Do not commit or hand-edit generated runtime files.
+The managed server uses `paper-plugin/run/`, Minecraft port `25566`, and bridge
+port `8765`. Reuse it for live tests; its world is disposable. Do not commit or
+hand-edit generated runtime files. Paper plugin reload is unsupported, so use
+`make reload` after plugin changes.
 
-Paper plugin reload is unsupported. Use `make reload`, which preserves the
-development world but clears in-memory plugin state such as undo history. The
-project MCP process hot-reloads rebuilt tool definitions; bootstrap changes
-still require a Codex restart. Stop Paper with `make down`.
+- During iteration, run only the smallest relevant test or type-check target.
+- Before handing off code or contract changes, run `make verify` once. It already
+  includes `make check` and `make smoke`; do not run those immediately beforehand.
+- After an interrupted command, confirm it stopped before starting it again.
+- Documentation-only changes need only link, command, formatting, and stale-text
+  checks.
 
-Validation expectations:
-
-- Documentation-only changes: check links, commands, formatting, and stale
-  references.
-- Use focused `make check` or `make smoke` runs while iterating.
-- Before handing off code or contract changes, run `make verify`; it includes
-  Java/JUnit and MCP tests, Paper JAR inspection, a clean managed-server restart,
-  live bridge/Paper/FAWE coverage, world-fixture restoration, and lifecycle-log
-  validation.
-- `make ci` is the clean offline build used by GitHub Actions; do not repeat it
-  locally after a successful `make verify` unless clean-build behavior changed.
-
-Keep documentation concise and durable. Record the present design and supported
-behavior, not conversation history, implementation diaries, review reports, or
-roadmaps.
+Keep documentation concise and current. Do not add implementation diaries,
+review reports, or roadmaps.
