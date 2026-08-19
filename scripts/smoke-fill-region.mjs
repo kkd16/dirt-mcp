@@ -22,8 +22,8 @@ const min = { x: 0, y: 0, z: 0 };
 const max = { x: 1, y: 1, z: 1 };
 const baseUrl = `http://127.0.0.1:${bridgePort}`;
 
-async function bridgeHealth() {
-  const response = await fetch(`${baseUrl}/v1/health`, {
+async function getServerInfo() {
+  const response = await fetch(`${baseUrl}/v1/server-info`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   assert.equal(response.status, 200);
@@ -70,7 +70,7 @@ async function waitForRegion(region) {
   let lastError;
   for (let attempt = 0; attempt < 20; attempt += 1) {
     try {
-      return await bridgeRequest('/v1/inspect-region', region);
+      return await bridgeRequest('/v1/count-region-block-states', region);
     } catch (error) {
       lastError = error;
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -95,7 +95,7 @@ function normalizedJson(value) {
 
 function sortedBlockKeys(blocks) {
   return blocks
-    .map(({ position, state }) => `${position.x},${position.y},${position.z}:${state}`)
+    .map(({ position, blockState }) => `${position.x},${position.y},${position.z}:${blockState}`)
     .sort();
 }
 
@@ -120,7 +120,7 @@ function expandedRunKeys(runs) {
     for (let y = run.from.y; y <= run.to.y; y += 1) {
       for (let z = run.from.z; z <= run.to.z; z += 1) {
         for (let x = run.from.x; x <= run.to.x; x += 1) {
-          blocks.push(`${x},${y},${z}:${run.state}`);
+          blocks.push(`${x},${y},${z}:${run.blockState}`);
         }
       }
     }
@@ -129,9 +129,9 @@ function expandedRunKeys(runs) {
 }
 
 function assertExactBlocks(inspection, state) {
-  assert.equal(inspection.mode, 'blocks');
+  assert.equal(inspection.format, 'blocks');
   assert.equal(inspection.volume, 8);
-  assert.equal(inspection.matchedBlocks, 8);
+  assert.equal(inspection.matchedBlockCount, 8);
   assert.deepEqual(inspection.bounds, { min, max });
   assert.deepEqual(sortedBlockKeys(inspection.blocks), expectedBlockKeys(state));
 }
@@ -140,46 +140,50 @@ const region = { world, min, max };
 let editsToUndo = 0;
 let fixtureIsForceLoaded = false;
 try {
-  const health = await bridgeHealth();
-  assert.equal(health.configuration.bridge.port, bridgePort);
-  assert.ok(health.configuration.bridge.maxRequestBytes > 0);
-  assert.ok(health.configuration.limits.maxRegionVolume > 0);
+  const serverInfo = await getServerInfo();
+  assert.equal(serverInfo.configuration.bridge.port, bridgePort);
+  assert.ok(serverInfo.configuration.bridge.maxRequestBytes > 0);
+  assert.ok(serverInfo.configuration.limits.maxRegionVolume > 0);
   assert.ok(
-    health.configuration.limits.defaultExactResults
-      <= health.configuration.limits.maxExactResults,
+    serverInfo.configuration.limits.defaultRegionBlocksResultLimit
+      <= serverInfo.configuration.limits.maxRegionBlocksResultLimit,
   );
   assert.ok(
-    health.configuration.limits.defaultViewResults
-      <= health.configuration.limits.maxViewResults,
+    serverInfo.configuration.limits.defaultOrthographicViewResultLimit
+      <= serverInfo.configuration.limits.maxOrthographicViewResultLimit,
   );
 
   await paperCommand('forceload add 0 0');
   fixtureIsForceLoaded = true;
 
   const original = await waitForRegion(region);
-  const originalStates = Object.keys(original.blockStates);
-  const destination = originalStates.length === 1 && originalStates[0].startsWith('minecraft:barrier')
+  const originalStates = Object.keys(original.blockStateCounts);
+  const fillBlockState = originalStates.length === 1 && originalStates[0].startsWith('minecraft:barrier')
     ? 'minecraft:amethyst_block'
     : 'minecraft:barrier';
 
-  const preview = await bridgeRequest('/v1/fill-region', { ...region, destination, dryRun: true });
-  const alreadyMatching = original.blockStates[preview.destination] ?? 0;
+  const preview = await bridgeRequest('/v1/fill-region', {
+    ...region,
+    blockState: fillBlockState,
+    dryRun: true,
+  });
+  const alreadyMatching = original.blockStateCounts[preview.blockState] ?? 0;
   assert.equal(preview.dryRun, true);
   assert.equal(preview.volume, original.volume);
-  assert.equal(preview.changedBlocks, original.volume - alreadyMatching);
-  assert.ok(preview.changedBlocks > 0, 'Smoke destination must change at least one block');
+  assert.equal(preview.changedBlockCount, original.volume - alreadyMatching);
+  assert.ok(preview.changedBlockCount > 0, 'Smoke destination must change at least one block');
 
-  const filled = await bridgeRequest('/v1/fill-region', { ...region, destination });
-  editsToUndo += filled.changedBlocks > 0 ? 1 : 0;
+  const filled = await bridgeRequest('/v1/fill-region', { ...region, blockState: fillBlockState });
+  editsToUndo += filled.changedBlockCount > 0 ? 1 : 0;
   assert.equal(filled.dryRun, false);
-  assert.equal(filled.destination, preview.destination);
-  assert.equal(filled.changedBlocks, preview.changedBlocks);
+  assert.equal(filled.blockState, preview.blockState);
+  assert.equal(filled.changedBlockCount, preview.changedBlockCount);
 
-  const afterFill = await bridgeRequest('/v1/inspect-region', region);
-  assert.deepEqual(afterFill.blockStates, { [filled.destination]: filled.volume });
+  const afterFill = await bridgeRequest('/v1/count-region-block-states', region);
+  assert.deepEqual(afterFill.blockStateCounts, { [filled.blockState]: filled.volume });
 
-  const exactBlocks = await bridgeRequest('/v1/inspect-blocks', region);
-  assertExactBlocks(exactBlocks, filled.destination);
+  const exactBlocks = await bridgeRequest('/v1/get-region-blocks', region);
+  assertExactBlocks(exactBlocks, filled.blockState);
 
   const viewRequest = {
     world,
@@ -189,8 +193,9 @@ try {
     verticalRadius: 0,
     maxDistance: 2,
   };
-  const view = await bridgeRequest('/v1/inspect-view', viewRequest);
+  const view = await bridgeRequest('/v1/scan-orthographic-view', viewRequest);
   assert.equal(view.direction, 'north');
+  assert.equal(view.format, 'blocks');
   assert.deepEqual(view.basis, {
     forward: { x: 0, y: 0, z: -1 },
     horizontal: { x: 1, y: 0, z: 0 },
@@ -206,14 +211,14 @@ try {
     max: { x: 0, y: 0, z: 1 },
   });
   assert.equal(view.scannedVolume, 2);
-  assert.equal(view.visibleBlocks, 1);
+  assert.equal(view.visibleBlockCount, 1);
   assert.deepEqual(view.blocks, [{
     position: { x: 0, y: 0, z: 1 },
     offset: { horizontal: 0, vertical: 0, distance: 1 },
-    state: filled.destination,
+    blockState: filled.blockState,
   }]);
 
-  const limitedView = await bridgeResponse('/v1/inspect-view', {
+  const limitedView = await bridgeResponse('/v1/scan-orthographic-view', {
     ...viewRequest,
     verticalRadius: 1,
     maxResults: 1,
@@ -226,25 +231,25 @@ try {
     },
   });
 
-  const exactRuns = await bridgeRequest('/v1/inspect-blocks', {
+  const exactRuns = await bridgeRequest('/v1/get-region-blocks', {
     ...region,
-    include: [filled.destination],
-    mode: 'runs',
+    includeBlockStatePatterns: [filled.blockState],
+    format: 'runs',
     maxResults: 8,
   });
-  assert.equal(exactRuns.mode, 'runs');
-  assert.equal(exactRuns.matchedBlocks, 8);
+  assert.equal(exactRuns.format, 'runs');
+  assert.equal(exactRuns.matchedBlockCount, 8);
   assert.ok(exactRuns.runs.length > 0 && exactRuns.runs.length < 8);
-  assert.deepEqual(expandedRunKeys(exactRuns.runs), expectedBlockKeys(filled.destination));
+  assert.deepEqual(expandedRunKeys(exactRuns.runs), expectedBlockKeys(filled.blockState));
 
-  const excluded = await bridgeRequest('/v1/inspect-blocks', {
+  const excluded = await bridgeRequest('/v1/get-region-blocks', {
     ...region,
-    exclude: [filled.destination],
+    excludeBlockStatePatterns: [filled.blockState],
   });
-  assert.equal(excluded.matchedBlocks, 0);
+  assert.equal(excluded.matchedBlockCount, 0);
   assert.deepEqual(excluded.blocks, []);
 
-  const limited = await bridgeResponse('/v1/inspect-blocks', { ...region, maxResults: 1 });
+  const limited = await bridgeResponse('/v1/get-region-blocks', { ...region, maxResults: 1 });
   assert.equal(limited.status, 413);
   assert.deepEqual(limited.body, {
     error: {
@@ -254,47 +259,53 @@ try {
   });
 
   const replacementDestination = 'minecraft:gold_block';
-  const replacePreview = await bridgeRequest('/v1/replace-blocks', {
+  const replacePreview = await bridgeRequest('/v1/replace-region-blocks', {
     ...region,
-    source: filled.destination,
-    destination: replacementDestination,
+    sourceBlockState: filled.blockState,
+    destinationBlockState: replacementDestination,
     dryRun: true,
   });
   assert.equal(replacePreview.dryRun, true);
-  assert.equal(replacePreview.matchedBlocks, 8);
-  assert.equal(replacePreview.changedBlocks, 8);
+  assert.equal(replacePreview.matchedBlockCount, 8);
+  assert.equal(replacePreview.changedBlockCount, 8);
 
-  const replaced = await bridgeRequest('/v1/replace-blocks', {
+  const replaced = await bridgeRequest('/v1/replace-region-blocks', {
     ...region,
-    source: filled.destination,
-    destination: replacementDestination,
+    sourceBlockState: filled.blockState,
+    destinationBlockState: replacementDestination,
   });
-  editsToUndo += replaced.changedBlocks > 0 ? 1 : 0;
+  editsToUndo += replaced.changedBlockCount > 0 ? 1 : 0;
   assert.equal(replaced.dryRun, false);
-  assert.equal(replaced.matchedBlocks, replacePreview.matchedBlocks);
-  assert.equal(replaced.changedBlocks, replacePreview.changedBlocks);
-  assertExactBlocks(await bridgeRequest('/v1/inspect-blocks', region), replaced.destination);
+  assert.equal(replaced.matchedBlockCount, replacePreview.matchedBlockCount);
+  assert.equal(replaced.changedBlockCount, replacePreview.changedBlockCount);
+  assertExactBlocks(
+    await bridgeRequest('/v1/get-region-blocks', region),
+    replaced.destinationBlockState,
+  );
 
-  const replacementUndone = await bridgeRequest('/v1/undo-last-edit', { world });
+  const replacementUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
   editsToUndo -= 1;
-  assert.equal(replacementUndone.changedBlocks, replaced.changedBlocks);
-  assertExactBlocks(await bridgeRequest('/v1/inspect-blocks', region), filled.destination);
+  assert.equal(replacementUndone.changedBlockCount, replaced.changedBlockCount);
+  assertExactBlocks(await bridgeRequest('/v1/get-region-blocks', region), filled.blockState);
 
-  const noOp = await bridgeRequest('/v1/fill-region', { ...region, destination: filled.destination });
-  assert.equal(noOp.changedBlocks, 0);
+  const noOp = await bridgeRequest('/v1/fill-region', {
+    ...region,
+    blockState: filled.blockState,
+  });
+  assert.equal(noOp.changedBlockCount, 0);
 
-  const undone = await bridgeRequest('/v1/undo-last-edit', { world });
+  const undone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
   editsToUndo -= 1;
-  assert.equal(undone.changedBlocks, filled.changedBlocks);
+  assert.equal(undone.changedBlockCount, filled.changedBlockCount);
 
-  const restored = await bridgeRequest('/v1/inspect-region', region);
+  const restored = await bridgeRequest('/v1/count-region-block-states', region);
   assert.deepEqual(normalizedJson(restored), normalizedJson(original));
   process.stdout.write(`managed bridge smoke test passed in ${world}\n`);
 } finally {
   if (editsToUndo > 0) {
     try {
       while (editsToUndo > 0) {
-        await bridgeRequest('/v1/undo-last-edit', { world });
+        await bridgeRequest('/v1/undo-last-dirt-edit', { world });
         editsToUndo -= 1;
       }
     } catch (error) {

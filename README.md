@@ -106,7 +106,7 @@ the same `DIRT_MCP_BRIDGE_TOKEN` to the MCP process. Tokens must satisfy the
 configured byte minimum, which defaults to 32; lowering it weakens
 authentication. Never commit or log tokens. All settings are validated at
 startup and reported without secrets by
-`dirt_status`; restart Paper after changing them. Existing configuration files
+`get_server_info`; restart Paper after changing them. Existing configuration files
 receive newly introduced default keys without replacing operator values.
 
 The repository includes a project-scoped Codex configuration in
@@ -134,13 +134,14 @@ For another MCP host, configure it to launch the source build:
 ```
 
 Once npm publishing exists, a global installation will provide the equivalent
-`dirt-mcp` command. The current tool surface contains `dirt_status`,
-`inspect_region`, `inspect_blocks`, `inspect_view`, `replace_blocks`,
-`fill_region`, and `undo_last_edit`.
+`dirt-mcp` command. The current tool surface contains `get_server_info`,
+`count_region_block_states`, `get_region_blocks`, `scan_orthographic_view`,
+`replace_region_blocks`, `fill_region`, and `undo_last_dirt_edit`.
 
-`inspect_view` defaults to explicit visible-block records. MCP callers can set
-`format` to `grid` for a substantially smaller lossless response containing a
-canonical state palette plus aligned state-index and distance rows.
+`scan_orthographic_view` defaults to explicit visible-block records. MCP
+callers can set `format` to `grid` for a substantially smaller lossless
+response containing a canonical `blockStatePalette` plus aligned
+`blockStateIndexRows` and `distanceRows`.
 
 ## Local development
 

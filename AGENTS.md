@@ -25,7 +25,7 @@ the planned fill tool as working.
 - World endpoints require bearer authentication. Never log or commit tokens.
 - Do not add permission or land-policy integrations. Configurable volume and
   changed-block caps exist only to bound resource use.
-- `replace_blocks` and `fill_region` may execute immediately; `dryRun` is an
+- `replace_region_blocks` and `fill_region` may execute immediately; `dryRun` is an
   option, not a mandatory approval stage.
 - Keep v1 synchronous and simple: one mutation per world, at most 20 in-memory
   undo entries per world, and no persistent jobs or database.

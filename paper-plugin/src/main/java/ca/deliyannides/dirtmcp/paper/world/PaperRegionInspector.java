@@ -1,25 +1,25 @@
 package ca.deliyannides.dirtmcp.paper.world;
 
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.AxisVector;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockStateCountRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockStateCountResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Bounds;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockInspectionResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockRun;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionMode;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionRequest;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Failure;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectedBlock;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionException;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionRequest;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionResult;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RunInspectionResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.OrthographicViewDirection;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.OrthographicViewRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.OrthographicViewResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RegionBlockListResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RegionBlockRunsResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RegionBlocksFormat;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RegionBlocksRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RegionBlocksResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewBasis;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewBlock;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewDirection;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewOffset;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewRequest;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Viewport;
 import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.NormalizedRegion;
 import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.RegionTooLargeException;
@@ -48,62 +48,67 @@ public final class PaperRegionInspector implements RegionInspector {
 
     private final JavaPlugin plugin;
     private final long maxRegionVolume;
-    private final long maxExactInspectionVolume;
-    private final int maxExactResults;
-    private final long maxViewVolume;
-    private final int maxViewResults;
+    private final long maxRegionBlocksVolume;
+    private final int maxRegionBlocksResults;
+    private final long maxOrthographicViewVolume;
+    private final int maxOrthographicViewResults;
 
     public PaperRegionInspector(
             JavaPlugin plugin,
             long maxRegionVolume,
-            long maxExactInspectionVolume,
-            int maxExactResults,
-            long maxViewVolume,
-            int maxViewResults) {
+            long maxRegionBlocksVolume,
+            int maxRegionBlocksResults,
+            long maxOrthographicViewVolume,
+            int maxOrthographicViewResults) {
         if (maxRegionVolume < 1
-                || maxExactInspectionVolume < 1
-                || maxExactResults < 1
-                || maxViewVolume < 1
-                || maxViewResults < 1) {
+                || maxRegionBlocksVolume < 1
+                || maxRegionBlocksResults < 1
+                || maxOrthographicViewVolume < 1
+                || maxOrthographicViewResults < 1) {
             throw new IllegalArgumentException("Inspection limits must be positive");
         }
         this.plugin = plugin;
         this.maxRegionVolume = maxRegionVolume;
-        this.maxExactInspectionVolume = maxExactInspectionVolume;
-        this.maxExactResults = maxExactResults;
-        this.maxViewVolume = maxViewVolume;
-        this.maxViewResults = maxViewResults;
+        this.maxRegionBlocksVolume = maxRegionBlocksVolume;
+        this.maxRegionBlocksResults = maxRegionBlocksResults;
+        this.maxOrthographicViewVolume = maxOrthographicViewVolume;
+        this.maxOrthographicViewResults = maxOrthographicViewResults;
     }
 
     @Override
-    public InspectionResult inspect(InspectionRequest request) throws InspectionException {
+    public BlockStateCountResult countRegionBlockStates(BlockStateCountRequest request)
+            throws InspectionException {
         NormalizedRegion region = normalize(request, this.maxRegionVolume);
         WorldCapture capture = capture(request.world(), region, List.of(), List.of());
-        Map<String, Long> blockStates = countBlockStates(region, capture.snapshots());
+        Map<String, Long> blockStateCounts = countBlockStates(region, capture.snapshots());
 
-        return new InspectionResult(
+        return new BlockStateCountResult(
                 capture.worldName(),
                 new Bounds(region.min(), region.max()),
                 region.dimensions(),
                 region.volume(),
-                blockStates);
+                blockStateCounts);
     }
 
     @Override
-    public ExactInspectionResult inspectBlocks(ExactInspectionRequest request) throws InspectionException {
-        if (request.maxResults() < 1 || request.maxResults() > this.maxExactResults) {
+    public RegionBlocksResult getRegionBlocks(RegionBlocksRequest request) throws InspectionException {
+        if (request.maxResults() < 1 || request.maxResults() > this.maxRegionBlocksResults) {
             throw new InspectionException(
                     Failure.INVALID_REQUEST,
-                    "maxResults must be between 1 and " + this.maxExactResults);
+                    "maxResults must be between 1 and " + this.maxRegionBlocksResults);
         }
 
-        NormalizedRegion region = normalizeExact(
-                request, this.maxRegionVolume, this.maxExactInspectionVolume);
-        WorldCapture capture = capture(request.world(), region, request.include(), request.exclude());
+        NormalizedRegion region = normalizeRegionBlocks(
+                request, this.maxRegionVolume, this.maxRegionBlocksVolume);
+        WorldCapture capture = capture(
+                request.world(),
+                region,
+                request.includeBlockStatePatterns(),
+                request.excludeBlockStatePatterns());
         List<InspectedBlock> blocks = collectBlocks(region, capture, request);
         Bounds bounds = new Bounds(region.min(), region.max());
-        if (request.mode() == ExactInspectionMode.BLOCKS) {
-            return new BlockInspectionResult(
+        if (request.format() == RegionBlocksFormat.BLOCKS) {
+            return new RegionBlockListResult(
                     capture.worldName(),
                     bounds,
                     region.volume(),
@@ -113,7 +118,7 @@ public final class PaperRegionInspector implements RegionInspector {
         }
 
         List<BlockRun> runs = groupSortedRuns(blocks, request.maxResults());
-        return new RunInspectionResult(
+        return new RegionBlockRunsResult(
                 capture.worldName(),
                 bounds,
                 region.volume(),
@@ -123,22 +128,24 @@ public final class PaperRegionInspector implements RegionInspector {
     }
 
     @Override
-    public ViewResult inspectView(ViewRequest request) throws InspectionException {
-        ViewGeometry geometry = normalizeView(
+    public OrthographicViewResult scanOrthographicView(OrthographicViewRequest request)
+            throws InspectionException {
+        ViewGeometry geometry = normalizeOrthographicView(
                 request,
                 this.maxRegionVolume,
-                this.maxViewVolume,
-                this.maxViewResults);
+                this.maxOrthographicViewVolume,
+                this.maxOrthographicViewResults);
         WorldCapture capture = capture(request.world(), geometry.region(), List.of(), List.of());
         List<ViewBlock> blocks = collectViewBlocks(
                 request,
                 geometry,
                 position -> visibleStateAt(capture, position));
 
-        return new ViewResult(
+        return new OrthographicViewResult(
                 capture.worldName(),
                 request.origin(),
                 request.direction().name().toLowerCase(Locale.ROOT),
+                "blocks",
                 geometry.basis(),
                 new Viewport(
                         request.horizontalRadius(),
@@ -150,27 +157,27 @@ public final class PaperRegionInspector implements RegionInspector {
                 blocks);
     }
 
-    static NormalizedRegion normalize(InspectionRequest request, long maxRegionVolume)
+    static NormalizedRegion normalize(BlockStateCountRequest request, long maxRegionVolume)
             throws InspectionException {
         return normalize(request.min(), request.max(), maxRegionVolume);
     }
 
-    static NormalizedRegion normalizeExact(
-            ExactInspectionRequest request,
+    static NormalizedRegion normalizeRegionBlocks(
+            RegionBlocksRequest request,
             long maxRegionVolume,
-            long maxExactInspectionVolume)
+            long maxRegionBlocksVolume)
             throws InspectionException {
         return normalize(
                 request.min(),
                 request.max(),
-                Math.min(maxRegionVolume, maxExactInspectionVolume));
+                Math.min(maxRegionVolume, maxRegionBlocksVolume));
     }
 
-    static ViewGeometry normalizeView(
-            ViewRequest request,
+    static ViewGeometry normalizeOrthographicView(
+            OrthographicViewRequest request,
             long maxRegionVolume,
-            long maxViewVolume,
-            int maxViewResults)
+            long maxOrthographicViewVolume,
+            int maxOrthographicViewResults)
             throws InspectionException {
         if (request.direction() == null) {
             throw new InspectionException(Failure.INVALID_REQUEST, "direction is required");
@@ -183,13 +190,13 @@ public final class PaperRegionInspector implements RegionInspector {
         if (request.maxDistance() < 1) {
             throw new InspectionException(Failure.INVALID_REQUEST, "maxDistance must be positive");
         }
-        if (request.maxResults() < 1 || request.maxResults() > maxViewResults) {
+        if (request.maxResults() < 1 || request.maxResults() > maxOrthographicViewResults) {
             throw new InspectionException(
                     Failure.INVALID_REQUEST,
-                    "maxResults must be between 1 and " + maxViewResults);
+                    "maxResults must be between 1 and " + maxOrthographicViewResults);
         }
 
-        long maximum = Math.min(maxRegionVolume, maxViewVolume);
+        long maximum = Math.min(maxRegionVolume, maxOrthographicViewVolume);
         long horizontalSize = 2L * request.horizontalRadius() + 1;
         long verticalSize = 2L * request.verticalRadius() + 1;
         BigInteger requestedVolume = BigInteger.valueOf(horizontalSize)
@@ -240,7 +247,7 @@ public final class PaperRegionInspector implements RegionInspector {
     }
 
     static List<ViewBlock> collectViewBlocks(
-            ViewRequest request,
+            OrthographicViewRequest request,
             ViewGeometry geometry,
             Function<BlockPosition, String> blockStateAt) throws InspectionException {
         List<ViewBlock> blocks = new ArrayList<>();
@@ -273,7 +280,7 @@ public final class PaperRegionInspector implements RegionInspector {
         return List.copyOf(blocks);
     }
 
-    private static ViewBasis viewBasis(ViewDirection direction) {
+    private static ViewBasis viewBasis(OrthographicViewDirection direction) {
         AxisVector worldUp = new AxisVector(0, 1, 0);
         return switch (direction) {
             case NORTH -> new ViewBasis(
@@ -333,11 +340,15 @@ public final class PaperRegionInspector implements RegionInspector {
     private WorldCapture capture(
             String worldName,
             NormalizedRegion region,
-            List<String> include,
-            List<String> exclude) throws InspectionException {
+            List<String> includeBlockStatePatterns,
+            List<String> excludeBlockStatePatterns) throws InspectionException {
         Future<WorldCapture> capture = this.plugin.getServer()
                 .getScheduler()
-                .callSyncMethod(this.plugin, () -> captureOnMainThread(worldName, region, include, exclude));
+                .callSyncMethod(this.plugin, () -> captureOnMainThread(
+                        worldName,
+                        region,
+                        includeBlockStatePatterns,
+                        excludeBlockStatePatterns));
         try {
             return capture.get();
         } catch (InterruptedException exception) {
@@ -356,8 +367,8 @@ public final class PaperRegionInspector implements RegionInspector {
     private WorldCapture captureOnMainThread(
             String worldName,
             NormalizedRegion region,
-            List<String> include,
-            List<String> exclude)
+            List<String> includeBlockStatePatterns,
+            List<String> excludeBlockStatePatterns)
             throws InspectionException {
         World world = this.plugin.getServer().getWorld(worldName);
         if (world == null) {
@@ -374,8 +385,10 @@ public final class PaperRegionInspector implements RegionInspector {
         int minChunkZ = region.min().z() >> 4;
         int maxChunkZ = region.max().z() >> 4;
 
-        List<BlockData> includePatterns = parsePatterns(include, "include");
-        List<BlockData> excludePatterns = parsePatterns(exclude, "exclude");
+        List<BlockData> includePatterns = parsePatterns(
+                includeBlockStatePatterns, "includeBlockStatePatterns");
+        List<BlockData> excludePatterns = parsePatterns(
+                excludeBlockStatePatterns, "excludeBlockStatePatterns");
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
             for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
                 if (!world.isChunkLoaded(chunkX, chunkZ)) {
@@ -448,7 +461,7 @@ public final class PaperRegionInspector implements RegionInspector {
     private static List<InspectedBlock> collectBlocks(
             NormalizedRegion region,
             WorldCapture capture,
-            ExactInspectionRequest request) throws InspectionException {
+            RegionBlocksRequest request) throws InspectionException {
         List<InspectedBlock> blocks = new ArrayList<>();
         for (ChunkSnapshot snapshot : capture.snapshots()) {
             int chunkMinX = snapshot.getX() << 4;
@@ -468,7 +481,7 @@ public final class PaperRegionInspector implements RegionInspector {
                         blocks.add(new InspectedBlock(
                                 new BlockPosition(x, y, z),
                                 blockData.getAsString()));
-                        if (request.mode() == ExactInspectionMode.BLOCKS
+                        if (request.format() == RegionBlocksFormat.BLOCKS
                                 && blocks.size() > request.maxResults()) {
                             throw resultTooLarge(request.maxResults());
                         }
@@ -504,7 +517,7 @@ public final class PaperRegionInspector implements RegionInspector {
             throws InspectionException {
         Map<BlockPosition, String> remaining = new HashMap<>();
         for (InspectedBlock block : blocks) {
-            remaining.put(block.position(), block.state());
+            remaining.put(block.position(), block.blockState());
         }
 
         List<BlockRun> runs = new ArrayList<>();

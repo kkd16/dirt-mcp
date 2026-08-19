@@ -6,17 +6,17 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.AxisVector;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockRun;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionMode;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RegionBlocksFormat;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RegionBlocksRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Failure;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectedBlock;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionException;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockStateCountRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewBasis;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewBlock;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewDirection;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.OrthographicViewDirection;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewOffset;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.OrthographicViewRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.NormalizedRegion;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +25,7 @@ import org.junit.jupiter.api.Test;
 final class PaperRegionInspectorTest {
     @Test
     void normalizesInclusiveBounds() throws Exception {
-        InspectionRequest request = new InspectionRequest(
+        BlockStateCountRequest request = new BlockStateCountRequest(
                 "world", new BlockPosition(4, 12, 9), new BlockPosition(2, 10, 6));
 
         NormalizedRegion region = PaperRegionInspector.normalize(request, 1_000);
@@ -38,7 +38,7 @@ final class PaperRegionInspectorTest {
 
     @Test
     void rejectsOversizedRegionsWithoutOverflow() {
-        InspectionRequest request = new InspectionRequest(
+        BlockStateCountRequest request = new BlockStateCountRequest(
                 "world",
                 new BlockPosition(Integer.MIN_VALUE, 0, Integer.MIN_VALUE),
                 new BlockPosition(Integer.MAX_VALUE, 0, Integer.MAX_VALUE));
@@ -50,8 +50,8 @@ final class PaperRegionInspectorTest {
     }
 
     @Test
-    void appliesTheSmallerExactInspectionVolumeLimit() {
-        ExactInspectionRequest request = new ExactInspectionRequest(
+    void appliesTheSmallerRegionBlocksVolumeLimit() {
+        RegionBlocksRequest request = new RegionBlocksRequest(
                 "world",
                 new BlockPosition(0, 0, 0),
                 new BlockPosition(32_768, 0, 0),
@@ -59,11 +59,11 @@ final class PaperRegionInspectorTest {
                 List.of(),
                 false,
                 10_000,
-                ExactInspectionMode.BLOCKS);
+                RegionBlocksFormat.BLOCKS);
 
         InspectionException exception = assertThrows(
                 InspectionException.class,
-                () -> PaperRegionInspector.normalizeExact(request, 1_000_000, 32_768));
+                () -> PaperRegionInspector.normalizeRegionBlocks(request, 1_000_000, 32_768));
 
         assertEquals(Failure.REGION_TOO_LARGE, exception.failure());
     }
@@ -104,11 +104,11 @@ final class PaperRegionInspectorTest {
     }
 
     @Test
-    void mapsEveryViewDirectionToMinecraftWorldAxes() throws Exception {
+    void mapsEveryOrthographicViewDirectionToMinecraftWorldAxes() throws Exception {
         BlockPosition origin = new BlockPosition(10, 20, 30);
 
         assertViewGeometry(
-                viewRequest(origin, ViewDirection.NORTH, 1, 2, 3, 10),
+                viewRequest(origin, OrthographicViewDirection.NORTH, 1, 2, 3, 10),
                 new ViewBasis(
                         new AxisVector(0, 0, -1),
                         new AxisVector(1, 0, 0),
@@ -116,7 +116,7 @@ final class PaperRegionInspectorTest {
                 new BlockPosition(9, 18, 27),
                 new BlockPosition(11, 22, 29));
         assertViewGeometry(
-                viewRequest(origin, ViewDirection.EAST, 1, 2, 3, 10),
+                viewRequest(origin, OrthographicViewDirection.EAST, 1, 2, 3, 10),
                 new ViewBasis(
                         new AxisVector(1, 0, 0),
                         new AxisVector(0, 0, 1),
@@ -124,7 +124,7 @@ final class PaperRegionInspectorTest {
                 new BlockPosition(11, 18, 29),
                 new BlockPosition(13, 22, 31));
         assertViewGeometry(
-                viewRequest(origin, ViewDirection.SOUTH, 1, 2, 3, 10),
+                viewRequest(origin, OrthographicViewDirection.SOUTH, 1, 2, 3, 10),
                 new ViewBasis(
                         new AxisVector(0, 0, 1),
                         new AxisVector(-1, 0, 0),
@@ -132,7 +132,7 @@ final class PaperRegionInspectorTest {
                 new BlockPosition(9, 18, 31),
                 new BlockPosition(11, 22, 33));
         assertViewGeometry(
-                viewRequest(origin, ViewDirection.WEST, 1, 2, 3, 10),
+                viewRequest(origin, OrthographicViewDirection.WEST, 1, 2, 3, 10),
                 new ViewBasis(
                         new AxisVector(-1, 0, 0),
                         new AxisVector(0, 0, -1),
@@ -144,12 +144,12 @@ final class PaperRegionInspectorTest {
                 new AxisVector(1, 0, 0),
                 new AxisVector(0, 0, -1));
         assertViewGeometry(
-                viewRequest(origin, ViewDirection.UP, 1, 2, 3, 10),
+                viewRequest(origin, OrthographicViewDirection.UP, 1, 2, 3, 10),
                 verticalBasis,
                 new BlockPosition(9, 21, 28),
                 new BlockPosition(11, 23, 32));
         assertViewGeometry(
-                viewRequest(origin, ViewDirection.DOWN, 1, 2, 3, 10),
+                viewRequest(origin, OrthographicViewDirection.DOWN, 1, 2, 3, 10),
                 new ViewBasis(
                         new AxisVector(0, -1, 0),
                         verticalBasis.horizontal(),
@@ -160,10 +160,10 @@ final class PaperRegionInspectorTest {
 
     @Test
     void returnsTheFirstNonAirBlockPerSightlineInViewOrder() throws Exception {
-        ViewRequest request = viewRequest(
-                new BlockPosition(0, 0, 0), ViewDirection.NORTH, 1, 1, 3, 10);
+        OrthographicViewRequest request = viewRequest(
+                new BlockPosition(0, 0, 0), OrthographicViewDirection.NORTH, 1, 1, 3, 10);
         PaperRegionInspector.ViewGeometry geometry =
-                PaperRegionInspector.normalizeView(request, 1_000, 1_000, 10);
+                PaperRegionInspector.normalizeOrthographicView(request, 1_000, 1_000, 10);
         Map<BlockPosition, String> states = Map.of(
                 new BlockPosition(-1, 1, -2), "minecraft:glass",
                 new BlockPosition(-1, 1, -3), "minecraft:stone",
@@ -190,17 +190,17 @@ final class PaperRegionInspectorTest {
 
     @Test
     void rejectsOversizedAndOverflowingViews() {
-        ViewRequest oversized = viewRequest(
-                new BlockPosition(0, 0, 0), ViewDirection.NORTH, 100, 100, 1, 10);
-        ViewRequest overflowing = viewRequest(
-                new BlockPosition(Integer.MAX_VALUE, 0, 0), ViewDirection.EAST, 0, 0, 1, 10);
+        OrthographicViewRequest oversized = viewRequest(
+                new BlockPosition(0, 0, 0), OrthographicViewDirection.NORTH, 100, 100, 1, 10);
+        OrthographicViewRequest overflowing = viewRequest(
+                new BlockPosition(Integer.MAX_VALUE, 0, 0), OrthographicViewDirection.EAST, 0, 0, 1, 10);
 
         InspectionException oversizedFailure = assertThrows(
                 InspectionException.class,
-                () -> PaperRegionInspector.normalizeView(oversized, 1_000_000, 32_768, 10));
+                () -> PaperRegionInspector.normalizeOrthographicView(oversized, 1_000_000, 32_768, 10));
         InspectionException overflowFailure = assertThrows(
                 InspectionException.class,
-                () -> PaperRegionInspector.normalizeView(overflowing, 1_000_000, 32_768, 10));
+                () -> PaperRegionInspector.normalizeOrthographicView(overflowing, 1_000_000, 32_768, 10));
 
         assertEquals(Failure.REGION_TOO_LARGE, oversizedFailure.failure());
         assertEquals(
@@ -210,11 +210,11 @@ final class PaperRegionInspectorTest {
     }
 
     @Test
-    void rejectsViewResultsOverTheRequestedCapWithoutTruncating() throws Exception {
-        ViewRequest request = viewRequest(
-                new BlockPosition(0, 0, 0), ViewDirection.NORTH, 1, 0, 1, 1);
+    void rejectsOrthographicViewResultsOverTheRequestedCapWithoutTruncating() throws Exception {
+        OrthographicViewRequest request = viewRequest(
+                new BlockPosition(0, 0, 0), OrthographicViewDirection.NORTH, 1, 0, 1, 1);
         PaperRegionInspector.ViewGeometry geometry =
-                PaperRegionInspector.normalizeView(request, 100, 100, 1);
+                PaperRegionInspector.normalizeOrthographicView(request, 100, 100, 1);
 
         InspectionException exception = assertThrows(
                 InspectionException.class,
@@ -224,14 +224,14 @@ final class PaperRegionInspectorTest {
         assertEquals(Failure.RESULT_TOO_LARGE, exception.failure());
     }
 
-    private static ViewRequest viewRequest(
+    private static OrthographicViewRequest viewRequest(
             BlockPosition origin,
-            ViewDirection direction,
+            OrthographicViewDirection direction,
             int horizontalRadius,
             int verticalRadius,
             int maxDistance,
             int maxResults) {
-        return new ViewRequest(
+        return new OrthographicViewRequest(
                 "world",
                 origin,
                 direction,
@@ -242,12 +242,12 @@ final class PaperRegionInspectorTest {
     }
 
     private static void assertViewGeometry(
-            ViewRequest request,
+            OrthographicViewRequest request,
             ViewBasis basis,
             BlockPosition min,
             BlockPosition max) throws Exception {
         PaperRegionInspector.ViewGeometry geometry =
-                PaperRegionInspector.normalizeView(request, 1_000, 1_000, 10);
+                PaperRegionInspector.normalizeOrthographicView(request, 1_000, 1_000, 10);
 
         assertEquals(basis, geometry.basis());
         assertEquals(min, geometry.region().min());

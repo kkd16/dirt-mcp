@@ -78,10 +78,10 @@ function modernResult(result) {
 
 test('forwards MCP tools to the authenticated bridge and preserves contract errors', async (context) => {
   const requests = [];
-  const health = {
+  const serverInfo = {
     status: 'ok',
     service: 'dirt-mcp-paper',
-    version: '0.1.0-test',
+    pluginVersion: '0.1.0-test',
     minecraftVersion: '26.2',
     configuration: {
       bridge: {
@@ -94,34 +94,35 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       limits: {
         maxRegionVolume: 1_000_000,
         maxChangedBlocks: 250_000,
-        maxExactInspectionVolume: 32_768,
-        defaultExactResults: 10_000,
-        maxExactResults: 10_000,
-        maxViewVolume: 32_768,
-        defaultViewResults: 2_048,
-        maxViewResults: 10_000,
+        maxRegionBlocksVolume: 32_768,
+        defaultRegionBlocksResultLimit: 10_000,
+        maxRegionBlocksResultLimit: 10_000,
+        maxOrthographicViewVolume: 32_768,
+        defaultOrthographicViewResultLimit: 2_048,
+        maxOrthographicViewResultLimit: 10_000,
         undoHistoryPerWorld: 20,
       },
       defaults: {
-        exactInspectionIncludeAir: false,
-        exactInspectionMode: 'blocks',
-        replaceDryRun: false,
-        fillDryRun: false,
+        regionBlocksIncludeAir: false,
+        regionBlocksFormat: 'blocks',
+        replaceRegionBlocksDryRun: false,
+        fillRegionDryRun: false,
       },
     },
   };
-  const inspection = {
+  const regionBlocks = {
     world: 'world',
     bounds: { min: { x: 1, y: 2, z: 3 }, max: { x: 2, y: 2, z: 3 } },
     volume: 2,
-    matchedBlocks: 1,
-    mode: 'blocks',
-    blocks: [{ position: { x: 1, y: 2, z: 3 }, state: 'minecraft:stone' }],
+    matchedBlockCount: 1,
+    format: 'blocks',
+    blocks: [{ position: { x: 1, y: 2, z: 3 }, blockState: 'minecraft:stone' }],
   };
   const view = {
     world: 'world',
     origin: { x: 1, y: 2, z: 4 },
     direction: 'north',
+    format: 'blocks',
     basis: {
       forward: { x: 0, y: 0, z: -1 },
       horizontal: { x: 1, y: 0, z: 0 },
@@ -130,22 +131,22 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     viewport: { horizontalRadius: 1, verticalRadius: 1, maxDistance: 3 },
     bounds: { min: { x: 0, y: 1, z: 1 }, max: { x: 2, y: 3, z: 3 } },
     scannedVolume: 27,
-    visibleBlocks: 3,
+    visibleBlockCount: 3,
     blocks: [
       {
         position: { x: 0, y: 3, z: 2 },
         offset: { horizontal: -1, vertical: 1, distance: 2 },
-        state: 'minecraft:stone',
+        blockState: 'minecraft:stone',
       },
       {
         position: { x: 2, y: 3, z: 3 },
         offset: { horizontal: 1, vertical: 1, distance: 1 },
-        state: 'minecraft:oak_stairs[facing=north]',
+        blockState: 'minecraft:oak_stairs[facing=north]',
       },
       {
         position: { x: 1, y: 2, z: 1 },
         offset: { horizontal: 0, vertical: 0, distance: 3 },
-        state: 'minecraft:gold_block',
+        blockState: 'minecraft:gold_block',
       },
     ],
   };
@@ -157,14 +158,14 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     viewport: view.viewport,
     bounds: view.bounds,
     scannedVolume: view.scannedVolume,
-    visibleBlocks: view.visibleBlocks,
+    visibleBlockCount: view.visibleBlockCount,
     format: 'grid',
-    palette: [
+    blockStatePalette: [
       'minecraft:stone',
       'minecraft:oak_stairs[facing=north]',
       'minecraft:gold_block',
     ],
-    stateRows: [
+    blockStateIndexRows: [
       [1, 0, 2],
       [0, 3, 0],
       [0, 0, 0],
@@ -188,11 +189,11 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     });
 
     response.setHeader('Content-Type', 'application/json');
-    if (request.url === '/v1/health') {
-      response.end(JSON.stringify(health));
-    } else if (request.url === '/v1/inspect-blocks') {
-      response.end(JSON.stringify(inspection));
-    } else if (request.url === '/v1/inspect-view') {
+    if (request.url === '/v1/server-info') {
+      response.end(JSON.stringify(serverInfo));
+    } else if (request.url === '/v1/get-region-blocks') {
+      response.end(JSON.stringify(regionBlocks));
+    } else if (request.url === '/v1/scan-orthographic-view') {
       response.end(JSON.stringify(view));
     } else if (request.url === '/v1/fill-region') {
       response.statusCode = 413;
@@ -231,12 +232,12 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 2,
     method: 'tools/call',
-    params: modernParams({ name: 'dirt_status', arguments: {} }),
+    params: modernParams({ name: 'get_server_info', arguments: {} }),
   });
   const status = await waitFor(messages, 2);
   assert.deepEqual(status.result, modernResult({
-    content: [{ type: 'text', text: JSON.stringify(health, null, 2) }],
-    structuredContent: health,
+    content: [{ type: 'text', text: 'Dirt bridge ready: Minecraft 26.2, plugin 0.1.0-test.' }],
+    structuredContent: serverInfo,
   }));
 
   const region = {
@@ -248,12 +249,12 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 3,
     method: 'tools/call',
-    params: modernParams({ name: 'inspect_blocks', arguments: region }),
+    params: modernParams({ name: 'get_region_blocks', arguments: region }),
   });
   const inspected = await waitFor(messages, 3);
   assert.deepEqual(inspected.result, modernResult({
-    content: [{ type: 'text', text: JSON.stringify(inspection, null, 2) }],
-    structuredContent: inspection,
+    content: [{ type: 'text', text: 'Matching blocks: 1; block entries: 1; world: world.' }],
+    structuredContent: regionBlocks,
   }));
 
   const viewInput = {
@@ -268,11 +269,11 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 4,
     method: 'tools/call',
-    params: modernParams({ name: 'inspect_view', arguments: viewInput }),
+    params: modernParams({ name: 'scan_orthographic_view', arguments: viewInput }),
   });
   const viewed = await waitFor(messages, 4);
   assert.deepEqual(viewed.result, modernResult({
-    content: [{ type: 'text', text: JSON.stringify(view, null, 2) }],
+    content: [{ type: 'text', text: 'Scanned view in world: 3 visible blocks returned explicitly.' }],
     structuredContent: view,
   }));
 
@@ -281,7 +282,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     id: 5,
     method: 'tools/call',
     params: modernParams({
-      name: 'inspect_view',
+      name: 'scan_orthographic_view',
       arguments: { ...viewInput, format: 'grid' },
     }),
   });
@@ -289,8 +290,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.deepEqual(gridViewed.result, modernResult({
     content: [{
       type: 'text',
-      text: 'Compact 3x3 view: 3 visible blocks, 3 states. '
-        + 'See structuredContent for palette, stateRows, and distanceRows.',
+      text: 'Scanned 3x3 view: 3 visible blocks using 3 block states.',
     }],
     structuredContent: gridView,
   }));
@@ -301,7 +301,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     method: 'tools/call',
     params: modernParams({
       name: 'fill_region',
-      arguments: { ...region, destination: 'minecraft:dirt' },
+      arguments: { ...region, blockState: 'minecraft:dirt' },
     }),
   });
   const failedFill = await waitFor(messages, 6);
@@ -309,18 +309,21 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     isError: true,
     content: [{
       type: 'text',
-      text: 'Could not fill the region: change_limit_exceeded: Too many changes',
+      text: 'Could not fill the region: Too many changes',
     }],
+    structuredContent: {
+      error: { code: 'change_limit_exceeded', message: 'Too many changes' },
+    },
   }));
   await waitForValue(errors, (line) => line.includes('tool=fill_region'));
 
   assert.deepEqual(
     requests.map(({ method, path }) => ({ method, path })),
     [
-      { method: 'GET', path: '/v1/health' },
-      { method: 'POST', path: '/v1/inspect-blocks' },
-      { method: 'POST', path: '/v1/inspect-view' },
-      { method: 'POST', path: '/v1/inspect-view' },
+      { method: 'GET', path: '/v1/server-info' },
+      { method: 'POST', path: '/v1/get-region-blocks' },
+      { method: 'POST', path: '/v1/scan-orthographic-view' },
+      { method: 'POST', path: '/v1/scan-orthographic-view' },
       { method: 'POST', path: '/v1/fill-region' },
     ],
   );
@@ -336,8 +339,8 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.equal(new Set(callIds).size, 5);
   assert.deepEqual(requests[1].body, {
     ...region,
-    include: [],
-    exclude: [],
+    includeBlockStatePatterns: [],
+    excludeBlockStatePatterns: [],
   });
   assert.equal(requests[1].headers['content-type'], 'application/json');
   assert.deepEqual(requests[2].body, viewInput);
@@ -346,7 +349,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.equal(requests[3].headers['content-type'], 'application/json');
   assert.deepEqual(requests[4].body, {
     ...region,
-    destination: 'minecraft:dirt',
+    blockState: 'minecraft:dirt',
   });
   assert.equal(requests[4].headers['content-type'], 'application/json');
 
@@ -354,22 +357,22 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.equal(auditLines.length, 5);
   assert.match(
     auditLines[0],
-    new RegExp(`^Dirt MCP tool_call tool=dirt_status call=${callIds[0]} request=2 `
+    new RegExp(`^Dirt MCP tool_call tool=get_server_info call=${callIds[0]} request=2 `
       + 'client="bridge-test/1" outcome=ok duration_ms=\\d+$'),
   );
   assert.match(
     auditLines[1],
-    new RegExp(`^Dirt MCP tool_call tool=inspect_blocks call=${callIds[1]} request=3 `
+    new RegExp(`^Dirt MCP tool_call tool=get_region_blocks call=${callIds[1]} request=3 `
       + 'client="bridge-test/1" world="world" outcome=ok duration_ms=\\d+$'),
   );
   assert.match(
     auditLines[2],
-    new RegExp(`^Dirt MCP tool_call tool=inspect_view call=${callIds[2]} request=4 `
+    new RegExp(`^Dirt MCP tool_call tool=scan_orthographic_view call=${callIds[2]} request=4 `
       + 'client="bridge-test/1" world="world" outcome=ok duration_ms=\\d+$'),
   );
   assert.match(
     auditLines[3],
-    new RegExp(`^Dirt MCP tool_call tool=inspect_view call=${callIds[3]} request=5 `
+    new RegExp(`^Dirt MCP tool_call tool=scan_orthographic_view call=${callIds[3]} request=5 `
       + 'client="bridge-test/1" world="world" outcome=ok duration_ms=\\d+$'),
   );
   assert.match(
@@ -377,6 +380,96 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     new RegExp(`^Dirt MCP tool_call tool=fill_region call=${callIds[4]} request=6 `
       + 'client="bridge-test/1" world="world" outcome=error duration_ms=\\d+$'),
   );
+
+  const exited = once(child, 'exit');
+  child.stdin.end();
+  const [exitCode] = await exited;
+  assert.equal(exitCode, 0);
+});
+
+test('returns stable structured codes for MCP-local bridge failures', async (context) => {
+  let behavior = 'unauthorized';
+  const bridge = createServer((_request, response) => {
+    if (behavior === 'unauthorized') {
+      response.statusCode = 401;
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({ error: { code: 'unauthorized', message: 'bad token' } }));
+    } else if (behavior === 'invalid') {
+      response.setHeader('Content-Type', 'application/json');
+      response.end('{}');
+    } else {
+      response.statusCode = 502;
+      response.setHeader('Content-Type', 'text/plain');
+      response.end('not json');
+    }
+  });
+  bridge.listen(0, '127.0.0.1');
+  await once(bridge, 'listening');
+
+  const address = bridge.address();
+  const child = spawn(process.execPath, [join(packageDirectory, 'dist/index.js')], {
+    env: {
+      ...process.env,
+      DIRT_MCP_BRIDGE_TOKEN: 'bridge-test-token',
+      DIRT_MCP_BRIDGE_URL: `http://127.0.0.1:${address.port}`,
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  context.after(async () => {
+    if (child.exitCode === null) child.kill();
+    if (bridge.listening) {
+      await new Promise((resolve, reject) => {
+        bridge.close((error) => (error === undefined ? resolve() : reject(error)));
+      });
+    }
+  });
+  const messages = collectLines(child.stdout, (line) => JSON.parse(line));
+
+  async function callServerInfo(id) {
+    send(child, {
+      jsonrpc: '2.0',
+      id,
+      method: 'tools/call',
+      params: modernParams({ name: 'get_server_info', arguments: {} }),
+    });
+    return waitFor(messages, id);
+  }
+
+  const unauthorized = await callServerInfo(10);
+  assert.equal(unauthorized.result.isError, true);
+  assert.deepEqual(unauthorized.result.structuredContent, {
+    error: {
+      code: 'bridge_unauthorized',
+      message: 'Paper bridge rejected DIRT_MCP_BRIDGE_TOKEN.',
+    },
+  });
+
+  behavior = 'invalid';
+  const invalid = await callServerInfo(11);
+  assert.equal(invalid.result.isError, true);
+  assert.deepEqual(invalid.result.structuredContent, {
+    error: {
+      code: 'bridge_invalid_response',
+      message: 'Paper bridge response did not match the documented schema.',
+    },
+  });
+
+  behavior = 'unstructured';
+  const unstructured = await callServerInfo(12);
+  assert.equal(unstructured.result.isError, true);
+  assert.deepEqual(unstructured.result.structuredContent, {
+    error: {
+      code: 'bridge_http_error',
+      message: 'Paper bridge returned unstructured HTTP 502.',
+    },
+  });
+
+  await new Promise((resolve, reject) => {
+    bridge.close((error) => (error === undefined ? resolve() : reject(error)));
+  });
+  const unavailable = await callServerInfo(13);
+  assert.equal(unavailable.result.isError, true);
+  assert.equal(unavailable.result.structuredContent.error.code, 'bridge_unavailable');
 
   const exited = once(child, 'exit');
   child.stdin.end();

@@ -7,6 +7,15 @@ import type { BridgeConfig } from './tools.js';
 
 const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:8765';
 const TOOL_MODULE_URL = new URL('./tools.js', import.meta.url);
+const SERVER_INSTRUCTIONS = [
+  'Dirt operates on live, already-loaded Paper worlds and chunks.',
+  'Coordinates are absolute Minecraft block coordinates (X east/west, Y up/down, Z south/north); region corners are inclusive and normalized automatically.',
+  'Use count_region_block_states for totals, get_region_blocks for exact filtered positions or runs, and scan_orthographic_view for first-visible-block sightlines.',
+  'Treat structuredContent as the canonical result; text content is only a summary, and failed calls set isError=true with structuredContent.error.code and .message.',
+  'Inspection result limits fail the call instead of truncating data.',
+  'replace_region_blocks and fill_region can mutate immediately; pass dryRun=true when a preview is needed.',
+  'undo_last_dirt_edit only undoes the newest successful Dirt edit in that world, from bounded in-memory per-world history.',
+].join(' ');
 
 interface ToolModule {
   registerTools(server: McpServer, config: BridgeConfig, registrations: RegisteredTool[]): void;
@@ -55,7 +64,10 @@ function installTools(
 
 async function createServer(): Promise<McpServer> {
   const config = bridgeConfig();
-  const server = new McpServer({ name: 'dirt-mcp', version: '0.1.0' });
+  const server = new McpServer(
+    { name: 'dirt-mcp', version: '0.1.0' },
+    { instructions: SERVER_INSTRUCTIONS },
+  );
   let activeModule = await loadToolModule(0);
   let activeTools = installTools(server, config, activeModule);
 

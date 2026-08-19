@@ -85,39 +85,91 @@ test('reloads tools without replacing the stdio process', async (context) => {
 
   send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: modernParams({}) });
   const initial = await waitFor(messages, (message) => message.id === 2);
-  assert.equal(initial.result.tools[0].title, 'Dirt MCP status');
+  assert.equal(initial.result.tools[0].title, 'Get Dirt server info');
   assert.deepEqual(
-    initial.result.tools.find((tool) => tool.name === 'inspect_view').annotations,
-    { readOnlyHint: true },
+    initial.result.tools.find((tool) => tool.name === 'scan_orthographic_view').annotations,
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  );
+  assert.deepEqual(
+    Object.fromEntries(initial.result.tools.map((tool) => [tool.name, tool.annotations])),
+    {
+      get_server_info: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      count_region_block_states: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+      get_region_blocks: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+      scan_orthographic_view: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+      replace_region_blocks: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+      fill_region: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+      undo_last_dirt_edit: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
   );
   assert.deepEqual(
     initial.result.tools.map((tool) => tool.name).sort(),
     [
-      'dirt_status',
+      'count_region_block_states',
       'fill_region',
-      'inspect_blocks',
-      'inspect_region',
-      'inspect_view',
-      'replace_blocks',
-      'undo_last_edit',
+      'get_region_blocks',
+      'get_server_info',
+      'replace_region_blocks',
+      'scan_orthographic_view',
+      'undo_last_dirt_edit',
     ],
   );
 
   const toolsSource = await readFile(toolsPath, 'utf8');
-  const changedSource = toolsSource.replace('Dirt MCP status', 'Reloaded Dirt MCP status');
+  const changedSource = toolsSource.replace('Get Dirt server info', 'Reloaded Dirt server info');
   assert.notEqual(changedSource, toolsSource);
   await writeFile(toolsPath, changedSource);
 
   await waitFor(errors, (line) => line.includes('Reloaded Dirt MCP tools'));
   send({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: modernParams({}) });
   const reloaded = await waitFor(messages, (message) => message.id === 3);
-  assert.equal(reloaded.result.tools[0].title, 'Reloaded Dirt MCP status');
+  assert.equal(reloaded.result.tools[0].title, 'Reloaded Dirt server info');
 
   await writeFile(toolsPath, 'this is not valid JavaScript');
   await waitFor(errors, (line) => line.includes('Could not reload Dirt MCP tools'));
   send({ jsonrpc: '2.0', id: 4, method: 'tools/list', params: modernParams({}) });
   const retained = await waitFor(messages, (message) => message.id === 4);
-  assert.equal(retained.result.tools[0].title, 'Reloaded Dirt MCP status');
+  assert.equal(retained.result.tools[0].title, 'Reloaded Dirt server info');
 
   child.stdin.end();
   await new Promise((resolve, reject) => {

@@ -12,38 +12,38 @@ servers:
 security:
   - bearerAuth: []
 paths:
-  /v1/health:
+  /v1/server-info:
     get:
-      operationId: getHealth
+      operationId: getServerInfo
       summary: Report bridge availability, versions, and active non-secret configuration
       responses:
         '200':
-          description: Bridge health
+          description: Server and bridge information
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Health'
+                $ref: '#/components/schemas/ServerInfo'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '405':
           $ref: '#/components/responses/GetMethodNotAllowed'
-  /v1/inspect-region:
+  /v1/count-region-block-states:
     post:
-      operationId: inspectRegion
+      operationId: countRegionBlockStates
       summary: Count block states in a bounded region of loaded chunks
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/InspectRegionRequest'
+              $ref: '#/components/schemas/CountRegionBlockStatesRequest'
       responses:
         '200':
           description: Region inspection
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InspectRegionResponse'
+                $ref: '#/components/schemas/CountRegionBlockStatesResponse'
         '400':
           description: Invalid JSON, fields, coordinates, or world height
           content:
@@ -78,23 +78,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /v1/inspect-blocks:
+  /v1/get-region-blocks:
     post:
-      operationId: inspectBlocks
+      operationId: getRegionBlocks
       summary: Return exact filtered block geometry from a bounded region of loaded chunks
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/InspectBlocksRequest'
+              $ref: '#/components/schemas/GetRegionBlocksRequest'
       responses:
         '200':
           description: Exact sparse blocks or deterministic axis-aligned runs
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InspectBlocksResponse'
+                $ref: '#/components/schemas/GetRegionBlocksResponse'
         '400':
           description: Invalid JSON, fields, coordinates, filters, options, or world height
           content:
@@ -129,23 +129,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /v1/inspect-view:
+  /v1/scan-orthographic-view:
     post:
-      operationId: inspectView
+      operationId: scanOrthographicView
       summary: Return the first non-air block along each sightline in an orthographic view
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/InspectViewRequest'
+              $ref: '#/components/schemas/ScanOrthographicViewRequest'
       responses:
         '200':
           description: Exact sparse visible block layer and its world-aligned view basis
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InspectViewResponse'
+                $ref: '#/components/schemas/ScanOrthographicViewResponse'
         '400':
           description: Invalid JSON, fields, coordinates, view geometry, or world height
           content:
@@ -180,23 +180,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /v1/replace-blocks:
+  /v1/replace-region-blocks:
     post:
-      operationId: replaceBlocks
+      operationId: replaceRegionBlocks
       summary: Replace one exact block state in a bounded region of loaded chunks
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ReplaceBlocksRequest'
+              $ref: '#/components/schemas/ReplaceRegionBlocksRequest'
       responses:
         '200':
           description: Executed edit or exact dry-run result
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ReplaceBlocksResponse'
+                $ref: '#/components/schemas/ReplaceRegionBlocksResponse'
         '400':
           description: Invalid JSON, fields, coordinates, world height, or block state
           content:
@@ -294,23 +294,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /v1/undo-last-edit:
+  /v1/undo-last-dirt-edit:
     post:
-      operationId: undoLastEdit
+      operationId: undoLastDirtEdit
       summary: Undo the newest successful Dirt MCP edit in a loaded world
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UndoLastEditRequest'
+              $ref: '#/components/schemas/UndoLastDirtEditRequest'
       responses:
         '200':
           description: Completed undo
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UndoLastEditResponse'
+                $ref: '#/components/schemas/UndoLastDirtEditResponse'
         '400':
           description: Invalid JSON or fields
           content:
@@ -460,7 +460,7 @@ components:
           type: integer
           format: int64
           minimum: 1
-    InspectRegionRequest:
+    CountRegionBlockStatesRequest:
       type: object
       additionalProperties: false
       required:
@@ -475,7 +475,7 @@ components:
           $ref: '#/components/schemas/BlockPosition'
         max:
           $ref: '#/components/schemas/BlockPosition'
-    InspectRegionResponse:
+    CountRegionBlockStatesResponse:
       type: object
       additionalProperties: false
       required:
@@ -483,7 +483,7 @@ components:
         - bounds
         - dimensions
         - volume
-        - blockStates
+        - blockStateCounts
       properties:
         world:
           type: string
@@ -496,13 +496,13 @@ components:
           type: integer
           format: int64
           minimum: 1
-        blockStates:
+        blockStateCounts:
           type: object
           additionalProperties:
             type: integer
             format: int64
             minimum: 0
-    InspectBlocksRequest:
+    GetRegionBlocksRequest:
       type: object
       additionalProperties: false
       required:
@@ -517,13 +517,13 @@ components:
           $ref: '#/components/schemas/BlockPosition'
         max:
           $ref: '#/components/schemas/BlockPosition'
-        include:
+        includeBlockStatePatterns:
           type: array
           description: Block-state patterns to include; omitted properties match any value.
           items:
             type: string
             minLength: 1
-        exclude:
+        excludeBlockStatePatterns:
           type: array
           description: Block-state patterns to exclude after include filtering.
           items:
@@ -537,33 +537,33 @@ components:
           format: int32
           minimum: 1
           description: Requested result cap; it cannot exceed the configured maximum.
-        mode:
+        format:
           type: string
           enum:
             - blocks
             - runs
-          description: Omission uses the configured exact-inspection mode.
-    InspectedBlock:
+          description: Omission uses the configured region-blocks format.
+    RegionBlock:
       type: object
       additionalProperties: false
       required:
         - position
-        - state
+        - blockState
       properties:
         position:
           $ref: '#/components/schemas/BlockPosition'
-        state:
+        blockState:
           type: string
           minLength: 1
     BlockRun:
       type: object
       additionalProperties: false
       required:
-        - state
+        - blockState
         - from
         - to
       properties:
-        state:
+        blockState:
           type: string
           minLength: 1
         from:
@@ -572,24 +572,24 @@ components:
         to:
           description: Inclusive last position of the axis-aligned run.
           $ref: '#/components/schemas/BlockPosition'
-    InspectBlocksResponse:
+    GetRegionBlocksResponse:
       oneOf:
-        - $ref: '#/components/schemas/InspectBlocksListResponse'
-        - $ref: '#/components/schemas/InspectBlockRunsResponse'
+        - $ref: '#/components/schemas/GetRegionBlocksListResponse'
+        - $ref: '#/components/schemas/GetRegionBlockRunsResponse'
       discriminator:
-        propertyName: mode
+        propertyName: format
         mapping:
-          blocks: '#/components/schemas/InspectBlocksListResponse'
-          runs: '#/components/schemas/InspectBlockRunsResponse'
-    InspectBlocksListResponse:
+          blocks: '#/components/schemas/GetRegionBlocksListResponse'
+          runs: '#/components/schemas/GetRegionBlockRunsResponse'
+    GetRegionBlocksListResponse:
       type: object
       additionalProperties: false
       required:
         - world
         - bounds
         - volume
-        - matchedBlocks
-        - mode
+        - matchedBlockCount
+        - format
         - blocks
       properties:
         world:
@@ -601,25 +601,25 @@ components:
           type: integer
           format: int64
           minimum: 1
-        matchedBlocks:
+        matchedBlockCount:
           type: integer
           format: int64
           minimum: 0
-        mode:
+        format:
           const: blocks
         blocks:
           type: array
           items:
-            $ref: '#/components/schemas/InspectedBlock'
-    InspectBlockRunsResponse:
+            $ref: '#/components/schemas/RegionBlock'
+    GetRegionBlockRunsResponse:
       type: object
       additionalProperties: false
       required:
         - world
         - bounds
         - volume
-        - matchedBlocks
-        - mode
+        - matchedBlockCount
+        - format
         - runs
       properties:
         world:
@@ -631,17 +631,17 @@ components:
           type: integer
           format: int64
           minimum: 1
-        matchedBlocks:
+        matchedBlockCount:
           type: integer
           format: int64
           minimum: 0
-        mode:
+        format:
           const: runs
         runs:
           type: array
           items:
             $ref: '#/components/schemas/BlockRun'
-    InspectViewRequest:
+    ScanOrthographicViewRequest:
       type: object
       additionalProperties: false
       required:
@@ -767,22 +767,22 @@ components:
           format: int32
           minimum: 1
           description: Positive displacement along the forward basis; 1 is adjacent to the origin.
-    ViewBlock:
+    OrthographicViewBlock:
       type: object
       additionalProperties: false
       required:
         - position
         - offset
-        - state
+        - blockState
       properties:
         position:
           $ref: '#/components/schemas/BlockPosition'
         offset:
           $ref: '#/components/schemas/ViewOffset'
-        state:
+        blockState:
           type: string
           minLength: 1
-    InspectViewResponse:
+    ScanOrthographicViewResponse:
       type: object
       additionalProperties: false
       required:
@@ -793,7 +793,8 @@ components:
         - viewport
         - bounds
         - scannedVolume
-        - visibleBlocks
+        - visibleBlockCount
+        - format
         - blocks
       properties:
         world:
@@ -820,23 +821,25 @@ components:
           type: integer
           format: int64
           minimum: 1
-        visibleBlocks:
+        visibleBlockCount:
           type: integer
           format: int64
           minimum: 0
+        format:
+          const: blocks
         blocks:
           type: array
           items:
-            $ref: '#/components/schemas/ViewBlock'
-    ReplaceBlocksRequest:
+            $ref: '#/components/schemas/OrthographicViewBlock'
+    ReplaceRegionBlocksRequest:
       type: object
       additionalProperties: false
       required:
         - world
         - min
         - max
-        - source
-        - destination
+        - sourceBlockState
+        - destinationBlockState
       properties:
         world:
           type: string
@@ -845,45 +848,45 @@ components:
           $ref: '#/components/schemas/BlockPosition'
         max:
           $ref: '#/components/schemas/BlockPosition'
-        source:
+        sourceBlockState:
           type: string
           minLength: 1
-        destination:
+        destinationBlockState:
           type: string
           minLength: 1
         dryRun:
           type: boolean
           description: Omission uses the configured replace default.
-    ReplaceBlocksResponse:
+    ReplaceRegionBlocksResponse:
       type: object
       additionalProperties: false
       required:
         - world
         - bounds
-        - source
-        - destination
+        - sourceBlockState
+        - destinationBlockState
         - dryRun
-        - matchedBlocks
-        - changedBlocks
+        - matchedBlockCount
+        - changedBlockCount
       properties:
         world:
           type: string
           minLength: 1
         bounds:
           $ref: '#/components/schemas/Bounds'
-        source:
+        sourceBlockState:
           type: string
           minLength: 1
-        destination:
+        destinationBlockState:
           type: string
           minLength: 1
         dryRun:
           type: boolean
-        matchedBlocks:
+        matchedBlockCount:
           type: integer
           format: int64
           minimum: 0
-        changedBlocks:
+        changedBlockCount:
           type: integer
           format: int64
           minimum: 0
@@ -894,7 +897,7 @@ components:
         - world
         - min
         - max
-        - destination
+        - blockState
       properties:
         world:
           type: string
@@ -903,7 +906,7 @@ components:
           $ref: '#/components/schemas/BlockPosition'
         max:
           $ref: '#/components/schemas/BlockPosition'
-        destination:
+        blockState:
           type: string
           minLength: 1
         dryRun:
@@ -915,17 +918,17 @@ components:
       required:
         - world
         - bounds
-        - destination
+        - blockState
         - dryRun
         - volume
-        - changedBlocks
+        - changedBlockCount
       properties:
         world:
           type: string
           minLength: 1
         bounds:
           $ref: '#/components/schemas/Bounds'
-        destination:
+        blockState:
           type: string
           minLength: 1
         dryRun:
@@ -934,11 +937,11 @@ components:
           type: integer
           format: int64
           minimum: 1
-        changedBlocks:
+        changedBlockCount:
           type: integer
           format: int64
           minimum: 0
-    UndoLastEditRequest:
+    UndoLastDirtEditRequest:
       type: object
       additionalProperties: false
       required:
@@ -947,17 +950,17 @@ components:
         world:
           type: string
           minLength: 1
-    UndoLastEditResponse:
+    UndoLastDirtEditResponse:
       type: object
       additionalProperties: false
       required:
         - world
-        - changedBlocks
+        - changedBlockCount
       properties:
         world:
           type: string
           minLength: 1
-        changedBlocks:
+        changedBlockCount:
           type: integer
           format: int64
           minimum: 1
@@ -998,12 +1001,12 @@ components:
       required:
         - maxRegionVolume
         - maxChangedBlocks
-        - maxExactInspectionVolume
-        - defaultExactResults
-        - maxExactResults
-        - maxViewVolume
-        - defaultViewResults
-        - maxViewResults
+        - maxRegionBlocksVolume
+        - defaultRegionBlocksResultLimit
+        - maxRegionBlocksResultLimit
+        - maxOrthographicViewVolume
+        - defaultOrthographicViewResultLimit
+        - maxOrthographicViewResultLimit
         - undoHistoryPerWorld
       properties:
         maxRegionVolume:
@@ -1014,27 +1017,27 @@ components:
           type: integer
           format: int32
           minimum: 1
-        maxExactInspectionVolume:
+        maxRegionBlocksVolume:
           type: integer
           format: int32
           minimum: 1
-        defaultExactResults:
+        defaultRegionBlocksResultLimit:
           type: integer
           format: int32
           minimum: 1
-        maxExactResults:
+        maxRegionBlocksResultLimit:
           type: integer
           format: int32
           minimum: 1
-        maxViewVolume:
+        maxOrthographicViewVolume:
           type: integer
           format: int32
           minimum: 1
-        defaultViewResults:
+        defaultOrthographicViewResultLimit:
           type: integer
           format: int32
           minimum: 1
-        maxViewResults:
+        maxOrthographicViewResultLimit:
           type: integer
           format: int32
           minimum: 1
@@ -1046,21 +1049,21 @@ components:
       type: object
       additionalProperties: false
       required:
-        - exactInspectionIncludeAir
-        - exactInspectionMode
-        - replaceDryRun
-        - fillDryRun
+        - regionBlocksIncludeAir
+        - regionBlocksFormat
+        - replaceRegionBlocksDryRun
+        - fillRegionDryRun
       properties:
-        exactInspectionIncludeAir:
+        regionBlocksIncludeAir:
           type: boolean
-        exactInspectionMode:
+        regionBlocksFormat:
           type: string
           enum:
             - blocks
             - runs
-        replaceDryRun:
+        replaceRegionBlocksDryRun:
           type: boolean
-        fillDryRun:
+        fillRegionDryRun:
           type: boolean
     PluginConfiguration:
       type: object
@@ -1076,13 +1079,13 @@ components:
           $ref: '#/components/schemas/LimitConfiguration'
         defaults:
           $ref: '#/components/schemas/DefaultConfiguration'
-    Health:
+    ServerInfo:
       type: object
       additionalProperties: false
       required:
         - status
         - service
-        - version
+        - pluginVersion
         - minecraftVersion
         - configuration
       properties:
@@ -1090,7 +1093,7 @@ components:
           const: ok
         service:
           const: dirt-mcp-paper
-        version:
+        pluginVersion:
           type: string
         minecraftVersion:
           type: string

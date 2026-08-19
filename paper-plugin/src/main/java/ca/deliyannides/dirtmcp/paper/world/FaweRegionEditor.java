@@ -2,12 +2,12 @@ package ca.deliyannides.dirtmcp.paper.world;
 
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.Failure;
-import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRequest;
-import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillResult;
-import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRequest;
-import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceResult;
-import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoRequest;
-import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRegionRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRegionResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRegionBlocksRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRegionBlocksResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoLastDirtEditRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoLastDirtEditResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Bounds;
 import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.NormalizedRegion;
@@ -58,7 +58,8 @@ public final class FaweRegionEditor implements RegionEditor {
     }
 
     @Override
-    public ReplaceResult replace(ReplaceRequest request) throws EditException {
+    public ReplaceRegionBlocksResult replaceRegionBlocks(ReplaceRegionBlocksRequest request)
+            throws EditException {
         NormalizedRegion region = normalize(request.min(), request.max());
         PreparedWorld world = prepareWorld(request.world());
         WorldState state = this.worldStates.computeIfAbsent(world.worldName(), ignored -> new WorldState());
@@ -80,7 +81,7 @@ public final class FaweRegionEditor implements RegionEditor {
     }
 
     @Override
-    public FillResult fill(FillRequest request) throws EditException {
+    public FillRegionResult fillRegion(FillRegionRequest request) throws EditException {
         NormalizedRegion region = normalize(request.min(), request.max());
         PreparedWorld world = prepareWorld(request.world());
         WorldState state = this.worldStates.computeIfAbsent(world.worldName(), ignored -> new WorldState());
@@ -102,7 +103,8 @@ public final class FaweRegionEditor implements RegionEditor {
     }
 
     @Override
-    public UndoResult undo(UndoRequest request) throws EditException {
+    public UndoLastDirtEditResult undoLastDirtEdit(UndoLastDirtEditRequest request)
+            throws EditException {
         PreparedWorld prepared = prepareWorld(request.world());
         WorldState state = this.worldStates.computeIfAbsent(prepared.worldName(), ignored -> new WorldState());
         if (!state.lock.tryLock()) {
@@ -115,36 +117,40 @@ public final class FaweRegionEditor implements RegionEditor {
             if (edit == null) {
                 throw new EditException(Failure.NOTHING_TO_UNDO, "No Dirt MCP edit is available to undo");
             }
-            long changedBlocks = edit.getChangeSet().longSize();
+            long changedBlockCount = edit.getChangeSet().longSize();
             try (EditSession undoSession = newEditSession(prepared.world(), false)) {
                 edit.undo(undoSession);
             }
             state.history.removeLast();
-            return new UndoResult(prepared.worldName(), changedBlocks);
+            return new UndoLastDirtEditResult(prepared.worldName(), changedBlockCount);
         } finally {
             state.lock.unlock();
         }
     }
 
-    private ReplaceResult replaceLocked(
-            ReplaceRequest request,
+    private ReplaceRegionBlocksResult replaceLocked(
+            ReplaceRegionBlocksRequest request,
             NormalizedRegion region,
             PreparedEdit prepared,
             WorldState state) throws EditException {
         CuboidRegion selection = selection(prepared.world(), region);
 
-        boolean changesBlocks = !prepared.sourceName().equals(prepared.destinationName());
+        boolean changesBlocks = !prepared.sourceBlockStateName()
+                .equals(prepared.destinationBlockStateName());
         EditSession session = newEditSession(prepared.world(), !request.dryRun());
         int matches;
         long changes;
         try (session) {
-            matches = session.countBlocks(selection, Set.of(prepared.source()));
+            matches = session.countBlocks(selection, Set.of(prepared.sourceBlockState()));
             long expectedChanges = changesBlocks ? matches : 0;
             enforceChangeLimit(expectedChanges);
 
             changes = expectedChanges;
             if (!request.dryRun() && expectedChanges > 0) {
-                changes = session.replaceBlocks(selection, Set.of(prepared.source()), prepared.destination());
+                changes = session.replaceBlocks(
+                        selection,
+                        Set.of(prepared.sourceBlockState()),
+                        prepared.destinationBlockState());
             }
         } catch (MaxChangedBlocksException exception) {
             throw new EditException(
@@ -158,8 +164,8 @@ public final class FaweRegionEditor implements RegionEditor {
         return result(request, region, prepared, matches, changes);
     }
 
-    private FillResult fillLocked(
-            FillRequest request,
+    private FillRegionResult fillLocked(
+            FillRegionRequest request,
             NormalizedRegion region,
             PreparedFill prepared,
             WorldState state) throws EditException {
@@ -167,13 +173,13 @@ public final class FaweRegionEditor implements RegionEditor {
         EditSession session = newEditSession(prepared.world(), !request.dryRun());
         long changes;
         try (session) {
-            int matchingDestination = session.countBlocks(selection, Set.of(prepared.destination()));
+            int matchingDestination = session.countBlocks(selection, Set.of(prepared.blockState()));
             long expectedChanges = region.volume() - matchingDestination;
             enforceChangeLimit(expectedChanges);
 
             changes = expectedChanges;
             if (!request.dryRun() && expectedChanges > 0) {
-                changes = session.setBlocks((Region) selection, prepared.destination());
+                changes = session.setBlocks((Region) selection, prepared.blockState());
             }
         } catch (MaxChangedBlocksException exception) {
             throw new EditException(
@@ -184,10 +190,10 @@ public final class FaweRegionEditor implements RegionEditor {
         if (!request.dryRun() && changes > 0) {
             remember(state, session);
         }
-        return new FillResult(
+        return new FillRegionResult(
                 prepared.worldName(),
                 new Bounds(region.min(), region.max()),
-                prepared.destinationName(),
+                prepared.blockStateName(),
                 request.dryRun(),
                 region.volume(),
                 changes);
@@ -216,17 +222,17 @@ public final class FaweRegionEditor implements RegionEditor {
         return builder.fastMode(true).changeSetNull().build();
     }
 
-    private ReplaceResult result(
-            ReplaceRequest request,
+    private ReplaceRegionBlocksResult result(
+            ReplaceRegionBlocksRequest request,
             NormalizedRegion region,
             PreparedEdit prepared,
             long matches,
             long changes) {
-        return new ReplaceResult(
+        return new ReplaceRegionBlocksResult(
                 prepared.worldName(),
                 new Bounds(region.min(), region.max()),
-                prepared.sourceName(),
-                prepared.destinationName(),
+                prepared.sourceBlockStateName(),
+                prepared.destinationBlockStateName(),
                 request.dryRun(),
                 matches,
                 changes);
@@ -242,11 +248,12 @@ public final class FaweRegionEditor implements RegionEditor {
         }
     }
 
-    private PreparedEdit prepare(ReplaceRequest request, NormalizedRegion region) throws EditException {
+    private PreparedEdit prepare(ReplaceRegionBlocksRequest request, NormalizedRegion region)
+            throws EditException {
         return onMainThread(() -> prepareOnMainThread(request, region));
     }
 
-    private PreparedFill prepare(FillRequest request, NormalizedRegion region) throws EditException {
+    private PreparedFill prepare(FillRegionRequest request, NormalizedRegion region) throws EditException {
         return onMainThread(() -> prepareOnMainThread(request, region));
     }
 
@@ -270,38 +277,39 @@ public final class FaweRegionEditor implements RegionEditor {
         }
     }
 
-    private PreparedEdit prepareOnMainThread(ReplaceRequest request, NormalizedRegion region)
+    private PreparedEdit prepareOnMainThread(ReplaceRegionBlocksRequest request, NormalizedRegion region)
             throws EditException {
         PreparedWorld prepared = resolveWorld(request.world());
         World world = prepared.bukkitWorld();
         requireValidHeight(world, region);
 
-        BlockData source = parseBlockData(request.source(), "source");
-        BlockData destination = parseBlockData(request.destination(), "destination");
+        BlockData sourceBlockState = parseBlockData(request.sourceBlockState(), "sourceBlockState");
+        BlockData destinationBlockState = parseBlockData(
+                request.destinationBlockState(), "destinationBlockState");
         ChunkTickets chunkTickets = retainLoadedChunks(world, region);
         return new PreparedEdit(
                 prepared.worldName(),
                 prepared.world(),
-                BukkitAdapter.adapt(source).toBaseBlock(),
-                BukkitAdapter.adapt(destination).toBaseBlock(),
-                source.getAsString(),
-                destination.getAsString(),
+                BukkitAdapter.adapt(sourceBlockState).toBaseBlock(),
+                BukkitAdapter.adapt(destinationBlockState).toBaseBlock(),
+                sourceBlockState.getAsString(),
+                destinationBlockState.getAsString(),
                 chunkTickets);
     }
 
-    private PreparedFill prepareOnMainThread(FillRequest request, NormalizedRegion region)
+    private PreparedFill prepareOnMainThread(FillRegionRequest request, NormalizedRegion region)
             throws EditException {
         PreparedWorld prepared = resolveWorld(request.world());
         World world = prepared.bukkitWorld();
         requireValidHeight(world, region);
 
-        BlockData destination = parseBlockData(request.destination(), "destination");
+        BlockData blockState = parseBlockData(request.blockState(), "blockState");
         ChunkTickets chunkTickets = retainLoadedChunks(world, region);
         return new PreparedFill(
                 prepared.worldName(),
                 prepared.world(),
-                BukkitAdapter.adapt(destination).toBaseBlock(),
-                destination.getAsString(),
+                BukkitAdapter.adapt(blockState).toBaseBlock(),
+                blockState.getAsString(),
                 chunkTickets);
     }
 
@@ -426,17 +434,17 @@ public final class FaweRegionEditor implements RegionEditor {
     private record PreparedEdit(
             String worldName,
             com.sk89q.worldedit.world.World world,
-            BaseBlock source,
-            BaseBlock destination,
-            String sourceName,
-            String destinationName,
+            BaseBlock sourceBlockState,
+            BaseBlock destinationBlockState,
+            String sourceBlockStateName,
+            String destinationBlockStateName,
             ChunkTickets chunkTickets) {}
 
     private record PreparedFill(
             String worldName,
             com.sk89q.worldedit.world.World world,
-            BaseBlock destination,
-            String destinationName,
+            BaseBlock blockState,
+            String blockStateName,
             ChunkTickets chunkTickets) {}
 
     private record ChunkTickets(World world, List<ChunkPosition> chunks) {}

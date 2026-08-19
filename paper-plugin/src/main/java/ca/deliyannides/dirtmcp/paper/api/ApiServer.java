@@ -3,18 +3,18 @@ package ca.deliyannides.dirtmcp.paper.api;
 import ca.deliyannides.dirtmcp.paper.PluginSettings;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
-import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRequest;
-import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRequest;
-import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRegionRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRegionBlocksRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoLastDirtEditRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionMode;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockStateCountRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Failure;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionException;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionRequest;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewDirection;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.OrthographicViewDirection;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.OrthographicViewRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RegionBlocksFormat;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RegionBlocksRequest;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -45,18 +45,25 @@ public final class ApiServer implements AutoCloseable {
     private static final String WORLD_ATTRIBUTE = ApiServer.class.getName() + ".world";
     private static final Pattern CALL_ID_PATTERN = Pattern.compile(
             "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}");
-    private static final Set<String> INSPECTION_FIELDS = Set.of("world", "min", "max");
-    private static final Set<String> EXACT_INSPECTION_REQUIRED_FIELDS = Set.of("world", "min", "max");
-    private static final Set<String> EXACT_INSPECTION_FIELDS =
-            Set.of("world", "min", "max", "include", "exclude", "includeAir", "maxResults", "mode");
-    private static final Set<String> VIEW_REQUIRED_FIELDS = Set.of(
+    private static final Set<String> BLOCK_STATE_COUNT_FIELDS = Set.of("world", "min", "max");
+    private static final Set<String> REGION_BLOCKS_REQUIRED_FIELDS = Set.of("world", "min", "max");
+    private static final Set<String> REGION_BLOCKS_FIELDS = Set.of(
+            "world",
+            "min",
+            "max",
+            "includeBlockStatePatterns",
+            "excludeBlockStatePatterns",
+            "includeAir",
+            "maxResults",
+            "format");
+    private static final Set<String> ORTHOGRAPHIC_VIEW_REQUIRED_FIELDS = Set.of(
             "world",
             "origin",
             "direction",
             "horizontalRadius",
             "verticalRadius",
             "maxDistance");
-    private static final Set<String> VIEW_FIELDS = Set.of(
+    private static final Set<String> ORTHOGRAPHIC_VIEW_FIELDS = Set.of(
             "world",
             "origin",
             "direction",
@@ -64,18 +71,20 @@ public final class ApiServer implements AutoCloseable {
             "verticalRadius",
             "maxDistance",
             "maxResults");
-    private static final Set<String> REPLACEMENT_REQUIRED_FIELDS =
-            Set.of("world", "min", "max", "source", "destination");
-    private static final Set<String> REPLACEMENT_FIELDS =
-            Set.of("world", "min", "max", "source", "destination", "dryRun");
-    private static final Set<String> FILL_REQUIRED_FIELDS = Set.of("world", "min", "max", "destination");
-    private static final Set<String> FILL_FIELDS = Set.of("world", "min", "max", "destination", "dryRun");
+    private static final Set<String> REPLACE_REGION_BLOCKS_REQUIRED_FIELDS =
+            Set.of("world", "min", "max", "sourceBlockState", "destinationBlockState");
+    private static final Set<String> REPLACE_REGION_BLOCKS_FIELDS = Set.of(
+            "world", "min", "max", "sourceBlockState", "destinationBlockState", "dryRun");
+    private static final Set<String> FILL_REGION_REQUIRED_FIELDS =
+            Set.of("world", "min", "max", "blockState");
+    private static final Set<String> FILL_REGION_FIELDS =
+            Set.of("world", "min", "max", "blockState", "dryRun");
     private static final Set<String> UNDO_FIELDS = Set.of("world");
     private static final Set<String> POSITION_FIELDS = Set.of("x", "y", "z");
     private static final Gson GSON = new Gson();
 
     private final PluginSettings settings;
-    private final String responseBody;
+    private final String serverInfoResponseBody;
     private final BearerAuthentication authentication;
     private final RegionInspector regionInspector;
     private final RegionEditor regionEditor;
@@ -98,7 +107,7 @@ public final class ApiServer implements AutoCloseable {
                 bearerToken, settings.bridge().minimumTokenBytes());
         this.regionInspector = regionInspector;
         this.regionEditor = regionEditor;
-        this.responseBody = GSON.toJson(new HealthResponse(
+        this.serverInfoResponseBody = GSON.toJson(new ServerInfoResponse(
                 "ok",
                 "dirt-mcp-paper",
                 pluginVersion,
@@ -118,25 +127,30 @@ public final class ApiServer implements AutoCloseable {
 
         try {
             newServer.createContext(
-                    "/v1/health", exchange -> handleAudited("health", exchange, this::handleHealth));
+                    "/v1/server-info",
+                    exchange -> handleAudited("get_server_info", exchange, this::handleGetServerInfo));
             newServer.createContext(
-                    "/v1/inspect-region",
-                    exchange -> handleAudited("inspect_region", exchange, this::handleInspectRegion));
+                    "/v1/count-region-block-states",
+                    exchange -> handleAudited(
+                            "count_region_block_states", exchange, this::handleCountRegionBlockStates));
             newServer.createContext(
-                    "/v1/inspect-blocks",
-                    exchange -> handleAudited("inspect_blocks", exchange, this::handleInspectBlocks));
+                    "/v1/get-region-blocks",
+                    exchange -> handleAudited("get_region_blocks", exchange, this::handleGetRegionBlocks));
             newServer.createContext(
-                    "/v1/inspect-view",
-                    exchange -> handleAudited("inspect_view", exchange, this::handleInspectView));
+                    "/v1/scan-orthographic-view",
+                    exchange -> handleAudited(
+                            "scan_orthographic_view", exchange, this::handleScanOrthographicView));
             newServer.createContext(
-                    "/v1/replace-blocks",
-                    exchange -> handleAudited("replace_blocks", exchange, this::handleReplaceBlocks));
+                    "/v1/replace-region-blocks",
+                    exchange -> handleAudited(
+                            "replace_region_blocks", exchange, this::handleReplaceRegionBlocks));
             newServer.createContext(
                     "/v1/fill-region",
                     exchange -> handleAudited("fill_region", exchange, this::handleFillRegion));
             newServer.createContext(
-                    "/v1/undo-last-edit",
-                    exchange -> handleAudited("undo_last_edit", exchange, this::handleUndoLastEdit));
+                    "/v1/undo-last-dirt-edit",
+                    exchange -> handleAudited(
+                            "undo_last_dirt_edit", exchange, this::handleUndoLastDirtEdit));
             newServer.setExecutor(newExecutor);
             newServer.start();
         } catch (RuntimeException exception) {
@@ -172,7 +186,7 @@ public final class ApiServer implements AutoCloseable {
         this.logger.info("Dirt MCP bridge stopped.");
     }
 
-    private void handleHealth(HttpExchange exchange) throws IOException {
+    private void handleGetServerInfo(HttpExchange exchange) throws IOException {
         if (!authenticate(exchange)) {
             return;
         }
@@ -183,7 +197,7 @@ public final class ApiServer implements AutoCloseable {
             return;
         }
 
-        send(exchange, 200, this.responseBody);
+        send(exchange, 200, this.serverInfoResponseBody);
     }
 
     private void handleAudited(String operation, HttpExchange exchange, HttpHandler handler)
@@ -213,7 +227,7 @@ public final class ApiServer implements AutoCloseable {
         }
     }
 
-    private void handleInspectRegion(HttpExchange exchange) throws IOException {
+    private void handleCountRegionBlockStates(HttpExchange exchange) throws IOException {
         if (!authenticate(exchange)) {
             return;
         }
@@ -224,20 +238,20 @@ public final class ApiServer implements AutoCloseable {
         }
 
         try {
-            InspectionRequest request = parseInspectionRequest(exchange);
+            BlockStateCountRequest request = parseBlockStateCountRequest(exchange);
             exchange.setAttribute(WORLD_ATTRIBUTE, request.world());
-            send(exchange, 200, GSON.toJson(this.regionInspector.inspect(request)));
+            send(exchange, 200, GSON.toJson(this.regionInspector.countRegionBlockStates(request)));
         } catch (InvalidRequestException exception) {
             sendError(exchange, 400, "invalid_request", exception.getMessage());
         } catch (InspectionException exception) {
             sendInspectionError(exchange, exception);
         } catch (RuntimeException exception) {
-            this.logger.log(Level.SEVERE, "Unexpected inspect-region failure", exception);
-            sendError(exchange, 500, "internal_error", "The region could not be inspected");
+            this.logger.log(Level.SEVERE, "Unexpected count-region-block-states failure", exception);
+            sendError(exchange, 500, "internal_error", "The region's block states could not be counted");
         }
     }
 
-    private void handleInspectBlocks(HttpExchange exchange) throws IOException {
+    private void handleGetRegionBlocks(HttpExchange exchange) throws IOException {
         if (!authenticate(exchange)) {
             return;
         }
@@ -248,20 +262,20 @@ public final class ApiServer implements AutoCloseable {
         }
 
         try {
-            ExactInspectionRequest request = parseExactInspectionRequest(exchange);
+            RegionBlocksRequest request = parseRegionBlocksRequest(exchange);
             exchange.setAttribute(WORLD_ATTRIBUTE, request.world());
-            send(exchange, 200, GSON.toJson(this.regionInspector.inspectBlocks(request)));
+            send(exchange, 200, GSON.toJson(this.regionInspector.getRegionBlocks(request)));
         } catch (InvalidRequestException exception) {
             sendError(exchange, 400, "invalid_request", exception.getMessage());
         } catch (InspectionException exception) {
             sendInspectionError(exchange, exception);
         } catch (RuntimeException exception) {
-            this.logger.log(Level.SEVERE, "Unexpected inspect-blocks failure", exception);
-            sendError(exchange, 500, "internal_error", "The blocks could not be inspected");
+            this.logger.log(Level.SEVERE, "Unexpected get-region-blocks failure", exception);
+            sendError(exchange, 500, "internal_error", "The region's blocks could not be returned");
         }
     }
 
-    private void handleInspectView(HttpExchange exchange) throws IOException {
+    private void handleScanOrthographicView(HttpExchange exchange) throws IOException {
         if (!authenticate(exchange)) {
             return;
         }
@@ -272,20 +286,20 @@ public final class ApiServer implements AutoCloseable {
         }
 
         try {
-            ViewRequest request = parseViewRequest(exchange);
+            OrthographicViewRequest request = parseOrthographicViewRequest(exchange);
             exchange.setAttribute(WORLD_ATTRIBUTE, request.world());
-            send(exchange, 200, GSON.toJson(this.regionInspector.inspectView(request)));
+            send(exchange, 200, GSON.toJson(this.regionInspector.scanOrthographicView(request)));
         } catch (InvalidRequestException exception) {
             sendError(exchange, 400, "invalid_request", exception.getMessage());
         } catch (InspectionException exception) {
             sendInspectionError(exchange, exception);
         } catch (RuntimeException exception) {
-            this.logger.log(Level.SEVERE, "Unexpected inspect-view failure", exception);
-            sendError(exchange, 500, "internal_error", "The view could not be inspected");
+            this.logger.log(Level.SEVERE, "Unexpected scan-orthographic-view failure", exception);
+            sendError(exchange, 500, "internal_error", "The orthographic view could not be scanned");
         }
     }
 
-    private void handleReplaceBlocks(HttpExchange exchange) throws IOException {
+    private void handleReplaceRegionBlocks(HttpExchange exchange) throws IOException {
         if (!authenticate(exchange)) {
             return;
         }
@@ -296,20 +310,20 @@ public final class ApiServer implements AutoCloseable {
         }
 
         try {
-            ReplaceRequest request = parseReplaceRequest(exchange);
+            ReplaceRegionBlocksRequest request = parseReplaceRegionBlocksRequest(exchange);
             exchange.setAttribute(WORLD_ATTRIBUTE, request.world());
-            send(exchange, 200, GSON.toJson(this.regionEditor.replace(request)));
+            send(exchange, 200, GSON.toJson(this.regionEditor.replaceRegionBlocks(request)));
         } catch (InvalidRequestException exception) {
             sendError(exchange, 400, "invalid_request", exception.getMessage());
         } catch (EditException exception) {
             sendEditError(exchange, exception);
         } catch (RuntimeException exception) {
-            this.logger.log(Level.SEVERE, "Unexpected replace-blocks failure", exception);
+            this.logger.log(Level.SEVERE, "Unexpected replace-region-blocks failure", exception);
             sendError(exchange, 500, "internal_error", "The blocks could not be replaced");
         }
     }
 
-    private void handleUndoLastEdit(HttpExchange exchange) throws IOException {
+    private void handleUndoLastDirtEdit(HttpExchange exchange) throws IOException {
         if (!authenticate(exchange)) {
             return;
         }
@@ -320,15 +334,15 @@ public final class ApiServer implements AutoCloseable {
         }
 
         try {
-            UndoRequest request = parseUndoRequest(exchange);
+            UndoLastDirtEditRequest request = parseUndoLastDirtEditRequest(exchange);
             exchange.setAttribute(WORLD_ATTRIBUTE, request.world());
-            send(exchange, 200, GSON.toJson(this.regionEditor.undo(request)));
+            send(exchange, 200, GSON.toJson(this.regionEditor.undoLastDirtEdit(request)));
         } catch (InvalidRequestException exception) {
             sendError(exchange, 400, "invalid_request", exception.getMessage());
         } catch (EditException exception) {
             sendEditError(exchange, exception);
         } catch (RuntimeException exception) {
-            this.logger.log(Level.SEVERE, "Unexpected undo-last-edit failure", exception);
+            this.logger.log(Level.SEVERE, "Unexpected undo-last-dirt-edit failure", exception);
             sendError(exchange, 500, "internal_error", "The edit could not be undone");
         }
     }
@@ -344,9 +358,9 @@ public final class ApiServer implements AutoCloseable {
         }
 
         try {
-            FillRequest request = parseFillRequest(exchange);
+            FillRegionRequest request = parseFillRegionRequest(exchange);
             exchange.setAttribute(WORLD_ATTRIBUTE, request.world());
-            send(exchange, 200, GSON.toJson(this.regionEditor.fill(request)));
+            send(exchange, 200, GSON.toJson(this.regionEditor.fillRegion(request)));
         } catch (InvalidRequestException exception) {
             sendError(exchange, 400, "invalid_request", exception.getMessage());
         } catch (EditException exception) {
@@ -366,12 +380,12 @@ public final class ApiServer implements AutoCloseable {
         return false;
     }
 
-    private InspectionRequest parseInspectionRequest(HttpExchange exchange)
+    private BlockStateCountRequest parseBlockStateCountRequest(HttpExchange exchange)
             throws IOException, InvalidRequestException {
         try {
             JsonObject object = parseRequestObject(exchange);
-            requireFields(object, INSPECTION_FIELDS, "Request");
-            return new InspectionRequest(
+            requireFields(object, BLOCK_STATE_COUNT_FIELDS, "Request");
+            return new BlockStateCountRequest(
                     parseString(object.get("world"), "world"),
                     parsePosition(object.get("min"), "min"),
                     parsePosition(object.get("max"), "max"));
@@ -380,46 +394,54 @@ public final class ApiServer implements AutoCloseable {
         }
     }
 
-    private ExactInspectionRequest parseExactInspectionRequest(HttpExchange exchange)
+    private RegionBlocksRequest parseRegionBlocksRequest(HttpExchange exchange)
             throws IOException, InvalidRequestException {
         try {
             JsonObject object = parseRequestObject(exchange);
-            if (!object.keySet().containsAll(EXACT_INSPECTION_REQUIRED_FIELDS)
-                    || !EXACT_INSPECTION_FIELDS.containsAll(object.keySet())) {
+            if (!object.keySet().containsAll(REGION_BLOCKS_REQUIRED_FIELDS)
+                    || !REGION_BLOCKS_FIELDS.containsAll(object.keySet())) {
                 throw new InvalidRequestException("Request contains missing or unknown fields");
             }
             int maxResults = object.has("maxResults")
                     ? parseInteger(object.get("maxResults"), "maxResults")
-                    : this.settings.limits().defaultExactResults();
-            if (maxResults < 1 || maxResults > this.settings.limits().maxExactResults()) {
+                    : this.settings.limits().defaultRegionBlocksResultLimit();
+            if (maxResults < 1 || maxResults > this.settings.limits().maxRegionBlocksResultLimit()) {
                 throw new InvalidRequestException(
                         "maxResults must be between 1 and "
-                                + this.settings.limits().maxExactResults());
+                                + this.settings.limits().maxRegionBlocksResultLimit());
             }
-            return new ExactInspectionRequest(
+            return new RegionBlocksRequest(
                     parseString(object.get("world"), "world"),
                     parsePosition(object.get("min"), "min"),
                     parsePosition(object.get("max"), "max"),
-                    object.has("include") ? parseStringList(object.get("include"), "include") : List.of(),
-                    object.has("exclude") ? parseStringList(object.get("exclude"), "exclude") : List.of(),
+                    object.has("includeBlockStatePatterns")
+                            ? parseStringList(
+                                    object.get("includeBlockStatePatterns"),
+                                    "includeBlockStatePatterns")
+                            : List.of(),
+                    object.has("excludeBlockStatePatterns")
+                            ? parseStringList(
+                                    object.get("excludeBlockStatePatterns"),
+                                    "excludeBlockStatePatterns")
+                            : List.of(),
                     object.has("includeAir")
                             ? parseBoolean(object.get("includeAir"), "includeAir")
-                            : this.settings.defaults().exactInspectionIncludeAir(),
+                            : this.settings.defaults().regionBlocksIncludeAir(),
                     maxResults,
-                    object.has("mode")
-                            ? parseInspectionMode(object.get("mode"))
-                            : parseInspectionMode(this.settings.defaults().exactInspectionMode()));
+                    object.has("format")
+                            ? parseRegionBlocksFormat(object.get("format"))
+                            : parseRegionBlocksFormat(this.settings.defaults().regionBlocksFormat()));
         } catch (JsonParseException | NumberFormatException | ArithmeticException exception) {
             throw new InvalidRequestException("Request body must contain valid JSON values");
         }
     }
 
-    private ViewRequest parseViewRequest(HttpExchange exchange)
+    private OrthographicViewRequest parseOrthographicViewRequest(HttpExchange exchange)
             throws IOException, InvalidRequestException {
         try {
             JsonObject object = parseRequestObject(exchange);
-            if (!object.keySet().containsAll(VIEW_REQUIRED_FIELDS)
-                    || !VIEW_FIELDS.containsAll(object.keySet())) {
+            if (!object.keySet().containsAll(ORTHOGRAPHIC_VIEW_REQUIRED_FIELDS)
+                    || !ORTHOGRAPHIC_VIEW_FIELDS.containsAll(object.keySet())) {
                 throw new InvalidRequestException("Request contains missing or unknown fields");
             }
             int horizontalRadius = parseInteger(object.get("horizontalRadius"), "horizontalRadius");
@@ -427,7 +449,7 @@ public final class ApiServer implements AutoCloseable {
             int maxDistance = parseInteger(object.get("maxDistance"), "maxDistance");
             int maxResults = object.has("maxResults")
                     ? parseInteger(object.get("maxResults"), "maxResults")
-                    : this.settings.limits().defaultViewResults();
+                    : this.settings.limits().defaultOrthographicViewResultLimit();
             if (horizontalRadius < 0 || verticalRadius < 0) {
                 throw new InvalidRequestException(
                         "horizontalRadius and verticalRadius must be non-negative");
@@ -435,15 +457,16 @@ public final class ApiServer implements AutoCloseable {
             if (maxDistance < 1) {
                 throw new InvalidRequestException("maxDistance must be positive");
             }
-            if (maxResults < 1 || maxResults > this.settings.limits().maxViewResults()) {
+            if (maxResults < 1
+                    || maxResults > this.settings.limits().maxOrthographicViewResultLimit()) {
                 throw new InvalidRequestException(
                         "maxResults must be between 1 and "
-                                + this.settings.limits().maxViewResults());
+                                + this.settings.limits().maxOrthographicViewResultLimit());
             }
-            return new ViewRequest(
+            return new OrthographicViewRequest(
                     parseString(object.get("world"), "world"),
                     parsePosition(object.get("origin"), "origin"),
-                    parseViewDirection(object.get("direction")),
+                    parseOrthographicViewDirection(object.get("direction")),
                     horizontalRadius,
                     verticalRadius,
                     maxDistance,
@@ -453,55 +476,55 @@ public final class ApiServer implements AutoCloseable {
         }
     }
 
-    private ReplaceRequest parseReplaceRequest(HttpExchange exchange)
+    private ReplaceRegionBlocksRequest parseReplaceRegionBlocksRequest(HttpExchange exchange)
             throws IOException, InvalidRequestException {
         try {
             JsonObject object = parseRequestObject(exchange);
-            if (!object.keySet().containsAll(REPLACEMENT_REQUIRED_FIELDS)
-                    || !REPLACEMENT_FIELDS.containsAll(object.keySet())) {
+            if (!object.keySet().containsAll(REPLACE_REGION_BLOCKS_REQUIRED_FIELDS)
+                    || !REPLACE_REGION_BLOCKS_FIELDS.containsAll(object.keySet())) {
                 throw new InvalidRequestException("Request contains missing or unknown fields");
             }
-            return new ReplaceRequest(
+            return new ReplaceRegionBlocksRequest(
                     parseString(object.get("world"), "world"),
                     parsePosition(object.get("min"), "min"),
                     parsePosition(object.get("max"), "max"),
-                    parseString(object.get("source"), "source"),
-                    parseString(object.get("destination"), "destination"),
+                    parseString(object.get("sourceBlockState"), "sourceBlockState"),
+                    parseString(object.get("destinationBlockState"), "destinationBlockState"),
                     object.has("dryRun")
                             ? parseBoolean(object.get("dryRun"), "dryRun")
-                            : this.settings.defaults().replaceDryRun());
+                            : this.settings.defaults().replaceRegionBlocksDryRun());
         } catch (JsonParseException | NumberFormatException | ArithmeticException exception) {
             throw new InvalidRequestException("Request body must contain valid JSON values");
         }
     }
 
-    private UndoRequest parseUndoRequest(HttpExchange exchange)
+    private UndoLastDirtEditRequest parseUndoLastDirtEditRequest(HttpExchange exchange)
             throws IOException, InvalidRequestException {
         try {
             JsonObject object = parseRequestObject(exchange);
             requireFields(object, UNDO_FIELDS, "Request");
-            return new UndoRequest(parseString(object.get("world"), "world"));
+            return new UndoLastDirtEditRequest(parseString(object.get("world"), "world"));
         } catch (JsonParseException exception) {
             throw new InvalidRequestException("Request body must contain valid JSON values");
         }
     }
 
-    private FillRequest parseFillRequest(HttpExchange exchange)
+    private FillRegionRequest parseFillRegionRequest(HttpExchange exchange)
             throws IOException, InvalidRequestException {
         try {
             JsonObject object = parseRequestObject(exchange);
-            if (!object.keySet().containsAll(FILL_REQUIRED_FIELDS)
-                    || !FILL_FIELDS.containsAll(object.keySet())) {
+            if (!object.keySet().containsAll(FILL_REGION_REQUIRED_FIELDS)
+                    || !FILL_REGION_FIELDS.containsAll(object.keySet())) {
                 throw new InvalidRequestException("Request contains missing or unknown fields");
             }
-            return new FillRequest(
+            return new FillRegionRequest(
                     parseString(object.get("world"), "world"),
                     parsePosition(object.get("min"), "min"),
                     parsePosition(object.get("max"), "max"),
-                    parseString(object.get("destination"), "destination"),
+                    parseString(object.get("blockState"), "blockState"),
                     object.has("dryRun")
                             ? parseBoolean(object.get("dryRun"), "dryRun")
-                            : this.settings.defaults().fillDryRun());
+                            : this.settings.defaults().fillRegionDryRun());
         } catch (JsonParseException | NumberFormatException | ArithmeticException exception) {
             throw new InvalidRequestException("Request body must contain valid JSON values");
         }
@@ -554,30 +577,30 @@ public final class ApiServer implements AutoCloseable {
         return List.copyOf(values);
     }
 
-    private static ExactInspectionMode parseInspectionMode(JsonElement element)
+    private static RegionBlocksFormat parseRegionBlocksFormat(JsonElement element)
             throws InvalidRequestException {
-        return parseInspectionMode(parseString(element, "mode"));
+        return parseRegionBlocksFormat(parseString(element, "format"));
     }
 
-    private static ExactInspectionMode parseInspectionMode(String mode)
+    private static RegionBlocksFormat parseRegionBlocksFormat(String format)
             throws InvalidRequestException {
-        return switch (mode) {
-            case "blocks" -> ExactInspectionMode.BLOCKS;
-            case "runs" -> ExactInspectionMode.RUNS;
-            default -> throw new InvalidRequestException("mode must be blocks or runs");
+        return switch (format) {
+            case "blocks" -> RegionBlocksFormat.BLOCKS;
+            case "runs" -> RegionBlocksFormat.RUNS;
+            default -> throw new InvalidRequestException("format must be blocks or runs");
         };
     }
 
-    private static ViewDirection parseViewDirection(JsonElement element)
+    private static OrthographicViewDirection parseOrthographicViewDirection(JsonElement element)
             throws InvalidRequestException {
         String direction = parseString(element, "direction");
         return switch (direction) {
-            case "north" -> ViewDirection.NORTH;
-            case "east" -> ViewDirection.EAST;
-            case "south" -> ViewDirection.SOUTH;
-            case "west" -> ViewDirection.WEST;
-            case "up" -> ViewDirection.UP;
-            case "down" -> ViewDirection.DOWN;
+            case "north" -> OrthographicViewDirection.NORTH;
+            case "east" -> OrthographicViewDirection.EAST;
+            case "south" -> OrthographicViewDirection.SOUTH;
+            case "west" -> OrthographicViewDirection.WEST;
+            case "up" -> OrthographicViewDirection.UP;
+            case "down" -> OrthographicViewDirection.DOWN;
             default -> throw new InvalidRequestException(
                     "direction must be north, east, south, west, up, or down");
         };
@@ -658,10 +681,10 @@ public final class ApiServer implements AutoCloseable {
         }
     }
 
-    private record HealthResponse(
+    private record ServerInfoResponse(
             String status,
             String service,
-            String version,
+            String pluginVersion,
             String minecraftVersion,
             PluginSettings configuration) {}
 

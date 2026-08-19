@@ -92,12 +92,12 @@ that requires server-thread ownership crosses a small scheduler boundary.
 Responses report success only after FAWE has completed and closed its edit
 session.
 
-`replace_blocks` and `fill_region` use the same already-loaded-chunk rule as
-inspection, canonicalize Bukkit block-state strings at the Paper boundary, and
-record only successful non-empty edits. Fill counts blocks already in the
-destination state before mutation so dry-runs are exact and the changed-block
-limit is checked before execution.
-`undo_last_edit` uses the same world lock, applies the newest history entry
+`replace_region_blocks` and `fill_region` use the same already-loaded-chunk
+rule as inspection, canonicalize Bukkit block-state strings at the Paper
+boundary, and record only successful non-empty edits. Fill counts blocks
+already in the destination state before mutation so dry-runs are exact and the
+changed-block limit is checked before execution.
+`undo_last_dirt_edit` uses the same world lock, applies the newest history entry
 through a fresh FAWE edit session, and consumes it only after completion.
 
 ## Dependency direction

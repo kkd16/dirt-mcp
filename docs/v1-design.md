@@ -6,7 +6,7 @@ step.
 
 ## Tools
 
-### `inspect_region`
+### `count_region_block_states`
 
 Inputs:
 
@@ -16,7 +16,7 @@ Inputs:
 Returns normalized bounds, dimensions, volume, and block-state counts. V1 does
 not return entities, player data, rendered images, or every block coordinate.
 
-The bridge request is `POST /v1/inspect-region` with a JSON body:
+The bridge request is `POST /v1/count-region-block-states` with a JSON body:
 
 ```json
 {
@@ -38,7 +38,7 @@ objects reject unknown fields. A successful response has this shape:
   },
   "dimensions": { "x": 16, "y": 21, "z": 16 },
   "volume": 5376,
-  "blockStates": {
+  "blockStateCounts": {
     "minecraft:air": 4096,
     "minecraft:stone": 1280
   }
@@ -66,7 +66,7 @@ Its defined failures are `invalid_request` (400), `unauthorized` (401),
 and `internal_error` (500). Inspection uses snapshots of already-loaded chunks;
 it never loads or generates terrain.
 
-### `inspect_blocks`
+### `get_region_blocks`
 
 Exact inspection returns geometry rather than palette totals. The shipped
 configuration defaults to a sparse list of non-air blocks with canonical states
@@ -77,20 +77,20 @@ and exact coordinates:
   "world": "world",
   "min": { "x": -40, "y": 68, "z": -10 },
   "max": { "x": -24, "y": 85, "z": 7 },
-  "include": ["minecraft:spruce_door[half=lower]"],
-  "exclude": ["minecraft:snow"],
+  "includeBlockStatePatterns": ["minecraft:spruce_door[half=lower]"],
+  "excludeBlockStatePatterns": ["minecraft:snow"],
   "maxResults": 10000
 }
 ```
 
-`include` is an optional allowlist and `exclude` is applied afterward. Filter
-values are validated block-state patterns: omitted properties match every value
-of that property, so `minecraft:spruce_door` matches every spruce-door state
-while `minecraft:spruce_door[half=lower]` is narrower. Air-family states are
-excluded unless `includeAir` is `true`, even when an include pattern matches
-them.
+`includeBlockStatePatterns` is an optional allowlist and
+`excludeBlockStatePatterns` is applied afterward. Filter values are validated
+block-state patterns: omitted properties match every value of that property,
+so `minecraft:spruce_door` matches every spruce-door state while
+`minecraft:spruce_door[half=lower]` is narrower. Air-family states are excluded
+unless `includeAir` is `true`, even when an include pattern matches them.
 
-The shipped default `mode` is `blocks`:
+The shipped default `format` is `blocks`:
 
 ```json
 {
@@ -100,18 +100,18 @@ The shipped default `mode` is `blocks`:
     "max": { "x": -24, "y": 85, "z": 7 }
   },
   "volume": 5508,
-  "matchedBlocks": 1,
-  "mode": "blocks",
+  "matchedBlockCount": 1,
+  "format": "blocks",
   "blocks": [
     {
       "position": { "x": -32, "y": 71, "z": -4 },
-      "state": "minecraft:spruce_door[facing=north,half=lower,hinge=left,open=false,powered=false]"
+      "blockState": "minecraft:spruce_door[facing=north,half=lower,hinge=left,open=false,powered=false]"
     }
   ]
 }
 ```
 
-Set `mode` to `runs` to return a deterministic, exact cover using
+Set `format` to `runs` to return a deterministic, exact cover using
 non-overlapping axis-aligned runs with inclusive endpoints:
 
 ```json
@@ -122,11 +122,11 @@ non-overlapping axis-aligned runs with inclusive endpoints:
     "max": { "x": -24, "y": 85, "z": 7 }
   },
   "volume": 5508,
-  "matchedBlocks": 5,
-  "mode": "runs",
+  "matchedBlockCount": 5,
+  "format": "runs",
   "runs": [
     {
-      "state": "minecraft:stripped_spruce_log[axis=y]",
+      "blockState": "minecraft:stripped_spruce_log[axis=y]",
       "from": { "x": -37, "y": 71, "z": -4 },
       "to": { "x": -37, "y": 75, "z": -4 }
     }
@@ -137,19 +137,20 @@ non-overlapping axis-aligned runs with inclusive endpoints:
 Exact inspection uses the lower of `max-exact-inspection-volume` and the general
 region limit. The shipped exact-volume default is 32,768 blocks. Its default and
 maximum result counts are independently configurable and ship as 10,000; the
-request cap limits block entries in `blocks` mode and run entries in `runs`
-mode. The default mode and air inclusion are configurable. The bridge returns
+request cap limits block entries in `blocks` format and run entries in `runs`
+format. The default format and air inclusion are configurable. The bridge returns
 `result_too_large` (413) instead of truncating. Other failures match
-`inspect_region`. Both modes use snapshots and never load or generate chunks.
+`count_region_block_states`. Both formats use snapshots and never load or
+generate chunks.
 
-### `inspect_view`
+### `scan_orthographic_view`
 
 Structured view inspection returns one sparse orthographic surface layer. For
 each viewport cell, it scans away from an integer origin and returns the first
 non-air block. The origin is not scanned; distance `1` is the adjacent block.
 Glass, liquids, leaves, and every other non-air state stop their sightline.
 
-The bridge request is `POST /v1/inspect-view`:
+The bridge request is `POST /v1/scan-orthographic-view`:
 
 ```json
 {
@@ -177,6 +178,7 @@ offsets:
   "world": "world",
   "origin": { "x": 0, "y": 70, "z": 5 },
   "direction": "north",
+  "format": "blocks",
   "basis": {
     "forward": { "x": 0, "y": 0, "z": -1 },
     "horizontal": { "x": 1, "y": 0, "z": 0 },
@@ -192,12 +194,12 @@ offsets:
     "max": { "x": 1, "y": 71, "z": 4 }
   },
   "scannedVolume": 72,
-  "visibleBlocks": 1,
+  "visibleBlockCount": 1,
   "blocks": [
     {
       "position": { "x": -1, "y": 71, "z": 2 },
       "offset": { "horizontal": -1, "vertical": 1, "distance": 3 },
-      "state": "minecraft:oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]"
+      "blockState": "minecraft:oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]"
     }
   ]
 }
@@ -215,17 +217,18 @@ block data rather than an image or perspective render.
 
 The MCP tool additionally accepts `format: "grid"`; this option is consumed by
 the TypeScript process and is not sent to the bridge. Grid responses retain the
-same view metadata and encode the sparse bridge result as `palette`,
-`stateRows`, and `distanceRows`. Palette indices are one-based, while `0` in
-both aligned matrices means an empty sightline. Rows remain top-to-bottom and
-cells remain left-to-right, so basis vectors, offsets inferred from the
-viewport radii, and distances reconstruct every absolute position. Omitting
-`format`, or setting it to `blocks`, preserves the explicit bridge response.
+same view metadata and encode the sparse bridge result as `blockStatePalette`,
+`blockStateIndexRows`, and `distanceRows`. Palette indices are one-based, while
+`0` in both aligned matrices means an empty sightline. Rows remain
+top-to-bottom and cells remain left-to-right, so basis vectors, offsets inferred
+from the viewport radii, and distances reconstruct every absolute position.
+Omitting `format`, or setting it to `blocks`, preserves the explicit bridge
+response.
 
 View scan-limit errors report both the requested scan volume and the effective
 maximum to make radius and distance adjustments mechanical.
 
-### `replace_blocks`
+### `replace_region_blocks`
 
 Inputs:
 
@@ -236,15 +239,15 @@ Inputs:
 
 A dry-run returns the exact matching and estimated changed-block counts. An
 executed call replaces matches through one FAWE edit session and records one
-undo entry. The bridge request is `POST /v1/replace-blocks`:
+undo entry. The bridge request is `POST /v1/replace-region-blocks`:
 
 ```json
 {
   "world": "world",
   "min": { "x": 0, "y": 60, "z": 0 },
   "max": { "x": 15, "y": 80, "z": 15 },
-  "source": "minecraft:stone",
-  "destination": "minecraft:dirt",
+  "sourceBlockState": "minecraft:stone",
+  "destinationBlockState": "minecraft:dirt",
   "dryRun": false
 }
 ```
@@ -259,11 +262,11 @@ response contains canonical block states and normalized bounds:
     "min": { "x": 0, "y": 60, "z": 0 },
     "max": { "x": 15, "y": 80, "z": 15 }
   },
-  "source": "minecraft:stone",
-  "destination": "minecraft:dirt",
+  "sourceBlockState": "minecraft:stone",
+  "destinationBlockState": "minecraft:dirt",
   "dryRun": false,
-  "matchedBlocks": 1280,
-  "changedBlocks": 1280
+  "matchedBlockCount": 1280,
+  "changedBlockCount": 1280
 }
 ```
 
@@ -292,7 +295,7 @@ The bridge request is `POST /v1/fill-region`:
   "world": "world",
   "min": { "x": 0, "y": 60, "z": 0 },
   "max": { "x": 15, "y": 80, "z": 15 },
-  "destination": "minecraft:stone",
+  "blockState": "minecraft:stone",
   "dryRun": false
 }
 ```
@@ -307,18 +310,19 @@ state:
     "min": { "x": 0, "y": 60, "z": 0 },
     "max": { "x": 15, "y": 80, "z": 15 }
   },
-  "destination": "minecraft:stone",
+  "blockState": "minecraft:stone",
   "dryRun": false,
   "volume": 5376,
-  "changedBlocks": 5376
+  "changedBlockCount": 5376
 }
 ```
 
 Fill requires already-loaded chunks and returns the same edit failures as
-`replace_blocks`. A dry-run does not mutate or record history. Filling a region
-already in the destination state reports zero changes and records no history.
+`replace_region_blocks`. A dry-run does not mutate or record history. Filling a
+region already in the destination state reports zero changes and records no
+history.
 
-### `undo_last_edit`
+### `undo_last_dirt_edit`
 
 Input: loaded world name.
 
@@ -326,7 +330,7 @@ Undoes the newest successful Dirt MCP mutation for that world. It does not undo
 console, player, WorldEdit, or other plugin activity. A successful undo consumes
 the history entry. History does not survive restart.
 
-The bridge request is `POST /v1/undo-last-edit`:
+The bridge request is `POST /v1/undo-last-dirt-edit`:
 
 ```json
 { "world": "world" }
@@ -335,15 +339,15 @@ The bridge request is `POST /v1/undo-last-edit`:
 A successful response reports the number of restored blocks:
 
 ```json
-{ "world": "world", "changedBlocks": 1280 }
+{ "world": "world", "changedBlockCount": 1280 }
 ```
 
 Undo returns `invalid_request` (400), `unauthorized` (401), `world_not_found`
 (404), `nothing_to_undo` (409), `world_busy` (409), `world_unavailable`
 (503), or `internal_error` (500).
 
-The existing `dirt_status` tool reports bridge/version diagnostics and the
-active non-secret configuration.
+`get_server_info` calls `GET /v1/server-info` and reports bridge readiness,
+`pluginVersion`, the Minecraft version, active limits, and non-secret defaults.
 
 ## Common rules
 
@@ -353,7 +357,7 @@ active non-secret configuration.
   properties where needed.
 - Unknown worlds, invalid states, oversized regions, and busy worlds produce
   structured errors without mutation.
-- No-op mutations return `changedBlocks: 0` and do not create undo history.
+- No-op mutations return `changedBlockCount: 0` and do not create undo history.
 - Reads and writes are limited by normalized region volume. Writes are also
   limited by their estimated changed-block count.
 - Shipped defaults are a maximum region volume of 1,000,000 blocks, 250,000

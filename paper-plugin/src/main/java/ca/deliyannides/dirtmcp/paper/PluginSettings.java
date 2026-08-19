@@ -8,7 +8,7 @@ public record PluginSettings(
         Bridge bridge,
         Limits limits,
         Defaults defaults) {
-    private static final Set<String> EXACT_MODES = Set.of("blocks", "runs");
+    private static final Set<String> REGION_BLOCKS_FORMATS = Set.of("blocks", "runs");
 
     public static PluginSettings load(FileConfiguration config, String portOverride) {
         int configuredPort = positiveInteger(config, "bridge.port");
@@ -30,42 +30,42 @@ public record PluginSettings(
                 maximumRequestBytes,
                 positiveInteger(config, "bridge.minimum-token-bytes"));
 
-        int maximumExactResults = positiveInteger(config, "limits.max-exact-results");
-        int defaultExactResults = positiveInteger(config, "limits.default-exact-results");
+        int maximumRegionBlocksResults = positiveInteger(config, "limits.max-exact-results");
+        int defaultRegionBlocksResults = positiveInteger(config, "limits.default-exact-results");
         requireAtMost(
                 "limits.default-exact-results",
-                defaultExactResults,
+                defaultRegionBlocksResults,
                 "limits.max-exact-results",
-                maximumExactResults);
+                maximumRegionBlocksResults);
 
-        int maximumViewResults = positiveInteger(config, "limits.max-view-results");
-        int defaultViewResults = positiveInteger(config, "limits.default-view-results");
+        int maximumOrthographicViewResults = positiveInteger(config, "limits.max-view-results");
+        int defaultOrthographicViewResults = positiveInteger(config, "limits.default-view-results");
         requireAtMost(
                 "limits.default-view-results",
-                defaultViewResults,
+                defaultOrthographicViewResults,
                 "limits.max-view-results",
-                maximumViewResults);
+                maximumOrthographicViewResults);
 
         Limits limits = new Limits(
                 positiveInteger(config, "limits.max-region-volume"),
                 positiveInteger(config, "limits.max-changed-blocks"),
                 positiveInteger(config, "limits.max-exact-inspection-volume"),
-                defaultExactResults,
-                maximumExactResults,
+                defaultRegionBlocksResults,
+                maximumRegionBlocksResults,
                 positiveInteger(config, "limits.max-view-volume"),
-                defaultViewResults,
-                maximumViewResults,
+                defaultOrthographicViewResults,
+                maximumOrthographicViewResults,
                 nonNegativeInteger(config, "limits.undo-history-per-world"));
 
-        String exactMode = requiredString(config, "defaults.exact-inspection-mode")
+        String regionBlocksFormat = requiredString(config, "defaults.exact-inspection-mode")
                 .toLowerCase(Locale.ROOT);
-        if (!EXACT_MODES.contains(exactMode)) {
+        if (!REGION_BLOCKS_FORMATS.contains(regionBlocksFormat)) {
             throw new IllegalArgumentException(
                     "defaults.exact-inspection-mode must be blocks or runs");
         }
         Defaults defaults = new Defaults(
                 requiredBoolean(config, "defaults.exact-inspection-include-air"),
-                exactMode,
+                regionBlocksFormat,
                 requiredBoolean(config, "defaults.replace-dry-run"),
                 requiredBoolean(config, "defaults.fill-dry-run"));
 
@@ -150,17 +150,17 @@ public record PluginSettings(
     public record Limits(
             int maxRegionVolume,
             int maxChangedBlocks,
-            int maxExactInspectionVolume,
-            int defaultExactResults,
-            int maxExactResults,
-            int maxViewVolume,
-            int defaultViewResults,
-            int maxViewResults,
+            int maxRegionBlocksVolume,
+            int defaultRegionBlocksResultLimit,
+            int maxRegionBlocksResultLimit,
+            int maxOrthographicViewVolume,
+            int defaultOrthographicViewResultLimit,
+            int maxOrthographicViewResultLimit,
             int undoHistoryPerWorld) {}
 
     public record Defaults(
-            boolean exactInspectionIncludeAir,
-            String exactInspectionMode,
-            boolean replaceDryRun,
-            boolean fillDryRun) {}
+            boolean regionBlocksIncludeAir,
+            String regionBlocksFormat,
+            boolean replaceRegionBlocksDryRun,
+            boolean fillRegionDryRun) {}
 }

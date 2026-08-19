@@ -33,8 +33,9 @@ ordered by priority.
 
 ## 4. Complete MCP forwarding coverage
 
-- Add successful request and response tests for `inspect_region`,
-  `replace_blocks`, `fill_region` once supported, and `undo_last_edit`.
+- Add successful request and response tests for `count_region_block_states`,
+  `replace_region_blocks`, `fill_region` once supported, and
+  `undo_last_dirt_edit`.
 - Cover malformed bridge responses, timeouts, unavailable bridges, and every
   structured bridge error used by the MCP tools.
 

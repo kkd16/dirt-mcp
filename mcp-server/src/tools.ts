@@ -5,6 +5,7 @@ import {
   type CallToolResult,
   type RegisteredTool,
   type ServerContext,
+  type ToolAnnotations,
 } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 
@@ -18,124 +19,129 @@ export interface BridgeConfig {
 }
 
 const BlockPositionSchema = z.object({
-  x: z.number().int().min(INT32_MIN).max(INT32_MAX),
-  y: z.number().int().min(INT32_MIN).max(INT32_MAX),
-  z: z.number().int().min(INT32_MIN).max(INT32_MAX),
-}).strict();
+  x: z.number().int().min(INT32_MIN).max(INT32_MAX).describe('World X block coordinate.'),
+  y: z.number().int().min(INT32_MIN).max(INT32_MAX).describe('World Y block coordinate.'),
+  z: z.number().int().min(INT32_MIN).max(INT32_MAX).describe('World Z block coordinate.'),
+}).strict().describe('An absolute Minecraft block position.');
 
 const BoundsSchema = z.object({
-  min: BlockPositionSchema,
-  max: BlockPositionSchema,
-}).strict();
+  min: BlockPositionSchema.describe('Inclusive minimum corner after coordinate normalization.'),
+  max: BlockPositionSchema.describe('Inclusive maximum corner after coordinate normalization.'),
+}).strict().describe('Normalized inclusive region bounds.');
 
-const InspectRegionInputSchema = z.object({
-  world: z.string().min(1),
-  min: BlockPositionSchema,
-  max: BlockPositionSchema,
-}).strict();
+const DimensionsSchema = z.object({
+  x: z.number().int().positive().describe('Region size along X in blocks.'),
+  y: z.number().int().positive().describe('Region size along Y in blocks.'),
+  z: z.number().int().positive().describe('Region size along Z in blocks.'),
+}).strict().describe('Inclusive region dimensions in blocks.');
 
-const InspectRegionOutputSchema = z.object({
-  world: z.string().min(1),
+const CountRegionBlockStatesInputSchema = z.object({
+  world: z.string().min(1).describe('Exact name of an already loaded Paper world.'),
+  min: BlockPositionSchema.describe('One inclusive corner; ordering relative to max does not matter.'),
+  max: BlockPositionSchema.describe('The other inclusive corner; ordering relative to min does not matter.'),
+}).strict().describe('Region whose canonical block states should be counted.');
+
+const CountRegionBlockStatesOutputSchema = z.object({
+  world: z.string().min(1).describe('Inspected world name.'),
   bounds: BoundsSchema,
-  dimensions: z.object({
-    x: z.number().int().positive(),
-    y: z.number().int().positive(),
-    z: z.number().int().positive(),
-  }).strict(),
-  volume: z.number().int().positive(),
-  blockStates: z.record(z.string(), z.number().int().nonnegative()),
-}).strict();
+  dimensions: DimensionsSchema,
+  volume: z.number().int().positive().describe('Total blocks scanned, including air.'),
+  blockStateCounts: z.record(z.string().min(1), z.number().int().nonnegative())
+    .describe('Canonical block-state string to occurrence count, including properties when present.'),
+}).strict().describe('Complete block-state histogram for the region.');
 
-const InspectBlocksInputSchema = z.object({
-  world: z.string().min(1),
-  min: BlockPositionSchema,
-  max: BlockPositionSchema,
-  include: z.array(z.string().min(1))
-    .optional().default([])
-    .describe('Optional block-state allowlist; omitted state properties match any value.'),
-  exclude: z.array(z.string().min(1))
-    .optional().default([])
-    .describe('Block-state patterns to exclude after include filtering.'),
+const GetRegionBlocksInputSchema = z.object({
+  world: z.string().min(1).describe('Exact name of an already loaded Paper world.'),
+  min: BlockPositionSchema.describe('One inclusive corner; ordering relative to max does not matter.'),
+  max: BlockPositionSchema.describe('The other inclusive corner; ordering relative to min does not matter.'),
+  includeBlockStatePatterns: z.array(z.string().min(1)).optional().default([])
+    .describe('Optional allowlist of block-state patterns. Omitted properties match any value; an empty list allows all states.'),
+  excludeBlockStatePatterns: z.array(z.string().min(1)).optional().default([])
+    .describe('Block-state patterns rejected after include filtering. Omitted properties match any value.'),
   includeAir: z.boolean().optional()
-    .describe('Include air-family states; omission uses the Paper plugin configuration.'),
+    .describe('Whether air-family states may match; omission uses the Paper plugin default.'),
   maxResults: z.number().int().min(1).max(INT32_MAX).optional()
-    .describe('Maximum returned entries, bounded by Paper configuration; oversized results fail.'),
-  mode: z.enum(['blocks', 'runs']).optional()
-    .describe('Sparse blocks or exact axis-aligned runs; omission uses the Paper plugin configuration.'),
-}).strict();
+    .describe('Maximum returned blocks or runs. Results are never truncated: exceeding this limit fails the call.'),
+  format: z.enum(['blocks', 'runs']).optional()
+    .describe('blocks returns individual positions; runs returns lossless axis-aligned spans. Omission uses the plugin default.'),
+}).strict().describe('Filters and return format for exact region block data.');
 
-const ExactInspectionBase = {
-  world: z.string().min(1),
+const RegionBlocksOutputBase = {
+  world: z.string().min(1).describe('Inspected world name.'),
   bounds: BoundsSchema,
-  volume: z.number().int().positive(),
-  matchedBlocks: z.number().int().nonnegative(),
+  volume: z.number().int().positive().describe('Total blocks scanned before filtering.'),
+  matchedBlockCount: z.number().int().nonnegative().describe('Total matching blocks represented by the response.'),
 };
 
-const InspectBlocksOutputSchema = z.discriminatedUnion('mode', [
+const GetRegionBlocksOutputSchema = z.discriminatedUnion('format', [
   z.object({
-    ...ExactInspectionBase,
-    mode: z.literal('blocks'),
+    ...RegionBlocksOutputBase,
+    format: z.literal('blocks').describe('Response contains one entry per matching block.'),
     blocks: z.array(z.object({
       position: BlockPositionSchema,
-      state: z.string().min(1),
-    }).strict()),
+      blockState: z.string().min(1).describe('Canonical block state at position.'),
+    }).strict().describe('One matching block.')).describe('Matching blocks in deterministic scan order.'),
   }).strict(),
   z.object({
-    ...ExactInspectionBase,
-    mode: z.literal('runs'),
+    ...RegionBlocksOutputBase,
+    format: z.literal('runs').describe('Response contains lossless axis-aligned block runs.'),
     runs: z.array(z.object({
-      state: z.string().min(1),
-      from: BlockPositionSchema,
-      to: BlockPositionSchema,
-    }).strict()),
+      blockState: z.string().min(1).describe('Canonical block state shared by the run.'),
+      from: BlockPositionSchema.describe('Inclusive first block of the run.'),
+      to: BlockPositionSchema.describe('Inclusive last block of the run.'),
+    }).strict().describe('A lossless run of matching blocks.')).describe('Matching block runs in deterministic scan order.'),
   }).strict(),
-]);
+]).describe('Exact matching block data; inspect format before reading blocks or runs.');
 
-const ViewDirectionSchema = z.enum(['north', 'east', 'south', 'west', 'up', 'down']);
+const OrthographicViewDirectionSchema = z.enum(['north', 'east', 'south', 'west', 'up', 'down'])
+  .describe('World-axis scan direction: north=-Z, east=+X, south=+Z, west=-X, up=+Y, down=-Y.');
 
-const InspectViewInputSchema = z.object({
-  world: z.string().min(1),
-  origin: BlockPositionSchema
-    .describe('Center anchor of the view; scanning starts one block away and never includes the origin.'),
-  direction: ViewDirectionSchema
-    .describe('World-axis direction: north=-Z, east=+X, south=+Z, west=-X, up=+Y, down=-Y.'),
+const ScanOrthographicViewInputSchema = z.object({
+  world: z.string().min(1).describe('Exact name of an already loaded Paper world.'),
+  origin: BlockPositionSchema.describe('View anchor; scanning begins one block away and excludes the origin.'),
+  direction: OrthographicViewDirectionSchema,
   horizontalRadius: z.number().int().min(0).max(INT32_MAX)
-    .describe('Viewport cells on each side of the center sightline along the returned horizontal basis.'),
+    .describe('Cells on each side of the center sightline along the returned horizontal basis.'),
   verticalRadius: z.number().int().min(0).max(INT32_MAX)
-    .describe('Viewport cells on each side of the center sightline along the returned vertical basis.'),
+    .describe('Cells on each side of the center sightline along the returned vertical basis.'),
   maxDistance: z.number().int().min(1).max(INT32_MAX)
-    .describe('Maximum blocks to scan forward; distance 1 is adjacent to origin.'),
+    .describe('Maximum forward scan distance; distance 1 is adjacent to origin.'),
   maxResults: z.number().int().min(1).max(INT32_MAX).optional()
-    .describe('Maximum visible blocks, bounded by Paper configuration; omission uses its default.'),
+    .describe('Maximum visible blocks. Results are never truncated: exceeding this limit fails the call.'),
   format: z.enum(['blocks', 'grid']).optional().default('blocks')
-    .describe('Use grid for a compact lossless palette and distance matrix; blocks returns explicit positions.'),
-}).strict();
+    .describe('blocks returns explicit positions; grid returns compact lossless palette and distance matrices.'),
+}).strict().describe('Bounded orthographic sightlines to scan for their first non-air blocks.');
 
 const AxisVectorSchema = z.object({
-  x: z.number().int().min(-1).max(1),
-  y: z.number().int().min(-1).max(1),
-  z: z.number().int().min(-1).max(1),
-}).strict();
+  x: z.number().int().min(-1).max(1).describe('X component.'),
+  y: z.number().int().min(-1).max(1).describe('Y component.'),
+  z: z.number().int().min(-1).max(1).describe('Z component.'),
+}).strict().describe('A world-axis unit vector.');
 
-const InspectViewBlocksOutputSchema = z.object({
-  world: z.string().min(1),
+const ViewMetadata = {
+  world: z.string().min(1).describe('Scanned world name.'),
   origin: BlockPositionSchema,
-  direction: ViewDirectionSchema,
+  direction: OrthographicViewDirectionSchema,
   basis: z.object({
-    forward: AxisVectorSchema,
-    horizontal: AxisVectorSchema,
-    vertical: AxisVectorSchema,
-  }).strict().describe('World-axis unit vectors used to convert each view-relative offset to a position.'),
+    forward: AxisVectorSchema.describe('Direction of increasing sightline distance.'),
+    horizontal: AxisVectorSchema.describe('Direction of increasing horizontal offset.'),
+    vertical: AxisVectorSchema.describe('Direction of increasing vertical offset.'),
+  }).strict().describe('Basis for converting view-relative offsets to world positions.'),
   viewport: z.object({
-    horizontalRadius: z.number().int().nonnegative(),
-    verticalRadius: z.number().int().nonnegative(),
-    maxDistance: z.number().int().positive(),
-  }).strict(),
-  bounds: BoundsSchema,
-  scannedVolume: z.number().int().positive(),
-  visibleBlocks: z.number().int().nonnegative(),
+    horizontalRadius: z.number().int().nonnegative().describe('Horizontal radius used.'),
+    verticalRadius: z.number().int().nonnegative().describe('Vertical radius used.'),
+    maxDistance: z.number().int().positive().describe('Forward distance used.'),
+  }).strict().describe('Resolved scan dimensions.'),
+  bounds: BoundsSchema.describe('Inclusive world-space bounds scanned.'),
+  scannedVolume: z.number().int().positive().describe('Total blocks checked across all sightlines.'),
+  visibleBlockCount: z.number().int().nonnegative().describe('Sightlines whose first non-air block was found.'),
+};
+
+const ScanOrthographicViewBlocksOutputSchema = z.object({
+  ...ViewMetadata,
+  format: z.literal('blocks').describe('Response contains explicit visible-block entries.'),
   blocks: z.array(z.object({
-    position: BlockPositionSchema,
+    position: BlockPositionSchema.describe('Absolute position of the first non-air block.'),
     offset: z.object({
       horizontal: z.number().int().min(INT32_MIN).max(INT32_MAX)
         .describe('Signed displacement along basis.horizontal.'),
@@ -143,168 +149,199 @@ const InspectViewBlocksOutputSchema = z.object({
         .describe('Signed displacement along basis.vertical.'),
       distance: z.number().int().min(1).max(INT32_MAX)
         .describe('Positive displacement along basis.forward; 1 is adjacent to origin.'),
-    }).strict(),
-    state: z.string().min(1),
-  }).strict()),
-}).strict();
+    }).strict().describe('View-relative location of the visible block.'),
+    blockState: z.string().min(1).describe('Canonical state of the visible block.'),
+  }).strict().describe('First non-air block on one sightline.')).describe('Visible blocks in deterministic viewport order.'),
+}).strict().describe('Orthographic scan with explicit block positions.');
 
-const InspectViewGridOutputSchema = z.object({
-  world: z.string().min(1),
-  origin: BlockPositionSchema,
-  direction: ViewDirectionSchema,
-  basis: z.object({
-    forward: AxisVectorSchema,
-    horizontal: AxisVectorSchema,
-    vertical: AxisVectorSchema,
-  }).strict().describe('World-axis unit vectors used to reconstruct absolute positions.'),
-  viewport: z.object({
-    horizontalRadius: z.number().int().nonnegative(),
-    verticalRadius: z.number().int().nonnegative(),
-    maxDistance: z.number().int().positive(),
-  }).strict(),
-  bounds: BoundsSchema,
-  scannedVolume: z.number().int().positive(),
-  visibleBlocks: z.number().int().nonnegative(),
-  format: z.literal('grid'),
-  palette: z.array(z.string().min(1))
-    .describe('Canonical states; stateRows uses one-based indices and reserves 0 for an empty sightline.'),
-  stateRows: z.array(z.array(z.number().int().nonnegative()))
-    .describe('Top-to-bottom rows, left-to-right cells; 0 means no visible block.'),
+const ScanOrthographicViewGridOutputSchema = z.object({
+  ...ViewMetadata,
+  format: z.literal('grid').describe('Response contains compact palette and distance matrices.'),
+  blockStatePalette: z.array(z.string().min(1))
+    .describe('Canonical states indexed from 1 by blockStateIndexRows; index 0 means no visible block.'),
+  blockStateIndexRows: z.array(z.array(z.number().int().nonnegative()))
+    .describe('Top-to-bottom rows and left-to-right cells containing palette indices; 0 means empty sightline.'),
   distanceRows: z.array(z.array(z.number().int().nonnegative()))
-    .describe('Distances aligned with stateRows; 0 means no visible block.'),
-}).strict();
+    .describe('Distances aligned with blockStateIndexRows; 0 means empty sightline.'),
+}).strict().describe('Lossless compact orthographic scan.');
 
-const InspectViewOutputSchema = z.union([
-  InspectViewBlocksOutputSchema,
-  InspectViewGridOutputSchema,
-]);
+const ScanOrthographicViewOutputSchema = z.discriminatedUnion('format', [
+  ScanOrthographicViewBlocksOutputSchema,
+  ScanOrthographicViewGridOutputSchema,
+]).describe('Orthographic scan result; inspect format before reading blocks or grid fields.');
 
-type InspectViewBlocksOutput = z.infer<typeof InspectViewBlocksOutputSchema>;
+type ScanOrthographicViewBlocksOutput = z.infer<typeof ScanOrthographicViewBlocksOutputSchema>;
 
-function compactView(view: InspectViewBlocksOutput): z.infer<typeof InspectViewGridOutputSchema> {
+function compactView(
+  view: ScanOrthographicViewBlocksOutput,
+): z.infer<typeof ScanOrthographicViewGridOutputSchema> {
   const width = 2 * view.viewport.horizontalRadius + 1;
   const height = 2 * view.viewport.verticalRadius + 1;
-  const stateRows = Array.from({ length: height }, () => Array<number>(width).fill(0));
+  const blockStateIndexRows = Array.from({ length: height }, () => Array<number>(width).fill(0));
   const distanceRows = Array.from({ length: height }, () => Array<number>(width).fill(0));
-  const palette: string[] = [];
+  const blockStatePalette: string[] = [];
   const paletteIndices = new Map<string, number>();
 
   for (const block of view.blocks) {
     const rowIndex = view.viewport.verticalRadius - block.offset.vertical;
     const columnIndex = block.offset.horizontal + view.viewport.horizontalRadius;
-    const stateRow = stateRows[rowIndex];
+    const blockStateIndexRow = blockStateIndexRows[rowIndex];
     const distanceRow = distanceRows[rowIndex];
-    if (stateRow === undefined || distanceRow === undefined
+    if (blockStateIndexRow === undefined || distanceRow === undefined
         || columnIndex < 0 || columnIndex >= width) {
-      throw new Error('Bridge returned a view block outside its viewport');
+      throw new DirtToolError('bridge_invalid_response', 'Bridge returned a view block outside its viewport.');
     }
 
-    let paletteIndex = paletteIndices.get(block.state);
+    let paletteIndex = paletteIndices.get(block.blockState);
     if (paletteIndex === undefined) {
-      palette.push(block.state);
-      paletteIndex = palette.length;
-      paletteIndices.set(block.state, paletteIndex);
+      blockStatePalette.push(block.blockState);
+      paletteIndex = blockStatePalette.length;
+      paletteIndices.set(block.blockState, paletteIndex);
     }
-    stateRow[columnIndex] = paletteIndex;
+    blockStateIndexRow[columnIndex] = paletteIndex;
     distanceRow[columnIndex] = block.offset.distance;
   }
 
   const { blocks: _blocks, ...metadata } = view;
-  return {
-    ...metadata,
-    format: 'grid',
-    palette,
-    stateRows,
-    distanceRows,
-  };
+  return { ...metadata, format: 'grid', blockStatePalette, blockStateIndexRows, distanceRows };
 }
 
-const ReplaceBlocksInputSchema = z.object({
-  world: z.string().min(1),
-  min: BlockPositionSchema,
-  max: BlockPositionSchema,
-  source: z.string().min(1),
-  destination: z.string().min(1),
+const ReplaceRegionBlocksInputSchema = z.object({
+  world: z.string().min(1).describe('Exact name of an already loaded Paper world.'),
+  min: BlockPositionSchema.describe('One inclusive corner; ordering relative to max does not matter.'),
+  max: BlockPositionSchema.describe('The other inclusive corner; ordering relative to min does not matter.'),
+  sourceBlockState: z.string().min(1)
+    .describe('Exact canonical block state to replace, including properties when they must match.'),
+  destinationBlockState: z.string().min(1)
+    .describe('Canonical block state to write, including desired properties.'),
   dryRun: z.boolean().optional()
-    .describe('Preview without mutation; omission uses the Paper plugin configuration.'),
-}).strict();
+    .describe('Preview counts without mutating the world; omission uses the Paper plugin default.'),
+}).strict().describe('Exact block-state replacement in an inclusive region.');
 
-const ReplaceBlocksOutputSchema = z.object({
-  world: z.string().min(1),
+const ReplaceRegionBlocksOutputSchema = z.object({
+  world: z.string().min(1).describe('Edited world name.'),
   bounds: BoundsSchema,
-  source: z.string().min(1),
-  destination: z.string().min(1),
-  dryRun: z.boolean(),
-  matchedBlocks: z.number().int().nonnegative(),
-  changedBlocks: z.number().int().nonnegative(),
-}).strict();
+  sourceBlockState: z.string().min(1).describe('Canonical source state used for matching.'),
+  destinationBlockState: z.string().min(1).describe('Canonical destination state used for writing.'),
+  dryRun: z.boolean().describe('Whether the world was left unchanged.'),
+  matchedBlockCount: z.number().int().nonnegative().describe('Blocks matching sourceBlockState.'),
+  changedBlockCount: z.number().int().nonnegative().describe('Blocks changed, or that would change in a dry run.'),
+}).strict().describe('Completed or previewed exact block-state replacement.');
 
 const FillRegionInputSchema = z.object({
-  world: z.string().min(1),
-  min: BlockPositionSchema,
-  max: BlockPositionSchema,
-  destination: z.string().min(1),
+  world: z.string().min(1).describe('Exact name of an already loaded Paper world.'),
+  min: BlockPositionSchema.describe('One inclusive corner; ordering relative to max does not matter.'),
+  max: BlockPositionSchema.describe('The other inclusive corner; ordering relative to min does not matter.'),
+  blockState: z.string().min(1).describe('Canonical block state to write throughout the region.'),
   dryRun: z.boolean().optional()
-    .describe('Preview without mutation; omission uses the Paper plugin configuration.'),
-}).strict();
+    .describe('Preview counts without mutating the world; omission uses the Paper plugin default.'),
+}).strict().describe('Uniform block-state fill of an inclusive region.');
 
 const FillRegionOutputSchema = z.object({
-  world: z.string().min(1),
+  world: z.string().min(1).describe('Edited world name.'),
   bounds: BoundsSchema,
-  destination: z.string().min(1),
-  dryRun: z.boolean(),
-  volume: z.number().int().positive(),
-  changedBlocks: z.number().int().nonnegative(),
-}).strict();
+  blockState: z.string().min(1).describe('Canonical block state used for the fill.'),
+  dryRun: z.boolean().describe('Whether the world was left unchanged.'),
+  volume: z.number().int().positive().describe('Total blocks in the region.'),
+  changedBlockCount: z.number().int().nonnegative().describe('Blocks changed, or that would change in a dry run.'),
+}).strict().describe('Completed or previewed region fill.');
 
-const UndoLastEditInputSchema = z.object({
-  world: z.string().min(1),
-}).strict();
+const UndoLastDirtEditInputSchema = z.object({
+  world: z.string().min(1).describe('Exact name of the loaded world whose Dirt edit should be undone.'),
+}).strict().describe('World-scoped Dirt edit history lookup.');
 
-const UndoLastEditOutputSchema = z.object({
-  world: z.string().min(1),
-  changedBlocks: z.number().int().positive(),
-}).strict();
+const UndoLastDirtEditOutputSchema = z.object({
+  world: z.string().min(1).describe('World in which the edit was undone.'),
+  changedBlockCount: z.number().int().positive().describe('Blocks restored by the undo.'),
+}).strict().describe('Result of undoing the newest successful Dirt edit in this world.');
 
 const ErrorSchema = z.object({
   error: z.object({
-    code: z.string(),
-    message: z.string(),
+    code: z.string().min(1).describe('Stable machine-readable error code.'),
+    message: z.string().min(1).describe('Human-readable explanation.'),
   }).strict(),
-}).strict();
+}).strict().describe('Structured Dirt error.');
 
-const HealthSchema = z.object({
-  status: z.literal('ok'),
-  service: z.literal('dirt-mcp-paper'),
-  version: z.string().min(1),
-  minecraftVersion: z.string().min(1),
+const ServerInfoSchema = z.object({
+  status: z.literal('ok').describe('Bridge readiness status.'),
+  service: z.literal('dirt-mcp-paper').describe('Bridge service identifier.'),
+  pluginVersion: z.string().min(1).describe('Running Dirt Paper plugin version.'),
+  minecraftVersion: z.string().min(1).describe('Running Paper server Minecraft version.'),
   configuration: z.object({
     bridge: z.object({
-      port: z.number().int().min(1).max(65_535),
-      backlog: z.number().int().nonnegative(),
-      shutdownDelaySeconds: z.number().int().nonnegative(),
-      maxRequestBytes: z.number().int().positive(),
-      minimumTokenBytes: z.number().int().positive(),
-    }).strict(),
+      port: z.number().int().min(1).max(65_535).describe('Loopback HTTP port.'),
+      backlog: z.number().int().nonnegative().describe('Configured HTTP listen backlog.'),
+      shutdownDelaySeconds: z.number().int().nonnegative().describe('Graceful bridge shutdown delay.'),
+      maxRequestBytes: z.number().int().positive().describe('Maximum accepted request body size.'),
+      minimumTokenBytes: z.number().int().positive().describe('Minimum bearer-token entropy length in bytes.'),
+    }).strict().describe('Non-secret bridge configuration.'),
     limits: z.object({
-      maxRegionVolume: z.number().int().positive(),
-      maxChangedBlocks: z.number().int().positive(),
-      maxExactInspectionVolume: z.number().int().positive(),
-      defaultExactResults: z.number().int().positive(),
-      maxExactResults: z.number().int().positive(),
-      maxViewVolume: z.number().int().positive(),
-      defaultViewResults: z.number().int().positive(),
-      maxViewResults: z.number().int().positive(),
-      undoHistoryPerWorld: z.number().int().nonnegative(),
-    }).strict(),
+      maxRegionVolume: z.number().int().positive().describe('Maximum mutation and count-region volume.'),
+      maxChangedBlocks: z.number().int().positive().describe('Maximum blocks one edit may change.'),
+      maxRegionBlocksVolume: z.number().int().positive().describe('Maximum get_region_blocks scan volume.'),
+      defaultRegionBlocksResultLimit: z.number().int().positive().describe('Default get_region_blocks result limit.'),
+      maxRegionBlocksResultLimit: z.number().int().positive().describe('Maximum get_region_blocks result limit.'),
+      maxOrthographicViewVolume: z.number().int().positive().describe('Maximum orthographic scan volume.'),
+      defaultOrthographicViewResultLimit: z.number().int().positive().describe('Default orthographic visible-block limit.'),
+      maxOrthographicViewResultLimit: z.number().int().positive().describe('Maximum orthographic visible-block limit.'),
+      undoHistoryPerWorld: z.number().int().nonnegative().describe('In-memory Dirt undo entries retained per world.'),
+    }).strict().describe('Active resource limits.'),
     defaults: z.object({
-      exactInspectionIncludeAir: z.boolean(),
-      exactInspectionMode: z.enum(['blocks', 'runs']),
-      replaceDryRun: z.boolean(),
-      fillDryRun: z.boolean(),
-    }).strict(),
-  }).strict(),
-}).strict();
+      regionBlocksIncludeAir: z.boolean().describe('Default air inclusion for get_region_blocks.'),
+      regionBlocksFormat: z.enum(['blocks', 'runs']).describe('Default get_region_blocks format.'),
+      replaceRegionBlocksDryRun: z.boolean().describe('Default dry-run behavior for replace_region_blocks.'),
+      fillRegionDryRun: z.boolean().describe('Default dry-run behavior for fill_region.'),
+    }).strict().describe('Active optional-argument defaults.'),
+  }).strict().describe('Active non-secret Paper plugin configuration.'),
+}).strict().describe('Running Dirt bridge, server version, and non-secret configuration.');
+
+const READ_WORLD_ANNOTATIONS: ToolAnnotations = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: true,
+};
+const READ_LOCAL_ANNOTATIONS: ToolAnnotations = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+};
+const MUTATION_ANNOTATIONS: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: true,
+  openWorldHint: true,
+};
+const UNDO_ANNOTATIONS: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: false,
+  openWorldHint: true,
+};
+
+class DirtToolError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+    this.name = 'DirtToolError';
+  }
+}
+
+function successResult(structuredContent: Record<string, unknown>, summary: string): CallToolResult {
+  return { content: [{ type: 'text', text: summary }], structuredContent };
+}
+
+function errorResult(error: unknown, context: string): CallToolResult {
+  const detail = error instanceof DirtToolError
+    ? error
+    : new DirtToolError('dirt_internal_error', error instanceof Error ? error.message : String(error));
+  const structuredContent = { error: { code: detail.code, message: detail.message } };
+  return {
+    content: [{ type: 'text', text: `${context}: ${detail.message}` }],
+    structuredContent,
+    isError: true,
+  };
+}
 
 function logValue(value: string | number): string {
   return JSON.stringify(value).replaceAll('\u2028', '\\u2028').replaceAll('\u2029', '\\u2029');
@@ -342,9 +379,7 @@ async function auditToolCall(
       `request=${logValue(context.mcpReq.id)}`,
       `client=${logValue(clientLabel(context))}`,
     ];
-    if (world !== undefined) {
-      fields.push(`world=${logValue(world)}`);
-    }
+    if (world !== undefined) fields.push(`world=${logValue(world)}`);
     fields.push(`outcome=${outcome}`);
     fields.push(`duration_ms=${Math.max(0, Math.round(performance.now() - started))}`);
     process.stderr.write(`Dirt MCP tool_call ${fields.join(' ')}\n`);
@@ -358,293 +393,178 @@ export function registerTools(
 ): void {
   const register: typeof server.registerTool = server.registerTool.bind(server);
 
-  registrations.push(register(
-    'dirt_status',
-    {
-      title: 'Dirt MCP status',
-      description: 'Check bridge availability and report the active non-secret Paper plugin configuration.',
-      inputSchema: z.object({}),
-      outputSchema: HealthSchema,
-    },
-    async (_input, context) => auditToolCall('dirt_status', undefined, context, async (callId) => {
-      try {
-        const response = await bridgeRequest(config, '/v1/health', callId);
-        const health = HealthSchema.parse(await response.json());
-        return {
-          content: [{ type: 'text', text: JSON.stringify(health, null, 2) }],
-          structuredContent: health,
-        };
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{
-            type: 'text',
-            text: `Dirt MCP Paper bridge is unavailable at ${config.baseUrl}: ${message}`,
-          }],
-          isError: true,
-        };
-      }
-    }),
-  ));
+  registrations.push(register('get_server_info', {
+    title: 'Get Dirt server info',
+    description: 'Verify the local Paper bridge and return Minecraft/plugin versions, active limits, and non-secret defaults.',
+    inputSchema: z.object({}).strict().describe('No arguments.'),
+    outputSchema: ServerInfoSchema,
+    annotations: READ_LOCAL_ANNOTATIONS,
+  }, async (_input, context) => auditToolCall('get_server_info', undefined, context, async (callId) => {
+    try {
+      const info = await bridgeRequest(config, '/v1/server-info', callId, ServerInfoSchema);
+      return successResult(info, `Dirt bridge ready: Minecraft ${info.minecraftVersion}, plugin ${info.pluginVersion}.`);
+    } catch (error: unknown) {
+      return errorResult(error, `Could not get Dirt server info from ${config.baseUrl}`);
+    }
+  })));
 
-  registrations.push(register(
-    'inspect_region',
-    {
-      title: 'Inspect a region',
-      description: 'Count block states in a bounded region of already-loaded Minecraft chunks.',
-      inputSchema: InspectRegionInputSchema,
-      outputSchema: InspectRegionOutputSchema,
-    },
-    async (input, context) => auditToolCall('inspect_region', input.world, context, async (callId) => {
-      try {
-        const response = await bridgeRequest(
-          config,
-          '/v1/inspect-region',
-          callId,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(input),
-          },
-          30_000,
-        );
-        const inspection = InspectRegionOutputSchema.parse(await response.json());
-        return {
-          content: [{ type: 'text', text: JSON.stringify(inspection, null, 2) }],
-          structuredContent: inspection,
-        };
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: 'text', text: `Could not inspect the region: ${message}` }],
-          isError: true,
-        };
-      }
-    }),
-  ));
+  registrations.push(register('count_region_block_states', {
+    title: 'Count region block states',
+    description: 'Return a complete canonical block-state histogram for an inclusive region. Use this before exact retrieval when totals are sufficient.',
+    inputSchema: CountRegionBlockStatesInputSchema,
+    outputSchema: CountRegionBlockStatesOutputSchema,
+    annotations: READ_WORLD_ANNOTATIONS,
+  }, async (input, context) => auditToolCall('count_region_block_states', input.world, context, async (callId) => {
+    try {
+      const result = await bridgeRequest(config, '/v1/count-region-block-states', callId, CountRegionBlockStatesOutputSchema, jsonPost(input), 30_000);
+      return successResult(result, `Counted ${result.volume} blocks across ${Object.keys(result.blockStateCounts).length} block states in ${result.world}.`);
+    } catch (error: unknown) {
+      return errorResult(error, 'Could not count region block states');
+    }
+  })));
 
-  registrations.push(register(
-    'inspect_blocks',
-    {
-      title: 'Inspect exact blocks',
-      description: 'Return exact non-air positions or lossless runs from already-loaded chunks; use inspect_region for cheaper palette totals.',
-      inputSchema: InspectBlocksInputSchema,
-      outputSchema: InspectBlocksOutputSchema,
-    },
-    async (input, context) => auditToolCall('inspect_blocks', input.world, context, async (callId) => {
-      try {
-        const response = await bridgeRequest(
-          config,
-          '/v1/inspect-blocks',
-          callId,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(input),
-          },
-          30_000,
-        );
-        const inspection = InspectBlocksOutputSchema.parse(await response.json());
-        return {
-          content: [{ type: 'text', text: JSON.stringify(inspection, null, 2) }],
-          structuredContent: inspection,
-        };
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: 'text', text: `Could not inspect exact blocks: ${message}` }],
-          isError: true,
-        };
-      }
-    }),
-  ));
+  registrations.push(register('get_region_blocks', {
+    title: 'Get region blocks',
+    description: 'Return filtered exact blocks or lossless runs from an inclusive region. Results fail rather than truncate when maxResults is exceeded.',
+    inputSchema: GetRegionBlocksInputSchema,
+    outputSchema: GetRegionBlocksOutputSchema,
+    annotations: READ_WORLD_ANNOTATIONS,
+  }, async (input, context) => auditToolCall('get_region_blocks', input.world, context, async (callId) => {
+    try {
+      const result = await bridgeRequest(config, '/v1/get-region-blocks', callId, GetRegionBlocksOutputSchema, jsonPost(input), 30_000);
+      const entries = result.format === 'blocks' ? result.blocks.length : result.runs.length;
+      const entryKind = result.format === 'blocks' ? 'block' : 'run';
+      return successResult(result, `Matching blocks: ${result.matchedBlockCount}; ${entryKind} entries: ${entries}; world: ${result.world}.`);
+    } catch (error: unknown) {
+      return errorResult(error, 'Could not get region blocks');
+    }
+  })));
 
-  registrations.push(register(
-    'inspect_view',
-    {
-      title: 'Inspect a view',
-      description: 'Return the first non-air block on each bounded orthographic sightline. Use format=grid for compact lossless palette and distance rows, or blocks for explicit positions.',
-      inputSchema: InspectViewInputSchema,
-      outputSchema: InspectViewOutputSchema,
-      annotations: { readOnlyHint: true },
-    },
-    async (input, context) => auditToolCall('inspect_view', input.world, context, async (callId) => {
-      try {
-        const { format, ...bridgeInput } = input;
-        const response = await bridgeRequest(
-          config,
-          '/v1/inspect-view',
-          callId,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(bridgeInput),
-          },
-          30_000,
-        );
-        const sparseView = InspectViewBlocksOutputSchema.parse(await response.json());
-        if (format === 'grid') {
-          const view = compactView(sparseView);
-          return {
-            content: [{
-              type: 'text',
-              text: `Compact ${view.viewport.horizontalRadius * 2 + 1}x${view.viewport.verticalRadius * 2 + 1} view: ${view.visibleBlocks} visible blocks, ${view.palette.length} states. See structuredContent for palette, stateRows, and distanceRows.`,
-            }],
-            structuredContent: view,
-          };
-        }
-        return {
-          content: [{ type: 'text', text: JSON.stringify(sparseView, null, 2) }],
-          structuredContent: sparseView,
-        };
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: 'text', text: `Could not inspect the view: ${message}` }],
-          isError: true,
-        };
+  registrations.push(register('scan_orthographic_view', {
+    title: 'Scan an orthographic view',
+    description: 'Return the first non-air block on each bounded world-axis sightline. Choose blocks for explicit positions or grid for compact lossless matrices.',
+    inputSchema: ScanOrthographicViewInputSchema,
+    outputSchema: ScanOrthographicViewOutputSchema,
+    annotations: READ_WORLD_ANNOTATIONS,
+  }, async (input, context) => auditToolCall('scan_orthographic_view', input.world, context, async (callId) => {
+    try {
+      const { format, ...bridgeInput } = input;
+      const sparseView = await bridgeRequest(config, '/v1/scan-orthographic-view', callId, ScanOrthographicViewBlocksOutputSchema, jsonPost(bridgeInput), 30_000);
+      if (format === 'grid') {
+        const result = compactView(sparseView);
+        const width = result.viewport.horizontalRadius * 2 + 1;
+        const height = result.viewport.verticalRadius * 2 + 1;
+        return successResult(result, `Scanned ${width}x${height} view: ${result.visibleBlockCount} visible blocks using ${result.blockStatePalette.length} block states.`);
       }
-    }),
-  ));
+      return successResult(sparseView, `Scanned view in ${sparseView.world}: ${sparseView.visibleBlockCount} visible blocks returned explicitly.`);
+    } catch (error: unknown) {
+      return errorResult(error, 'Could not scan the orthographic view');
+    }
+  })));
 
-  registrations.push(register(
-    'replace_blocks',
-    {
-      title: 'Replace blocks',
-      description: 'Replace one exact block state in a bounded region, or preview the exact result.',
-      inputSchema: ReplaceBlocksInputSchema,
-      outputSchema: ReplaceBlocksOutputSchema,
-    },
-    async (input, context) => auditToolCall('replace_blocks', input.world, context, async (callId) => {
-      try {
-        const response = await bridgeRequest(
-          config,
-          '/v1/replace-blocks',
-          callId,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(input),
-          },
-          120_000,
-        );
-        const result = ReplaceBlocksOutputSchema.parse(await response.json());
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-          structuredContent: result,
-        };
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: 'text', text: `Could not replace blocks: ${message}` }],
-          isError: true,
-        };
-      }
-    }),
-  ));
+  registrations.push(register('replace_region_blocks', {
+    title: 'Replace region blocks',
+    description: 'Replace one exact canonical block state throughout an inclusive region. Set dryRun=true to preview without mutation.',
+    inputSchema: ReplaceRegionBlocksInputSchema,
+    outputSchema: ReplaceRegionBlocksOutputSchema,
+    annotations: MUTATION_ANNOTATIONS,
+  }, async (input, context) => auditToolCall('replace_region_blocks', input.world, context, async (callId) => {
+    try {
+      const result = await bridgeRequest(config, '/v1/replace-region-blocks', callId, ReplaceRegionBlocksOutputSchema, jsonPost(input), 120_000);
+      const verb = result.dryRun ? 'Would change' : 'Changed';
+      return successResult(result, `${verb} ${result.changedBlockCount} of ${result.matchedBlockCount} matching blocks in ${result.world}.`);
+    } catch (error: unknown) {
+      return errorResult(error, 'Could not replace region blocks');
+    }
+  })));
 
-  registrations.push(register(
-    'fill_region',
-    {
-      title: 'Fill a region',
-      description: 'Set every block in a bounded region to one block state, or preview the exact result.',
-      inputSchema: FillRegionInputSchema,
-      outputSchema: FillRegionOutputSchema,
-    },
-    async (input, context) => auditToolCall('fill_region', input.world, context, async (callId) => {
-      try {
-        const response = await bridgeRequest(
-          config,
-          '/v1/fill-region',
-          callId,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(input),
-          },
-          120_000,
-        );
-        const result = FillRegionOutputSchema.parse(await response.json());
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-          structuredContent: result,
-        };
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: 'text', text: `Could not fill the region: ${message}` }],
-          isError: true,
-        };
-      }
-    }),
-  ));
+  registrations.push(register('fill_region', {
+    title: 'Fill a region',
+    description: 'Set every block in an inclusive region to one canonical block state. Set dryRun=true to preview without mutation.',
+    inputSchema: FillRegionInputSchema,
+    outputSchema: FillRegionOutputSchema,
+    annotations: MUTATION_ANNOTATIONS,
+  }, async (input, context) => auditToolCall('fill_region', input.world, context, async (callId) => {
+    try {
+      const result = await bridgeRequest(config, '/v1/fill-region', callId, FillRegionOutputSchema, jsonPost(input), 120_000);
+      const verb = result.dryRun ? 'Would change' : 'Changed';
+      return successResult(result, `${verb} ${result.changedBlockCount} of ${result.volume} blocks in ${result.world}.`);
+    } catch (error: unknown) {
+      return errorResult(error, 'Could not fill the region');
+    }
+  })));
 
-  registrations.push(register(
-    'undo_last_edit',
-    {
-      title: 'Undo the last edit',
-      description: 'Undo the newest successful Dirt MCP edit in a loaded world.',
-      inputSchema: UndoLastEditInputSchema,
-      outputSchema: UndoLastEditOutputSchema,
-    },
-    async (input, context) => auditToolCall('undo_last_edit', input.world, context, async (callId) => {
-      try {
-        const response = await bridgeRequest(
-          config,
-          '/v1/undo-last-edit',
-          callId,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(input),
-          },
-          120_000,
-        );
-        const result = UndoLastEditOutputSchema.parse(await response.json());
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-          structuredContent: result,
-        };
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: 'text', text: `Could not undo the edit: ${message}` }],
-          isError: true,
-        };
-      }
-    }),
-  ));
+  registrations.push(register('undo_last_dirt_edit', {
+    title: 'Undo the last Dirt edit',
+    description: 'Undo the newest successful Dirt replace or fill in one loaded world. History is in-memory and scoped per world.',
+    inputSchema: UndoLastDirtEditInputSchema,
+    outputSchema: UndoLastDirtEditOutputSchema,
+    annotations: UNDO_ANNOTATIONS,
+  }, async (input, context) => auditToolCall('undo_last_dirt_edit', input.world, context, async (callId) => {
+    try {
+      const result = await bridgeRequest(config, '/v1/undo-last-dirt-edit', callId, UndoLastDirtEditOutputSchema, jsonPost(input), 120_000);
+      return successResult(result, `Undid the last Dirt edit in ${result.world}, restoring ${result.changedBlockCount} blocks.`);
+    } catch (error: unknown) {
+      return errorResult(error, 'Could not undo the last Dirt edit');
+    }
+  })));
 }
 
-async function bridgeRequest(
+function jsonPost(body: unknown): RequestInit {
+  return {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  };
+}
+
+async function bridgeRequest<T>(
   config: BridgeConfig,
   path: string,
   callId: string,
+  schema: z.ZodType<T>,
   init?: RequestInit,
   timeoutMilliseconds = 3_000,
-): Promise<Response> {
+): Promise<T> {
   const headers = new Headers(init?.headers);
   headers.set('Accept', 'application/json');
   headers.set('Authorization', `Bearer ${config.token}`);
   headers.set('X-Dirt-Call-Id', callId);
 
-  const response = await fetch(new URL(path, config.url), {
-    ...init,
-    headers,
-    redirect: 'error',
-    signal: AbortSignal.timeout(timeoutMilliseconds),
-  });
-  if (response.ok) {
-    return response;
-  }
-  if (response.status === 401) {
-    throw new Error('Bridge rejected DIRT_MCP_BRIDGE_TOKEN');
+  let response: Response;
+  try {
+    response = await fetch(new URL(path, config.url), {
+      ...init,
+      headers,
+      redirect: 'error',
+      signal: AbortSignal.timeout(timeoutMilliseconds),
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new DirtToolError('bridge_unavailable', `Paper bridge request failed: ${message}`);
   }
 
-  const body: unknown = await response.json().catch(() => undefined);
-  const detail = ErrorSchema.safeParse(body);
-  if (detail.success) {
-    throw new Error(`${detail.data.error.code}: ${detail.data.error.message}`);
+  if (!response.ok) {
+    if (response.status === 401) {
+      throw new DirtToolError('bridge_unauthorized', 'Paper bridge rejected DIRT_MCP_BRIDGE_TOKEN.');
+    }
+    const body: unknown = await response.json().catch(() => undefined);
+    const detail = ErrorSchema.safeParse(body);
+    if (detail.success) {
+      throw new DirtToolError(detail.data.error.code, detail.data.error.message);
+    }
+    throw new DirtToolError('bridge_http_error', `Paper bridge returned unstructured HTTP ${response.status}.`);
   }
-  throw new Error(`Bridge returned HTTP ${response.status}`);
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new DirtToolError('bridge_invalid_response', 'Paper bridge returned invalid JSON.');
+  }
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    throw new DirtToolError('bridge_invalid_response', 'Paper bridge response did not match the documented schema.');
+  }
+  return parsed.data;
 }

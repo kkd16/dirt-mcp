@@ -12,32 +12,32 @@ import ca.deliyannides.dirtmcp.paper.PluginSettings.Limits;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
-import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRequest;
-import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillResult;
-import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRequest;
-import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceResult;
-import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoRequest;
-import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRegionRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRegionResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRegionBlocksRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRegionBlocksResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoLastDirtEditRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoLastDirtEditResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockInspectionResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RegionBlockListResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockRun;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Bounds;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Dimensions;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.AxisVector;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionMode;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionRequest;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ExactInspectionResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RegionBlocksFormat;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RegionBlocksRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RegionBlocksResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Failure;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectedBlock;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionException;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.InspectionResult;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RunInspectionResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockStateCountResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RegionBlockRunsResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewBasis;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewBlock;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewDirection;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.OrthographicViewDirection;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewOffset;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewRequest;
-import ca.deliyannides.dirtmcp.paper.world.RegionInspector.ViewResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.OrthographicViewRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionInspector.OrthographicViewResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Viewport;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -65,13 +65,13 @@ final class ApiServerTest {
     private static final RegionEditor UNUSED_EDITOR = new TestEditor() {};
 
     @Test
-    void reportsHealthOnLoopback() throws Exception {
+    void reportsServerInfoOnLoopback() throws Exception {
         try (ApiServer server = server(UNUSED_INSPECTOR);
                 HttpClient client = HttpClient.newHttpClient()) {
             server.start();
 
             HttpResponse<String> response = client.send(
-                    authorizedRequest(healthUri(server)).GET().build(),
+                    authorizedRequest(serverInfoUri(server)).GET().build(),
                     HttpResponse.BodyHandlers.ofString());
 
             assertEquals(200, response.statusCode());
@@ -80,17 +80,17 @@ final class ApiServerTest {
                     response.headers().firstValue("Content-Type").orElseThrow());
             assertEquals("no-store", response.headers().firstValue("Cache-Control").orElseThrow());
             assertEquals(
-                    "{\"status\":\"ok\",\"service\":\"dirt-mcp-paper\",\"version\":\"0.1.0-test\","
+                    "{\"status\":\"ok\",\"service\":\"dirt-mcp-paper\",\"pluginVersion\":\"0.1.0-test\","
                             + "\"minecraftVersion\":\"26.2\",\"configuration\":{"
                             + "\"bridge\":{\"port\":0,\"backlog\":0,\"shutdownDelaySeconds\":0,"
                             + "\"maxRequestBytes\":8192,\"minimumTokenBytes\":32},"
                             + "\"limits\":{\"maxRegionVolume\":1000000,\"maxChangedBlocks\":250000,"
-                            + "\"maxExactInspectionVolume\":32768,\"defaultExactResults\":321,"
-                            + "\"maxExactResults\":654,\"maxViewVolume\":32768,"
-                            + "\"defaultViewResults\":123,\"maxViewResults\":456,"
+                            + "\"maxRegionBlocksVolume\":32768,\"defaultRegionBlocksResultLimit\":321,"
+                            + "\"maxRegionBlocksResultLimit\":654,\"maxOrthographicViewVolume\":32768,"
+                            + "\"defaultOrthographicViewResultLimit\":123,\"maxOrthographicViewResultLimit\":456,"
                             + "\"undoHistoryPerWorld\":20},\"defaults\":{"
-                            + "\"exactInspectionIncludeAir\":false,\"exactInspectionMode\":\"blocks\","
-                            + "\"replaceDryRun\":false,\"fillDryRun\":false}}}",
+                            + "\"regionBlocksIncludeAir\":false,\"regionBlocksFormat\":\"blocks\","
+                            + "\"replaceRegionBlocksDryRun\":false,\"fillRegionDryRun\":false}}}",
                     response.body());
         }
     }
@@ -102,7 +102,7 @@ final class ApiServerTest {
             server.start();
 
             HttpResponse<String> response = client.send(
-                    HttpRequest.newBuilder(healthUri(server)).GET().build(),
+                    HttpRequest.newBuilder(serverInfoUri(server)).GET().build(),
                     HttpResponse.BodyHandlers.ofString());
 
             assertEquals(401, response.statusCode());
@@ -123,7 +123,7 @@ final class ApiServerTest {
             server.start();
 
             HttpResponse<String> response = client.send(
-                    authorizedRequest(healthUri(server))
+                    authorizedRequest(serverInfoUri(server))
                             .POST(HttpRequest.BodyPublishers.noBody())
                             .build(),
                     HttpResponse.BodyHandlers.ofString());
@@ -137,14 +137,14 @@ final class ApiServerTest {
     }
 
     @Test
-    void inspectsARegion() throws Exception {
+    void countsRegionBlockStates() throws Exception {
         RegionInspector inspector = new TestInspector() {
             @Override
-            public InspectionResult inspect(RegionInspector.InspectionRequest request) {
+            public BlockStateCountResult countRegionBlockStates(RegionInspector.BlockStateCountRequest request) {
                 assertEquals("world", request.world());
                 assertEquals(new BlockPosition(5, 60, -2), request.min());
                 assertEquals(new BlockPosition(6, 61, -1), request.max());
-                return new InspectionResult(
+                return new BlockStateCountResult(
                         request.world(),
                         new Bounds(request.min(), request.max()),
                         new Dimensions(2, 2, 2),
@@ -157,7 +157,7 @@ final class ApiServerTest {
             server.start();
 
             HttpResponse<String> response = client.send(
-                    inspectionRequest(server, """
+                    blockStateCountRequest(server, """
                             {"world":"world","min":{"x":5,"y":60,"z":-2},"max":{"x":6,"y":61,"z":-1}}
                             """),
                     HttpResponse.BodyHandlers.ofString());
@@ -167,7 +167,7 @@ final class ApiServerTest {
                     "{\"world\":\"world\",\"bounds\":{\"min\":{\"x\":5,\"y\":60,\"z\":-2},"
                             + "\"max\":{\"x\":6,\"y\":61,\"z\":-1}},"
                             + "\"dimensions\":{\"x\":2,\"y\":2,\"z\":2},\"volume\":8,"
-                            + "\"blockStates\":{\"minecraft:stone\":8}}",
+                            + "\"blockStateCounts\":{\"minecraft:stone\":8}}",
                     response.body());
         }
     }
@@ -193,8 +193,8 @@ final class ApiServerTest {
         });
         RegionInspector inspector = new TestInspector() {
             @Override
-            public InspectionResult inspect(RegionInspector.InspectionRequest request) {
-                return new InspectionResult(
+            public BlockStateCountResult countRegionBlockStates(RegionInspector.BlockStateCountRequest request) {
+                return new BlockStateCountResult(
                         request.world(),
                         new Bounds(request.min(), request.max()),
                         new Dimensions(1, 1, 1),
@@ -208,7 +208,7 @@ final class ApiServerTest {
                 HttpClient client = HttpClient.newHttpClient()) {
             server.start();
             HttpResponse<String> response = client.send(
-                    authorizedRequest(inspectRegionUri(server))
+                    authorizedRequest(countRegionBlockStatesUri(server))
                             .header("Content-Type", "application/json")
                             .header("X-Dirt-Call-Id", callId)
                             .POST(HttpRequest.BodyPublishers.ofString("""
@@ -222,23 +222,23 @@ final class ApiServerTest {
             assertTrue(logged.await(2, TimeUnit.SECONDS));
             assertEquals(1, messages.size());
             assertTrue(messages.getFirst().matches(
-                    "Dirt MCP bridge_call operation=inspect_region method=POST status=200 "
+                    "Dirt MCP bridge_call operation=count_region_block_states method=POST status=200 "
                             + "world=\\\"world\\\" call=" + callId + " duration_ms=\\d+"));
         }
     }
 
     @Test
-    void inspectsExactBlocksWithSparseDefaults() throws Exception {
+    void getsRegionBlocksWithSparseDefaults() throws Exception {
         RegionInspector inspector = new TestInspector() {
             @Override
-            public ExactInspectionResult inspectBlocks(ExactInspectionRequest request) {
+            public RegionBlocksResult getRegionBlocks(RegionBlocksRequest request) {
                 assertEquals("world", request.world());
-                assertEquals(List.of(), request.include());
-                assertEquals(List.of(), request.exclude());
+                assertEquals(List.of(), request.includeBlockStatePatterns());
+                assertEquals(List.of(), request.excludeBlockStatePatterns());
                 assertFalse(request.includeAir());
                 assertEquals(321, request.maxResults());
-                assertEquals(ExactInspectionMode.BLOCKS, request.mode());
-                return new BlockInspectionResult(
+                assertEquals(RegionBlocksFormat.BLOCKS, request.format());
+                return new RegionBlockListResult(
                         request.world(),
                         new Bounds(request.min(), request.max()),
                         2,
@@ -251,7 +251,7 @@ final class ApiServerTest {
         try (ApiServer server = server(inspector); HttpClient client = HttpClient.newHttpClient()) {
             server.start();
             HttpResponse<String> response = client.send(
-                    exactInspectionRequest(server, """
+                    regionBlocksRequest(server, """
                             {"world":"world","min":{"x":1,"y":2,"z":3},"max":{"x":2,"y":2,"z":3}}
                             """),
                     HttpResponse.BodyHandlers.ofString());
@@ -260,23 +260,23 @@ final class ApiServerTest {
             assertEquals(
                     "{\"world\":\"world\",\"bounds\":{\"min\":{\"x\":1,\"y\":2,\"z\":3},"
                             + "\"max\":{\"x\":2,\"y\":2,\"z\":3}},\"volume\":2,"
-                            + "\"matchedBlocks\":1,\"mode\":\"blocks\",\"blocks\":[{\"position\":"
-                            + "{\"x\":1,\"y\":2,\"z\":3},\"state\":\"minecraft:stone\"}]}",
+                            + "\"matchedBlockCount\":1,\"format\":\"blocks\",\"blocks\":[{\"position\":"
+                            + "{\"x\":1,\"y\":2,\"z\":3},\"blockState\":\"minecraft:stone\"}]}",
                     response.body());
         }
     }
 
     @Test
-    void inspectsExactRunsWithFilters() throws Exception {
+    void getsRegionBlockRunsWithFilters() throws Exception {
         RegionInspector inspector = new TestInspector() {
             @Override
-            public ExactInspectionResult inspectBlocks(ExactInspectionRequest request) {
-                assertEquals(List.of("minecraft:spruce_log[axis=y]"), request.include());
-                assertEquals(List.of("minecraft:air", "minecraft:snow"), request.exclude());
+            public RegionBlocksResult getRegionBlocks(RegionBlocksRequest request) {
+                assertEquals(List.of("minecraft:spruce_log[axis=y]"), request.includeBlockStatePatterns());
+                assertEquals(List.of("minecraft:air", "minecraft:snow"), request.excludeBlockStatePatterns());
                 assertTrue(request.includeAir());
                 assertEquals(25, request.maxResults());
-                assertEquals(ExactInspectionMode.RUNS, request.mode());
-                return new RunInspectionResult(
+                assertEquals(RegionBlocksFormat.RUNS, request.format());
+                return new RegionBlockRunsResult(
                         request.world(),
                         new Bounds(request.min(), request.max()),
                         5,
@@ -289,11 +289,11 @@ final class ApiServerTest {
         try (ApiServer server = server(inspector); HttpClient client = HttpClient.newHttpClient()) {
             server.start();
             HttpResponse<String> response = client.send(
-                    exactInspectionRequest(server, """
+                    regionBlocksRequest(server, """
                             {"world":"world","min":{"x":1,"y":2,"z":3},"max":{"x":1,"y":6,"z":3},
-                             "include":["minecraft:spruce_log[axis=y]"],
-                             "exclude":["minecraft:air","minecraft:snow"],"includeAir":true,
-                             "maxResults":25,"mode":"runs"}
+                             "includeBlockStatePatterns":["minecraft:spruce_log[axis=y]"],
+                             "excludeBlockStatePatterns":["minecraft:air","minecraft:snow"],"includeAir":true,
+                             "maxResults":25,"format":"runs"}
                             """),
                     HttpResponse.BodyHandlers.ofString());
 
@@ -301,8 +301,8 @@ final class ApiServerTest {
             assertEquals(
                     "{\"world\":\"world\",\"bounds\":{\"min\":{\"x\":1,\"y\":2,\"z\":3},"
                             + "\"max\":{\"x\":1,\"y\":6,\"z\":3}},\"volume\":5,"
-                            + "\"matchedBlocks\":5,\"mode\":\"runs\",\"runs\":[{"
-                            + "\"state\":\"minecraft:spruce_log[axis\\u003dy]\","
+                            + "\"matchedBlockCount\":5,\"format\":\"runs\",\"runs\":[{"
+                            + "\"blockState\":\"minecraft:spruce_log[axis\\u003dy]\","
                             + "\"from\":{\"x\":1,\"y\":2,\"z\":3},"
                             + "\"to\":{\"x\":1,\"y\":6,\"z\":3}}]}",
                     response.body());
@@ -310,25 +310,25 @@ final class ApiServerTest {
     }
 
     @Test
-    void rejectsInvalidExactInspectionOptions() throws Exception {
+    void rejectsInvalidRegionBlockOptions() throws Exception {
         try (ApiServer server = server(UNUSED_INSPECTOR); HttpClient client = HttpClient.newHttpClient()) {
             server.start();
             HttpResponse<String> tooMany = client.send(
-                    exactInspectionRequest(server, """
+                    regionBlocksRequest(server, """
                             {"world":"world","min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":0},
                              "maxResults":655}
                             """),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> wrongMode = client.send(
-                    exactInspectionRequest(server, """
+                    regionBlocksRequest(server, """
                             {"world":"world","min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":0},
-                             "mode":"cuboids"}
+                             "format":"cuboids"}
                             """),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> wrongInclude = client.send(
-                    exactInspectionRequest(server, """
+                    regionBlocksRequest(server, """
                             {"world":"world","min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":0},
-                             "include":"minecraft:stone"}
+                             "includeBlockStatePatterns":"minecraft:stone"}
                             """),
                     HttpResponse.BodyHandlers.ofString());
 
@@ -340,12 +340,12 @@ final class ApiServerTest {
             assertEquals(400, wrongMode.statusCode());
             assertEquals(
                     "{\"error\":{\"code\":\"invalid_request\","
-                            + "\"message\":\"mode must be blocks or runs\"}}",
+                            + "\"message\":\"format must be blocks or runs\"}}",
                     wrongMode.body());
             assertEquals(400, wrongInclude.statusCode());
             assertEquals(
                     "{\"error\":{\"code\":\"invalid_request\","
-                            + "\"message\":\"include must be an array of non-empty strings\"}}",
+                            + "\"message\":\"includeBlockStatePatterns must be an array of non-empty strings\"}}",
                     wrongInclude.body());
         }
     }
@@ -360,16 +360,16 @@ final class ApiServerTest {
                 HttpClient client = HttpClient.newHttpClient()) {
             server.start();
             HttpResponse<String> wrongContentType = client.send(
-                    authorizedRequest(inspectRegionUri(server))
+                    authorizedRequest(countRegionBlockStatesUri(server))
                             .header("Content-Type", "text/plain")
                             .POST(HttpRequest.BodyPublishers.ofString("{}"))
                             .build(),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> oversized = client.send(
-                    inspectionRequest(server, " ".repeat(65)),
+                    blockStateCountRequest(server, " ".repeat(65)),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> atLimit = client.send(
-                    inspectionRequest(server, "{}" + " ".repeat(62)),
+                    blockStateCountRequest(server, "{}" + " ".repeat(62)),
                     HttpResponse.BodyHandlers.ofString());
 
             assertEquals(400, wrongContentType.statusCode());
@@ -398,10 +398,10 @@ final class ApiServerTest {
                 new Defaults(true, "runs", true, true));
         RegionInspector inspector = new TestInspector() {
             @Override
-            public ExactInspectionResult inspectBlocks(ExactInspectionRequest request) {
+            public RegionBlocksResult getRegionBlocks(RegionBlocksRequest request) {
                 assertTrue(request.includeAir());
-                assertEquals(ExactInspectionMode.RUNS, request.mode());
-                return new RunInspectionResult(
+                assertEquals(RegionBlocksFormat.RUNS, request.format());
+                return new RegionBlockRunsResult(
                         request.world(),
                         new Bounds(request.min(), request.max()),
                         1,
@@ -412,25 +412,25 @@ final class ApiServerTest {
         };
         RegionEditor editor = new TestEditor() {
             @Override
-            public ReplaceResult replace(ReplaceRequest request) {
+            public ReplaceRegionBlocksResult replaceRegionBlocks(ReplaceRegionBlocksRequest request) {
                 assertTrue(request.dryRun());
-                return new ReplaceResult(
+                return new ReplaceRegionBlocksResult(
                         request.world(),
                         new Bounds(request.min(), request.max()),
-                        request.source(),
-                        request.destination(),
+                        request.sourceBlockState(),
+                        request.destinationBlockState(),
                         request.dryRun(),
                         0,
                         0);
             }
 
             @Override
-            public FillResult fill(FillRequest request) {
+            public FillRegionResult fillRegion(FillRegionRequest request) {
                 assertTrue(request.dryRun());
-                return new FillResult(
+                return new FillRegionResult(
                         request.world(),
                         new Bounds(request.min(), request.max()),
-                        request.destination(),
+                        request.blockState(),
                         request.dryRun(),
                         1,
                         0);
@@ -441,20 +441,20 @@ final class ApiServerTest {
                 HttpClient client = HttpClient.newHttpClient()) {
             server.start();
             HttpResponse<String> exact = client.send(
-                    exactInspectionRequest(server, """
+                    regionBlocksRequest(server, """
                             {"world":"world","min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":0}}
                             """),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> replace = client.send(
                     replacementRequest(server, """
                             {"world":"world","min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":0},
-                             "source":"minecraft:stone","destination":"minecraft:dirt"}
+                             "sourceBlockState":"minecraft:stone","destinationBlockState":"minecraft:dirt"}
                             """),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> fill = client.send(
                     fillRequest(server, """
                             {"world":"world","min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":0},
-                             "destination":"minecraft:dirt"}
+                             "blockState":"minecraft:dirt"}
                             """),
                     HttpResponse.BodyHandlers.ofString());
 
@@ -465,10 +465,10 @@ final class ApiServerTest {
     }
 
     @Test
-    void mapsOversizedExactResultsToTheWireError() throws Exception {
+    void mapsOversizedRegionBlockResultsToTheWireError() throws Exception {
         RegionInspector inspector = new TestInspector() {
             @Override
-            public ExactInspectionResult inspectBlocks(ExactInspectionRequest request)
+            public RegionBlocksResult getRegionBlocks(RegionBlocksRequest request)
                     throws InspectionException {
                 throw new InspectionException(Failure.RESULT_TOO_LARGE, "Too many exact blocks");
             }
@@ -477,7 +477,7 @@ final class ApiServerTest {
         try (ApiServer server = server(inspector); HttpClient client = HttpClient.newHttpClient()) {
             server.start();
             HttpResponse<String> response = client.send(
-                    exactInspectionRequest(server, """
+                    regionBlocksRequest(server, """
                             {"world":"world","min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":0}}
                             """),
                     HttpResponse.BodyHandlers.ofString());
@@ -491,21 +491,22 @@ final class ApiServerTest {
     }
 
     @Test
-    void inspectsAViewWithTheSparseResultDefault() throws Exception {
+    void scansAnOrthographicViewWithTheBlocksFormatDefault() throws Exception {
         RegionInspector inspector = new TestInspector() {
             @Override
-            public ViewResult inspectView(ViewRequest request) {
+            public OrthographicViewResult scanOrthographicView(OrthographicViewRequest request) {
                 assertEquals("world", request.world());
                 assertEquals(new BlockPosition(1, 2, 3), request.origin());
-                assertEquals(ViewDirection.NORTH, request.direction());
+                assertEquals(OrthographicViewDirection.NORTH, request.direction());
                 assertEquals(1, request.horizontalRadius());
                 assertEquals(1, request.verticalRadius());
                 assertEquals(3, request.maxDistance());
                 assertEquals(123, request.maxResults());
-                return new ViewResult(
+                return new OrthographicViewResult(
                         request.world(),
                         request.origin(),
                         "north",
+                        "blocks",
                         new ViewBasis(
                                 new AxisVector(0, 0, -1),
                                 new AxisVector(1, 0, 0),
@@ -534,15 +535,16 @@ final class ApiServerTest {
             assertEquals(200, response.statusCode());
             assertEquals(
                     "{\"world\":\"world\",\"origin\":{\"x\":1,\"y\":2,\"z\":3},"
-                            + "\"direction\":\"north\",\"basis\":{\"forward\":{\"x\":0,\"y\":0,\"z\":-1},"
+                            + "\"direction\":\"north\",\"format\":\"blocks\","
+                            + "\"basis\":{\"forward\":{\"x\":0,\"y\":0,\"z\":-1},"
                             + "\"horizontal\":{\"x\":1,\"y\":0,\"z\":0},"
                             + "\"vertical\":{\"x\":0,\"y\":1,\"z\":0}},"
                             + "\"viewport\":{\"horizontalRadius\":1,\"verticalRadius\":1,\"maxDistance\":3},"
                             + "\"bounds\":{\"min\":{\"x\":0,\"y\":1,\"z\":0},"
                             + "\"max\":{\"x\":2,\"y\":3,\"z\":2}},\"scannedVolume\":27,"
-                            + "\"visibleBlocks\":1,\"blocks\":[{\"position\":{\"x\":1,\"y\":2,\"z\":2},"
+                            + "\"visibleBlockCount\":1,\"blocks\":[{\"position\":{\"x\":1,\"y\":2,\"z\":2},"
                             + "\"offset\":{\"horizontal\":0,\"vertical\":0,\"distance\":1},"
-                            + "\"state\":\"minecraft:oak_stairs[facing\\u003dnorth]\"}]}",
+                            + "\"blockState\":\"minecraft:oak_stairs[facing\\u003dnorth]\"}]}",
                     response.body());
         }
     }
@@ -582,12 +584,12 @@ final class ApiServerTest {
             server.start();
 
             HttpResponse<String> unknownField = client.send(
-                    inspectionRequest(server, """
+                    blockStateCountRequest(server, """
                             {"world":"world","min":{"x":0,"y":60,"z":0},"max":{"x":1,"y":61,"z":1},"extra":true}
                             """),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> fractionalCoordinate = client.send(
-                    inspectionRequest(server, """
+                    blockStateCountRequest(server, """
                             {"world":"world","min":{"x":0.5,"y":60,"z":0},"max":{"x":1,"y":61,"z":1}}
                             """),
                     HttpResponse.BodyHandlers.ofString());
@@ -605,7 +607,7 @@ final class ApiServerTest {
     void mapsInspectionFailuresToTheWireError() throws Exception {
         RegionInspector inspector = new TestInspector() {
             @Override
-            public InspectionResult inspect(RegionInspector.InspectionRequest request)
+            public BlockStateCountResult countRegionBlockStates(RegionInspector.BlockStateCountRequest request)
                     throws InspectionException {
                 throw new InspectionException(Failure.REGION_TOO_LARGE, "Region is too large");
             }
@@ -614,7 +616,7 @@ final class ApiServerTest {
             server.start();
 
             HttpResponse<String> response = client.send(
-                    inspectionRequest(server, """
+                    blockStateCountRequest(server, """
                             {"world":"world","min":{"x":0,"y":60,"z":0},"max":{"x":1,"y":61,"z":1}}
                             """),
                     HttpResponse.BodyHandlers.ofString());
@@ -630,18 +632,18 @@ final class ApiServerTest {
     void replacesBlocksWithDryRunDefaultingToFalse() throws Exception {
         RegionEditor editor = new TestEditor() {
             @Override
-            public ReplaceResult replace(ReplaceRequest request) {
+            public ReplaceRegionBlocksResult replaceRegionBlocks(ReplaceRegionBlocksRequest request) {
                 assertEquals("world", request.world());
                 assertEquals(new BlockPosition(5, 60, -2), request.min());
                 assertEquals(new BlockPosition(6, 61, -1), request.max());
-                assertEquals("minecraft:stone", request.source());
-                assertEquals("minecraft:dirt", request.destination());
+                assertEquals("minecraft:stone", request.sourceBlockState());
+                assertEquals("minecraft:dirt", request.destinationBlockState());
                 assertFalse(request.dryRun());
-                return new ReplaceResult(
+                return new ReplaceRegionBlocksResult(
                         request.world(),
                         new Bounds(request.min(), request.max()),
-                        request.source(),
-                        request.destination(),
+                        request.sourceBlockState(),
+                        request.destinationBlockState(),
                         request.dryRun(),
                         8,
                         8);
@@ -655,8 +657,8 @@ final class ApiServerTest {
             HttpResponse<String> response = client.send(
                     replacementRequest(server, """
                             {"world":"world","min":{"x":5,"y":60,"z":-2},
-                             "max":{"x":6,"y":61,"z":-1},"source":"minecraft:stone",
-                             "destination":"minecraft:dirt"}
+                             "max":{"x":6,"y":61,"z":-1},"sourceBlockState":"minecraft:stone",
+                             "destinationBlockState":"minecraft:dirt"}
                             """),
                     HttpResponse.BodyHandlers.ofString());
 
@@ -664,8 +666,8 @@ final class ApiServerTest {
             assertEquals(
                     "{\"world\":\"world\",\"bounds\":{\"min\":{\"x\":5,\"y\":60,\"z\":-2},"
                             + "\"max\":{\"x\":6,\"y\":61,\"z\":-1}},"
-                            + "\"source\":\"minecraft:stone\",\"destination\":\"minecraft:dirt\","
-                            + "\"dryRun\":false,\"matchedBlocks\":8,\"changedBlocks\":8}",
+                            + "\"sourceBlockState\":\"minecraft:stone\",\"destinationBlockState\":\"minecraft:dirt\","
+                            + "\"dryRun\":false,\"matchedBlockCount\":8,\"changedBlockCount\":8}",
                     response.body());
         }
     }
@@ -679,14 +681,14 @@ final class ApiServerTest {
             HttpResponse<String> missing = client.send(
                     replacementRequest(server, """
                             {"world":"world","min":{"x":0,"y":60,"z":0},
-                             "max":{"x":0,"y":60,"z":0},"source":"minecraft:stone"}
+                             "max":{"x":0,"y":60,"z":0},"sourceBlockState":"minecraft:stone"}
                             """),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> wrongDryRun = client.send(
                     replacementRequest(server, """
                             {"world":"world","min":{"x":0,"y":60,"z":0},
-                             "max":{"x":0,"y":60,"z":0},"source":"minecraft:stone",
-                             "destination":"minecraft:dirt","dryRun":"yes"}
+                             "max":{"x":0,"y":60,"z":0},"sourceBlockState":"minecraft:stone",
+                             "destinationBlockState":"minecraft:dirt","dryRun":"yes"}
                             """),
                     HttpResponse.BodyHandlers.ofString());
 
@@ -702,7 +704,7 @@ final class ApiServerTest {
     void mapsEditFailuresToTheWireError() throws Exception {
         RegionEditor editor = new TestEditor() {
             @Override
-            public ReplaceResult replace(ReplaceRequest request) throws EditException {
+            public ReplaceRegionBlocksResult replaceRegionBlocks(ReplaceRegionBlocksRequest request) throws EditException {
                 throw new EditException(RegionEditor.Failure.WORLD_BUSY, "World is busy");
             }
         };
@@ -713,8 +715,8 @@ final class ApiServerTest {
             HttpResponse<String> response = client.send(
                     replacementRequest(server, """
                             {"world":"world","min":{"x":0,"y":60,"z":0},
-                             "max":{"x":0,"y":60,"z":0},"source":"minecraft:stone",
-                             "destination":"minecraft:dirt","dryRun":true}
+                             "max":{"x":0,"y":60,"z":0},"sourceBlockState":"minecraft:stone",
+                             "destinationBlockState":"minecraft:dirt","dryRun":true}
                             """),
                     HttpResponse.BodyHandlers.ofString());
 
@@ -729,16 +731,16 @@ final class ApiServerTest {
     void fillsARegionWithDryRunDefaultingToFalse() throws Exception {
         RegionEditor editor = new TestEditor() {
             @Override
-            public FillResult fill(FillRequest request) {
+            public FillRegionResult fillRegion(FillRegionRequest request) {
                 assertEquals("world", request.world());
                 assertEquals(new BlockPosition(5, 60, -2), request.min());
                 assertEquals(new BlockPosition(6, 61, -1), request.max());
-                assertEquals("minecraft:oak_planks", request.destination());
+                assertEquals("minecraft:oak_planks", request.blockState());
                 assertFalse(request.dryRun());
-                return new FillResult(
+                return new FillRegionResult(
                         request.world(),
                         new Bounds(request.min(), request.max()),
-                        request.destination(),
+                        request.blockState(),
                         request.dryRun(),
                         8,
                         6);
@@ -752,7 +754,7 @@ final class ApiServerTest {
             HttpResponse<String> response = client.send(
                     fillRequest(server, """
                             {"world":"world","min":{"x":5,"y":60,"z":-2},
-                             "max":{"x":6,"y":61,"z":-1},"destination":"minecraft:oak_planks"}
+                             "max":{"x":6,"y":61,"z":-1},"blockState":"minecraft:oak_planks"}
                             """),
                     HttpResponse.BodyHandlers.ofString());
 
@@ -760,8 +762,8 @@ final class ApiServerTest {
             assertEquals(
                     "{\"world\":\"world\",\"bounds\":{\"min\":{\"x\":5,\"y\":60,\"z\":-2},"
                             + "\"max\":{\"x\":6,\"y\":61,\"z\":-1}},"
-                            + "\"destination\":\"minecraft:oak_planks\",\"dryRun\":false,"
-                            + "\"volume\":8,\"changedBlocks\":6}",
+                            + "\"blockState\":\"minecraft:oak_planks\",\"dryRun\":false,"
+                            + "\"volume\":8,\"changedBlockCount\":6}",
                     response.body());
         }
     }
@@ -781,7 +783,7 @@ final class ApiServerTest {
             HttpResponse<String> wrongDryRun = client.send(
                     fillRequest(server, """
                             {"world":"world","min":{"x":0,"y":60,"z":0},
-                             "max":{"x":0,"y":60,"z":0},"destination":"minecraft:dirt",
+                             "max":{"x":0,"y":60,"z":0},"blockState":"minecraft:dirt",
                              "dryRun":"yes"}
                             """),
                     HttpResponse.BodyHandlers.ofString());
@@ -798,7 +800,7 @@ final class ApiServerTest {
     void mapsFillFailuresToTheWireError() throws Exception {
         RegionEditor editor = new TestEditor() {
             @Override
-            public FillResult fill(FillRequest request) throws EditException {
+            public FillRegionResult fillRegion(FillRegionRequest request) throws EditException {
                 throw new EditException(RegionEditor.Failure.CHANGE_LIMIT_EXCEEDED, "Too many changes");
             }
         };
@@ -809,7 +811,7 @@ final class ApiServerTest {
             HttpResponse<String> response = client.send(
                     fillRequest(server, """
                             {"world":"world","min":{"x":0,"y":60,"z":0},
-                             "max":{"x":0,"y":60,"z":0},"destination":"minecraft:dirt","dryRun":true}
+                             "max":{"x":0,"y":60,"z":0},"blockState":"minecraft:dirt","dryRun":true}
                             """),
                     HttpResponse.BodyHandlers.ofString());
 
@@ -824,9 +826,9 @@ final class ApiServerTest {
     void undoesTheLastEdit() throws Exception {
         RegionEditor editor = new TestEditor() {
             @Override
-            public UndoResult undo(UndoRequest request) {
+            public UndoLastDirtEditResult undoLastDirtEdit(UndoLastDirtEditRequest request) {
                 assertEquals("world", request.world());
-                return new UndoResult(request.world(), 8);
+                return new UndoLastDirtEditResult(request.world(), 8);
             }
         };
         try (ApiServer server = server(UNUSED_INSPECTOR, editor);
@@ -838,7 +840,7 @@ final class ApiServerTest {
                     HttpResponse.BodyHandlers.ofString());
 
             assertEquals(200, response.statusCode());
-            assertEquals("{\"world\":\"world\",\"changedBlocks\":8}", response.body());
+            assertEquals("{\"world\":\"world\",\"changedBlockCount\":8}", response.body());
         }
     }
 
@@ -846,7 +848,7 @@ final class ApiServerTest {
     void reportsWhenThereIsNothingToUndo() throws Exception {
         RegionEditor editor = new TestEditor() {
             @Override
-            public UndoResult undo(UndoRequest request) throws EditException {
+            public UndoLastDirtEditResult undoLastDirtEdit(UndoLastDirtEditRequest request) throws EditException {
                 throw new EditException(RegionEditor.Failure.NOTHING_TO_UNDO, "Nothing to undo");
             }
         };
@@ -871,7 +873,7 @@ final class ApiServerTest {
         CountDownLatch inspectionInterrupted = new CountDownLatch(1);
         RegionInspector inspector = new TestInspector() {
             @Override
-            public InspectionResult inspect(RegionInspector.InspectionRequest request)
+            public BlockStateCountResult countRegionBlockStates(RegionInspector.BlockStateCountRequest request)
                     throws InspectionException {
                 inspectionStarted.countDown();
                 try {
@@ -889,7 +891,7 @@ final class ApiServerTest {
         try (HttpClient client = HttpClient.newHttpClient()) {
             server.start();
             client.sendAsync(
-                    inspectionRequest(server, """
+                    blockStateCountRequest(server, """
                             {"world":"world","min":{"x":0,"y":60,"z":0},"max":{"x":0,"y":60,"z":0}}
                             """),
                     HttpResponse.BodyHandlers.ofString());
@@ -929,36 +931,36 @@ final class ApiServerTest {
         return new ApiServer(settings, "0.1.0-test", "26.2", TOKEN, inspector, editor, logger);
     }
 
-    private static HttpRequest inspectionRequest(ApiServer server, String body) {
-        return authorizedRequest(inspectRegionUri(server))
+    private static HttpRequest blockStateCountRequest(ApiServer server, String body) {
+        return authorizedRequest(countRegionBlockStatesUri(server))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
     }
 
     private static HttpRequest replacementRequest(ApiServer server, String body) {
-        return authorizedRequest(replaceBlocksUri(server))
+        return authorizedRequest(replaceRegionBlocksUri(server))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
     }
 
-    private static HttpRequest exactInspectionRequest(ApiServer server, String body) {
-        return authorizedRequest(inspectBlocksUri(server))
+    private static HttpRequest regionBlocksRequest(ApiServer server, String body) {
+        return authorizedRequest(getRegionBlocksUri(server))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
     }
 
     private static HttpRequest viewRequest(ApiServer server, String body) {
-        return authorizedRequest(inspectViewUri(server))
+        return authorizedRequest(scanOrthographicViewUri(server))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
     }
 
     private static HttpRequest undoRequest(ApiServer server, String body) {
-        return authorizedRequest(undoLastEditUri(server))
+        return authorizedRequest(undoLastDirtEditUri(server))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
@@ -975,28 +977,30 @@ final class ApiServerTest {
         return HttpRequest.newBuilder(uri).header("Authorization", "Bearer " + TOKEN);
     }
 
-    private static URI healthUri(ApiServer server) {
-        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/health");
+    private static URI serverInfoUri(ApiServer server) {
+        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/server-info");
     }
 
-    private static URI inspectRegionUri(ApiServer server) {
-        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/inspect-region");
+    private static URI countRegionBlockStatesUri(ApiServer server) {
+        return URI.create(
+                "http://127.0.0.1:" + server.boundPort() + "/v1/count-region-block-states");
     }
 
-    private static URI replaceBlocksUri(ApiServer server) {
-        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/replace-blocks");
+    private static URI replaceRegionBlocksUri(ApiServer server) {
+        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/replace-region-blocks");
     }
 
-    private static URI inspectBlocksUri(ApiServer server) {
-        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/inspect-blocks");
+    private static URI getRegionBlocksUri(ApiServer server) {
+        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/get-region-blocks");
     }
 
-    private static URI inspectViewUri(ApiServer server) {
-        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/inspect-view");
+    private static URI scanOrthographicViewUri(ApiServer server) {
+        return URI.create(
+                "http://127.0.0.1:" + server.boundPort() + "/v1/scan-orthographic-view");
     }
 
-    private static URI undoLastEditUri(ApiServer server) {
-        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/undo-last-edit");
+    private static URI undoLastDirtEditUri(ApiServer server) {
+        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/undo-last-dirt-edit");
     }
 
     private static URI fillRegionUri(ApiServer server) {
@@ -1005,36 +1009,36 @@ final class ApiServerTest {
 
     private abstract static class TestEditor implements RegionEditor {
         @Override
-        public ReplaceResult replace(ReplaceRequest request) throws EditException {
+        public ReplaceRegionBlocksResult replaceRegionBlocks(ReplaceRegionBlocksRequest request) throws EditException {
             throw new AssertionError("Region editor should not be called");
         }
 
         @Override
-        public FillResult fill(FillRequest request) throws EditException {
+        public FillRegionResult fillRegion(FillRegionRequest request) throws EditException {
             throw new AssertionError("Region editor should not be called");
         }
 
         @Override
-        public UndoResult undo(UndoRequest request) throws EditException {
+        public UndoLastDirtEditResult undoLastDirtEdit(UndoLastDirtEditRequest request) throws EditException {
             throw new AssertionError("Region editor should not be called");
         }
     }
 
     private abstract static class TestInspector implements RegionInspector {
         @Override
-        public InspectionResult inspect(RegionInspector.InspectionRequest request)
+        public BlockStateCountResult countRegionBlockStates(RegionInspector.BlockStateCountRequest request)
                 throws InspectionException {
             throw new AssertionError("Region summary inspector should not be called");
         }
 
         @Override
-        public ExactInspectionResult inspectBlocks(ExactInspectionRequest request)
+        public RegionBlocksResult getRegionBlocks(RegionBlocksRequest request)
                 throws InspectionException {
             throw new AssertionError("Exact block inspector should not be called");
         }
 
         @Override
-        public ViewResult inspectView(ViewRequest request) throws InspectionException {
+        public OrthographicViewResult scanOrthographicView(OrthographicViewRequest request) throws InspectionException {
             throw new AssertionError("View inspector should not be called");
         }
     }

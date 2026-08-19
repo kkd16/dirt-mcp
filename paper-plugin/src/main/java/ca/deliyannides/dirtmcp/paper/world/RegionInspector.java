@@ -5,75 +5,75 @@ import java.util.List;
 import java.util.Map;
 
 public interface RegionInspector {
-    InspectionResult inspect(InspectionRequest request) throws InspectionException;
+    BlockStateCountResult countRegionBlockStates(BlockStateCountRequest request) throws InspectionException;
 
-    ExactInspectionResult inspectBlocks(ExactInspectionRequest request) throws InspectionException;
+    RegionBlocksResult getRegionBlocks(RegionBlocksRequest request) throws InspectionException;
 
-    ViewResult inspectView(ViewRequest request) throws InspectionException;
+    OrthographicViewResult scanOrthographicView(OrthographicViewRequest request) throws InspectionException;
 
     record BlockPosition(int x, int y, int z) {}
 
-    record InspectionRequest(String world, BlockPosition min, BlockPosition max) {}
+    record BlockStateCountRequest(String world, BlockPosition min, BlockPosition max) {}
 
     record Bounds(BlockPosition min, BlockPosition max) {}
 
     record Dimensions(long x, long y, long z) {}
 
-    record InspectionResult(
+    record BlockStateCountResult(
             String world,
             Bounds bounds,
             Dimensions dimensions,
             long volume,
-            Map<String, Long> blockStates) {}
+            Map<String, Long> blockStateCounts) {}
 
-    enum ExactInspectionMode {
+    enum RegionBlocksFormat {
         BLOCKS,
         RUNS
     }
 
-    record ExactInspectionRequest(
+    record RegionBlocksRequest(
             String world,
             BlockPosition min,
             BlockPosition max,
-            List<String> include,
-            List<String> exclude,
+            List<String> includeBlockStatePatterns,
+            List<String> excludeBlockStatePatterns,
             boolean includeAir,
             int maxResults,
-            ExactInspectionMode mode) {}
+            RegionBlocksFormat format) {}
 
-    sealed interface ExactInspectionResult permits BlockInspectionResult, RunInspectionResult {
+    sealed interface RegionBlocksResult permits RegionBlockListResult, RegionBlockRunsResult {
         String world();
 
         Bounds bounds();
 
         long volume();
 
-        long matchedBlocks();
+        long matchedBlockCount();
 
-        String mode();
+        String format();
     }
 
-    record InspectedBlock(BlockPosition position, String state) {}
+    record InspectedBlock(BlockPosition position, String blockState) {}
 
-    record BlockRun(String state, BlockPosition from, BlockPosition to) {}
+    record BlockRun(String blockState, BlockPosition from, BlockPosition to) {}
 
-    record BlockInspectionResult(
+    record RegionBlockListResult(
             String world,
             Bounds bounds,
             long volume,
-            long matchedBlocks,
-            String mode,
-            List<InspectedBlock> blocks) implements ExactInspectionResult {}
+            long matchedBlockCount,
+            String format,
+            List<InspectedBlock> blocks) implements RegionBlocksResult {}
 
-    record RunInspectionResult(
+    record RegionBlockRunsResult(
             String world,
             Bounds bounds,
             long volume,
-            long matchedBlocks,
-            String mode,
-            List<BlockRun> runs) implements ExactInspectionResult {}
+            long matchedBlockCount,
+            String format,
+            List<BlockRun> runs) implements RegionBlocksResult {}
 
-    enum ViewDirection {
+    enum OrthographicViewDirection {
         NORTH,
         EAST,
         SOUTH,
@@ -82,10 +82,10 @@ public interface RegionInspector {
         DOWN
     }
 
-    record ViewRequest(
+    record OrthographicViewRequest(
             String world,
             BlockPosition origin,
-            ViewDirection direction,
+            OrthographicViewDirection direction,
             int horizontalRadius,
             int verticalRadius,
             int maxDistance,
@@ -99,17 +99,18 @@ public interface RegionInspector {
 
     record ViewOffset(int horizontal, int vertical, int distance) {}
 
-    record ViewBlock(BlockPosition position, ViewOffset offset, String state) {}
+    record ViewBlock(BlockPosition position, ViewOffset offset, String blockState) {}
 
-    record ViewResult(
+    record OrthographicViewResult(
             String world,
             BlockPosition origin,
             String direction,
+            String format,
             ViewBasis basis,
             Viewport viewport,
             Bounds bounds,
             long scannedVolume,
-            long visibleBlocks,
+            long visibleBlockCount,
             List<ViewBlock> blocks) {}
 
     enum Failure {

@@ -5,47 +5,47 @@ import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Bounds;
 import java.io.Serial;
 
 public interface RegionEditor {
-    ReplaceResult replace(ReplaceRequest request) throws EditException;
+    ReplaceRegionBlocksResult replaceRegionBlocks(ReplaceRegionBlocksRequest request) throws EditException;
 
-    FillResult fill(FillRequest request) throws EditException;
+    FillRegionResult fillRegion(FillRegionRequest request) throws EditException;
 
-    UndoResult undo(UndoRequest request) throws EditException;
+    UndoLastDirtEditResult undoLastDirtEdit(UndoLastDirtEditRequest request) throws EditException;
 
-    record ReplaceRequest(
+    record ReplaceRegionBlocksRequest(
             String world,
             BlockPosition min,
             BlockPosition max,
-            String source,
-            String destination,
+            String sourceBlockState,
+            String destinationBlockState,
             boolean dryRun) {}
 
-    record ReplaceResult(
+    record ReplaceRegionBlocksResult(
             String world,
             Bounds bounds,
-            String source,
-            String destination,
+            String sourceBlockState,
+            String destinationBlockState,
             boolean dryRun,
-            long matchedBlocks,
-            long changedBlocks) {}
+            long matchedBlockCount,
+            long changedBlockCount) {}
 
-    record FillRequest(
+    record FillRegionRequest(
             String world,
             BlockPosition min,
             BlockPosition max,
-            String destination,
+            String blockState,
             boolean dryRun) {}
 
-    record FillResult(
+    record FillRegionResult(
             String world,
             Bounds bounds,
-            String destination,
+            String blockState,
             boolean dryRun,
             long volume,
-            long changedBlocks) {}
+            long changedBlockCount) {}
 
-    record UndoRequest(String world) {}
+    record UndoLastDirtEditRequest(String world) {}
 
-    record UndoResult(String world, long changedBlocks) {}
+    record UndoLastDirtEditResult(String world, long changedBlockCount) {}
 
     enum Failure {
         CHANGE_LIMIT_EXCEEDED,
