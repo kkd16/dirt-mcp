@@ -34,3 +34,4 @@ defaults:
   exact-inspection-mode: blocks
   replace-dry-run: false
   fill-dry-run: false
+  set-blocks-dry-run: false

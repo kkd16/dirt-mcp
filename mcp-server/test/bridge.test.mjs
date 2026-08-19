@@ -126,6 +126,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
         regionBlocksFormat: 'blocks',
         replaceRegionBlocksDryRun: false,
         fillRegionDryRun: false,
+        setBlocksDryRun: false,
     },
   };
   const regionBlocks = {
@@ -216,6 +217,13 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       },
     ],
   };
+  const setBlocks = {
+    world: 'world',
+    dryRun: false,
+    blockCount: 2,
+    changedBlockCount: 1,
+    unchangedBlockCount: 1,
+  };
   const bridge = createServer(async (request, response) => {
     let rawBody = '';
     for await (const chunk of request) {
@@ -242,6 +250,8 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       response.end(JSON.stringify({
         error: { code: 'change_limit_exceeded', message: 'Too many changes' },
       }));
+    } else if (request.url === '/v1/set-blocks') {
+      response.end(JSON.stringify(setBlocks));
     } else if (request.url === '/v1/run-minecraft-commands') {
       response.end(JSON.stringify(commandRun));
     } else {
@@ -376,16 +386,38 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     structuredContent: serverStatus,
   }));
 
+  const sparseChanges = [
+    { position: { x: 1, y: 2, z: 3 }, blockState: 'minecraft:stone' },
+    { position: { x: 5, y: 2, z: 3 }, blockState: 'minecraft:glass' },
+  ];
   send(child, {
     jsonrpc: '2.0',
     id: 8,
+    method: 'tools/call',
+    params: modernParams({
+      name: 'set_blocks',
+      arguments: { world: 'world', changes: sparseChanges },
+    }),
+  });
+  const blocksSet = await waitFor(messages, 8);
+  assert.deepEqual(blocksSet.result, modernResult({
+    content: [{
+      type: 'text',
+      text: 'Changed 1 of 2 explicitly listed blocks in world.',
+    }],
+    structuredContent: setBlocks,
+  }));
+
+  send(child, {
+    jsonrpc: '2.0',
+    id: 9,
     method: 'tools/call',
     params: modernParams({
       name: 'run_minecraft_commands',
       arguments: { commands: ['/say hello', 'missing'] },
     }),
   });
-  const commands = await waitFor(messages, 8);
+  const commands = await waitFor(messages, 9);
   assert.deepEqual(commands.result, modernResult({
     isError: true,
     content: [{
@@ -404,6 +436,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { method: 'POST', path: '/v1/scan-orthographic-view' },
       { method: 'POST', path: '/v1/fill-region' },
       { method: 'GET', path: '/v1/server-status' },
+      { method: 'POST', path: '/v1/set-blocks' },
       { method: 'POST', path: '/v1/run-minecraft-commands' },
     ],
   );
@@ -416,7 +449,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     );
   }
   const callIds = requests.map((request) => request.headers['x-dirt-call-id']);
-  assert.equal(new Set(callIds).size, 7);
+  assert.equal(new Set(callIds).size, 8);
   assert.deepEqual(requests[1].body, {
     ...region,
     includeBlockStatePatterns: [],
@@ -432,11 +465,13 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     blockState: 'minecraft:dirt',
   });
   assert.equal(requests[4].headers['content-type'], 'application/json');
-  assert.deepEqual(requests[6].body, { commands: ['/say hello', 'missing'] });
+  assert.deepEqual(requests[6].body, { world: 'world', changes: sparseChanges });
   assert.equal(requests[6].headers['content-type'], 'application/json');
+  assert.deepEqual(requests[7].body, { commands: ['/say hello', 'missing'] });
+  assert.equal(requests[7].headers['content-type'], 'application/json');
 
   const auditLines = errors.values.filter((line) => line.startsWith('Dirt MCP tool_call '));
-  assert.equal(auditLines.length, 7);
+  assert.equal(auditLines.length, 8);
   assert.match(
     auditLines[0],
     new RegExp(`^Dirt MCP tool_call tool=ping_server call=${callIds[0]} request=2 `
@@ -469,7 +504,12 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   );
   assert.match(
     auditLines[6],
-    new RegExp(`^Dirt MCP tool_call tool=run_minecraft_commands call=${callIds[6]} request=8 `
+    new RegExp(`^Dirt MCP tool_call tool=set_blocks call=${callIds[6]} request=8 `
+      + 'client="bridge-test/1" world="world" outcome=ok duration_ms=\\d+$'),
+  );
+  assert.match(
+    auditLines[7],
+    new RegExp(`^Dirt MCP tool_call tool=run_minecraft_commands call=${callIds[7]} request=9 `
       + 'client="bridge-test/1" outcome=error duration_ms=\\d+$'),
   );
 

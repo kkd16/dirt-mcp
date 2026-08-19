@@ -1,11 +1,14 @@
 package ca.deliyannides.dirtmcp.paper.world;
 
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.BlockChange;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.Failure;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRegionRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRegionResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRegionBlocksRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRegionBlocksResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.SetBlocksRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.SetBlocksResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoLastDirtEditRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoLastDirtEditResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
@@ -18,13 +21,17 @@ import com.sk89q.worldedit.MaxChangedBlocksException;
 import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.function.mask.Mask;
+import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldedit.regions.CuboidRegion;
 import com.sk89q.worldedit.world.block.BlockState;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -94,6 +101,28 @@ public final class FaweRegionEditor implements RegionEditor {
             PreparedFill prepared = prepare(request, region);
             try {
                 return fillLocked(request, region, prepared, state);
+            } finally {
+                releaseChunkTickets(prepared.chunkTickets());
+            }
+        } finally {
+            state.lock.unlock();
+        }
+    }
+
+    @Override
+    public SetBlocksResult setBlocks(SetBlocksRequest request) throws EditException {
+        validateSparseSize(request);
+        PreparedWorld world = prepareWorld(request.world());
+        WorldState state = this.worldStates.computeIfAbsent(world.worldName(), ignored -> new WorldState());
+        if (!state.lock.tryLock()) {
+            throw new EditException(Failure.WORLD_BUSY, "Another Dirt MCP edit is running in world: "
+                    + world.worldName());
+        }
+
+        try {
+            PreparedSparseEdit prepared = prepare(request, world);
+            try {
+                return setBlocksLocked(request, prepared, state);
             } finally {
                 releaseChunkTickets(prepared.chunkTickets());
             }
@@ -201,6 +230,44 @@ public final class FaweRegionEditor implements RegionEditor {
                 changes);
     }
 
+    private SetBlocksResult setBlocksLocked(
+            SetBlocksRequest request,
+            PreparedSparseEdit prepared,
+            WorldState state) throws EditException {
+        EditSession session = newEditSession(prepared.world(), !request.dryRun());
+        List<PreparedBlockChange> pendingChanges = new ArrayList<>();
+        long expectedChanges;
+        try (session) {
+            for (PreparedBlockChange change : prepared.changes()) {
+                if (!session.getBlock(change.position()).equals(change.blockState())) {
+                    pendingChanges.add(change);
+                }
+            }
+            expectedChanges = pendingChanges.size();
+            enforceChangeLimit(expectedChanges);
+
+            if (!request.dryRun() && expectedChanges > 0) {
+                for (PreparedBlockChange change : pendingChanges) {
+                    session.setBlock(
+                            change.position().x(),
+                            change.position().y(),
+                            change.position().z(),
+                            change.blockState());
+                }
+            }
+        }
+        long changes = request.dryRun() ? expectedChanges : session.getChangeSet().longSize();
+        if (!request.dryRun() && changes > 0) {
+            remember(state, session);
+        }
+        return new SetBlocksResult(
+                prepared.worldName(),
+                request.dryRun(),
+                prepared.changes().size(),
+                changes,
+                prepared.changes().size() - changes);
+    }
+
     private static CuboidRegion selection(
             com.sk89q.worldedit.world.World world,
             NormalizedRegion region) {
@@ -259,6 +326,11 @@ public final class FaweRegionEditor implements RegionEditor {
         return onMainThread(() -> prepareOnMainThread(request, region));
     }
 
+    private PreparedSparseEdit prepare(SetBlocksRequest request, PreparedWorld world)
+            throws EditException {
+        return onMainThread(() -> prepareOnMainThread(request, world));
+    }
+
     private PreparedWorld prepareWorld(String worldName) throws EditException {
         return onMainThread(() -> resolveWorld(worldName));
     }
@@ -315,6 +387,74 @@ public final class FaweRegionEditor implements RegionEditor {
                 chunkTickets);
     }
 
+    private PreparedSparseEdit prepareOnMainThread(SetBlocksRequest request, PreparedWorld prepared)
+            throws EditException {
+        World world = prepared.bukkitWorld();
+        Map<BlockPosition, Integer> positions = new HashMap<>();
+        Map<String, BlockState> blockStates = new HashMap<>();
+        List<PreparedBlockChange> changes = new ArrayList<>(request.changes().size());
+
+        for (int index = 0; index < request.changes().size(); index++) {
+            BlockChange change = request.changes().get(index);
+            if (change == null || change.position() == null) {
+                throw new EditException(
+                        Failure.INVALID_REQUEST,
+                        "changes[" + index + "] must contain a position and blockState");
+            }
+            BlockPosition position = change.position();
+            if (position.y() < world.getMinHeight() || position.y() >= world.getMaxHeight()) {
+                throw new EditException(
+                        Failure.INVALID_REQUEST,
+                        "changes[" + index + "].position.y must be between "
+                                + world.getMinHeight() + " and " + (world.getMaxHeight() - 1));
+            }
+            Integer previous = positions.putIfAbsent(position, index);
+            if (previous != null) {
+                throw new EditException(
+                        Failure.INVALID_REQUEST,
+                        "changes[" + index + "].position duplicates changes[" + previous + "].position");
+            }
+            if (change.blockState() == null || change.blockState().isBlank()) {
+                throw new EditException(
+                        Failure.INVALID_REQUEST,
+                        "changes[" + index + "].blockState must be a non-empty string");
+            }
+            BlockState state = blockStates.get(change.blockState());
+            if (state == null) {
+                BlockData blockData = parseBlockData(
+                        change.blockState(), "changes[" + index + "].blockState");
+                state = BukkitAdapter.adapt(blockData);
+                blockStates.put(change.blockState(), state);
+            }
+            changes.add(new PreparedBlockChange(
+                    BlockVector3.at(position.x(), position.y(), position.z()),
+                    state));
+        }
+
+        ChunkTickets chunkTickets = retainLoadedChunks(world, request.changes().stream()
+                .map(BlockChange::position)
+                .toList());
+        return new PreparedSparseEdit(
+                prepared.worldName(),
+                prepared.world(),
+                List.copyOf(changes),
+                chunkTickets);
+    }
+
+    private void validateSparseSize(SetBlocksRequest request) throws EditException {
+        if (request == null || request.changes() == null || request.changes().isEmpty()) {
+            throw new EditException(
+                    Failure.INVALID_REQUEST,
+                    "changes must contain at least one block change");
+        }
+        if (request.changes().size() > this.maxRegionVolume) {
+            throw new EditException(
+                    Failure.REGION_TOO_LARGE,
+                    "Sparse edit contains " + request.changes().size()
+                            + " blocks; maximum is " + this.maxRegionVolume);
+        }
+    }
+
     private static void requireValidHeight(World world, NormalizedRegion region) throws EditException {
         if (region.min().y() < world.getMinHeight() || region.max().y() >= world.getMaxHeight()) {
             throw new EditException(
@@ -353,6 +493,35 @@ public final class FaweRegionEditor implements RegionEditor {
                             "Region contains an unloaded chunk at " + chunkX + "," + chunkZ);
                 }
                 chunks.add(new ChunkPosition(chunkX, chunkZ));
+            }
+        }
+
+        List<ChunkPosition> retained = new ArrayList<>(chunks.size());
+        try {
+            for (ChunkPosition chunk : chunks) {
+                if (world.addPluginChunkTicket(chunk.x(), chunk.z(), this.plugin)) {
+                    retained.add(chunk);
+                }
+            }
+        } catch (RuntimeException exception) {
+            removeChunkTickets(world, retained);
+            throw exception;
+        }
+        return new ChunkTickets(world, List.copyOf(retained));
+    }
+
+    private ChunkTickets retainLoadedChunks(World world, List<BlockPosition> positions)
+            throws EditException {
+        Set<ChunkPosition> chunks = new LinkedHashSet<>();
+        for (BlockPosition position : positions) {
+            chunks.add(new ChunkPosition(position.x() >> 4, position.z() >> 4));
+        }
+
+        for (ChunkPosition chunk : chunks) {
+            if (!world.isChunkLoaded(chunk.x(), chunk.z())) {
+                throw new EditException(
+                        Failure.WORLD_UNAVAILABLE,
+                        "Sparse edit contains an unloaded chunk at " + chunk.x() + "," + chunk.z());
             }
         }
 
@@ -448,6 +617,16 @@ public final class FaweRegionEditor implements RegionEditor {
             BlockState blockState,
             String blockStateName,
             ChunkTickets chunkTickets) {}
+
+    private record PreparedSparseEdit(
+            String worldName,
+            com.sk89q.worldedit.world.World world,
+            List<PreparedBlockChange> changes,
+            ChunkTickets chunkTickets) {}
+
+    private record PreparedBlockChange(
+            BlockVector3 position,
+            BlockState blockState) {}
 
     private record ChunkTickets(World world, List<ChunkPosition> chunks) {}
 

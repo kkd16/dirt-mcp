@@ -23,6 +23,7 @@ const max = { x: 1, y: 1, z: 1 };
 const stairMin = { x: 2, y: 0, z: 0 };
 const stairMax = { x: 4, y: 0, z: 0 };
 const commandPosition = { x: 5, y: 0, z: 0 };
+const sparsePosition = { x: 6, y: 0, z: 0 };
 const northStairs = 'minecraft:dark_oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]';
 const southStairs = 'minecraft:dark_oak_stairs[facing=south,half=bottom,shape=straight,waterlogged=false]';
 const baseUrl = `http://127.0.0.1:${bridgePort}`;
@@ -156,6 +157,7 @@ let editsToUndo = 0;
 let fixtureIsForceLoaded = false;
 let originalStairFixture;
 let originalCommandFixture;
+let originalSparseFixture;
 try {
   assert.deepEqual(await bridgeGet('/v1/ping'), { status: 'ok' });
   const serverStatus = await bridgeGet('/v1/server-status');
@@ -231,6 +233,116 @@ try {
     blockState: originalCommandFixture.blocks[0].blockState,
   }]);
   originalCommandFixture = undefined;
+
+  originalSparseFixture = await bridgeRequest('/v1/get-region-blocks', {
+    world,
+    min: commandPosition,
+    max: sparsePosition,
+    includeAir: true,
+  });
+  assert.equal(originalSparseFixture.matchedBlockCount, 2);
+  const originalSparseStates = new Map(originalSparseFixture.blocks.map((block) => [
+    `${block.position.x},${block.position.y},${block.position.z}`,
+    block.blockState,
+  ]));
+  const firstOriginalState = originalSparseStates.get('5,0,0');
+  const secondOriginalState = originalSparseStates.get('6,0,0');
+  assert.ok(firstOriginalState);
+  assert.ok(secondOriginalState);
+  const firstSparseState = firstOriginalState === 'minecraft:diamond_block'
+    ? 'minecraft:gold_block'
+    : 'minecraft:diamond_block';
+  const secondSparseState = secondOriginalState === 'minecraft:emerald_block'
+    ? 'minecraft:redstone_block'
+    : 'minecraft:emerald_block';
+
+  const sparsePreview = await bridgeRequest('/v1/set-blocks', {
+    world,
+    changes: [
+      { position: commandPosition, blockState: firstOriginalState },
+      { position: sparsePosition, blockState: secondSparseState },
+    ],
+    dryRun: true,
+  });
+  assert.deepEqual(sparsePreview, {
+    world,
+    dryRun: true,
+    blockCount: 2,
+    changedBlockCount: 1,
+    unchangedBlockCount: 1,
+  });
+
+  const duplicateSparse = await bridgeResponse('/v1/set-blocks', {
+    world,
+    changes: [
+      { position: commandPosition, blockState: firstSparseState },
+      { position: commandPosition, blockState: secondSparseState },
+    ],
+  });
+  assert.equal(duplicateSparse.status, 400);
+  assert.equal(duplicateSparse.body.error.code, 'invalid_request');
+
+  const invalidSparse = await bridgeResponse('/v1/set-blocks', {
+    world,
+    changes: [
+      { position: commandPosition, blockState: firstSparseState },
+      { position: sparsePosition, blockState: 'minecraft:not_a_block' },
+    ],
+  });
+  assert.equal(invalidSparse.status, 400);
+  assert.equal(invalidSparse.body.error.code, 'invalid_request');
+  const afterInvalidSparse = await bridgeRequest('/v1/get-region-blocks', {
+    world,
+    min: commandPosition,
+    max: sparsePosition,
+    includeAir: true,
+  });
+  assert.deepEqual(
+    sortedBlockKeys(afterInvalidSparse.blocks),
+    sortedBlockKeys(originalSparseFixture.blocks),
+  );
+
+  const sparseSet = await bridgeRequest('/v1/set-blocks', {
+    world,
+    changes: [
+      { position: commandPosition, blockState: firstSparseState },
+      { position: sparsePosition, blockState: secondSparseState },
+    ],
+  });
+  editsToUndo += sparseSet.changedBlockCount > 0 ? 1 : 0;
+  assert.deepEqual(sparseSet, {
+    world,
+    dryRun: false,
+    blockCount: 2,
+    changedBlockCount: 2,
+    unchangedBlockCount: 0,
+  });
+  const afterSparseSet = await bridgeRequest('/v1/get-region-blocks', {
+    world,
+    min: commandPosition,
+    max: sparsePosition,
+  });
+  assert.deepEqual(
+    sortedBlockKeys(afterSparseSet.blocks),
+    [
+      `5,0,0:${firstSparseState}`,
+      `6,0,0:${secondSparseState}`,
+    ],
+  );
+  const sparseUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
+  editsToUndo -= 1;
+  assert.equal(sparseUndone.changedBlockCount, 2);
+  const afterSparseUndo = await bridgeRequest('/v1/get-region-blocks', {
+    world,
+    min: commandPosition,
+    max: sparsePosition,
+    includeAir: true,
+  });
+  assert.deepEqual(
+    sortedBlockKeys(afterSparseUndo.blocks),
+    sortedBlockKeys(originalSparseFixture.blocks),
+  );
+  originalSparseFixture = undefined;
 
   const originalStates = Object.keys(original.blockStateCounts);
   const fillBlockState = originalStates.length === 1 && originalStates[0].startsWith('minecraft:barrier')
@@ -479,6 +591,13 @@ try {
       }]);
     } catch (error) {
       process.stderr.write(`Could not restore command fixture: ${error.message}\n`);
+    }
+  }
+  if (originalSparseFixture) {
+    try {
+      await bridgeSetBlocks(originalSparseFixture.blocks);
+    } catch (error) {
+      process.stderr.write(`Could not restore sparse fixture: ${error.message}\n`);
     }
   }
   if (fixtureIsForceLoaded) {

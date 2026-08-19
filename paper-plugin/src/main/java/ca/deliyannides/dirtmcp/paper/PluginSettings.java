@@ -69,7 +69,8 @@ public record PluginSettings(
                 requiredBoolean(config, "defaults.exact-inspection-include-air"),
                 regionBlocksFormat,
                 requiredBoolean(config, "defaults.replace-dry-run"),
-                requiredBoolean(config, "defaults.fill-dry-run"));
+                requiredBoolean(config, "defaults.fill-dry-run"),
+                requiredBoolean(config, "defaults.set-blocks-dry-run"));
 
         return new PluginSettings(bridge, limits, defaults);
     }
@@ -166,5 +167,6 @@ public record PluginSettings(
             boolean regionBlocksIncludeAir,
             String regionBlocksFormat,
             boolean replaceRegionBlocksDryRun,
-            boolean fillRegionDryRun) {}
+            boolean fillRegionDryRun,
+            boolean setBlocksDryRun) {}
 }

@@ -3,11 +3,14 @@ package ca.deliyannides.dirtmcp.paper.world;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Bounds;
 import java.io.Serial;
+import java.util.List;
 
 public interface RegionEditor {
     ReplaceRegionBlocksResult replaceRegionBlocks(ReplaceRegionBlocksRequest request) throws EditException;
 
     FillRegionResult fillRegion(FillRegionRequest request) throws EditException;
+
+    SetBlocksResult setBlocks(SetBlocksRequest request) throws EditException;
 
     UndoLastDirtEditResult undoLastDirtEdit(UndoLastDirtEditRequest request) throws EditException;
 
@@ -42,6 +45,20 @@ public interface RegionEditor {
             boolean dryRun,
             long volume,
             long changedBlockCount) {}
+
+    record SetBlocksRequest(
+            String world,
+            List<BlockChange> changes,
+            boolean dryRun) {}
+
+    record BlockChange(BlockPosition position, String blockState) {}
+
+    record SetBlocksResult(
+            String world,
+            boolean dryRun,
+            long blockCount,
+            long changedBlockCount,
+            long unchangedBlockCount) {}
 
     record UndoLastDirtEditRequest(String world) {}
 

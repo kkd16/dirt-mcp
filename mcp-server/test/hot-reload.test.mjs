@@ -140,6 +140,12 @@ test('reloads tools without replacing the stdio process', async (context) => {
         idempotentHint: true,
         openWorldHint: true,
       },
+      set_blocks: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
       undo_last_dirt_edit: {
         readOnlyHint: false,
         destructiveHint: true,
@@ -165,6 +171,7 @@ test('reloads tools without replacing the stdio process', async (context) => {
       'replace_region_blocks',
       'run_minecraft_commands',
       'scan_orthographic_view',
+      'set_blocks',
       'undo_last_dirt_edit',
     ],
   );

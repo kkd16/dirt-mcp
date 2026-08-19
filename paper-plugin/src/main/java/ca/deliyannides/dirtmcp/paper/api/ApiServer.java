@@ -7,9 +7,11 @@ import ca.deliyannides.dirtmcp.paper.command.CommandRunner.RunCommandsRequest;
 import ca.deliyannides.dirtmcp.paper.server.ServerContext;
 import ca.deliyannides.dirtmcp.paper.server.ServerContext.ServerContextException;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.BlockChange;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRegionRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRegionBlocksRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.SetBlocksRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoLastDirtEditRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
@@ -85,6 +87,9 @@ public final class ApiServer implements AutoCloseable {
             Set.of("world", "min", "max", "blockState");
     private static final Set<String> FILL_REGION_FIELDS =
             Set.of("world", "min", "max", "blockState", "dryRun");
+    private static final Set<String> SET_BLOCKS_REQUIRED_FIELDS = Set.of("world", "changes");
+    private static final Set<String> SET_BLOCKS_FIELDS = Set.of("world", "changes", "dryRun");
+    private static final Set<String> BLOCK_CHANGE_FIELDS = Set.of("position", "blockState");
     private static final Set<String> UNDO_FIELDS = Set.of("world");
     private static final Set<String> RUN_COMMANDS_FIELDS = Set.of("commands");
     private static final Set<String> POSITION_FIELDS = Set.of("x", "y", "z");
@@ -154,6 +159,9 @@ public final class ApiServer implements AutoCloseable {
             newServer.createContext(
                     "/v1/fill-region",
                     exchange -> handleAudited("fill_region", exchange, this::handleFillRegion));
+            newServer.createContext(
+                    "/v1/set-blocks",
+                    exchange -> handleAudited("set_blocks", exchange, this::handleSetBlocks));
             newServer.createContext(
                     "/v1/undo-last-dirt-edit",
                     exchange -> handleAudited(
@@ -437,6 +445,30 @@ public final class ApiServer implements AutoCloseable {
         }
     }
 
+    private void handleSetBlocks(HttpExchange exchange) throws IOException {
+        if (!authenticate(exchange)) {
+            return;
+        }
+        if (!"POST".equals(exchange.getRequestMethod())) {
+            exchange.getResponseHeaders().set("Allow", "POST");
+            sendError(exchange, 405, "method_not_allowed", "Method must be POST");
+            return;
+        }
+
+        try {
+            SetBlocksRequest request = parseSetBlocksRequest(exchange);
+            exchange.setAttribute(WORLD_ATTRIBUTE, request.world());
+            send(exchange, 200, GSON.toJson(this.regionEditor.setBlocks(request)));
+        } catch (InvalidRequestException exception) {
+            sendError(exchange, 400, "invalid_request", exception.getMessage());
+        } catch (EditException exception) {
+            sendEditError(exchange, exception);
+        } catch (RuntimeException exception) {
+            this.logger.log(Level.SEVERE, "Unexpected set-blocks failure", exception);
+            sendError(exchange, 500, "internal_error", "The blocks could not be set");
+        }
+    }
+
     private boolean authenticate(HttpExchange exchange) throws IOException {
         if (this.authentication.accepts(exchange.getRequestHeaders().getFirst("Authorization"))) {
             return true;
@@ -605,6 +637,45 @@ public final class ApiServer implements AutoCloseable {
         } catch (JsonParseException exception) {
             throw new InvalidRequestException("Request body must contain valid JSON values");
         }
+    }
+
+    private SetBlocksRequest parseSetBlocksRequest(HttpExchange exchange)
+            throws IOException, InvalidRequestException {
+        try {
+            JsonObject object = parseRequestObject(exchange);
+            if (!object.keySet().containsAll(SET_BLOCKS_REQUIRED_FIELDS)
+                    || !SET_BLOCKS_FIELDS.containsAll(object.keySet())) {
+                throw new InvalidRequestException("Request contains missing or unknown fields");
+            }
+            return new SetBlocksRequest(
+                    parseString(object.get("world"), "world"),
+                    parseBlockChanges(object.get("changes")),
+                    object.has("dryRun")
+                            ? parseBoolean(object.get("dryRun"), "dryRun")
+                            : this.settings.defaults().setBlocksDryRun());
+        } catch (JsonParseException exception) {
+            throw new InvalidRequestException("Request body must contain valid JSON values");
+        }
+    }
+
+    private static List<BlockChange> parseBlockChanges(JsonElement element)
+            throws InvalidRequestException {
+        if (element == null || !element.isJsonArray() || element.getAsJsonArray().isEmpty()) {
+            throw new InvalidRequestException("changes must be a non-empty array");
+        }
+        List<BlockChange> changes = new ArrayList<>(element.getAsJsonArray().size());
+        for (int index = 0; index < element.getAsJsonArray().size(); index++) {
+            JsonElement entry = element.getAsJsonArray().get(index);
+            if (!entry.isJsonObject()) {
+                throw new InvalidRequestException("changes[" + index + "] must be an object");
+            }
+            JsonObject object = entry.getAsJsonObject();
+            requireFields(object, BLOCK_CHANGE_FIELDS, "changes[" + index + "]");
+            changes.add(new BlockChange(
+                    parsePosition(object.get("position"), "changes[" + index + "].position"),
+                    parseString(object.get("blockState"), "changes[" + index + "].blockState")));
+        }
+        return List.copyOf(changes);
     }
 
     private JsonObject parseRequestObject(HttpExchange exchange)

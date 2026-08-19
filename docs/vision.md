@@ -28,11 +28,12 @@ inspect region -> describe an edit -> optionally preview -> execute -> inspect -
 
 ## Version 1
 
-V1 provides five world capabilities:
+V1 provides these world capabilities:
 
 - inspect bounded regions as summaries, exact geometry, or sparse orthographic views;
 - replace matching blocks;
-- fill a bounded region; and
+- fill a bounded region;
+- set mixed block states at explicitly listed positions as one edit;
 - undo the most recent Dirt MCP edit in a world; and
 - run an ordered batch of registered Minecraft commands with operator-level
   permissions through a non-player Paper sender.
@@ -53,5 +54,5 @@ remain the operator's responsibility.
 - support for multiple Paper versions.
 
 V1 succeeds when a local MCP client can inspect a region, perform bounded FAWE
-replacements and fills, observe exact results, and undo its last edit without
+replacements, fills, and sparse sets, observe exact results, and undo its last edit without
 requiring Minecraft or FAWE implementation details in the prompt.

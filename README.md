@@ -103,6 +103,7 @@ defaults:
   exact-inspection-mode: blocks
   replace-dry-run: false
   fill-dry-run: false
+  set-blocks-dry-run: false
 ```
 
 The bridge always binds to `127.0.0.1`; do not proxy or expose it publicly. Give
@@ -141,8 +142,13 @@ Once npm publishing exists, a global installation will provide the equivalent
 `dirt-mcp` command. The current tool surface contains `ping_server`,
 `get_server_status`,
 `count_region_block_states`, `get_region_blocks`, `scan_orthographic_view`,
-`replace_region_blocks`, `fill_region`, `undo_last_dirt_edit`, and
+`replace_region_blocks`, `fill_region`, `set_blocks`, `undo_last_dirt_edit`, and
 `run_minecraft_commands`.
+
+`set_blocks` applies distinct explicitly listed positions and block states
+through one FAWE edit session and records the non-empty batch as one Dirt undo
+entry. It validates the complete list and rejects duplicate positions before
+mutation. It does not request Minecraft neighbor physics.
 
 `run_minecraft_commands` accepts a non-empty command array and dispatches it in
 order with console-equivalent permissions. Its Paper sender is not a player, so
@@ -225,7 +231,7 @@ the world.
 validates the built Paper JAR, restarts the managed server, runs live bridge,
 Paper, and FAWE coverage, and rejects serious lifecycle log failures. The live
 suite temporarily force-loads chunk `0,0`, verifies status and inspection paths,
-mutates a bounded fixture through fill and replacement, checks result caps,
+mutates a bounded fixture through fill, replacement, and sparse setting, checks result caps,
 exact block states, no-ops, and undo, then restores the prior world state. Run it
 without concurrent Dirt MCP edits.
 

@@ -322,6 +322,57 @@ Fill requires already-loaded chunks and returns the same edit failures as
 region already in the destination state reports zero changes and records no
 history.
 
+### `set_blocks`
+
+Sets distinct explicit positions to independently chosen block states in one
+sparse mutation. This is the compact operation for mixed-material structures,
+redstone layouts, furniture, and other edits that are not one cuboid fill.
+
+The bridge request is `POST /v1/set-blocks`:
+
+```json
+{
+  "world": "world",
+  "changes": [
+    {
+      "position": { "x": 60, "y": 76, "z": 16 },
+      "blockState": "minecraft:lever[face=floor,facing=west,powered=false]"
+    },
+    {
+      "position": { "x": 61, "y": 76, "z": 16 },
+      "blockState": "minecraft:redstone_wire[power=0]"
+    }
+  ],
+  "dryRun": false
+}
+```
+
+Every entry is validated before editing begins. Positions must be distinct,
+within the loaded world's height range, and located in already-loaded chunks;
+duplicate positions are rejected rather than assigned ordering semantics. Block
+states are canonicalized at the Paper boundary. The number of positions may not
+exceed `max-region-volume`, and the number that differ from the live world may
+not exceed `max-changed-blocks`.
+
+One FAWE edit session applies the complete list and a successful non-empty batch
+becomes one Dirt undo entry. FAWE placement does not request Bukkit neighbor
+physics; recalculating redstone or other physics-sensitive structures remains a
+separate operation. A dry-run returns the same exact counts without mutation or
+history:
+
+```json
+{
+  "world": "world",
+  "dryRun": false,
+  "blockCount": 2,
+  "changedBlockCount": 1,
+  "unchangedBlockCount": 1
+}
+```
+
+Sparse setting returns the same edit failures as `fill_region`. Omitted
+`dryRun` uses the configured set-blocks default.
+
 ### `undo_last_dirt_edit`
 
 Input: loaded world name.
@@ -393,7 +444,8 @@ volume or changed-block limits, per-world mutation lock, or undo history.
 - Unknown worlds, invalid states, oversized regions, and busy worlds produce
   structured errors without mutation.
 - No-op mutations return `changedBlockCount: 0` and do not create undo history.
-- Reads and writes are limited by normalized region volume. Writes are also
+- Cuboid reads and writes are limited by normalized region volume; sparse edits
+  apply the same limit to their number of explicit positions. Writes are also
   limited by their estimated changed-block count.
 - Shipped defaults are a maximum region volume of 1,000,000 blocks, 250,000
   changed blocks per mutation, and 20 undo entries per world. All numeric
@@ -436,6 +488,7 @@ defaults:
   exact-inspection-mode: blocks
   replace-dry-run: false
   fill-dry-run: false
+  set-blocks-dry-run: false
 ```
 
 The bearer token is supplied to both processes as `DIRT_MCP_BRIDGE_TOKEN` and is

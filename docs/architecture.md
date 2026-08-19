@@ -93,8 +93,11 @@ Responses report success only after FAWE has completed and closed its edit
 session.
 
 `replace_region_blocks` and `fill_region` use the same already-loaded-chunk
-rule as inspection, canonicalize Bukkit block-state strings at the Paper
-boundary, and record only successful non-empty edits. Fill counts blocks
+rule as inspection. `set_blocks` checks only the chunks containing its explicit
+positions. All three canonicalize Bukkit block-state strings at the Paper
+boundary and record only successful non-empty edits. Sparse edits reject
+duplicate positions and validate every position, state, and chunk before
+opening their single FAWE edit session. Fill and sparse edits count blocks
 already in the destination state before mutation so dry-runs are exact and the
 changed-block limit is checked before execution.
 `undo_last_dirt_edit` uses the same world lock, applies the newest history entry

@@ -27,10 +27,13 @@ import ca.deliyannides.dirtmcp.paper.server.ServerContext.WorldStatus;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.BlockChange;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRegionRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRegionResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRegionBlocksRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRegionBlocksResult;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.SetBlocksRequest;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.SetBlocksResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoLastDirtEditRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.UndoLastDirtEditResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
@@ -86,7 +89,7 @@ final class ApiServerTest {
                     20,
                     32_768,
                     20),
-            new Defaults(false, "blocks", false, false));
+            new Defaults(false, "blocks", false, false, false));
     private static final RegionInspector UNUSED_INSPECTOR = new TestInspector() {};
     private static final RegionEditor UNUSED_EDITOR = new TestEditor() {};
     private static final CommandRunner UNUSED_COMMAND_RUNNER = request -> {
@@ -173,7 +176,7 @@ final class ApiServerTest {
                             + "\"maxCommandsPerRequest\":20,\"maxCommandFeedbackCharacters\":32768,"
                             + "\"undoHistoryPerWorld\":20},\"defaults\":{\"regionBlocksIncludeAir\":false,"
                             + "\"regionBlocksFormat\":\"blocks\",\"replaceRegionBlocksDryRun\":false,"
-                            + "\"fillRegionDryRun\":false}}",
+                            + "\"fillRegionDryRun\":false,\"setBlocksDryRun\":false}}",
                     response.body());
         }
     }
@@ -478,7 +481,7 @@ final class ApiServerTest {
         PluginSettings settings = new PluginSettings(
                 SETTINGS.bridge(),
                 SETTINGS.limits(),
-                new Defaults(true, "runs", true, true));
+                new Defaults(true, "runs", true, true, true));
         RegionInspector inspector = new TestInspector() {
             @Override
             public RegionBlocksResult getRegionBlocks(RegionBlocksRequest request) {
@@ -518,6 +521,12 @@ final class ApiServerTest {
                         1,
                         0);
             }
+
+            @Override
+            public SetBlocksResult setBlocks(SetBlocksRequest request) {
+                assertTrue(request.dryRun());
+                return new SetBlocksResult(request.world(), true, request.changes().size(), 0, 1);
+            }
         };
 
         try (ApiServer server = server(settings, inspector, editor);
@@ -540,10 +549,17 @@ final class ApiServerTest {
                              "blockState":"minecraft:dirt"}
                             """),
                     HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> set = client.send(
+                    setBlocksRequest(server, """
+                            {"world":"world","changes":[{"position":{"x":0,"y":0,"z":0},
+                             "blockState":"minecraft:dirt"}]}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
 
             assertEquals(200, exact.statusCode());
             assertEquals(200, replace.statusCode());
             assertEquals(200, fill.statusCode());
+            assertEquals(200, set.statusCode());
         }
     }
 
@@ -906,6 +922,73 @@ final class ApiServerTest {
     }
 
     @Test
+    void setsExplicitBlocksWithDryRunDefaultingToFalse() throws Exception {
+        RegionEditor editor = new TestEditor() {
+            @Override
+            public SetBlocksResult setBlocks(SetBlocksRequest request) {
+                assertEquals("world", request.world());
+                assertEquals(
+                        List.of(
+                                new BlockChange(
+                                        new BlockPosition(5, 60, -2),
+                                        "minecraft:oak_planks"),
+                                new BlockChange(
+                                        new BlockPosition(8, 63, 4),
+                                        "minecraft:glass")),
+                        request.changes());
+                assertFalse(request.dryRun());
+                return new SetBlocksResult(request.world(), false, 2, 1, 1);
+            }
+        };
+
+        try (ApiServer server = server(UNUSED_INSPECTOR, editor);
+                HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> response = client.send(
+                    setBlocksRequest(server, """
+                            {"world":"world","changes":[
+                              {"position":{"x":5,"y":60,"z":-2},
+                               "blockState":"minecraft:oak_planks"},
+                              {"position":{"x":8,"y":63,"z":4},
+                               "blockState":"minecraft:glass"}]}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, response.statusCode());
+            assertEquals(
+                    "{\"world\":\"world\",\"dryRun\":false,\"blockCount\":2,"
+                            + "\"changedBlockCount\":1,\"unchangedBlockCount\":1}",
+                    response.body());
+        }
+    }
+
+    @Test
+    void rejectsInvalidSetBlocksFields() throws Exception {
+        try (ApiServer server = server(UNUSED_INSPECTOR, UNUSED_EDITOR);
+                HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> empty = client.send(
+                    setBlocksRequest(server, "{\"world\":\"world\",\"changes\":[]}"),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> unknownEntryField = client.send(
+                    setBlocksRequest(server, """
+                            {"world":"world","changes":[{"position":{"x":0,"y":60,"z":0},
+                             "blockState":"minecraft:stone","extra":true}]}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(400, empty.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"invalid_request\","
+                            + "\"message\":\"changes must be a non-empty array\"}}",
+                    empty.body());
+            assertEquals(400, unknownEntryField.statusCode());
+        }
+    }
+
+    @Test
     void undoesTheLastEdit() throws Exception {
         RegionEditor editor = new TestEditor() {
             @Override
@@ -1154,6 +1237,13 @@ final class ApiServerTest {
                 .build();
     }
 
+    private static HttpRequest setBlocksRequest(ApiServer server, String body) {
+        return authorizedRequest(setBlocksUri(server))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+    }
+
     private static HttpRequest.Builder authorizedRequest(URI uri) {
         return HttpRequest.newBuilder(uri).header("Authorization", "Bearer " + TOKEN);
     }
@@ -1192,6 +1282,10 @@ final class ApiServerTest {
         return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/fill-region");
     }
 
+    private static URI setBlocksUri(ApiServer server) {
+        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/set-blocks");
+    }
+
     private static URI runMinecraftCommandsUri(ApiServer server) {
         return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/run-minecraft-commands");
     }
@@ -1204,6 +1298,11 @@ final class ApiServerTest {
 
         @Override
         public FillRegionResult fillRegion(FillRegionRequest request) throws EditException {
+            throw new AssertionError("Region editor should not be called");
+        }
+
+        @Override
+        public SetBlocksResult setBlocks(SetBlocksRequest request) throws EditException {
             throw new AssertionError("Region editor should not be called");
         }
 

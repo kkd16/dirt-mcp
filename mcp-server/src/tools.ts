@@ -246,6 +246,27 @@ const FillRegionOutputSchema = z.object({
   changedBlockCount: z.number().int().nonnegative().describe('Blocks changed, or that would change in a dry run.'),
 }).strict().describe('Completed or previewed region fill.');
 
+const SetBlocksInputSchema = z.object({
+  world: z.string().min(1).describe('Exact name of an already loaded Paper world.'),
+  changes: z.array(z.object({
+    position: BlockPositionSchema,
+    blockState: z.string().min(1).describe('Canonical block state to write at this position.'),
+  }).strict()).min(1)
+    .describe('Distinct block positions and their destination states. Duplicate positions are rejected.'),
+  dryRun: z.boolean().optional()
+    .describe('Preview exact counts without mutating the world; omission uses the Paper plugin default.'),
+}).strict().describe('One sparse, undoable block edit across explicitly listed positions.');
+
+const SetBlocksOutputSchema = z.object({
+  world: z.string().min(1).describe('Edited world name.'),
+  dryRun: z.boolean().describe('Whether the world was left unchanged.'),
+  blockCount: z.number().int().positive().describe('Distinct positions in the request.'),
+  changedBlockCount: z.number().int().nonnegative()
+    .describe('Blocks changed, or that would change in a dry run.'),
+  unchangedBlockCount: z.number().int().nonnegative()
+    .describe('Blocks already in their requested state.'),
+}).strict().describe('Completed or previewed sparse block edit.');
+
 const UndoLastDirtEditInputSchema = z.object({
   world: z.string().min(1).describe('Exact name of the loaded world whose Dirt edit should be undone.'),
 }).strict().describe('World-scoped Dirt edit history lookup.');
@@ -278,7 +299,7 @@ const RunMinecraftCommandsOutputSchema = z.object({
     command: z.string().min(1).describe('Normalized command dispatched without the in-game leading slash.'),
     outcome: CommandOutcomeSchema.describe('Paper dispatch outcome; dispatched is not a semantic success signal.'),
     feedback: z.array(z.string()).describe('Plain-text feedback emitted synchronously during dispatch.'),
-    message: z.string().nullable().describe('Dispatch failure or skip explanation, otherwise null.'),
+    message: z.string().nullable().describe('Dispatch failure explanation, otherwise null.'),
   }).strict()).min(1).describe('One result per supplied command in the original order.'),
 }).strict().describe('Ordered Paper command dispatch results and bounded feedback.');
 
@@ -294,7 +315,7 @@ const PingServerOutputSchema = z.object({
 }).strict().describe('Successful end-to-end Dirt server health check.');
 
 const LimitConfigurationSchema = z.object({
-  maxRegionVolume: z.number().int().positive().describe('Maximum mutation and count-region volume.'),
+  maxRegionVolume: z.number().int().positive().describe('Maximum cuboid mutation/count volume or explicit positions in set_blocks.'),
   maxChangedBlocks: z.number().int().positive().describe('Maximum blocks one edit may change.'),
   maxRegionBlocksVolume: z.number().int().positive().describe('Maximum get_region_blocks scan volume.'),
   defaultRegionBlocksResultLimit: z.number().int().positive().describe('Default get_region_blocks result limit.'),
@@ -312,6 +333,7 @@ const DefaultConfigurationSchema = z.object({
   regionBlocksFormat: z.enum(['blocks', 'runs']).describe('Default get_region_blocks format.'),
   replaceRegionBlocksDryRun: z.boolean().describe('Default dry-run behavior for replace_region_blocks.'),
   fillRegionDryRun: z.boolean().describe('Default dry-run behavior for fill_region.'),
+  setBlocksDryRun: z.boolean().describe('Default dry-run behavior for set_blocks.'),
 }).strict().describe('Active optional-argument defaults for Dirt tools.');
 
 const ServerStatusSchema = z.object({
@@ -568,9 +590,25 @@ export function registerTools(
     }
   })));
 
+  registrations.push(register('set_blocks', {
+    title: 'Set blocks',
+    description: 'Set distinct explicit positions to individual canonical block states in one FAWE edit and one Dirt undo entry. All entries are validated before mutation; duplicate positions are rejected. Placement does not trigger Minecraft neighbor physics. Set dryRun=true to preview exact counts.',
+    inputSchema: SetBlocksInputSchema,
+    outputSchema: SetBlocksOutputSchema,
+    annotations: MUTATION_ANNOTATIONS,
+  }, async (input, context) => auditToolCall('set_blocks', input.world, context, async (callId) => {
+    try {
+      const result = await bridgeRequest(config, '/v1/set-blocks', callId, SetBlocksOutputSchema, jsonPost(input), 120_000);
+      const verb = result.dryRun ? 'Would change' : 'Changed';
+      return successResult(result, `${verb} ${result.changedBlockCount} of ${result.blockCount} explicitly listed blocks in ${result.world}.`);
+    } catch (error: unknown) {
+      return errorResult(error, 'Could not set blocks');
+    }
+  })));
+
   registrations.push(register('undo_last_dirt_edit', {
     title: 'Undo the last Dirt edit',
-    description: 'Undo the newest successful Dirt replace or fill in one loaded world. History is in-memory and scoped per world.',
+    description: 'Undo the newest successful Dirt replace, fill, or sparse set in one loaded world. History is in-memory and scoped per world.',
     inputSchema: UndoLastDirtEditInputSchema,
     outputSchema: UndoLastDirtEditOutputSchema,
     annotations: UNDO_ANNOTATIONS,
