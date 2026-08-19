@@ -61,6 +61,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -76,20 +77,18 @@ final class ApiServerTest {
     private static final Logger LOGGER = Logger.getLogger(ApiServerTest.class.getName());
     private static final String TOKEN = "test-token-with-at-least-thirty-two-bytes";
     private static final PluginSettings SETTINGS = new PluginSettings(
-            new Bridge(0, 0, 0, 8_192, 32),
+            new Bridge(0, 0, 0, 32),
             new Limits(
+                    262_144,
                     1_000_000,
                     250_000,
                     32_768,
                     321,
                     654,
-                    32_768,
-                    123,
-                    456,
                     20,
                     32_768,
                     20),
-            new Defaults(false, "blocks", false, false, false));
+            new Defaults(false, "blocks", false));
     private static final RegionInspector UNUSED_INSPECTOR = new TestInspector() {};
     private static final RegionEditor UNUSED_EDITOR = new TestEditor() {};
     private static final CommandRunner UNUSED_COMMAND_RUNNER = request -> {
@@ -169,14 +168,13 @@ final class ApiServerTest {
                             + "\"name\":\"world\",\"environment\":\"normal\",\"minY\":-64,\"maxY\":319,"
                             + "\"spawn\":{\"x\":0,\"y\":64,\"z\":0},\"timeOfDay\":6000,"
                             + "\"storm\":false,\"thundering\":false,\"playerCount\":1}],"
-                            + "\"limits\":{\"maxRegionVolume\":1000000,\"maxChangedBlocks\":250000,"
-                            + "\"maxRegionBlocksVolume\":32768,\"defaultRegionBlocksResultLimit\":321,"
-                            + "\"maxRegionBlocksResultLimit\":654,\"maxOrthographicViewVolume\":32768,"
-                            + "\"defaultOrthographicViewResultLimit\":123,\"maxOrthographicViewResultLimit\":456,"
+                            + "\"limits\":{\"maxRequestBytes\":262144,\"maxRegionVolume\":1000000,"
+                            + "\"maxChangedBlocks\":250000,"
+                            + "\"maxInspectionVolume\":32768,\"defaultInspectionResultLimit\":321,"
+                            + "\"maxInspectionResultLimit\":654,"
                             + "\"maxCommandsPerRequest\":20,\"maxCommandFeedbackCharacters\":32768,"
                             + "\"undoHistoryPerWorld\":20},\"defaults\":{\"regionBlocksIncludeAir\":false,"
-                            + "\"regionBlocksFormat\":\"blocks\",\"replaceRegionBlocksDryRun\":false,"
-                            + "\"fillRegionDryRun\":false,\"setBlocksDryRun\":false}}",
+                            + "\"regionBlocksFormat\":\"blocks\",\"editDryRun\":false}}",
                     response.body());
         }
     }
@@ -438,9 +436,19 @@ final class ApiServerTest {
 
     @Test
     void enforcesJsonContentTypeAndRequestSize() throws Exception {
+        Limits standard = SETTINGS.limits();
         PluginSettings settings = new PluginSettings(
-                new Bridge(0, 0, 0, 64, 32),
-                SETTINGS.limits(),
+                SETTINGS.bridge(),
+                new Limits(
+                        64,
+                        standard.maxRegionVolume(),
+                        standard.maxChangedBlocks(),
+                        standard.maxInspectionVolume(),
+                        standard.defaultInspectionResultLimit(),
+                        standard.maxInspectionResultLimit(),
+                        standard.maxCommandsPerRequest(),
+                        standard.maxCommandFeedbackCharacters(),
+                        standard.undoHistoryPerWorld()),
                 SETTINGS.defaults());
         try (ApiServer server = server(settings, UNUSED_INSPECTOR, UNUSED_EDITOR);
                 HttpClient client = HttpClient.newHttpClient()) {
@@ -466,7 +474,7 @@ final class ApiServerTest {
             assertEquals(400, oversized.statusCode());
             assertEquals(
                     "{\"error\":{\"code\":\"invalid_request\","
-                            + "\"message\":\"Request body is too large\"}}",
+                            + "\"message\":\"Request body exceeds the maximum of 64 bytes\"}}",
                     oversized.body());
             assertEquals(400, atLimit.statusCode());
             assertEquals(
@@ -481,7 +489,7 @@ final class ApiServerTest {
         PluginSettings settings = new PluginSettings(
                 SETTINGS.bridge(),
                 SETTINGS.limits(),
-                new Defaults(true, "runs", true, true, true));
+                new Defaults(true, "runs", true));
         RegionInspector inspector = new TestInspector() {
             @Override
             public RegionBlocksResult getRegionBlocks(RegionBlocksRequest request) {
@@ -600,7 +608,7 @@ final class ApiServerTest {
                 assertEquals(1, request.horizontalRadius());
                 assertEquals(1, request.verticalRadius());
                 assertEquals(3, request.maxDistance());
-                assertEquals(123, request.maxResults());
+                assertEquals(321, request.maxResults());
                 return new OrthographicViewResult(
                         request.world(),
                         request.origin(),
@@ -664,7 +672,7 @@ final class ApiServerTest {
                     viewRequest(server, base.formatted("north", -1, "")),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> resultCap = client.send(
-                    viewRequest(server, base.formatted("north", 1, ",\"maxResults\":457")),
+                    viewRequest(server, base.formatted("north", 1, ",\"maxResults\":655")),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> unknown = client.send(
                     viewRequest(server, base.formatted("north", 1, ",\"extra\":true")),
@@ -959,6 +967,43 @@ final class ApiServerTest {
             assertEquals(
                     "{\"world\":\"world\",\"dryRun\":false,\"blockCount\":2,"
                             + "\"changedBlockCount\":1,\"unchangedBlockCount\":1}",
+                    response.body());
+        }
+    }
+
+    @Test
+    void acceptsLargeSparseBatchesWithinTheConfiguredRequestLimit() throws Exception {
+        RegionEditor editor = new TestEditor() {
+            @Override
+            public SetBlocksResult setBlocks(SetBlocksRequest request) {
+                assertEquals(510, request.changes().size());
+                return new SetBlocksResult(request.world(), false, 510, 510, 0);
+            }
+        };
+        StringBuilder body = new StringBuilder("{\"world\":\"world\",\"changes\":[");
+        for (int x = 0; x < 510; x++) {
+            if (x > 0) {
+                body.append(',');
+            }
+            body.append("{\"position\":{\"x\":")
+                    .append(x)
+                    .append(",\"y\":64,\"z\":0},\"blockState\":\"minecraft:stone\"}");
+        }
+        body.append("]}");
+        assertTrue(body.toString().getBytes(StandardCharsets.UTF_8).length > 8_192);
+
+        try (ApiServer server = server(UNUSED_INSPECTOR, editor);
+                HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> response = client.send(
+                    setBlocksRequest(server, body.toString()),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, response.statusCode());
+            assertEquals(
+                    "{\"world\":\"world\",\"dryRun\":false,\"blockCount\":510,"
+                            + "\"changedBlockCount\":510,\"unchangedBlockCount\":0}",
                     response.body());
         }
     }

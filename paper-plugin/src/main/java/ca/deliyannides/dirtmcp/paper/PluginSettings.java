@@ -17,60 +17,68 @@ public record PluginSettings(
             throw new IllegalArgumentException("bridge.port must be between 1 and 65535");
         }
 
-        int maximumRequestBytes = positiveInteger(config, "bridge.max-request-bytes");
+        int maximumRequestBytes = positiveInteger(config, "limits.max-request-bytes");
         if (maximumRequestBytes == Integer.MAX_VALUE) {
             throw new IllegalArgumentException(
-                    "bridge.max-request-bytes must be less than " + Integer.MAX_VALUE);
+                    "limits.max-request-bytes must be less than " + Integer.MAX_VALUE);
         }
 
         Bridge bridge = new Bridge(
                 port,
                 nonNegativeInteger(config, "bridge.backlog"),
                 nonNegativeInteger(config, "bridge.shutdown-delay-seconds"),
-                maximumRequestBytes,
                 positiveInteger(config, "bridge.minimum-token-bytes"));
 
-        int maximumRegionBlocksResults = positiveInteger(config, "limits.max-exact-results");
-        int defaultRegionBlocksResults = positiveInteger(config, "limits.default-exact-results");
+        int maximumRegionVolume = positiveInteger(config, "limits.max-region-volume");
+        int maximumChangedBlocks = positiveInteger(config, "limits.max-changed-blocks");
+        int maximumInspectionVolume = positiveInteger(
+                config, "limits.max-inspection-volume");
+        int maximumInspectionResults = positiveInteger(
+                config, "limits.max-inspection-results");
+        int defaultInspectionResults = positiveInteger(
+                config, "limits.default-inspection-results");
         requireAtMost(
-                "limits.default-exact-results",
-                defaultRegionBlocksResults,
-                "limits.max-exact-results",
-                maximumRegionBlocksResults);
-
-        int maximumOrthographicViewResults = positiveInteger(config, "limits.max-view-results");
-        int defaultOrthographicViewResults = positiveInteger(config, "limits.default-view-results");
+                "limits.max-changed-blocks",
+                maximumChangedBlocks,
+                "limits.max-region-volume",
+                maximumRegionVolume);
         requireAtMost(
-                "limits.default-view-results",
-                defaultOrthographicViewResults,
-                "limits.max-view-results",
-                maximumOrthographicViewResults);
+                "limits.max-inspection-volume",
+                maximumInspectionVolume,
+                "limits.max-region-volume",
+                maximumRegionVolume);
+        requireAtMost(
+                "limits.default-inspection-results",
+                defaultInspectionResults,
+                "limits.max-inspection-results",
+                maximumInspectionResults);
+        requireAtMost(
+                "limits.max-inspection-results",
+                maximumInspectionResults,
+                "limits.max-inspection-volume",
+                maximumInspectionVolume);
 
         Limits limits = new Limits(
-                positiveInteger(config, "limits.max-region-volume"),
-                positiveInteger(config, "limits.max-changed-blocks"),
-                positiveInteger(config, "limits.max-exact-inspection-volume"),
-                defaultRegionBlocksResults,
-                maximumRegionBlocksResults,
-                positiveInteger(config, "limits.max-view-volume"),
-                defaultOrthographicViewResults,
-                maximumOrthographicViewResults,
+                maximumRequestBytes,
+                maximumRegionVolume,
+                maximumChangedBlocks,
+                maximumInspectionVolume,
+                defaultInspectionResults,
+                maximumInspectionResults,
                 positiveInteger(config, "limits.max-commands-per-request"),
                 positiveInteger(config, "limits.max-command-feedback-characters"),
                 nonNegativeInteger(config, "limits.undo-history-per-world"));
 
-        String regionBlocksFormat = requiredString(config, "defaults.exact-inspection-mode")
+        String regionBlocksFormat = requiredString(config, "defaults.region-blocks-format")
                 .toLowerCase(Locale.ROOT);
         if (!REGION_BLOCKS_FORMATS.contains(regionBlocksFormat)) {
             throw new IllegalArgumentException(
-                    "defaults.exact-inspection-mode must be blocks or runs");
+                    "defaults.region-blocks-format must be blocks or runs");
         }
         Defaults defaults = new Defaults(
-                requiredBoolean(config, "defaults.exact-inspection-include-air"),
+                requiredBoolean(config, "defaults.region-blocks-include-air"),
                 regionBlocksFormat,
-                requiredBoolean(config, "defaults.replace-dry-run"),
-                requiredBoolean(config, "defaults.fill-dry-run"),
-                requiredBoolean(config, "defaults.set-blocks-dry-run"));
+                requiredBoolean(config, "defaults.edit-dry-run"));
 
         return new PluginSettings(bridge, limits, defaults);
     }
@@ -147,18 +155,15 @@ public record PluginSettings(
             int port,
             int backlog,
             int shutdownDelaySeconds,
-            int maxRequestBytes,
             int minimumTokenBytes) {}
 
     public record Limits(
+            int maxRequestBytes,
             int maxRegionVolume,
             int maxChangedBlocks,
-            int maxRegionBlocksVolume,
-            int defaultRegionBlocksResultLimit,
-            int maxRegionBlocksResultLimit,
-            int maxOrthographicViewVolume,
-            int defaultOrthographicViewResultLimit,
-            int maxOrthographicViewResultLimit,
+            int maxInspectionVolume,
+            int defaultInspectionResultLimit,
+            int maxInspectionResultLimit,
             int maxCommandsPerRequest,
             int maxCommandFeedbackCharacters,
             int undoHistoryPerWorld) {}
@@ -166,7 +171,5 @@ public record PluginSettings(
     public record Defaults(
             boolean regionBlocksIncludeAir,
             String regionBlocksFormat,
-            boolean replaceRegionBlocksDryRun,
-            boolean fillRegionDryRun,
-            boolean setBlocksDryRun) {}
+            boolean editDryRun) {}
 }

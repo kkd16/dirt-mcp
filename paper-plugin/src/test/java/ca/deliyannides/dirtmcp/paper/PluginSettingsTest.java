@@ -16,22 +16,20 @@ final class PluginSettingsTest {
     void loadsEveryShippedConfigurationValue() {
         PluginSettings settings = PluginSettings.load(defaultConfiguration(), null);
 
-        assertEquals(new Bridge(8_765, 0, 0, 8_192, 32), settings.bridge());
+        assertEquals(new Bridge(8_765, 0, 0, 32), settings.bridge());
         assertEquals(
                 new Limits(
-                        1_000_000,
-                        250_000,
-                        32_768,
-                        10_000,
-                        10_000,
-                        32_768,
+                        262_144,
+                        262_144,
+                        65_536,
+                        16_384,
+                        512,
                         2_048,
-                        10_000,
-                        20,
-                        32_768,
+                        10,
+                        8_192,
                         20),
                 settings.limits());
-        assertEquals(new Defaults(false, "blocks", false, false, false), settings.defaults());
+        assertEquals(new Defaults(false, "blocks", false), settings.defaults());
     }
 
     @Test
@@ -39,23 +37,33 @@ final class PluginSettingsTest {
         PluginSettings settings = PluginSettings.load(defaultConfiguration(), " 9876 ");
 
         assertEquals(9_876, settings.bridge().port());
-        assertEquals(8_192, settings.bridge().maxRequestBytes());
+        assertEquals(262_144, settings.limits().maxRequestBytes());
     }
 
     @Test
     void rejectsMissingInvalidAndInconsistentValues() {
         YamlConfiguration missing = defaultConfiguration();
-        missing.set("bridge.max-request-bytes", null);
+        missing.set("limits.max-request-bytes", null);
         YamlConfiguration invalidMode = defaultConfiguration();
-        invalidMode.set("defaults.exact-inspection-mode", "summary");
+        invalidMode.set("defaults.region-blocks-format", "summary");
         YamlConfiguration inconsistentResults = defaultConfiguration();
-        inconsistentResults.set("limits.default-view-results", 10_001);
+        inconsistentResults.set("limits.default-inspection-results", 2_049);
+        YamlConfiguration inconsistentChangedBlocks = defaultConfiguration();
+        inconsistentChangedBlocks.set("limits.max-changed-blocks", 262_145);
+        YamlConfiguration inconsistentInspection = defaultConfiguration();
+        inconsistentInspection.set("limits.max-inspection-results", 16_385);
 
         assertThrows(IllegalArgumentException.class, () -> PluginSettings.load(missing, null));
         assertThrows(IllegalArgumentException.class, () -> PluginSettings.load(invalidMode, null));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> PluginSettings.load(inconsistentResults, null));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> PluginSettings.load(inconsistentChangedBlocks, null));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> PluginSettings.load(inconsistentInspection, null));
     }
 
     private static YamlConfiguration defaultConfiguration() {

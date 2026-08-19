@@ -109,14 +109,12 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       playerCount: 1,
     }],
     limits: {
+        maxRequestBytes: 262_144,
         maxRegionVolume: 1_000_000,
         maxChangedBlocks: 250_000,
-        maxRegionBlocksVolume: 32_768,
-        defaultRegionBlocksResultLimit: 10_000,
-        maxRegionBlocksResultLimit: 10_000,
-        maxOrthographicViewVolume: 32_768,
-        defaultOrthographicViewResultLimit: 2_048,
-        maxOrthographicViewResultLimit: 10_000,
+        maxInspectionVolume: 32_768,
+        defaultInspectionResultLimit: 512,
+        maxInspectionResultLimit: 2_048,
         maxCommandsPerRequest: 20,
         maxCommandFeedbackCharacters: 32_768,
         undoHistoryPerWorld: 20,
@@ -124,9 +122,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     defaults: {
         regionBlocksIncludeAir: false,
         regionBlocksFormat: 'blocks',
-        replaceRegionBlocksDryRun: false,
-        fillRegionDryRun: false,
-        setBlocksDryRun: false,
+        editDryRun: false,
     },
   };
   const regionBlocks = {

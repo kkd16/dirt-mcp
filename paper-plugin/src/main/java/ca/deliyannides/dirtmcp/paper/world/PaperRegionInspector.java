@@ -48,31 +48,23 @@ public final class PaperRegionInspector implements RegionInspector {
 
     private final JavaPlugin plugin;
     private final long maxRegionVolume;
-    private final long maxRegionBlocksVolume;
-    private final int maxRegionBlocksResults;
-    private final long maxOrthographicViewVolume;
-    private final int maxOrthographicViewResults;
+    private final long maxInspectionVolume;
+    private final int maxInspectionResults;
 
     public PaperRegionInspector(
             JavaPlugin plugin,
             long maxRegionVolume,
-            long maxRegionBlocksVolume,
-            int maxRegionBlocksResults,
-            long maxOrthographicViewVolume,
-            int maxOrthographicViewResults) {
+            long maxInspectionVolume,
+            int maxInspectionResults) {
         if (maxRegionVolume < 1
-                || maxRegionBlocksVolume < 1
-                || maxRegionBlocksResults < 1
-                || maxOrthographicViewVolume < 1
-                || maxOrthographicViewResults < 1) {
+                || maxInspectionVolume < 1
+                || maxInspectionResults < 1) {
             throw new IllegalArgumentException("Inspection limits must be positive");
         }
         this.plugin = plugin;
         this.maxRegionVolume = maxRegionVolume;
-        this.maxRegionBlocksVolume = maxRegionBlocksVolume;
-        this.maxRegionBlocksResults = maxRegionBlocksResults;
-        this.maxOrthographicViewVolume = maxOrthographicViewVolume;
-        this.maxOrthographicViewResults = maxOrthographicViewResults;
+        this.maxInspectionVolume = maxInspectionVolume;
+        this.maxInspectionResults = maxInspectionResults;
     }
 
     @Override
@@ -92,14 +84,14 @@ public final class PaperRegionInspector implements RegionInspector {
 
     @Override
     public RegionBlocksResult getRegionBlocks(RegionBlocksRequest request) throws InspectionException {
-        if (request.maxResults() < 1 || request.maxResults() > this.maxRegionBlocksResults) {
+        if (request.maxResults() < 1 || request.maxResults() > this.maxInspectionResults) {
             throw new InspectionException(
                     Failure.INVALID_REQUEST,
-                    "maxResults must be between 1 and " + this.maxRegionBlocksResults);
+                    "maxResults must be between 1 and " + this.maxInspectionResults);
         }
 
         NormalizedRegion region = normalizeRegionBlocks(
-                request, this.maxRegionVolume, this.maxRegionBlocksVolume);
+                request, this.maxRegionVolume, this.maxInspectionVolume);
         WorldCapture capture = capture(
                 request.world(),
                 region,
@@ -133,8 +125,8 @@ public final class PaperRegionInspector implements RegionInspector {
         ViewGeometry geometry = normalizeOrthographicView(
                 request,
                 this.maxRegionVolume,
-                this.maxOrthographicViewVolume,
-                this.maxOrthographicViewResults);
+                this.maxInspectionVolume,
+                this.maxInspectionResults);
         WorldCapture capture = capture(request.world(), geometry.region(), List.of(), List.of());
         List<ViewBlock> blocks = collectViewBlocks(
                 request,
@@ -165,19 +157,19 @@ public final class PaperRegionInspector implements RegionInspector {
     static NormalizedRegion normalizeRegionBlocks(
             RegionBlocksRequest request,
             long maxRegionVolume,
-            long maxRegionBlocksVolume)
+            long maxInspectionVolume)
             throws InspectionException {
         return normalize(
                 request.min(),
                 request.max(),
-                Math.min(maxRegionVolume, maxRegionBlocksVolume));
+                Math.min(maxRegionVolume, maxInspectionVolume));
     }
 
     static ViewGeometry normalizeOrthographicView(
             OrthographicViewRequest request,
             long maxRegionVolume,
-            long maxOrthographicViewVolume,
-            int maxOrthographicViewResults)
+            long maxInspectionVolume,
+            int maxInspectionResults)
             throws InspectionException {
         if (request.direction() == null) {
             throw new InspectionException(Failure.INVALID_REQUEST, "direction is required");
@@ -190,13 +182,13 @@ public final class PaperRegionInspector implements RegionInspector {
         if (request.maxDistance() < 1) {
             throw new InspectionException(Failure.INVALID_REQUEST, "maxDistance must be positive");
         }
-        if (request.maxResults() < 1 || request.maxResults() > maxOrthographicViewResults) {
+        if (request.maxResults() < 1 || request.maxResults() > maxInspectionResults) {
             throw new InspectionException(
                     Failure.INVALID_REQUEST,
-                    "maxResults must be between 1 and " + maxOrthographicViewResults);
+                    "maxResults must be between 1 and " + maxInspectionResults);
         }
 
-        long maximum = Math.min(maxRegionVolume, maxOrthographicViewVolume);
+        long maximum = Math.min(maxRegionVolume, maxInspectionVolume);
         long horizontalSize = 2L * request.horizontalRadius() + 1;
         long verticalSize = 2L * request.verticalRadius() + 1;
         BigInteger requestedVolume = BigInteger.valueOf(horizontalSize)

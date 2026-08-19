@@ -35,10 +35,8 @@ public final class DirtMcpPlugin extends JavaPlugin {
                 new PaperRegionInspector(
                         this,
                         limits.maxRegionVolume(),
-                        limits.maxRegionBlocksVolume(),
-                        limits.maxRegionBlocksResultLimit(),
-                        limits.maxOrthographicViewVolume(),
-                        limits.maxOrthographicViewResultLimit()),
+                        limits.maxInspectionVolume(),
+                        limits.maxInspectionResultLimit()),
                 new FaweRegionEditor(
                         this,
                         limits.maxRegionVolume(),

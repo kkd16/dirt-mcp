@@ -1237,18 +1237,21 @@ components:
       type: object
       additionalProperties: false
       required:
+        - maxRequestBytes
         - maxRegionVolume
         - maxChangedBlocks
-        - maxRegionBlocksVolume
-        - defaultRegionBlocksResultLimit
-        - maxRegionBlocksResultLimit
-        - maxOrthographicViewVolume
-        - defaultOrthographicViewResultLimit
-        - maxOrthographicViewResultLimit
+        - maxInspectionVolume
+        - defaultInspectionResultLimit
+        - maxInspectionResultLimit
         - maxCommandsPerRequest
         - maxCommandFeedbackCharacters
         - undoHistoryPerWorld
       properties:
+        maxRequestBytes:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Maximum JSON request-body size accepted by the bridge.
         maxRegionVolume:
           type: integer
           format: int32
@@ -1258,30 +1261,22 @@ components:
           type: integer
           format: int32
           minimum: 1
-        maxRegionBlocksVolume:
+          description: Maximum blocks one mutation may change.
+        maxInspectionVolume:
           type: integer
           format: int32
           minimum: 1
-        defaultRegionBlocksResultLimit:
+          description: Maximum blocks scanned by exact block retrieval or an orthographic view.
+        defaultInspectionResultLimit:
           type: integer
           format: int32
           minimum: 1
-        maxRegionBlocksResultLimit:
+          description: Default exact-block, run, or visible-block result limit.
+        maxInspectionResultLimit:
           type: integer
           format: int32
           minimum: 1
-        maxOrthographicViewVolume:
-          type: integer
-          format: int32
-          minimum: 1
-        defaultOrthographicViewResultLimit:
-          type: integer
-          format: int32
-          minimum: 1
-        maxOrthographicViewResultLimit:
-          type: integer
-          format: int32
-          minimum: 1
+          description: Maximum caller-selectable exact-block, run, or visible-block result limit.
         maxCommandsPerRequest:
           type: integer
           format: int32
@@ -1300,9 +1295,7 @@ components:
       required:
         - regionBlocksIncludeAir
         - regionBlocksFormat
-        - replaceRegionBlocksDryRun
-        - fillRegionDryRun
-        - setBlocksDryRun
+        - editDryRun
       properties:
         regionBlocksIncludeAir:
           type: boolean
@@ -1311,12 +1304,9 @@ components:
           enum:
             - blocks
             - runs
-        replaceRegionBlocksDryRun:
+        editDryRun:
           type: boolean
-        fillRegionDryRun:
-          type: boolean
-        setBlocksDryRun:
-          type: boolean
+          description: Default dry-run behavior for every Dirt block-edit tool.
     PingResponse:
       type: object
       additionalProperties: false

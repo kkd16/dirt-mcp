@@ -56,7 +56,9 @@ Java implementation, TypeScript tool, validation, and tests.
 
 ## Inspection execution
 
-Region inspection never loads or generates terrain. The plugin verifies that
+Region inspection never loads or generates terrain. Exact block retrieval and
+orthographic views share one detailed-inspection volume limit and one default
+and maximum result limit. The plugin verifies that
 every intersecting chunk is already loaded and captures thread-safe Paper chunk
 snapshots on the main server thread. It counts summary states, extracts exact
 filtered geometry, or scans the nearest non-air block along each sightline of a

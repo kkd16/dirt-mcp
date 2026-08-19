@@ -2,36 +2,40 @@
 # after changing this file. The authenticated server-status endpoint reports
 # active values but never reports the bearer token.
 # The bridge always listens on 127.0.0.1 while the plugin is enabled.
-# DIRT_MCP_BRIDGE_PORT overrides this value.
 bridge:
+  # HTTP port on 127.0.0.1. DIRT_MCP_BRIDGE_PORT overrides this value.
   port: 8765
   # Zero asks the operating system to choose its normal HTTP connection backlog.
   backlog: 0
   # Seconds that the HTTP server allows active exchanges to finish during shutdown.
   shutdown-delay-seconds: 0
-  max-request-bytes: 8192
   # Lowering this below 32 weakens bearer-token security.
   minimum-token-bytes: 32
 
 limits:
-  max-region-volume: 1000000
-  max-changed-blocks: 250000
-  max-exact-inspection-volume: 32768
-  default-exact-results: 10000
-  max-exact-results: 10000
-  max-view-volume: 32768
-  default-view-results: 2048
-  max-view-results: 10000
-  # Commands run sequentially on Paper's main thread, so keep batches bounded.
-  max-commands-per-request: 20
-  # Total plain-text command feedback retained across one request.
-  max-command-feedback-characters: 32768
+  # Maximum JSON request body. Oversized requests fail before parsing or mutation.
+  max-request-bytes: 262144
+  # Maximum inclusive cuboid volume or explicit positions in one operation.
+  max-region-volume: 262144
+  # Maximum blocks one mutation may change.
+  max-changed-blocks: 65536
+  # Maximum blocks scanned by exact block retrieval or an orthographic view.
+  max-inspection-volume: 16384
+  # Result limit used when a detailed inspection omits maxResults.
+  default-inspection-results: 512
+  # Highest maxResults accepted for a detailed inspection.
+  max-inspection-results: 2048
+  # Maximum commands accepted in one ordered batch.
+  max-commands-per-request: 10
+  # Maximum plain-text command feedback retained across one request.
+  max-command-feedback-characters: 8192
   # Zero disables retaining undo entries while leaving edit tools enabled.
   undo-history-per-world: 20
 
 defaults:
-  exact-inspection-include-air: false
-  exact-inspection-mode: blocks
-  replace-dry-run: false
-  fill-dry-run: false
-  set-blocks-dry-run: false
+  # Whether get_region_blocks includes air-family states when includeAir is omitted.
+  region-blocks-include-air: false
+  # get_region_blocks format used when format is omitted: blocks or runs.
+  region-blocks-format: blocks
+  # Dry-run value used when a block-edit request omits dryRun.
+why  edit-dry-run: false

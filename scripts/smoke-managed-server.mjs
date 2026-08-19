@@ -167,14 +167,11 @@ try {
   assert.ok(serverStatus.builds.fawe.length > 0);
   assert.ok(serverStatus.performance.tpsOneMinute >= 0);
   assert.ok(serverStatus.worlds.some((entry) => entry.name === world));
+  assert.ok(serverStatus.limits.maxRequestBytes > 0);
   assert.ok(serverStatus.limits.maxRegionVolume > 0);
   assert.ok(
-    serverStatus.limits.defaultRegionBlocksResultLimit
-      <= serverStatus.limits.maxRegionBlocksResultLimit,
-  );
-  assert.ok(
-    serverStatus.limits.defaultOrthographicViewResultLimit
-      <= serverStatus.limits.maxOrthographicViewResultLimit,
+    serverStatus.limits.defaultInspectionResultLimit
+      <= serverStatus.limits.maxInspectionResultLimit,
   );
   assert.ok(serverStatus.limits.maxCommandsPerRequest > 0);
   assert.ok(serverStatus.limits.maxCommandFeedbackCharacters > 0);

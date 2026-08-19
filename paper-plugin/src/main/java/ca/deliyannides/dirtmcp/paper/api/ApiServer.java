@@ -502,11 +502,11 @@ public final class ApiServer implements AutoCloseable {
             }
             int maxResults = object.has("maxResults")
                     ? parseInteger(object.get("maxResults"), "maxResults")
-                    : this.settings.limits().defaultRegionBlocksResultLimit();
-            if (maxResults < 1 || maxResults > this.settings.limits().maxRegionBlocksResultLimit()) {
+                    : this.settings.limits().defaultInspectionResultLimit();
+            if (maxResults < 1 || maxResults > this.settings.limits().maxInspectionResultLimit()) {
                 throw new InvalidRequestException(
                         "maxResults must be between 1 and "
-                                + this.settings.limits().maxRegionBlocksResultLimit());
+                                + this.settings.limits().maxInspectionResultLimit());
             }
             return new RegionBlocksRequest(
                     parseString(object.get("world"), "world"),
@@ -547,7 +547,7 @@ public final class ApiServer implements AutoCloseable {
             int maxDistance = parseInteger(object.get("maxDistance"), "maxDistance");
             int maxResults = object.has("maxResults")
                     ? parseInteger(object.get("maxResults"), "maxResults")
-                    : this.settings.limits().defaultOrthographicViewResultLimit();
+                    : this.settings.limits().defaultInspectionResultLimit();
             if (horizontalRadius < 0 || verticalRadius < 0) {
                 throw new InvalidRequestException(
                         "horizontalRadius and verticalRadius must be non-negative");
@@ -556,10 +556,10 @@ public final class ApiServer implements AutoCloseable {
                 throw new InvalidRequestException("maxDistance must be positive");
             }
             if (maxResults < 1
-                    || maxResults > this.settings.limits().maxOrthographicViewResultLimit()) {
+                    || maxResults > this.settings.limits().maxInspectionResultLimit()) {
                 throw new InvalidRequestException(
                         "maxResults must be between 1 and "
-                                + this.settings.limits().maxOrthographicViewResultLimit());
+                                + this.settings.limits().maxInspectionResultLimit());
             }
             return new OrthographicViewRequest(
                     parseString(object.get("world"), "world"),
@@ -590,7 +590,7 @@ public final class ApiServer implements AutoCloseable {
                     parseString(object.get("destinationBlockState"), "destinationBlockState"),
                     object.has("dryRun")
                             ? parseBoolean(object.get("dryRun"), "dryRun")
-                            : this.settings.defaults().replaceRegionBlocksDryRun());
+                            : this.settings.defaults().editDryRun());
         } catch (JsonParseException | NumberFormatException | ArithmeticException exception) {
             throw new InvalidRequestException("Request body must contain valid JSON values");
         }
@@ -622,7 +622,7 @@ public final class ApiServer implements AutoCloseable {
                     parseString(object.get("blockState"), "blockState"),
                     object.has("dryRun")
                             ? parseBoolean(object.get("dryRun"), "dryRun")
-                            : this.settings.defaults().fillRegionDryRun());
+                            : this.settings.defaults().editDryRun());
         } catch (JsonParseException | NumberFormatException | ArithmeticException exception) {
             throw new InvalidRequestException("Request body must contain valid JSON values");
         }
@@ -652,7 +652,7 @@ public final class ApiServer implements AutoCloseable {
                     parseBlockChanges(object.get("changes")),
                     object.has("dryRun")
                             ? parseBoolean(object.get("dryRun"), "dryRun")
-                            : this.settings.defaults().setBlocksDryRun());
+                            : this.settings.defaults().editDryRun());
         } catch (JsonParseException exception) {
             throw new InvalidRequestException("Request body must contain valid JSON values");
         }
@@ -685,10 +685,11 @@ public final class ApiServer implements AutoCloseable {
                 || !contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT).equals("application/json")) {
             throw new InvalidRequestException("Content-Type must be application/json");
         }
-        int maximumRequestBytes = this.settings.bridge().maxRequestBytes();
+        int maximumRequestBytes = this.settings.limits().maxRequestBytes();
         byte[] body = exchange.getRequestBody().readNBytes(maximumRequestBytes + 1);
         if (body.length > maximumRequestBytes) {
-            throw new InvalidRequestException("Request body is too large");
+            throw new InvalidRequestException(
+                    "Request body exceeds the maximum of " + maximumRequestBytes + " bytes");
         }
         JsonElement document = JsonParser.parseString(new String(body, StandardCharsets.UTF_8));
         if (!document.isJsonObject()) {

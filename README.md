@@ -67,28 +67,23 @@ bridge:
   port: 8765
   backlog: 0
   shutdown-delay-seconds: 0
-  max-request-bytes: 8192
   minimum-token-bytes: 32
 
 limits:
-  max-region-volume: 1000000
-  max-changed-blocks: 250000
-  max-exact-inspection-volume: 32768
-  default-exact-results: 10000
-  max-exact-results: 10000
-  max-view-volume: 32768
-  default-view-results: 2048
-  max-view-results: 10000
-  max-commands-per-request: 20
-  max-command-feedback-characters: 32768
+  max-request-bytes: 262144
+  max-region-volume: 262144
+  max-changed-blocks: 65536
+  max-inspection-volume: 16384
+  default-inspection-results: 512
+  max-inspection-results: 2048
+  max-commands-per-request: 10
+  max-command-feedback-characters: 8192
   undo-history-per-world: 20
 
 defaults:
-  exact-inspection-include-air: false
-  exact-inspection-mode: blocks
-  replace-dry-run: false
-  fill-dry-run: false
-  set-blocks-dry-run: false
+  region-blocks-include-air: false
+  region-blocks-format: blocks
+  edit-dry-run: false
 ```
 
 The bridge always binds to `127.0.0.1`; do not proxy or expose it publicly. Give
@@ -133,7 +128,8 @@ selection and execution semantics, and the
 `set_blocks` applies distinct explicitly listed positions and block states
 through one FAWE edit session and records the non-empty batch as one Dirt undo
 entry. It validates the complete list and rejects duplicate positions before
-mutation. It does not request Minecraft neighbor physics.
+mutation. The shipped 256 KiB request limit supports coherent sparse batches
+while bounding request memory. It does not request Minecraft neighbor physics.
 
 `run_minecraft_commands` accepts a non-empty command array and dispatches it in
 order with console-equivalent permissions. Its Paper sender is not a player, so

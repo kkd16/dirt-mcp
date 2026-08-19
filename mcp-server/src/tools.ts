@@ -61,7 +61,7 @@ const GetRegionBlocksInputSchema = z.object({
   includeAir: z.boolean().optional()
     .describe('Whether air-family states may match; omission uses the Paper plugin default.'),
   maxResults: z.number().int().min(1).max(INT32_MAX).optional()
-    .describe('Maximum returned blocks or runs. Results are never truncated: exceeding this limit fails the call.'),
+    .describe('Maximum returned blocks or runs, bounded by get_server_status.limits.maxInspectionResultLimit. Results fail instead of truncating.'),
   format: z.enum(['blocks', 'runs']).optional()
     .describe('blocks returns individual positions; runs returns lossless axis-aligned spans. Omission uses the plugin default.'),
 }).strict().describe('Filters and return format for exact region block data.');
@@ -107,7 +107,7 @@ const ScanOrthographicViewInputSchema = z.object({
   maxDistance: z.number().int().min(1).max(INT32_MAX)
     .describe('Maximum forward scan distance; distance 1 is adjacent to origin.'),
   maxResults: z.number().int().min(1).max(INT32_MAX).optional()
-    .describe('Maximum visible blocks. Results are never truncated: exceeding this limit fails the call.'),
+    .describe('Maximum visible blocks, bounded by get_server_status.limits.maxInspectionResultLimit. Results fail instead of truncating.'),
   format: z.enum(['blocks', 'grid']).optional().default('blocks')
     .describe('blocks returns explicit positions; grid returns compact lossless palette and distance matrices.'),
 }).strict().describe('Bounded orthographic sightlines to scan for their first non-air blocks.');
@@ -317,14 +317,16 @@ const PingServerOutputSchema = z.object({
 }).strict().describe('Successful end-to-end Dirt server health check.');
 
 const LimitConfigurationSchema = z.object({
+  maxRequestBytes: z.number().int().positive()
+    .describe('Maximum JSON request-body size accepted by the bridge.'),
   maxRegionVolume: z.number().int().positive().describe('Maximum cuboid mutation/count volume or explicit positions in set_blocks.'),
   maxChangedBlocks: z.number().int().positive().describe('Maximum blocks one edit may change.'),
-  maxRegionBlocksVolume: z.number().int().positive().describe('Maximum get_region_blocks scan volume.'),
-  defaultRegionBlocksResultLimit: z.number().int().positive().describe('Default get_region_blocks result limit.'),
-  maxRegionBlocksResultLimit: z.number().int().positive().describe('Maximum get_region_blocks result limit.'),
-  maxOrthographicViewVolume: z.number().int().positive().describe('Maximum orthographic scan volume.'),
-  defaultOrthographicViewResultLimit: z.number().int().positive().describe('Default orthographic visible-block limit.'),
-  maxOrthographicViewResultLimit: z.number().int().positive().describe('Maximum orthographic visible-block limit.'),
+  maxInspectionVolume: z.number().int().positive()
+    .describe('Maximum blocks scanned by get_region_blocks or scan_orthographic_view.'),
+  defaultInspectionResultLimit: z.number().int().positive()
+    .describe('Default block, run, or visible-block result limit for detailed inspections.'),
+  maxInspectionResultLimit: z.number().int().positive()
+    .describe('Maximum caller-selectable result limit for detailed inspections.'),
   maxCommandsPerRequest: z.number().int().positive().describe('Maximum commands accepted in one ordered batch.'),
   maxCommandFeedbackCharacters: z.number().int().positive().describe('Maximum plain-text feedback characters retained per command batch.'),
   undoHistoryPerWorld: z.number().int().nonnegative().describe('In-memory Dirt undo entries retained per world.'),
@@ -333,9 +335,7 @@ const LimitConfigurationSchema = z.object({
 const DefaultConfigurationSchema = z.object({
   regionBlocksIncludeAir: z.boolean().describe('Default air inclusion for get_region_blocks.'),
   regionBlocksFormat: z.enum(['blocks', 'runs']).describe('Default get_region_blocks format.'),
-  replaceRegionBlocksDryRun: z.boolean().describe('Default dry-run behavior for replace_region_blocks.'),
-  fillRegionDryRun: z.boolean().describe('Default dry-run behavior for fill_region.'),
-  setBlocksDryRun: z.boolean().describe('Default dry-run behavior for set_blocks.'),
+  editDryRun: z.boolean().describe('Default dry-run behavior for every Dirt block-edit tool.'),
 }).strict().describe('Active optional-argument defaults for Dirt tools.');
 
 const ServerStatusSchema = z.object({
@@ -523,7 +523,7 @@ export function registerTools(
 
   registrations.push(register('get_region_blocks', {
     title: 'Get region blocks',
-    description: 'Return filtered exact blocks or lossless runs from an inclusive region. Results fail rather than truncate when maxResults is exceeded.',
+    description: 'Return filtered exact blocks or lossless runs from an inclusive region. Use filters and runs to keep output compact. Active scan and result ceilings are reported by get_server_status; results fail rather than truncate.',
     inputSchema: GetRegionBlocksInputSchema,
     outputSchema: GetRegionBlocksOutputSchema,
     annotations: READ_WORLD_ANNOTATIONS,
@@ -540,7 +540,7 @@ export function registerTools(
 
   registrations.push(register('scan_orthographic_view', {
     title: 'Scan an orthographic view',
-    description: 'Return the first non-air block on each bounded world-axis sightline. Choose blocks for explicit positions or grid for compact lossless matrices.',
+    description: 'Return the first non-air block on each bounded world-axis sightline. Prefer grid for larger views. Active scan and result ceilings are reported by get_server_status.',
     inputSchema: ScanOrthographicViewInputSchema,
     outputSchema: ScanOrthographicViewOutputSchema,
     annotations: READ_WORLD_ANNOTATIONS,
@@ -594,7 +594,7 @@ export function registerTools(
 
   registrations.push(register('set_blocks', {
     title: 'Set blocks',
-    description: 'Set distinct explicit positions to individual canonical block states in one FAWE edit and one Dirt undo entry. All entries are validated before mutation; duplicate positions are rejected. Placement does not trigger Minecraft neighbor physics. Set dryRun=true to preview exact counts.',
+    description: 'Set distinct explicit positions to individual canonical block states in one FAWE edit and one Dirt undo entry. All entries are validated before mutation; duplicate positions are rejected. Keep the encoded request within get_server_status.limits.maxRequestBytes. Placement does not trigger Minecraft neighbor physics. Set dryRun=true to preview exact counts.',
     inputSchema: SetBlocksInputSchema,
     outputSchema: SetBlocksOutputSchema,
     annotations: MUTATION_ANNOTATIONS,
