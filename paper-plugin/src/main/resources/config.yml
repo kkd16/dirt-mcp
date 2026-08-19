@@ -22,6 +22,10 @@ limits:
   max-view-volume: 32768
   default-view-results: 2048
   max-view-results: 10000
+  # Commands run sequentially on Paper's main thread, so keep batches bounded.
+  max-commands-per-request: 20
+  # Total plain-text command feedback retained across one request.
+  max-command-feedback-characters: 32768
   # Zero disables retaining undo entries while leaving edit tools enabled.
   undo-history-per-world: 20
 

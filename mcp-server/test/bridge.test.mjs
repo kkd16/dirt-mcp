@@ -117,6 +117,8 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
         maxOrthographicViewVolume: 32_768,
         defaultOrthographicViewResultLimit: 2_048,
         maxOrthographicViewResultLimit: 10_000,
+        maxCommandsPerRequest: 20,
+        maxCommandFeedbackCharacters: 32_768,
         undoHistoryPerWorld: 20,
     },
     defaults: {
@@ -192,6 +194,28 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       [0, 0, 0],
     ],
   };
+  const commandRun = {
+    sender: {
+      name: 'FeedbackForwardingSender',
+      isOperator: true,
+      isPlayer: false,
+    },
+    feedbackTruncated: false,
+    results: [
+      {
+        command: 'say hello',
+        outcome: 'dispatched',
+        feedback: ['[FeedbackForwardingSender] hello'],
+        message: null,
+      },
+      {
+        command: 'missing',
+        outcome: 'not_found',
+        feedback: [],
+        message: 'Paper found no target for this command',
+      },
+    ],
+  };
   const bridge = createServer(async (request, response) => {
     let rawBody = '';
     for await (const chunk of request) {
@@ -218,6 +242,8 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       response.end(JSON.stringify({
         error: { code: 'change_limit_exceeded', message: 'Too many changes' },
       }));
+    } else if (request.url === '/v1/run-minecraft-commands') {
+      response.end(JSON.stringify(commandRun));
     } else {
       response.statusCode = 404;
       response.end('{}');
@@ -350,6 +376,25 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     structuredContent: serverStatus,
   }));
 
+  send(child, {
+    jsonrpc: '2.0',
+    id: 8,
+    method: 'tools/call',
+    params: modernParams({
+      name: 'run_minecraft_commands',
+      arguments: { commands: ['/say hello', 'missing'] },
+    }),
+  });
+  const commands = await waitFor(messages, 8);
+  assert.deepEqual(commands.result, modernResult({
+    isError: true,
+    content: [{
+      type: 'text',
+      text: 'Dispatched 1 command(s), then stopped after a Paper dispatch failure.',
+    }],
+    structuredContent: commandRun,
+  }));
+
   assert.deepEqual(
     requests.map(({ method, path }) => ({ method, path })),
     [
@@ -359,6 +404,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { method: 'POST', path: '/v1/scan-orthographic-view' },
       { method: 'POST', path: '/v1/fill-region' },
       { method: 'GET', path: '/v1/server-status' },
+      { method: 'POST', path: '/v1/run-minecraft-commands' },
     ],
   );
   for (const request of requests) {
@@ -370,7 +416,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     );
   }
   const callIds = requests.map((request) => request.headers['x-dirt-call-id']);
-  assert.equal(new Set(callIds).size, 6);
+  assert.equal(new Set(callIds).size, 7);
   assert.deepEqual(requests[1].body, {
     ...region,
     includeBlockStatePatterns: [],
@@ -386,9 +432,11 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     blockState: 'minecraft:dirt',
   });
   assert.equal(requests[4].headers['content-type'], 'application/json');
+  assert.deepEqual(requests[6].body, { commands: ['/say hello', 'missing'] });
+  assert.equal(requests[6].headers['content-type'], 'application/json');
 
   const auditLines = errors.values.filter((line) => line.startsWith('Dirt MCP tool_call '));
-  assert.equal(auditLines.length, 6);
+  assert.equal(auditLines.length, 7);
   assert.match(
     auditLines[0],
     new RegExp(`^Dirt MCP tool_call tool=ping_server call=${callIds[0]} request=2 `
@@ -418,6 +466,11 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     auditLines[5],
     new RegExp(`^Dirt MCP tool_call tool=get_server_status call=${callIds[5]} request=7 `
       + 'client="bridge-test/1" outcome=ok duration_ms=\\d+$'),
+  );
+  assert.match(
+    auditLines[6],
+    new RegExp(`^Dirt MCP tool_call tool=run_minecraft_commands call=${callIds[6]} request=8 `
+      + 'client="bridge-test/1" outcome=error duration_ms=\\d+$'),
   );
 
   const exited = once(child, 'exit');

@@ -1,6 +1,9 @@
 package ca.deliyannides.dirtmcp.paper.api;
 
 import ca.deliyannides.dirtmcp.paper.PluginSettings;
+import ca.deliyannides.dirtmcp.paper.command.CommandRunner;
+import ca.deliyannides.dirtmcp.paper.command.CommandRunner.CommandRunnerException;
+import ca.deliyannides.dirtmcp.paper.command.CommandRunner.RunCommandsRequest;
 import ca.deliyannides.dirtmcp.paper.server.ServerContext;
 import ca.deliyannides.dirtmcp.paper.server.ServerContext.ServerContextException;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor;
@@ -18,6 +21,7 @@ import ca.deliyannides.dirtmcp.paper.world.RegionInspector.OrthographicViewReque
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RegionBlocksFormat;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.RegionBlocksRequest;
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
@@ -82,14 +86,16 @@ public final class ApiServer implements AutoCloseable {
     private static final Set<String> FILL_REGION_FIELDS =
             Set.of("world", "min", "max", "blockState", "dryRun");
     private static final Set<String> UNDO_FIELDS = Set.of("world");
+    private static final Set<String> RUN_COMMANDS_FIELDS = Set.of("commands");
     private static final Set<String> POSITION_FIELDS = Set.of("x", "y", "z");
-    private static final Gson GSON = new Gson();
+    private static final Gson GSON = new GsonBuilder().serializeNulls().create();
 
     private final PluginSettings settings;
     private final BearerAuthentication authentication;
     private final ServerContext serverContext;
     private final RegionInspector regionInspector;
     private final RegionEditor regionEditor;
+    private final CommandRunner commandRunner;
     private final Logger logger;
 
     private HttpServer server;
@@ -101,6 +107,7 @@ public final class ApiServer implements AutoCloseable {
             ServerContext serverContext,
             RegionInspector regionInspector,
             RegionEditor regionEditor,
+            CommandRunner commandRunner,
             Logger logger) {
         this.settings = settings;
         this.logger = logger;
@@ -109,6 +116,7 @@ public final class ApiServer implements AutoCloseable {
         this.serverContext = serverContext;
         this.regionInspector = regionInspector;
         this.regionEditor = regionEditor;
+        this.commandRunner = commandRunner;
     }
 
     public void start() throws IOException {
@@ -150,6 +158,10 @@ public final class ApiServer implements AutoCloseable {
                     "/v1/undo-last-dirt-edit",
                     exchange -> handleAudited(
                             "undo_last_dirt_edit", exchange, this::handleUndoLastDirtEdit));
+            newServer.createContext(
+                    "/v1/run-minecraft-commands",
+                    exchange -> handleAudited(
+                            "run_minecraft_commands", exchange, this::handleRunMinecraftCommands));
             newServer.setExecutor(newExecutor);
             newServer.start();
         } catch (RuntimeException exception) {
@@ -398,6 +410,33 @@ public final class ApiServer implements AutoCloseable {
         }
     }
 
+    private void handleRunMinecraftCommands(HttpExchange exchange) throws IOException {
+        if (!authenticate(exchange)) {
+            return;
+        }
+        if (!"POST".equals(exchange.getRequestMethod())) {
+            exchange.getResponseHeaders().set("Allow", "POST");
+            sendError(exchange, 405, "method_not_allowed", "Method must be POST");
+            return;
+        }
+
+        try {
+            RunCommandsRequest request = parseRunCommandsRequest(exchange);
+            send(exchange, 200, GSON.toJson(this.commandRunner.runCommands(request)));
+        } catch (InvalidRequestException exception) {
+            sendError(exchange, 400, "invalid_request", exception.getMessage());
+        } catch (CommandRunnerException exception) {
+            int status = exception.failure() == CommandRunner.Failure.INVALID_REQUEST ? 400 : 503;
+            String code = exception.failure() == CommandRunner.Failure.INVALID_REQUEST
+                    ? "invalid_request"
+                    : "server_unavailable";
+            sendError(exchange, status, code, exception.getMessage());
+        } catch (RuntimeException exception) {
+            this.logger.log(Level.SEVERE, "Unexpected run-minecraft-commands failure", exception);
+            sendError(exchange, 500, "internal_error", "The commands could not be run");
+        }
+    }
+
     private boolean authenticate(HttpExchange exchange) throws IOException {
         if (this.authentication.accepts(exchange.getRequestHeaders().getFirst("Authorization"))) {
             return true;
@@ -553,6 +592,17 @@ public final class ApiServer implements AutoCloseable {
                             ? parseBoolean(object.get("dryRun"), "dryRun")
                             : this.settings.defaults().fillRegionDryRun());
         } catch (JsonParseException | NumberFormatException | ArithmeticException exception) {
+            throw new InvalidRequestException("Request body must contain valid JSON values");
+        }
+    }
+
+    private RunCommandsRequest parseRunCommandsRequest(HttpExchange exchange)
+            throws IOException, InvalidRequestException {
+        try {
+            JsonObject object = parseRequestObject(exchange);
+            requireFields(object, RUN_COMMANDS_FIELDS, "Request");
+            return new RunCommandsRequest(parseStringList(object.get("commands"), "commands"));
+        } catch (JsonParseException exception) {
             throw new InvalidRequestException("Request body must contain valid JSON values");
         }
     }

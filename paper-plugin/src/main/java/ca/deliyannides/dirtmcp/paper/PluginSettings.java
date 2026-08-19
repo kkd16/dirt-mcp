@@ -55,6 +55,8 @@ public record PluginSettings(
                 positiveInteger(config, "limits.max-view-volume"),
                 defaultOrthographicViewResults,
                 maximumOrthographicViewResults,
+                positiveInteger(config, "limits.max-commands-per-request"),
+                positiveInteger(config, "limits.max-command-feedback-characters"),
                 nonNegativeInteger(config, "limits.undo-history-per-world"));
 
         String regionBlocksFormat = requiredString(config, "defaults.exact-inspection-mode")
@@ -156,6 +158,8 @@ public record PluginSettings(
             int maxOrthographicViewVolume,
             int defaultOrthographicViewResultLimit,
             int maxOrthographicViewResultLimit,
+            int maxCommandsPerRequest,
+            int maxCommandFeedbackCharacters,
             int undoHistoryPerWorld) {}
 
     public record Defaults(

@@ -146,6 +146,12 @@ test('reloads tools without replacing the stdio process', async (context) => {
         idempotentHint: false,
         openWorldHint: true,
       },
+      run_minecraft_commands: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
     },
   );
   assert.deepEqual(
@@ -157,6 +163,7 @@ test('reloads tools without replacing the stdio process', async (context) => {
       'get_server_status',
       'ping_server',
       'replace_region_blocks',
+      'run_minecraft_commands',
       'scan_orthographic_view',
       'undo_last_dirt_edit',
     ],

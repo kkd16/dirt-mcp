@@ -27,6 +27,8 @@ final class PluginSettingsTest {
                         32_768,
                         2_048,
                         10_000,
+                        20,
+                        32_768,
                         20),
                 settings.limits());
         assertEquals(new Defaults(false, "blocks", false, false), settings.defaults());

@@ -9,6 +9,13 @@ import ca.deliyannides.dirtmcp.paper.PluginSettings;
 import ca.deliyannides.dirtmcp.paper.PluginSettings.Bridge;
 import ca.deliyannides.dirtmcp.paper.PluginSettings.Defaults;
 import ca.deliyannides.dirtmcp.paper.PluginSettings.Limits;
+import ca.deliyannides.dirtmcp.paper.command.CommandRunner;
+import ca.deliyannides.dirtmcp.paper.command.CommandRunner.CommandRunnerException;
+import ca.deliyannides.dirtmcp.paper.command.CommandRunner.CommandOutcome;
+import ca.deliyannides.dirtmcp.paper.command.CommandRunner.CommandResult;
+import ca.deliyannides.dirtmcp.paper.command.CommandRunner.RunCommandsRequest;
+import ca.deliyannides.dirtmcp.paper.command.CommandRunner.RunCommandsResult;
+import ca.deliyannides.dirtmcp.paper.command.CommandRunner.Sender;
 import ca.deliyannides.dirtmcp.paper.server.ServerContext;
 import ca.deliyannides.dirtmcp.paper.server.ServerContext.Builds;
 import ca.deliyannides.dirtmcp.paper.server.ServerContext.OnlinePlayer;
@@ -67,10 +74,24 @@ final class ApiServerTest {
     private static final String TOKEN = "test-token-with-at-least-thirty-two-bytes";
     private static final PluginSettings SETTINGS = new PluginSettings(
             new Bridge(0, 0, 0, 8_192, 32),
-            new Limits(1_000_000, 250_000, 32_768, 321, 654, 32_768, 123, 456, 20),
+            new Limits(
+                    1_000_000,
+                    250_000,
+                    32_768,
+                    321,
+                    654,
+                    32_768,
+                    123,
+                    456,
+                    20,
+                    32_768,
+                    20),
             new Defaults(false, "blocks", false, false));
     private static final RegionInspector UNUSED_INSPECTOR = new TestInspector() {};
     private static final RegionEditor UNUSED_EDITOR = new TestEditor() {};
+    private static final CommandRunner UNUSED_COMMAND_RUNNER = request -> {
+        throw new AssertionError("Command runner should not be called");
+    };
     private static final ServerContext SERVER_CONTEXT = new ServerContext() {
         @Override
         public PingResult ping() {
@@ -149,6 +170,7 @@ final class ApiServerTest {
                             + "\"maxRegionBlocksVolume\":32768,\"defaultRegionBlocksResultLimit\":321,"
                             + "\"maxRegionBlocksResultLimit\":654,\"maxOrthographicViewVolume\":32768,"
                             + "\"defaultOrthographicViewResultLimit\":123,\"maxOrthographicViewResultLimit\":456,"
+                            + "\"maxCommandsPerRequest\":20,\"maxCommandFeedbackCharacters\":32768,"
                             + "\"undoHistoryPerWorld\":20},\"defaults\":{\"regionBlocksIncludeAir\":false,"
                             + "\"regionBlocksFormat\":\"blocks\",\"replaceRegionBlocksDryRun\":false,"
                             + "\"fillRegionDryRun\":false}}",
@@ -929,6 +951,79 @@ final class ApiServerTest {
     }
 
     @Test
+    void runsAnOrderedMinecraftCommandBatch() throws Exception {
+        CommandRunner commandRunner = request -> {
+            assertEquals(List.of("say first", "missing", "say skipped"), request.commands());
+            return new RunCommandsResult(
+                    new Sender("FeedbackForwardingSender", true, false),
+                    false,
+                    List.of(
+                            new CommandResult(
+                                    "say first",
+                                    CommandOutcome.DISPATCHED,
+                                    List.of("[Dirt] first"),
+                                    null),
+                            new CommandResult(
+                                    "missing",
+                                    CommandOutcome.NOT_FOUND,
+                                    List.of(),
+                                    "Paper found no target for this command"),
+                            new CommandResult(
+                                    "say skipped",
+                                    CommandOutcome.SKIPPED,
+                                    List.of(),
+                                    "Skipped because an earlier command was not dispatched")));
+        };
+
+        try (ApiServer server = server(commandRunner);
+                HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> response = client.send(
+                    commandRequest(
+                            server,
+                            "{\"commands\":[\"say first\",\"missing\",\"say skipped\"]}"),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, response.statusCode());
+            assertEquals(
+                    "{\"sender\":{\"name\":\"FeedbackForwardingSender\",\"isOperator\":true,"
+                            + "\"isPlayer\":false},\"feedbackTruncated\":false,\"results\":[{"
+                            + "\"command\":\"say first\",\"outcome\":\"dispatched\","
+                            + "\"feedback\":[\"[Dirt] first\"],\"message\":null},{"
+                            + "\"command\":\"missing\",\"outcome\":\"not_found\","
+                            + "\"feedback\":[],\"message\":\"Paper found no target for this command\"},{"
+                            + "\"command\":\"say skipped\",\"outcome\":\"skipped\","
+                            + "\"feedback\":[],\"message\":\"Skipped because an earlier command was not dispatched\"}]}",
+                    response.body());
+        }
+    }
+
+    @Test
+    void rejectsInvalidMinecraftCommandRequests() throws Exception {
+        CommandRunner rejectingRunner = request -> {
+            throw new CommandRunnerException(
+                    CommandRunner.Failure.INVALID_REQUEST,
+                    "commands must contain at least one command");
+        };
+
+        try (ApiServer server = server(rejectingRunner);
+                HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> response = client.send(
+                    commandRequest(server, "{\"commands\":[]}"),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(400, response.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"invalid_request\","
+                            + "\"message\":\"commands must contain at least one command\"}}",
+                    response.body());
+        }
+    }
+
+    @Test
     void interruptsActiveRequestsWhenClosed() throws Exception {
         CountDownLatch inspectionStarted = new CountDownLatch(1);
         CountDownLatch inspectionInterrupted = new CountDownLatch(1);
@@ -969,6 +1064,17 @@ final class ApiServerTest {
         return server(inspector, UNUSED_EDITOR);
     }
 
+    private static ApiServer server(CommandRunner commandRunner) {
+        return new ApiServer(
+                SETTINGS,
+                TOKEN,
+                SERVER_CONTEXT,
+                UNUSED_INSPECTOR,
+                UNUSED_EDITOR,
+                commandRunner,
+                LOGGER);
+    }
+
     private static ApiServer server(RegionInspector inspector, RegionEditor editor) {
         return server(inspector, editor, LOGGER);
     }
@@ -989,7 +1095,14 @@ final class ApiServerTest {
             RegionInspector inspector,
             RegionEditor editor,
             Logger logger) {
-        return new ApiServer(settings, TOKEN, SERVER_CONTEXT, inspector, editor, logger);
+        return new ApiServer(
+                settings,
+                TOKEN,
+                SERVER_CONTEXT,
+                inspector,
+                editor,
+                UNUSED_COMMAND_RUNNER,
+                logger);
     }
 
     private static HttpRequest blockStateCountRequest(ApiServer server, String body) {
@@ -1008,6 +1121,13 @@ final class ApiServerTest {
 
     private static HttpRequest regionBlocksRequest(ApiServer server, String body) {
         return authorizedRequest(getRegionBlocksUri(server))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+    }
+
+    private static HttpRequest commandRequest(ApiServer server, String body) {
+        return authorizedRequest(runMinecraftCommandsUri(server))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
@@ -1070,6 +1190,10 @@ final class ApiServerTest {
 
     private static URI fillRegionUri(ApiServer server) {
         return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/fill-region");
+    }
+
+    private static URI runMinecraftCommandsUri(ApiServer server) {
+        return URI.create("http://127.0.0.1:" + server.boundPort() + "/v1/run-minecraft-commands");
     }
 
     private abstract static class TestEditor implements RegionEditor {

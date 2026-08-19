@@ -15,6 +15,7 @@ const SERVER_INSTRUCTIONS = [
   'Inspection result limits fail the call instead of truncating data.',
   'replace_region_blocks and fill_region can mutate immediately; pass dryRun=true when a preview is needed.',
   'undo_last_dirt_edit only undoes the newest successful Dirt edit in that world, from bounded in-memory per-world history.',
+  'run_minecraft_commands dispatches ordered operator-level commands immediately through a non-player Paper sender; command effects are outside Dirt edit limits and undo history.',
 ].join(' ');
 
 interface ToolModule {

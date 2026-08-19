@@ -376,6 +376,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /v1/run-minecraft-commands:
+    post:
+      operationId: runMinecraftCommands
+      summary: Run registered Minecraft commands sequentially with operator-level permissions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunMinecraftCommandsRequest'
+      responses:
+        '200':
+          description: Ordered dispatch outcomes and bounded synchronous command feedback
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunMinecraftCommandsResponse'
+        '400':
+          description: Invalid JSON, fields, command strings, or command count
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/PostMethodNotAllowed'
+        '500':
+          description: Unexpected command-runner failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Paper command execution is unavailable or was interrupted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 components:
   responses:
     Unauthorized:
@@ -437,6 +476,7 @@ components:
                 - nothing_to_undo
                 - region_too_large
                 - result_too_large
+                - server_unavailable
                 - unauthorized
                 - world_busy
                 - world_not_found
@@ -995,6 +1035,82 @@ components:
           type: integer
           format: int64
           minimum: 1
+    RunMinecraftCommandsRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - commands
+      properties:
+        commands:
+          type: array
+          minItems: 1
+          description: Commands in execution order. Each may include one in-game leading slash.
+          items:
+            type: string
+            minLength: 1
+    CommandSender:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - isOperator
+        - isPlayer
+      properties:
+        name:
+          type: string
+          minLength: 1
+        isOperator:
+          const: true
+        isPlayer:
+          const: false
+    CommandResult:
+      type: object
+      additionalProperties: false
+      required:
+        - command
+        - outcome
+        - feedback
+        - message
+      properties:
+        command:
+          type: string
+          minLength: 1
+          description: Normalized command passed to Paper without the in-game leading slash.
+        outcome:
+          type: string
+          enum:
+            - dispatched
+            - not_found
+            - dispatch_failed
+            - skipped
+        feedback:
+          type: array
+          description: Plain-text feedback emitted synchronously while dispatching this command.
+          items:
+            type: string
+        message:
+          type:
+            - string
+            - 'null'
+    RunMinecraftCommandsResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - sender
+        - feedbackTruncated
+        - results
+      properties:
+        sender:
+          $ref: '#/components/schemas/CommandSender'
+        feedbackTruncated:
+          type: boolean
+          description: Whether feedback exceeded the configured request-wide character limit.
+        results:
+          type: array
+          minItems: 1
+          description: One result per supplied command in the original order.
+          items:
+            $ref: '#/components/schemas/CommandResult'
     LimitConfiguration:
       type: object
       additionalProperties: false
@@ -1007,6 +1123,8 @@ components:
         - maxOrthographicViewVolume
         - defaultOrthographicViewResultLimit
         - maxOrthographicViewResultLimit
+        - maxCommandsPerRequest
+        - maxCommandFeedbackCharacters
         - undoHistoryPerWorld
       properties:
         maxRegionVolume:
@@ -1038,6 +1156,14 @@ components:
           format: int32
           minimum: 1
         maxOrthographicViewResultLimit:
+          type: integer
+          format: int32
+          minimum: 1
+        maxCommandsPerRequest:
+          type: integer
+          format: int32
+          minimum: 1
+        maxCommandFeedbackCharacters:
           type: integer
           format: int32
           minimum: 1

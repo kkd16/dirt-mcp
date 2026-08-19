@@ -255,6 +255,34 @@ const UndoLastDirtEditOutputSchema = z.object({
   changedBlockCount: z.number().int().positive().describe('Blocks restored by the undo.'),
 }).strict().describe('Result of undoing the newest successful Dirt edit in this world.');
 
+const RunMinecraftCommandsInputSchema = z.object({
+  commands: z.array(z.string().min(1)).min(1)
+    .describe('Registered Minecraft commands in execution order. Each may include one in-game leading slash.'),
+}).strict().describe('An ordered batch of one or more commands to dispatch through Paper.');
+
+const CommandOutcomeSchema = z.enum([
+  'dispatched',
+  'not_found',
+  'dispatch_failed',
+  'skipped',
+]);
+
+const RunMinecraftCommandsOutputSchema = z.object({
+  sender: z.object({
+    name: z.string().min(1).describe('Actual Paper command-sender name.'),
+    isOperator: z.literal(true).describe('The sender has operator/console-equivalent permissions.'),
+    isPlayer: z.literal(false).describe('The supported Paper feedback sender is not a player entity.'),
+  }).strict(),
+  feedbackTruncated: z.boolean()
+    .describe('Whether request-wide command feedback exceeded the configured character limit.'),
+  results: z.array(z.object({
+    command: z.string().min(1).describe('Normalized command dispatched without the in-game leading slash.'),
+    outcome: CommandOutcomeSchema.describe('Paper dispatch outcome; dispatched is not a semantic success signal.'),
+    feedback: z.array(z.string()).describe('Plain-text feedback emitted synchronously during dispatch.'),
+    message: z.string().nullable().describe('Dispatch failure or skip explanation, otherwise null.'),
+  }).strict()).min(1).describe('One result per supplied command in the original order.'),
+}).strict().describe('Ordered Paper command dispatch results and bounded feedback.');
+
 const ErrorSchema = z.object({
   error: z.object({
     code: z.string().min(1).describe('Stable machine-readable error code.'),
@@ -275,6 +303,8 @@ const LimitConfigurationSchema = z.object({
   maxOrthographicViewVolume: z.number().int().positive().describe('Maximum orthographic scan volume.'),
   defaultOrthographicViewResultLimit: z.number().int().positive().describe('Default orthographic visible-block limit.'),
   maxOrthographicViewResultLimit: z.number().int().positive().describe('Maximum orthographic visible-block limit.'),
+  maxCommandsPerRequest: z.number().int().positive().describe('Maximum commands accepted in one ordered batch.'),
+  maxCommandFeedbackCharacters: z.number().int().positive().describe('Maximum plain-text feedback characters retained per command batch.'),
   undoHistoryPerWorld: z.number().int().nonnegative().describe('In-memory Dirt undo entries retained per world.'),
 }).strict().describe('Active limits that constrain Dirt inspection and mutation tools.');
 
@@ -334,6 +364,12 @@ const MUTATION_ANNOTATIONS: ToolAnnotations = {
   openWorldHint: true,
 };
 const UNDO_ANNOTATIONS: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: false,
+  openWorldHint: true,
+};
+const COMMAND_ANNOTATIONS: ToolAnnotations = {
   readOnlyHint: false,
   destructiveHint: true,
   idempotentHint: false,
@@ -545,6 +581,39 @@ export function registerTools(
       return successResult(result, `Undid the last Dirt edit in ${result.world}, restoring ${result.changedBlockCount} blocks.`);
     } catch (error: unknown) {
       return errorResult(error, 'Could not undo the last Dirt edit');
+    }
+  })));
+
+  registrations.push(register('run_minecraft_commands', {
+    title: 'Run Minecraft commands',
+    description: 'Run registered vanilla, Paper, or plugin commands sequentially with operator-level permissions. The sender is not a player: player-only commands, @s, and relative context can differ. The batch stops on command-not-found or a dispatch exception; arbitrary effects are immediate and are not covered by Dirt undo or edit limits.',
+    inputSchema: RunMinecraftCommandsInputSchema,
+    outputSchema: RunMinecraftCommandsOutputSchema,
+    annotations: COMMAND_ANNOTATIONS,
+  }, async (input, context) => auditToolCall('run_minecraft_commands', undefined, context, async (callId) => {
+    try {
+      const result = await bridgeRequest(
+        config,
+        '/v1/run-minecraft-commands',
+        callId,
+        RunMinecraftCommandsOutputSchema,
+        jsonPost(input),
+        120_000,
+      );
+      const dispatched = result.results.filter((entry) => entry.outcome === 'dispatched').length;
+      const stopped = result.results.some(
+        (entry) => entry.outcome === 'not_found' || entry.outcome === 'dispatch_failed',
+      );
+      const summary = stopped
+        ? `Dispatched ${dispatched} command(s), then stopped after a Paper dispatch failure.`
+        : `Dispatched ${dispatched} command(s) in order.`;
+      return {
+        content: [{ type: 'text', text: summary }],
+        structuredContent: result,
+        ...(stopped ? { isError: true } : {}),
+      };
+    } catch (error: unknown) {
+      return errorResult(error, 'Could not run Minecraft commands');
     }
   })));
 }

@@ -7,6 +7,6 @@ implemented behavior.
 The current bridge is deliberately loopback-only and exposes an authenticated
 end-to-end Dirt/Paper/FAWE ping, lightweight server context, bounded summary and
 exact block inspection, sparse orthographic views, FAWE-backed block replacement
-and filling, and bounded in-memory undo. Server context includes current builds,
-players, loaded worlds, runtime limits, and defaults. Unimplemented operations
-are not included.
+and filling, bounded in-memory undo, and ordered operator-level command dispatch.
+Server context includes current builds, players, loaded worlds, runtime limits,
+and defaults. Unimplemented operations are not included.

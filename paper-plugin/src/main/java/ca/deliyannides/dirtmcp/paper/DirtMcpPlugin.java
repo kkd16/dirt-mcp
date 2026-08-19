@@ -1,6 +1,7 @@
 package ca.deliyannides.dirtmcp.paper;
 
 import ca.deliyannides.dirtmcp.paper.api.ApiServer;
+import ca.deliyannides.dirtmcp.paper.command.PaperCommandRunner;
 import ca.deliyannides.dirtmcp.paper.server.PaperServerContext;
 import ca.deliyannides.dirtmcp.paper.world.FaweRegionEditor;
 import ca.deliyannides.dirtmcp.paper.world.PaperRegionInspector;
@@ -43,6 +44,10 @@ public final class DirtMcpPlugin extends JavaPlugin {
                         limits.maxRegionVolume(),
                         limits.maxChangedBlocks(),
                         limits.undoHistoryPerWorld()),
+                new PaperCommandRunner(
+                        this,
+                        limits.maxCommandsPerRequest(),
+                        limits.maxCommandFeedbackCharacters()),
                 getLogger());
 
         try {

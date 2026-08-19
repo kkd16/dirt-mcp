@@ -357,6 +357,34 @@ and tick time; online players with worlds, game modes, and block positions;
 loaded-world bounds, spawn, time, and weather; and active Dirt tool limits and
 defaults.
 
+### `run_minecraft_commands`
+
+Runs one or more registered vanilla, Paper, or plugin commands in supplied
+order. The bridge request is `POST /v1/run-minecraft-commands`; even one command
+uses the `commands` array:
+
+```json
+{ "commands": ["/say hello", "time set day"] }
+```
+
+One in-game leading slash is optional and removed before dispatch. Paper runs
+the batch synchronously on its main thread with a feedback-capturing sender that
+has console-equivalent permissions. This supported sender is not a player; its
+current Paper name is `FeedbackForwardingSender`, and player-only commands,
+`@s`, and relative position context therefore differ from a real operator.
+
+Each response entry contains the normalized command, bounded plain-text
+feedback, a nullable message, and one of `dispatched`, `not_found`,
+`dispatch_failed`, or `skipped`. The batch stops on `not_found` or
+`dispatch_failed` and marks later commands skipped. `dispatched` means Paper
+found and invoked the command without a dispatch exception; Bukkit does not
+expose the command's Brigadier result value, so semantic failures reported as
+ordinary feedback do not stop the batch.
+
+The shipped limits are 20 commands and 32,768 retained feedback characters per
+request. Command effects execute immediately and are not subject to Dirt's FAWE
+volume or changed-block limits, per-world mutation lock, or undo history.
+
 ## Common rules
 
 - Positions use integer block coordinates and inclusive bounds.
@@ -400,6 +428,8 @@ limits:
   max-view-volume: 32768
   default-view-results: 2048
   max-view-results: 10000
+  max-commands-per-request: 20
+  max-command-feedback-characters: 32768
   undo-history-per-world: 20
 
 defaults:

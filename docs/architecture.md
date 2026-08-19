@@ -100,6 +100,20 @@ changed-block limit is checked before execution.
 `undo_last_dirt_edit` uses the same world lock, applies the newest history entry
 through a fresh FAWE edit session, and consumes it only after completion.
 
+## Command execution
+
+`run_minecraft_commands` crosses once onto Paper's main thread and dispatches
+the requested commands sequentially through `Server.dispatchCommand`. It uses
+Paper's feedback-capturing command sender, which has console-equivalent
+permissions but no player entity. Synchronous Adventure feedback is converted
+to bounded plain text for the bridge response.
+
+The batch stops when Paper finds no command target or throws a dispatch
+exception. Bukkit does not expose the Brigadier result value, so ordinary
+command feedback is returned to the caller but is not interpreted as semantic
+success or failure. Command effects do not participate in FAWE locking, Dirt
+resource limits, or Dirt undo history.
+
 ## Dependency direction
 
 Dependencies point toward the live world:

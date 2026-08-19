@@ -28,12 +28,14 @@ inspect region -> describe an edit -> optionally preview -> execute -> inspect -
 
 ## Version 1
 
-V1 provides four world operations:
+V1 provides five world capabilities:
 
 - inspect bounded regions as summaries, exact geometry, or sparse orthographic views;
 - replace matching blocks;
 - fill a bounded region; and
-- undo the most recent Dirt MCP edit in a world.
+- undo the most recent Dirt MCP edit in a world; and
+- run an ordered batch of registered Minecraft commands with operator-level
+  permissions through a non-player Paper sender.
 
 [FastAsyncWorldEdit (FAWE)](https://github.com/IntellectualSites/FastAsyncWorldEdit)
 is a required server dependency. Dirt MCP validates inputs and enforces

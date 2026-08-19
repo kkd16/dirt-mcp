@@ -10,6 +10,8 @@ while Paper remains the owner of the live world.
 The repository currently ships the Paper plugin, authenticated loopback bridge,
 and MCP tools for status, bounded summary, exact block inspection, sparse
 orthographic views, FAWE-backed block replacement and filling, and undo.
+It also exposes ordered operator-level Minecraft command dispatch through
+Paper's supported non-player feedback sender.
 
 ## Platform support
 
@@ -92,6 +94,8 @@ limits:
   max-view-volume: 32768
   default-view-results: 2048
   max-view-results: 10000
+  max-commands-per-request: 20
+  max-command-feedback-characters: 32768
   undo-history-per-world: 20
 
 defaults:
@@ -137,7 +141,14 @@ Once npm publishing exists, a global installation will provide the equivalent
 `dirt-mcp` command. The current tool surface contains `ping_server`,
 `get_server_status`,
 `count_region_block_states`, `get_region_blocks`, `scan_orthographic_view`,
-`replace_region_blocks`, `fill_region`, and `undo_last_dirt_edit`.
+`replace_region_blocks`, `fill_region`, `undo_last_dirt_edit`, and
+`run_minecraft_commands`.
+
+`run_minecraft_commands` accepts a non-empty command array and dispatches it in
+order with console-equivalent permissions. Its Paper sender is not a player, so
+player-only commands, `@s`, and relative-position behavior differ from a real
+operator. Command effects are immediate and are not covered by Dirt edit limits
+or `undo_last_dirt_edit`.
 
 `scan_orthographic_view` defaults to explicit visible-block records. MCP
 callers can set `format` to `grid` for a substantially smaller lossless

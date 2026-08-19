@@ -22,6 +22,7 @@ const min = { x: 0, y: 0, z: 0 };
 const max = { x: 1, y: 1, z: 1 };
 const stairMin = { x: 2, y: 0, z: 0 };
 const stairMax = { x: 4, y: 0, z: 0 };
+const commandPosition = { x: 5, y: 0, z: 0 };
 const northStairs = 'minecraft:dark_oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]';
 const southStairs = 'minecraft:dark_oak_stairs[facing=south,half=bottom,shape=straight,waterlogged=false]';
 const baseUrl = `http://127.0.0.1:${bridgePort}`;
@@ -70,8 +71,13 @@ async function paperCommand(command) {
   });
 }
 
-async function paperSetBlock(position, blockState) {
-  await paperCommand(`setblock ${position.x} ${position.y} ${position.z} ${blockState} replace`);
+async function bridgeSetBlocks(blocks) {
+  const result = await bridgeRequest('/v1/run-minecraft-commands', {
+    commands: blocks.map(({ position, blockState }) => (
+      `setblock ${position.x} ${position.y} ${position.z} ${blockState} replace`
+    )),
+  });
+  assert.ok(result.results.every(({ outcome }) => outcome === 'dispatched'));
 }
 
 async function waitForRegion(region) {
@@ -149,6 +155,7 @@ const stairRegion = { world, min: stairMin, max: stairMax };
 let editsToUndo = 0;
 let fixtureIsForceLoaded = false;
 let originalStairFixture;
+let originalCommandFixture;
 try {
   assert.deepEqual(await bridgeGet('/v1/ping'), { status: 'ok' });
   const serverStatus = await bridgeGet('/v1/server-status');
@@ -167,11 +174,64 @@ try {
     serverStatus.limits.defaultOrthographicViewResultLimit
       <= serverStatus.limits.maxOrthographicViewResultLimit,
   );
+  assert.ok(serverStatus.limits.maxCommandsPerRequest > 0);
+  assert.ok(serverStatus.limits.maxCommandFeedbackCharacters > 0);
 
   await paperCommand('forceload add 0 0');
   fixtureIsForceLoaded = true;
-
   const original = await waitForRegion(region);
+
+  originalCommandFixture = await bridgeRequest('/v1/get-region-blocks', {
+    world,
+    min: commandPosition,
+    max: commandPosition,
+    includeAir: true,
+  });
+  assert.equal(originalCommandFixture.matchedBlockCount, 1);
+  const commandRun = await bridgeRequest('/v1/run-minecraft-commands', {
+    commands: [
+      `/setblock ${commandPosition.x} ${commandPosition.y} ${commandPosition.z} minecraft:stone replace`,
+      `setblock ${commandPosition.x} ${commandPosition.y} ${commandPosition.z} minecraft:gold_block replace`,
+    ],
+  });
+  assert.deepEqual(commandRun.sender, {
+    name: 'FeedbackForwardingSender',
+    isOperator: true,
+    isPlayer: false,
+  });
+  assert.equal(commandRun.feedbackTruncated, false);
+  assert.deepEqual(commandRun.results.map(({ outcome }) => outcome), ['dispatched', 'dispatched']);
+  assert.ok(commandRun.results.every(({ feedback }) => feedback.length > 0));
+  const afterCommandRun = await bridgeRequest('/v1/get-region-blocks', {
+    world,
+    min: commandPosition,
+    max: commandPosition,
+  });
+  assert.equal(afterCommandRun.blocks[0].blockState, 'minecraft:gold_block');
+
+  const stoppedCommandRun = await bridgeRequest('/v1/run-minecraft-commands', {
+    commands: [
+      'dirt_command_that_does_not_exist',
+      `setblock ${commandPosition.x} ${commandPosition.y} ${commandPosition.z} minecraft:diamond_block replace`,
+    ],
+  });
+  assert.deepEqual(
+    stoppedCommandRun.results.map(({ outcome }) => outcome),
+    ['not_found', 'skipped'],
+  );
+  const afterStoppedCommandRun = await bridgeRequest('/v1/get-region-blocks', {
+    world,
+    min: commandPosition,
+    max: commandPosition,
+  });
+  assert.equal(afterStoppedCommandRun.blocks[0].blockState, 'minecraft:gold_block');
+
+  await bridgeSetBlocks([{
+    position: commandPosition,
+    blockState: originalCommandFixture.blocks[0].blockState,
+  }]);
+  originalCommandFixture = undefined;
+
   const originalStates = Object.keys(original.blockStateCounts);
   const fillBlockState = originalStates.length === 1 && originalStates[0].startsWith('minecraft:barrier')
     ? 'minecraft:amethyst_block'
@@ -321,8 +381,10 @@ try {
     includeAir: true,
   });
   assert.equal(originalStairFixture.matchedBlockCount, 3);
-  await paperSetBlock(stairMin, northStairs);
-  await paperSetBlock(stairMax, southStairs);
+  await bridgeSetBlocks([
+    { position: stairMin, blockState: northStairs },
+    { position: stairMax, blockState: southStairs },
+  ]);
 
   const exactStatePreview = await bridgeRequest('/v1/replace-region-blocks', {
     ...stairRegion,
@@ -388,9 +450,7 @@ try {
   editsToUndo -= 1;
   assert.equal(propertyFillUndone.changedBlockCount, 1);
 
-  for (const block of originalStairFixture.blocks) {
-    await paperSetBlock(block.position, block.blockState);
-  }
+  await bridgeSetBlocks(originalStairFixture.blocks);
   originalStairFixture = undefined;
   process.stdout.write(`managed server smoke test passed in ${world}\n`);
 } finally {
@@ -406,11 +466,19 @@ try {
   }
   if (originalStairFixture) {
     try {
-      for (const block of originalStairFixture.blocks) {
-        await paperSetBlock(block.position, block.blockState);
-      }
+      await bridgeSetBlocks(originalStairFixture.blocks);
     } catch (error) {
       process.stderr.write(`Could not restore stair fixture: ${error.message}\n`);
+    }
+  }
+  if (originalCommandFixture) {
+    try {
+      await bridgeSetBlocks([{
+        position: commandPosition,
+        blockState: originalCommandFixture.blocks[0].blockState,
+      }]);
+    } catch (error) {
+      process.stderr.write(`Could not restore command fixture: ${error.message}\n`);
     }
   }
   if (fixtureIsForceLoaded) {
