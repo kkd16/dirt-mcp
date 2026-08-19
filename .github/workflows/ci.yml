@@ -47,11 +47,11 @@ jobs:
         env:
           ACTIONLINT_VERSION: 1.7.12
         run: |
-          sudo apt-get update
           sudo apt-get install --no-install-recommends --yes tmux
           ci_tool_dir="$(mktemp -d)"
 
-          curl --fail --location --silent --show-error \
+          curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
+            --connect-timeout 15 --max-time 60 \
             --output "${ci_tool_dir}/actionlint.tar.gz" \
             "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  ${ci_tool_dir}/actionlint.tar.gz" \
