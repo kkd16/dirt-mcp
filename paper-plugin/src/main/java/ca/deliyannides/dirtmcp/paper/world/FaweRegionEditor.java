@@ -1,6 +1,7 @@
 package ca.deliyannides.dirtmcp.paper.world;
 
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.BlockChange;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.DestinationPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.Failure;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRegionRequest;
@@ -15,12 +16,14 @@ import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.NormalizedRegion;
 import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.RegionTooLargeException;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Bounds;
-import com.fastasyncworldedit.core.function.mask.SingleBlockStateMask;
+import com.fastasyncworldedit.core.math.random.SimpleRandom;
 import com.sk89q.worldedit.EditSession;
 import com.sk89q.worldedit.MaxChangedBlocksException;
 import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
-import com.sk89q.worldedit.function.mask.Mask;
+import com.sk89q.worldedit.function.mask.BlockMask;
+import com.sk89q.worldedit.function.pattern.Pattern;
+import com.sk89q.worldedit.function.pattern.RandomPattern;
 import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldedit.regions.CuboidRegion;
 import com.sk89q.worldedit.util.SideEffect;
@@ -166,23 +169,32 @@ public final class FaweRegionEditor implements RegionEditor {
             WorldState state) throws EditException {
         CuboidRegion selection = selection(prepared.world(), region);
 
-        boolean changesBlocks = !prepared.sourceBlockStateName()
-                .equals(prepared.destinationBlockStateName());
         EditSession session = newEditSession(prepared.world(), !request.dryRun());
-        int matches;
+        long matches = 0;
+        long expectedChanges = 0;
         long changes;
         try (session) {
-            Mask sourceMask = new SingleBlockStateMask(session, prepared.sourceBlockState());
-            matches = session.countBlocks(selection, sourceMask);
-            long expectedChanges = changesBlocks ? matches : 0;
+            BlockMask sourceMask = new BlockMask(session);
+            sourceMask.add(prepared.sourceBlockStates().toArray(BlockState[]::new));
+            for (BlockVector3 position : selection) {
+                BlockState current = session.getBlock(position);
+                if (!sourceMask.test(current)) {
+                    continue;
+                }
+                matches++;
+                if (!current.equals(destinationAt(prepared.destinationPalette(), position))) {
+                    expectedChanges++;
+                }
+            }
             enforceChangeLimit(expectedChanges);
 
             changes = expectedChanges;
             if (!request.dryRun() && expectedChanges > 0) {
-                changes = session.replaceBlocks(
+                session.replaceBlocks(
                         selection,
                         sourceMask,
-                        prepared.destinationBlockState());
+                        prepared.destinationPalette().pattern());
+                changes = session.getChangeSet().longSize();
             }
         } catch (MaxChangedBlocksException exception) {
             throw new EditException(
@@ -203,16 +215,22 @@ public final class FaweRegionEditor implements RegionEditor {
             WorldState state) throws EditException {
         CuboidRegion selection = selection(prepared.world(), region);
         EditSession session = newEditSession(prepared.world(), !request.dryRun());
+        long expectedChanges = 0;
         long changes;
         try (session) {
-            Mask destinationMask = new SingleBlockStateMask(session, prepared.blockState());
-            int matchingDestination = session.countBlocks(selection, destinationMask);
-            long expectedChanges = region.volume() - matchingDestination;
+            for (BlockVector3 position : selection) {
+                if (!session.getBlock(position).equals(destinationAt(prepared.destinationPalette(), position))) {
+                    expectedChanges++;
+                }
+            }
             enforceChangeLimit(expectedChanges);
 
             changes = expectedChanges;
             if (!request.dryRun() && expectedChanges > 0) {
-                changes = session.replaceBlocks(selection, destinationMask.inverse(), prepared.blockState());
+                session.setBlocks(
+                        (com.sk89q.worldedit.regions.Region) selection,
+                        prepared.destinationPalette().pattern());
+                changes = session.getChangeSet().longSize();
             }
         } catch (MaxChangedBlocksException exception) {
             throw new EditException(
@@ -226,7 +244,8 @@ public final class FaweRegionEditor implements RegionEditor {
         return new FillRegionResult(
                 prepared.worldName(),
                 new Bounds(region.min(), region.max()),
-                prepared.blockStateName(),
+                prepared.destinationPalette().entries(),
+                request.seed(),
                 request.dryRun(),
                 region.volume(),
                 changes);
@@ -303,8 +322,9 @@ public final class FaweRegionEditor implements RegionEditor {
         return new ReplaceRegionBlocksResult(
                 prepared.worldName(),
                 new Bounds(region.min(), region.max()),
-                prepared.sourceBlockStateName(),
-                prepared.destinationBlockStateName(),
+                prepared.sourceBlockStatePatterns(),
+                prepared.destinationPalette().entries(),
+                request.seed(),
                 request.dryRun(),
                 matches,
                 changes);
@@ -360,17 +380,15 @@ public final class FaweRegionEditor implements RegionEditor {
         World world = prepared.bukkitWorld();
         requireValidHeight(world, region);
 
-        BlockData sourceBlockState = parseBlockData(request.sourceBlockState(), "sourceBlockState");
-        BlockData destinationBlockState = parseBlockData(
-                request.destinationBlockState(), "destinationBlockState");
+        PreparedSourcePatterns sourcePatterns = prepareSourcePatterns(request.sourceBlockStatePatterns());
+        PreparedDestinationPalette destinationPalette = prepareDestinationPalette(request.destinationPalette(), request.seed());
         ChunkTickets chunkTickets = retainLoadedChunks(world, region);
         return new PreparedEdit(
                 prepared.worldName(),
                 prepared.world(),
-                BukkitAdapter.adapt(sourceBlockState),
-                BukkitAdapter.adapt(destinationBlockState),
-                sourceBlockState.getAsString(),
-                destinationBlockState.getAsString(),
+                sourcePatterns.blockStates(),
+                sourcePatterns.patterns(),
+                destinationPalette,
                 chunkTickets);
     }
 
@@ -380,13 +398,12 @@ public final class FaweRegionEditor implements RegionEditor {
         World world = prepared.bukkitWorld();
         requireValidHeight(world, region);
 
-        BlockData blockState = parseBlockData(request.blockState(), "blockState");
+        PreparedDestinationPalette destinationPalette = prepareDestinationPalette(request.destinationPalette(), request.seed());
         ChunkTickets chunkTickets = retainLoadedChunks(world, region);
         return new PreparedFill(
                 prepared.worldName(),
                 prepared.world(),
-                BukkitAdapter.adapt(blockState),
-                blockState.getAsString(),
+                destinationPalette,
                 chunkTickets);
     }
 
@@ -475,10 +492,132 @@ public final class FaweRegionEditor implements RegionEditor {
     }
 
     private static BlockData parseBlockData(String input, String field) throws EditException {
+        if (input == null || input.isBlank()) {
+            throw new EditException(Failure.INVALID_REQUEST, field + " must be a non-empty string");
+        }
         try {
             return Bukkit.createBlockData(input);
         } catch (IllegalArgumentException exception) {
             throw new EditException(Failure.INVALID_REQUEST, field + " is not a valid block state", exception);
+        }
+    }
+
+    private static PreparedSourcePatterns prepareSourcePatterns(List<String> inputs)
+            throws EditException {
+        if (inputs == null || inputs.isEmpty()) {
+            throw new EditException(
+                    Failure.INVALID_REQUEST,
+                    "sourceBlockStatePatterns must contain at least one entry");
+        }
+        Set<String> canonicalPatterns = new LinkedHashSet<>();
+        Set<BlockState> matchingStates = new LinkedHashSet<>();
+        for (int index = 0; index < inputs.size(); index++) {
+            BlockData pattern = parseBlockData(
+                    inputs.get(index), "sourceBlockStatePatterns[" + index + "]");
+            String canonicalPattern = pattern.getAsString(true);
+            if (!canonicalPatterns.add(canonicalPattern)) {
+                throw new EditException(
+                        Failure.INVALID_REQUEST,
+                        "sourceBlockStatePatterns contains a duplicate pattern: " + canonicalPattern);
+            }
+            BlockState parsedState = BukkitAdapter.adapt(pattern);
+            for (BlockState candidate : parsedState.getBlockType().getAllStates()) {
+                if (BukkitAdapter.adapt(candidate).matches(pattern)) {
+                    matchingStates.add(candidate);
+                }
+            }
+        }
+        return new PreparedSourcePatterns(
+                List.copyOf(canonicalPatterns),
+                List.copyOf(matchingStates));
+    }
+
+    private static PreparedDestinationPalette prepareDestinationPalette(
+            List<DestinationPaletteEntry> inputs,
+            int seed) throws EditException {
+        if (inputs == null || inputs.isEmpty()) {
+            throw new EditException(Failure.INVALID_REQUEST, "destinationPalette must contain at least one entry");
+        }
+        List<DestinationPaletteEntry> canonicalEntries = new ArrayList<>(inputs.size());
+        Set<String> canonicalStates = new LinkedHashSet<>();
+        List<BlockState> blockStates = new ArrayList<>(inputs.size());
+        boolean hasWeights = false;
+        boolean hasUnweightedEntries = false;
+        int weightTotal = 0;
+        for (int index = 0; index < inputs.size(); index++) {
+            DestinationPaletteEntry input = inputs.get(index);
+            if (input == null) {
+                throw new EditException(
+                        Failure.INVALID_REQUEST,
+                        "destinationPalette[" + index + "] must contain a blockState");
+            }
+            BlockData blockData = parseBlockData(
+                    input.blockState(), "destinationPalette[" + index + "].blockState");
+            String canonicalState = blockData.getAsString();
+            if (!canonicalStates.add(canonicalState)) {
+                throw new EditException(
+                        Failure.INVALID_REQUEST,
+                        "destinationPalette contains a duplicate block state: " + canonicalState);
+            }
+            Integer weight = input.weight();
+            if (weight == null) {
+                hasUnweightedEntries = true;
+            } else {
+                if (weight < 1 || weight > 100) {
+                    throw new EditException(
+                            Failure.INVALID_REQUEST,
+                            "destinationPalette[" + index + "].weight must be between 1 and 100");
+                }
+                hasWeights = true;
+                weightTotal = Math.addExact(weightTotal, weight);
+            }
+            canonicalEntries.add(new DestinationPaletteEntry(canonicalState, weight));
+            blockStates.add(BukkitAdapter.adapt(blockData));
+        }
+        if (hasWeights && hasUnweightedEntries) {
+            throw new EditException(
+                    Failure.INVALID_REQUEST,
+                    "destinationPalette weights must be provided for every entry or omitted from every entry");
+        }
+        if (hasWeights && weightTotal != 100) {
+            throw new EditException(Failure.INVALID_REQUEST, "destinationPalette weights must total 100");
+        }
+
+        RandomPattern pattern = new RandomPattern(new SeededCoordinateRandom(seed));
+        for (int index = 0; index < blockStates.size(); index++) {
+            Integer weight = canonicalEntries.get(index).weight();
+            pattern.add(blockStates.get(index), weight == null ? 1.0 : weight.doubleValue());
+        }
+        return new PreparedDestinationPalette(List.copyOf(canonicalEntries), pattern);
+    }
+
+    private static BlockState destinationAt(
+            PreparedDestinationPalette palette,
+            BlockVector3 position) {
+        return palette.pattern().applyBlock(position).toBlockState();
+    }
+
+    private static final class SeededCoordinateRandom implements SimpleRandom {
+        private static final double UNIT_DOUBLE = 0x1.0p-53;
+        private final long seed;
+
+        private SeededCoordinateRandom(int seed) {
+            this.seed = Integer.toUnsignedLong(seed);
+        }
+
+        @Override
+        public double nextDouble(int x, int y, int z) {
+            long value = mix(this.seed ^ 0x9e3779b97f4a7c15L);
+            value = mix(value ^ Integer.toUnsignedLong(x));
+            value = mix(value ^ Integer.toUnsignedLong(y));
+            value = mix(value ^ Integer.toUnsignedLong(z));
+            return (value >>> 11) * UNIT_DOUBLE;
+        }
+
+        private static long mix(long value) {
+            value = (value ^ (value >>> 30)) * 0xbf58476d1ce4e5b9L;
+            value = (value ^ (value >>> 27)) * 0x94d049bb133111ebL;
+            return value ^ (value >>> 31);
         }
     }
 
@@ -599,18 +738,24 @@ public final class FaweRegionEditor implements RegionEditor {
     private record PreparedEdit(
             String worldName,
             com.sk89q.worldedit.world.World world,
-            BlockState sourceBlockState,
-            BlockState destinationBlockState,
-            String sourceBlockStateName,
-            String destinationBlockStateName,
+            List<BlockState> sourceBlockStates,
+            List<String> sourceBlockStatePatterns,
+            PreparedDestinationPalette destinationPalette,
             ChunkTickets chunkTickets) {}
 
     private record PreparedFill(
             String worldName,
             com.sk89q.worldedit.world.World world,
-            BlockState blockState,
-            String blockStateName,
+            PreparedDestinationPalette destinationPalette,
             ChunkTickets chunkTickets) {}
+
+    private record PreparedSourcePatterns(
+            List<String> patterns,
+            List<BlockState> blockStates) {}
+
+    private record PreparedDestinationPalette(
+            List<DestinationPaletteEntry> entries,
+            Pattern pattern) {}
 
     private record PreparedSparseEdit(
             String worldName,

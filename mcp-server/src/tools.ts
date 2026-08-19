@@ -206,41 +206,99 @@ function compactView(
   return { ...metadata, format: 'grid', blockStatePalette, blockStateIndexRows, distanceRows };
 }
 
+const SourceBlockStatePatternsSchema = z.array(z.string().min(1)).min(1)
+  .superRefine((patterns, context) => {
+    const seen = new Set<string>();
+    patterns.forEach((pattern, index) => {
+      if (seen.has(pattern)) {
+        context.addIssue({
+          code: 'custom',
+          path: [index],
+          message: 'Source block-state patterns must be distinct.',
+        });
+      }
+      seen.add(pattern);
+    });
+  })
+  .describe('One or more block-state patterns matched as a union. Omitted properties match any value.');
+
+const DestinationPaletteEntrySchema = z.object({
+  blockState: z.string().min(1).describe('Exact canonical block state to place.'),
+  weight: z.number().int().min(1).max(100).optional()
+    .describe('Whole-number percentage. Supply for every entry or omit from every entry.'),
+}).strict().describe('One destination state and its optional probability percentage.');
+
+const DestinationPaletteSchema = z.array(DestinationPaletteEntrySchema).min(1)
+  .superRefine((entries, context) => {
+    const weightedCount = entries.filter((entry) => entry.weight !== undefined).length;
+    if (weightedCount !== 0 && weightedCount !== entries.length) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Weights must be provided for every destination or omitted from every destination.',
+      });
+    }
+    if (weightedCount === entries.length) {
+      const total = entries.reduce((sum, entry) => sum + (entry.weight ?? 0), 0);
+      if (total !== 100) {
+        context.addIssue({ code: 'custom', message: 'Destination weights must total 100.' });
+      }
+    }
+    const seen = new Set<string>();
+    entries.forEach((entry, index) => {
+      if (seen.has(entry.blockState)) {
+        context.addIssue({
+          code: 'custom',
+          path: [index, 'blockState'],
+          message: 'Destination block states must be distinct.',
+        });
+      }
+      seen.add(entry.blockState);
+    });
+  })
+  .describe('One or more exact destination states. Omitted weights give every entry equal probability.');
+
+const SeedSchema = z.number().int().min(INT32_MIN).max(INT32_MAX)
+  .describe('Signed 32-bit seed for reproducible per-coordinate palette choices.');
+
 const ReplaceRegionBlocksInputSchema = z.object({
   world: z.string().min(1).describe('Exact name of an already loaded Paper world.'),
   min: BlockPositionSchema.describe('One inclusive corner; ordering relative to max does not matter.'),
   max: BlockPositionSchema.describe('The other inclusive corner; ordering relative to min does not matter.'),
-  sourceBlockState: z.string().min(1)
-    .describe('Exact canonical block state to replace, including properties when they must match.'),
-  destinationBlockState: z.string().min(1)
-    .describe('Canonical block state to write, including desired properties.'),
+  sourceBlockStatePatterns: SourceBlockStatePatternsSchema,
+  destinationPalette: DestinationPaletteSchema,
+  seed: SeedSchema.optional()
+    .describe('Optional reproducibility seed. Omission generates a fresh seed returned in the result.'),
   dryRun: z.boolean().optional()
     .describe('Preview counts without mutating the world; omission uses the Paper plugin default.'),
-}).strict().describe('Exact block-state replacement in an inclusive region.');
+}).strict().describe('Property-aware block-state replacement with a weighted destination palette.');
 
 const ReplaceRegionBlocksOutputSchema = z.object({
   world: z.string().min(1).describe('Edited world name.'),
   bounds: BoundsSchema,
-  sourceBlockState: z.string().min(1).describe('Canonical source state used for matching.'),
-  destinationBlockState: z.string().min(1).describe('Canonical destination state used for writing.'),
+  sourceBlockStatePatterns: SourceBlockStatePatternsSchema,
+  destinationPalette: DestinationPaletteSchema,
+  seed: SeedSchema.describe('Resolved seed used for per-coordinate palette choices.'),
   dryRun: z.boolean().describe('Whether the world was left unchanged.'),
-  matchedBlockCount: z.number().int().nonnegative().describe('Blocks matching sourceBlockState.'),
+  matchedBlockCount: z.number().int().nonnegative().describe('Blocks matching any sourceBlockStatePatterns entry.'),
   changedBlockCount: z.number().int().nonnegative().describe('Blocks changed, or that would change in a dry run.'),
-}).strict().describe('Completed or previewed exact block-state replacement.');
+}).strict().describe('Completed or previewed property-aware block-state replacement.');
 
 const FillRegionInputSchema = z.object({
   world: z.string().min(1).describe('Exact name of an already loaded Paper world.'),
   min: BlockPositionSchema.describe('One inclusive corner; ordering relative to max does not matter.'),
   max: BlockPositionSchema.describe('The other inclusive corner; ordering relative to min does not matter.'),
-  blockState: z.string().min(1).describe('Canonical block state to write throughout the region.'),
+  destinationPalette: DestinationPaletteSchema,
+  seed: SeedSchema.optional()
+    .describe('Optional reproducibility seed. Omission generates a fresh seed returned in the result.'),
   dryRun: z.boolean().optional()
     .describe('Preview counts without mutating the world; omission uses the Paper plugin default.'),
-}).strict().describe('Uniform block-state fill of an inclusive region.');
+}).strict().describe('Weighted block-state palette fill of an inclusive region.');
 
 const FillRegionOutputSchema = z.object({
   world: z.string().min(1).describe('Edited world name.'),
   bounds: BoundsSchema,
-  blockState: z.string().min(1).describe('Canonical block state used for the fill.'),
+  destinationPalette: DestinationPaletteSchema,
+  seed: SeedSchema.describe('Resolved seed used for per-coordinate palette choices.'),
   dryRun: z.boolean().describe('Whether the world was left unchanged.'),
   volume: z.number().int().positive().describe('Total blocks in the region.'),
   changedBlockCount: z.number().int().nonnegative().describe('Blocks changed, or that would change in a dry run.'),
@@ -384,6 +442,12 @@ const MUTATION_ANNOTATIONS: ToolAnnotations = {
   readOnlyHint: false,
   destructiveHint: true,
   idempotentHint: true,
+  openWorldHint: true,
+};
+const RANDOM_MUTATION_ANNOTATIONS: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: false,
   openWorldHint: true,
 };
 const UNDO_ANNOTATIONS: ToolAnnotations = {
@@ -562,15 +626,15 @@ export function registerTools(
 
   registrations.push(register('replace_region_blocks', {
     title: 'Replace region blocks',
-    description: 'Replace one exact canonical block state throughout an inclusive region. Set dryRun=true to preview without mutation.',
+    description: 'Replace blocks matching any source pattern throughout an inclusive region. Omitted source properties match any value. Destination entries are exact states; omit every weight for equal probability or provide whole percentages totaling 100. Reuse the returned seed to reproduce a preview. Set dryRun=true to preview without mutation.',
     inputSchema: ReplaceRegionBlocksInputSchema,
     outputSchema: ReplaceRegionBlocksOutputSchema,
-    annotations: MUTATION_ANNOTATIONS,
+    annotations: RANDOM_MUTATION_ANNOTATIONS,
   }, async (input, context) => auditToolCall('replace_region_blocks', input.world, context, async (callId) => {
     try {
       const result = await bridgeRequest(config, '/v1/replace-region-blocks', callId, ReplaceRegionBlocksOutputSchema, jsonPost(input), 120_000);
       const verb = result.dryRun ? 'Would change' : 'Changed';
-      return successResult(result, `${verb} ${result.changedBlockCount} of ${result.matchedBlockCount} matching blocks in ${result.world}.`);
+      return successResult(result, `${verb} ${result.changedBlockCount} of ${result.matchedBlockCount} matching blocks in ${result.world} using seed ${result.seed}.`);
     } catch (error: unknown) {
       return errorResult(error, 'Could not replace region blocks');
     }
@@ -578,15 +642,15 @@ export function registerTools(
 
   registrations.push(register('fill_region', {
     title: 'Fill a region',
-    description: 'Set every block in an inclusive region to one canonical block state. Set dryRun=true to preview without mutation.',
+    description: 'Fill an inclusive region from a destination palette of exact block states. Omit every weight for equal probability or provide whole percentages totaling 100. Reuse the returned seed to reproduce a preview. Set dryRun=true to preview without mutation.',
     inputSchema: FillRegionInputSchema,
     outputSchema: FillRegionOutputSchema,
-    annotations: MUTATION_ANNOTATIONS,
+    annotations: RANDOM_MUTATION_ANNOTATIONS,
   }, async (input, context) => auditToolCall('fill_region', input.world, context, async (callId) => {
     try {
       const result = await bridgeRequest(config, '/v1/fill-region', callId, FillRegionOutputSchema, jsonPost(input), 120_000);
       const verb = result.dryRun ? 'Would change' : 'Changed';
-      return successResult(result, `${verb} ${result.changedBlockCount} of ${result.volume} blocks in ${result.world}.`);
+      return successResult(result, `${verb} ${result.changedBlockCount} of ${result.volume} blocks in ${result.world} using seed ${result.seed}.`);
     } catch (error: unknown) {
       return errorResult(error, 'Could not fill the region');
     }

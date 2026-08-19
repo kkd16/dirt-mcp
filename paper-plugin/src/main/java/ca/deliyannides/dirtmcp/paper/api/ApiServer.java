@@ -8,6 +8,7 @@ import ca.deliyannides.dirtmcp.paper.server.ServerContext;
 import ca.deliyannides.dirtmcp.paper.server.ServerContext.ServerContextException;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.BlockChange;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.DestinationPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRegionRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRegionBlocksRequest;
@@ -29,6 +30,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import com.google.gson.JsonSerializer;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -42,6 +44,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
@@ -80,20 +83,33 @@ public final class ApiServer implements AutoCloseable {
             "maxDistance",
             "maxResults");
     private static final Set<String> REPLACE_REGION_BLOCKS_REQUIRED_FIELDS =
-            Set.of("world", "min", "max", "sourceBlockState", "destinationBlockState");
+            Set.of("world", "min", "max", "sourceBlockStatePatterns", "destinationPalette");
     private static final Set<String> REPLACE_REGION_BLOCKS_FIELDS = Set.of(
-            "world", "min", "max", "sourceBlockState", "destinationBlockState", "dryRun");
+            "world", "min", "max", "sourceBlockStatePatterns", "destinationPalette", "seed", "dryRun");
     private static final Set<String> FILL_REGION_REQUIRED_FIELDS =
-            Set.of("world", "min", "max", "blockState");
+            Set.of("world", "min", "max", "destinationPalette");
     private static final Set<String> FILL_REGION_FIELDS =
-            Set.of("world", "min", "max", "blockState", "dryRun");
+            Set.of("world", "min", "max", "destinationPalette", "seed", "dryRun");
+    private static final Set<String> DESTINATION_PALETTE_ENTRY_REQUIRED_FIELDS = Set.of("blockState");
+    private static final Set<String> DESTINATION_PALETTE_ENTRY_FIELDS = Set.of("blockState", "weight");
     private static final Set<String> SET_BLOCKS_REQUIRED_FIELDS = Set.of("world", "changes");
     private static final Set<String> SET_BLOCKS_FIELDS = Set.of("world", "changes", "dryRun");
     private static final Set<String> BLOCK_CHANGE_FIELDS = Set.of("position", "blockState");
     private static final Set<String> UNDO_FIELDS = Set.of("world");
     private static final Set<String> RUN_COMMANDS_FIELDS = Set.of("commands");
     private static final Set<String> POSITION_FIELDS = Set.of("x", "y", "z");
-    private static final Gson GSON = new GsonBuilder().serializeNulls().create();
+    private static final Gson GSON = new GsonBuilder()
+            .serializeNulls()
+            .registerTypeAdapter(DestinationPaletteEntry.class, (JsonSerializer<DestinationPaletteEntry>)
+                    (entry, ignoredType, ignoredContext) -> {
+                        JsonObject object = new JsonObject();
+                        object.addProperty("blockState", entry.blockState());
+                        if (entry.weight() != null) {
+                            object.addProperty("weight", entry.weight());
+                        }
+                        return object;
+                    })
+            .create();
 
     private final PluginSettings settings;
     private final BearerAuthentication authentication;
@@ -586,8 +602,12 @@ public final class ApiServer implements AutoCloseable {
                     parseString(object.get("world"), "world"),
                     parsePosition(object.get("min"), "min"),
                     parsePosition(object.get("max"), "max"),
-                    parseString(object.get("sourceBlockState"), "sourceBlockState"),
-                    parseString(object.get("destinationBlockState"), "destinationBlockState"),
+                    parseNonEmptyStringList(
+                            object.get("sourceBlockStatePatterns"), "sourceBlockStatePatterns"),
+                    parseDestinationPalette(object.get("destinationPalette")),
+                    object.has("seed")
+                            ? parseInteger(object.get("seed"), "seed")
+                            : ThreadLocalRandom.current().nextInt(),
                     object.has("dryRun")
                             ? parseBoolean(object.get("dryRun"), "dryRun")
                             : this.settings.defaults().editDryRun());
@@ -619,7 +639,10 @@ public final class ApiServer implements AutoCloseable {
                     parseString(object.get("world"), "world"),
                     parsePosition(object.get("min"), "min"),
                     parsePosition(object.get("max"), "max"),
-                    parseString(object.get("blockState"), "blockState"),
+                    parseDestinationPalette(object.get("destinationPalette")),
+                    object.has("seed")
+                            ? parseInteger(object.get("seed"), "seed")
+                            : ThreadLocalRandom.current().nextInt(),
                     object.has("dryRun")
                             ? parseBoolean(object.get("dryRun"), "dryRun")
                             : this.settings.defaults().editDryRun());
@@ -724,6 +747,61 @@ public final class ApiServer implements AutoCloseable {
             values.add(parseString(value, name + "[]"));
         }
         return List.copyOf(values);
+    }
+
+    private static List<String> parseNonEmptyStringList(JsonElement element, String name)
+            throws InvalidRequestException {
+        List<String> values = parseStringList(element, name);
+        if (values.isEmpty()) {
+            throw new InvalidRequestException(name + " must contain at least one entry");
+        }
+        return values;
+    }
+
+    private static List<DestinationPaletteEntry> parseDestinationPalette(JsonElement element)
+            throws InvalidRequestException {
+        if (element == null || !element.isJsonArray() || element.getAsJsonArray().isEmpty()) {
+            throw new InvalidRequestException("destinationPalette must be a non-empty array");
+        }
+        List<DestinationPaletteEntry> entries = new ArrayList<>(element.getAsJsonArray().size());
+        boolean hasWeights = false;
+        boolean hasUnweightedEntries = false;
+        int weightTotal = 0;
+        for (int index = 0; index < element.getAsJsonArray().size(); index++) {
+            JsonElement value = element.getAsJsonArray().get(index);
+            if (!value.isJsonObject()) {
+                throw new InvalidRequestException("destinationPalette[" + index + "] must be an object");
+            }
+            JsonObject object = value.getAsJsonObject();
+            if (!object.keySet().containsAll(DESTINATION_PALETTE_ENTRY_REQUIRED_FIELDS)
+                    || !DESTINATION_PALETTE_ENTRY_FIELDS.containsAll(object.keySet())) {
+                throw new InvalidRequestException(
+                        "destinationPalette[" + index + "] contains missing or unknown fields");
+            }
+            Integer weight = null;
+            if (object.has("weight")) {
+                weight = parseInteger(object.get("weight"), "destinationPalette[" + index + "].weight");
+                if (weight < 1 || weight > 100) {
+                    throw new InvalidRequestException(
+                            "destinationPalette[" + index + "].weight must be between 1 and 100");
+                }
+                hasWeights = true;
+                weightTotal = Math.addExact(weightTotal, weight);
+            } else {
+                hasUnweightedEntries = true;
+            }
+            entries.add(new DestinationPaletteEntry(
+                    parseString(object.get("blockState"), "destinationPalette[" + index + "].blockState"),
+                    weight));
+        }
+        if (hasWeights && hasUnweightedEntries) {
+            throw new InvalidRequestException(
+                    "destinationPalette weights must be provided for every entry or omitted from every entry");
+        }
+        if (hasWeights && weightTotal != 100) {
+            throw new InvalidRequestException("destinationPalette weights must total 100");
+        }
+        return List.copyOf(entries);
     }
 
     private static RegionBlocksFormat parseRegionBlocksFormat(JsonElement element)

@@ -122,13 +122,13 @@ test('reloads tools without replacing the stdio process', async (context) => {
       replace_region_blocks: {
         readOnlyHint: false,
         destructiveHint: true,
-        idempotentHint: true,
+        idempotentHint: false,
         openWorldHint: true,
       },
       fill_region: {
         readOnlyHint: false,
         destructiveHint: true,
-        idempotentHint: true,
+        idempotentHint: false,
         openWorldHint: true,
       },
       set_blocks: {

@@ -143,8 +143,9 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   const replacement = {
     world: 'world',
     bounds: blockStateCount.bounds,
-    sourceBlockState: 'minecraft:stone',
-    destinationBlockState: 'minecraft:dirt',
+    sourceBlockStatePatterns: ['minecraft:stone'],
+    destinationPalette: [{ blockState: 'minecraft:dirt', weight: 100 }],
+    seed: 123,
     dryRun: true,
     matchedBlockCount: 1,
     changedBlockCount: 1,
@@ -383,7 +384,10 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     method: 'tools/call',
     params: modernParams({
       name: 'fill_region',
-      arguments: { ...region, blockState: 'minecraft:dirt' },
+      arguments: {
+        ...region,
+        destinationPalette: [{ blockState: 'minecraft:dirt' }],
+      },
     }),
   });
   const failedFill = await waitFor(messages, 6);
@@ -475,15 +479,19 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       name: 'replace_region_blocks',
       arguments: {
         ...region,
-        sourceBlockState: 'minecraft:stone',
-        destinationBlockState: 'minecraft:dirt',
+        sourceBlockStatePatterns: ['minecraft:stone'],
+        destinationPalette: [{ blockState: 'minecraft:dirt', weight: 100 }],
+        seed: 123,
         dryRun: true,
       },
     }),
   });
   const replaced = await waitFor(messages, 11);
   assert.deepEqual(replaced.result, modernResult({
-    content: [{ type: 'text', text: 'Would change 1 of 1 matching blocks in world.' }],
+    content: [{
+      type: 'text',
+      text: 'Would change 1 of 1 matching blocks in world using seed 123.',
+    }],
     structuredContent: replacement,
   }));
 
@@ -537,7 +545,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.equal(requests[3].headers['content-type'], 'application/json');
   assert.deepEqual(requests[4].body, {
     ...region,
-    blockState: 'minecraft:dirt',
+    destinationPalette: [{ blockState: 'minecraft:dirt' }],
   });
   assert.equal(requests[4].headers['content-type'], 'application/json');
   assert.deepEqual(requests[6].body, { world: 'world', changes: sparseChanges });
@@ -549,8 +557,9 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.deepEqual(requests[8].body, region);
   assert.deepEqual(requests[9].body, {
     ...region,
-    sourceBlockState: 'minecraft:stone',
-    destinationBlockState: 'minecraft:dirt',
+    sourceBlockStatePatterns: ['minecraft:stone'],
+    destinationPalette: [{ blockState: 'minecraft:dirt', weight: 100 }],
+    seed: 123,
     dryRun: true,
   });
   assert.deepEqual(requests[10].body, { world: 'world' });

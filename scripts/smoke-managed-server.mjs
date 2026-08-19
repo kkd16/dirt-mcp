@@ -21,6 +21,7 @@ const world = 'world';
 const min = { x: 0, y: 0, z: 0 };
 const max = { x: 1, y: 1, z: 1 };
 const stairMin = { x: 2, y: 0, z: 0 };
+const stairMiddle = { x: 3, y: 0, z: 0 };
 const stairMax = { x: 4, y: 0, z: 0 };
 const commandPosition = { x: 5, y: 0, z: 0 };
 const sparsePosition = { x: 6, y: 0, z: 0 };
@@ -376,26 +377,33 @@ try {
 
   const preview = await bridgeRequest('/v1/fill-region', {
     ...region,
-    blockState: fillBlockState,
+    destinationPalette: [{ blockState: fillBlockState }],
     dryRun: true,
   });
-  const alreadyMatching = original.blockStateCounts[preview.blockState] ?? 0;
+  const previewState = preview.destinationPalette[0].blockState;
+  const alreadyMatching = original.blockStateCounts[previewState] ?? 0;
   assert.equal(preview.dryRun, true);
   assert.equal(preview.volume, original.volume);
   assert.equal(preview.changedBlockCount, original.volume - alreadyMatching);
   assert.ok(preview.changedBlockCount > 0, 'Smoke destination must change at least one block');
 
-  const filled = await bridgeRequest('/v1/fill-region', { ...region, blockState: fillBlockState });
+  const filled = await bridgeRequest('/v1/fill-region', {
+    ...region,
+    destinationPalette: [{ blockState: fillBlockState }],
+    seed: preview.seed,
+  });
   editsToUndo += filled.changedBlockCount > 0 ? 1 : 0;
+  const filledState = filled.destinationPalette[0].blockState;
   assert.equal(filled.dryRun, false);
-  assert.equal(filled.blockState, preview.blockState);
+  assert.equal(filled.seed, preview.seed);
+  assert.deepEqual(filled.destinationPalette, preview.destinationPalette);
   assert.equal(filled.changedBlockCount, preview.changedBlockCount);
 
   const afterFill = await bridgeRequest('/v1/count-region-block-states', region);
-  assert.deepEqual(afterFill.blockStateCounts, { [filled.blockState]: filled.volume });
+  assert.deepEqual(afterFill.blockStateCounts, { [filledState]: filled.volume });
 
   const exactBlocks = await bridgeRequest('/v1/get-region-blocks', region);
-  assertExactBlocks(exactBlocks, filled.blockState);
+  assertExactBlocks(exactBlocks, filledState);
 
   const viewRequest = {
     world,
@@ -427,7 +435,7 @@ try {
   assert.deepEqual(view.blocks, [{
     position: { x: 0, y: 0, z: 1 },
     offset: { horizontal: 0, vertical: 0, distance: 1 },
-    blockState: filled.blockState,
+    blockState: filledState,
   }]);
 
   const limitedView = await bridgeResponse('/v1/scan-orthographic-view', {
@@ -445,18 +453,18 @@ try {
 
   const exactRuns = await bridgeRequest('/v1/get-region-blocks', {
     ...region,
-    includeBlockStatePatterns: [filled.blockState],
+    includeBlockStatePatterns: [filledState],
     format: 'runs',
     maxResults: 8,
   });
   assert.equal(exactRuns.format, 'runs');
   assert.equal(exactRuns.matchedBlockCount, 8);
   assert.ok(exactRuns.runs.length > 0 && exactRuns.runs.length < 8);
-  assert.deepEqual(expandedRunKeys(exactRuns.runs), expectedBlockKeys(filled.blockState));
+  assert.deepEqual(expandedRunKeys(exactRuns.runs), expectedBlockKeys(filledState));
 
   const excluded = await bridgeRequest('/v1/get-region-blocks', {
     ...region,
-    excludeBlockStatePatterns: [filled.blockState],
+    excludeBlockStatePatterns: [filledState],
   });
   assert.equal(excluded.matchedBlockCount, 0);
   assert.deepEqual(excluded.blocks, []);
@@ -473,8 +481,8 @@ try {
   const replacementDestination = 'minecraft:gold_block';
   const replacePreview = await bridgeRequest('/v1/replace-region-blocks', {
     ...region,
-    sourceBlockState: filled.blockState,
-    destinationBlockState: replacementDestination,
+    sourceBlockStatePatterns: [filledState],
+    destinationPalette: [{ blockState: replacementDestination }],
     dryRun: true,
   });
   assert.equal(replacePreview.dryRun, true);
@@ -483,8 +491,9 @@ try {
 
   const replaced = await bridgeRequest('/v1/replace-region-blocks', {
     ...region,
-    sourceBlockState: filled.blockState,
-    destinationBlockState: replacementDestination,
+    sourceBlockStatePatterns: [filledState],
+    destinationPalette: [{ blockState: replacementDestination }],
+    seed: replacePreview.seed,
   });
   editsToUndo += replaced.changedBlockCount > 0 ? 1 : 0;
   assert.equal(replaced.dryRun, false);
@@ -492,17 +501,17 @@ try {
   assert.equal(replaced.changedBlockCount, replacePreview.changedBlockCount);
   assertExactBlocks(
     await bridgeRequest('/v1/get-region-blocks', region),
-    replaced.destinationBlockState,
+    replaced.destinationPalette[0].blockState,
   );
 
   const replacementUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
   editsToUndo -= 1;
   assert.equal(replacementUndone.changedBlockCount, replaced.changedBlockCount);
-  assertExactBlocks(await bridgeRequest('/v1/get-region-blocks', region), filled.blockState);
+  assertExactBlocks(await bridgeRequest('/v1/get-region-blocks', region), filledState);
 
   const noOp = await bridgeRequest('/v1/fill-region', {
     ...region,
-    blockState: filled.blockState,
+    destinationPalette: [{ blockState: filledState }],
   });
   assert.equal(noOp.changedBlockCount, 0);
 
@@ -520,47 +529,73 @@ try {
   assert.equal(originalStairFixture.matchedBlockCount, 3);
   await bridgeSetBlocks([
     { position: stairMin, blockState: northStairs },
+    { position: stairMiddle, blockState: 'minecraft:air' },
     { position: stairMax, blockState: southStairs },
   ]);
 
   const exactStatePreview = await bridgeRequest('/v1/replace-region-blocks', {
     ...stairRegion,
-    sourceBlockState: northStairs,
-    destinationBlockState: 'minecraft:gold_block',
+    sourceBlockStatePatterns: ['minecraft:dark_oak_stairs', 'minecraft:air'],
+    destinationPalette: [
+      { blockState: 'minecraft:gold_block', weight: 50 },
+      { blockState: 'minecraft:diamond_block', weight: 50 },
+    ],
     dryRun: true,
   });
-  assert.equal(exactStatePreview.matchedBlockCount, 1);
-  assert.equal(exactStatePreview.changedBlockCount, 1);
+  assert.equal(exactStatePreview.matchedBlockCount, 3);
+  assert.equal(exactStatePreview.changedBlockCount, 3);
 
   const exactStateReplacement = await bridgeRequest('/v1/replace-region-blocks', {
     ...stairRegion,
-    sourceBlockState: northStairs,
-    destinationBlockState: 'minecraft:gold_block',
+    sourceBlockStatePatterns: ['minecraft:dark_oak_stairs', 'minecraft:air'],
+    destinationPalette: [
+      { blockState: 'minecraft:gold_block', weight: 50 },
+      { blockState: 'minecraft:diamond_block', weight: 50 },
+    ],
+    seed: exactStatePreview.seed,
   });
   editsToUndo += exactStateReplacement.changedBlockCount > 0 ? 1 : 0;
-  assert.equal(exactStateReplacement.matchedBlockCount, 1);
-  assert.equal(exactStateReplacement.changedBlockCount, 1);
+  assert.equal(exactStateReplacement.matchedBlockCount, 3);
+  assert.equal(exactStateReplacement.changedBlockCount, 3);
   const exactStateBlocks = await bridgeRequest('/v1/get-region-blocks', {
     ...stairRegion,
-    includeBlockStatePatterns: ['minecraft:gold_block', southStairs],
+    includeBlockStatePatterns: ['minecraft:gold_block', 'minecraft:diamond_block'],
   });
-  assert.deepEqual(
-    sortedBlockKeys(exactStateBlocks.blocks),
-    [
-      `${stairMin.x},${stairMin.y},${stairMin.z}:minecraft:gold_block`,
-      `${stairMax.x},${stairMax.y},${stairMax.z}:${southStairs}`,
-    ],
-  );
+  assert.equal(exactStateBlocks.matchedBlockCount, 3);
+  assert.ok(exactStateBlocks.blocks.every(({ blockState }) => (
+    blockState === 'minecraft:gold_block' || blockState === 'minecraft:diamond_block'
+  )));
+  const firstSeededLayout = sortedBlockKeys(exactStateBlocks.blocks);
 
   const exactStateReplacementUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
   editsToUndo -= 1;
-  assert.equal(exactStateReplacementUndone.changedBlockCount, 1);
+  assert.equal(exactStateReplacementUndone.changedBlockCount, 3);
+
+  const replayedReplacement = await bridgeRequest('/v1/replace-region-blocks', {
+    ...stairRegion,
+    sourceBlockStatePatterns: ['minecraft:dark_oak_stairs', 'minecraft:air'],
+    destinationPalette: [
+      { blockState: 'minecraft:gold_block', weight: 50 },
+      { blockState: 'minecraft:diamond_block', weight: 50 },
+    ],
+    seed: exactStatePreview.seed,
+  });
+  editsToUndo += replayedReplacement.changedBlockCount > 0 ? 1 : 0;
+  assert.equal(replayedReplacement.changedBlockCount, exactStateReplacement.changedBlockCount);
+  const replayedBlocks = await bridgeRequest('/v1/get-region-blocks', {
+    ...stairRegion,
+    includeBlockStatePatterns: ['minecraft:gold_block', 'minecraft:diamond_block'],
+  });
+  assert.deepEqual(sortedBlockKeys(replayedBlocks.blocks), firstSeededLayout);
+  const replayedReplacementUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
+  editsToUndo -= 1;
+  assert.equal(replayedReplacementUndone.changedBlockCount, 3);
 
   const propertyFillPreview = await bridgeRequest('/v1/fill-region', {
     world,
     min: stairMin,
     max: stairMin,
-    blockState: southStairs,
+    destinationPalette: [{ blockState: southStairs }],
     dryRun: true,
   });
   assert.equal(propertyFillPreview.changedBlockCount, 1);
@@ -569,7 +604,8 @@ try {
     world,
     min: stairMin,
     max: stairMin,
-    blockState: southStairs,
+    destinationPalette: [{ blockState: southStairs }],
+    seed: propertyFillPreview.seed,
   });
   editsToUndo += propertyFill.changedBlockCount > 0 ? 1 : 0;
   assert.equal(propertyFill.changedBlockCount, 1);

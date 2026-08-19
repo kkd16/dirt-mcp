@@ -15,8 +15,8 @@ behavior that matters when choosing and combining tools.
 | `count_region_block_states` | `POST /v1/count-region-block-states` | Count canonical block states in an inclusive region. |
 | `get_region_blocks` | `POST /v1/get-region-blocks` | Return filtered exact blocks or lossless axis-aligned runs. |
 | `scan_orthographic_view` | `POST /v1/scan-orthographic-view` | Find the first non-air block on each bounded world-axis sightline. |
-| `replace_region_blocks` | `POST /v1/replace-region-blocks` | Replace one exact block state throughout a region. |
-| `fill_region` | `POST /v1/fill-region` | Fill a region with one block state. |
+| `replace_region_blocks` | `POST /v1/replace-region-blocks` | Replace a union of block-state patterns with a destination palette. |
+| `fill_region` | `POST /v1/fill-region` | Fill a region from a destination palette. |
 | `set_blocks` | `POST /v1/set-blocks` | Apply different states at distinct explicit positions as one edit. |
 | `undo_last_dirt_edit` | `POST /v1/undo-last-dirt-edit` | Undo the newest retained Dirt edit in one world. |
 | `run_minecraft_commands` | `POST /v1/run-minecraft-commands` | Dispatch an ordered command batch with operator-level permissions. |
@@ -54,6 +54,19 @@ when exact blocks, runs, or visible blocks exceed the applicable cap.
 position can have a different destination state while the batch remains one
 mutation and one undo entry.
 
+Replacement sources are a non-empty array of block-state patterns. Patterns
+are ORed, and omitted properties match any value, so `minecraft:oak_stairs`
+matches every oak-stair state while an explicitly supplied property constrains
+the match. Destination palettes contain exact block states. If every palette
+entry omits `weight`, states have equal per-block probability. Otherwise every
+entry supplies a whole-number percentage and the weights total 100. Weighted
+results are probabilistic rather than exact quotas.
+
+Both cuboid tools accept an optional signed 32-bit `seed`. Omission generates a
+fresh seed that is returned in the response. Reusing a seed with the same
+ordered palette and unchanged world reproduces each coordinate's choice, so a
+dry run can be replayed as an edit with the same changed count.
+
 Before mutation, Dirt validates all coordinates, loaded chunks, and block
 states. Sparse positions must be distinct; duplicates are rejected rather than
 given last-write semantics. Block states are canonicalized at the Paper
@@ -66,9 +79,9 @@ Successful non-empty edits enter bounded, in-memory, per-world history when
 history is enabled. Dry runs and no-ops create no history. History is cleared on
 restart and can be disabled by setting its depth to zero.
 
-Dry runs report exact changed counts without mutation. Fill and sparse counts
-exclude blocks already in their requested destination state. Replacing a state
-with itself reports matches but zero changes.
+Dry runs report exact changed counts without mutation. Fill and replacement
+counts exclude coordinates whose selected destination is already present.
+Sparse counts exclude blocks already in their requested destination state.
 
 Dirt uses FAWE's API side-effect profile, which does not request Minecraft
 neighbor updates. This is appropriate for large deterministic builds, but

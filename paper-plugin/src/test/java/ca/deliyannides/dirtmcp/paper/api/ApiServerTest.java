@@ -28,6 +28,7 @@ import ca.deliyannides.dirtmcp.paper.world.RegionInspector;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.EditException;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.BlockChange;
+import ca.deliyannides.dirtmcp.paper.world.RegionEditor.DestinationPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRegionRequest;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.FillRegionResult;
 import ca.deliyannides.dirtmcp.paper.world.RegionEditor.ReplaceRegionBlocksRequest;
@@ -511,8 +512,9 @@ final class ApiServerTest {
                 return new ReplaceRegionBlocksResult(
                         request.world(),
                         new Bounds(request.min(), request.max()),
-                        request.sourceBlockState(),
-                        request.destinationBlockState(),
+                        request.sourceBlockStatePatterns(),
+                        request.destinationPalette(),
+                        request.seed(),
                         request.dryRun(),
                         0,
                         0);
@@ -524,7 +526,8 @@ final class ApiServerTest {
                 return new FillRegionResult(
                         request.world(),
                         new Bounds(request.min(), request.max()),
-                        request.blockState(),
+                        request.destinationPalette(),
+                        request.seed(),
                         request.dryRun(),
                         1,
                         0);
@@ -548,13 +551,14 @@ final class ApiServerTest {
             HttpResponse<String> replace = client.send(
                     replacementRequest(server, """
                             {"world":"world","min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":0},
-                             "sourceBlockState":"minecraft:stone","destinationBlockState":"minecraft:dirt"}
+                             "sourceBlockStatePatterns":["minecraft:stone"],
+                             "destinationPalette":[{"blockState":"minecraft:dirt"}]}
                             """),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> fill = client.send(
                     fillRequest(server, """
                             {"world":"world","min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":0},
-                             "blockState":"minecraft:dirt"}
+                             "destinationPalette":[{"blockState":"minecraft:dirt"}]}
                             """),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> set = client.send(
@@ -743,14 +747,18 @@ final class ApiServerTest {
                 assertEquals("world", request.world());
                 assertEquals(new BlockPosition(5, 60, -2), request.min());
                 assertEquals(new BlockPosition(6, 61, -1), request.max());
-                assertEquals("minecraft:stone", request.sourceBlockState());
-                assertEquals("minecraft:dirt", request.destinationBlockState());
+                assertEquals(List.of("minecraft:stone"), request.sourceBlockStatePatterns());
+                assertEquals(
+                        List.of(new DestinationPaletteEntry("minecraft:dirt", 100)),
+                        request.destinationPalette());
+                assertEquals(42, request.seed());
                 assertFalse(request.dryRun());
                 return new ReplaceRegionBlocksResult(
                         request.world(),
                         new Bounds(request.min(), request.max()),
-                        request.sourceBlockState(),
-                        request.destinationBlockState(),
+                        request.sourceBlockStatePatterns(),
+                        request.destinationPalette(),
+                        request.seed(),
                         request.dryRun(),
                         8,
                         8);
@@ -764,8 +772,10 @@ final class ApiServerTest {
             HttpResponse<String> response = client.send(
                     replacementRequest(server, """
                             {"world":"world","min":{"x":5,"y":60,"z":-2},
-                             "max":{"x":6,"y":61,"z":-1},"sourceBlockState":"minecraft:stone",
-                             "destinationBlockState":"minecraft:dirt"}
+                             "max":{"x":6,"y":61,"z":-1},
+                             "sourceBlockStatePatterns":["minecraft:stone"],
+                             "destinationPalette":[{"blockState":"minecraft:dirt","weight":100}],
+                             "seed":42}
                             """),
                     HttpResponse.BodyHandlers.ofString());
 
@@ -773,8 +783,9 @@ final class ApiServerTest {
             assertEquals(
                     "{\"world\":\"world\",\"bounds\":{\"min\":{\"x\":5,\"y\":60,\"z\":-2},"
                             + "\"max\":{\"x\":6,\"y\":61,\"z\":-1}},"
-                            + "\"sourceBlockState\":\"minecraft:stone\",\"destinationBlockState\":\"minecraft:dirt\","
-                            + "\"dryRun\":false,\"matchedBlockCount\":8,\"changedBlockCount\":8}",
+                            + "\"sourceBlockStatePatterns\":[\"minecraft:stone\"],"
+                            + "\"destinationPalette\":[{\"blockState\":\"minecraft:dirt\",\"weight\":100}],"
+                            + "\"seed\":42,\"dryRun\":false,\"matchedBlockCount\":8,\"changedBlockCount\":8}",
                     response.body());
         }
     }
@@ -788,14 +799,16 @@ final class ApiServerTest {
             HttpResponse<String> missing = client.send(
                     replacementRequest(server, """
                             {"world":"world","min":{"x":0,"y":60,"z":0},
-                             "max":{"x":0,"y":60,"z":0},"sourceBlockState":"minecraft:stone"}
+                             "max":{"x":0,"y":60,"z":0},
+                             "sourceBlockStatePatterns":["minecraft:stone"]}
                             """),
                     HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> wrongDryRun = client.send(
                     replacementRequest(server, """
                             {"world":"world","min":{"x":0,"y":60,"z":0},
-                             "max":{"x":0,"y":60,"z":0},"sourceBlockState":"minecraft:stone",
-                             "destinationBlockState":"minecraft:dirt","dryRun":"yes"}
+                             "max":{"x":0,"y":60,"z":0},
+                             "sourceBlockStatePatterns":["minecraft:stone"],
+                             "destinationPalette":[{"blockState":"minecraft:dirt"}],"dryRun":"yes"}
                             """),
                     HttpResponse.BodyHandlers.ofString());
 
@@ -822,8 +835,9 @@ final class ApiServerTest {
             HttpResponse<String> response = client.send(
                     replacementRequest(server, """
                             {"world":"world","min":{"x":0,"y":60,"z":0},
-                             "max":{"x":0,"y":60,"z":0},"sourceBlockState":"minecraft:stone",
-                             "destinationBlockState":"minecraft:dirt","dryRun":true}
+                             "max":{"x":0,"y":60,"z":0},
+                             "sourceBlockStatePatterns":["minecraft:stone"],
+                             "destinationPalette":[{"blockState":"minecraft:dirt"}],"dryRun":true}
                             """),
                     HttpResponse.BodyHandlers.ofString());
 
@@ -842,12 +856,16 @@ final class ApiServerTest {
                 assertEquals("world", request.world());
                 assertEquals(new BlockPosition(5, 60, -2), request.min());
                 assertEquals(new BlockPosition(6, 61, -1), request.max());
-                assertEquals("minecraft:oak_planks", request.blockState());
+                assertEquals(
+                        List.of(new DestinationPaletteEntry("minecraft:oak_planks", null)),
+                        request.destinationPalette());
+                assertEquals(43, request.seed());
                 assertFalse(request.dryRun());
                 return new FillRegionResult(
                         request.world(),
                         new Bounds(request.min(), request.max()),
-                        request.blockState(),
+                        request.destinationPalette(),
+                        request.seed(),
                         request.dryRun(),
                         8,
                         6);
@@ -861,7 +879,8 @@ final class ApiServerTest {
             HttpResponse<String> response = client.send(
                     fillRequest(server, """
                             {"world":"world","min":{"x":5,"y":60,"z":-2},
-                             "max":{"x":6,"y":61,"z":-1},"blockState":"minecraft:oak_planks"}
+                             "max":{"x":6,"y":61,"z":-1},
+                             "destinationPalette":[{"blockState":"minecraft:oak_planks"}],"seed":43}
                             """),
                     HttpResponse.BodyHandlers.ofString());
 
@@ -869,7 +888,8 @@ final class ApiServerTest {
             assertEquals(
                     "{\"world\":\"world\",\"bounds\":{\"min\":{\"x\":5,\"y\":60,\"z\":-2},"
                             + "\"max\":{\"x\":6,\"y\":61,\"z\":-1}},"
-                            + "\"blockState\":\"minecraft:oak_planks\",\"dryRun\":false,"
+                            + "\"destinationPalette\":[{\"blockState\":\"minecraft:oak_planks\"}],"
+                            + "\"seed\":43,\"dryRun\":false,"
                             + "\"volume\":8,\"changedBlockCount\":6}",
                     response.body());
         }
@@ -890,8 +910,8 @@ final class ApiServerTest {
             HttpResponse<String> wrongDryRun = client.send(
                     fillRequest(server, """
                             {"world":"world","min":{"x":0,"y":60,"z":0},
-                             "max":{"x":0,"y":60,"z":0},"blockState":"minecraft:dirt",
-                             "dryRun":"yes"}
+                             "max":{"x":0,"y":60,"z":0},
+                             "destinationPalette":[{"blockState":"minecraft:dirt"}],"dryRun":"yes"}
                             """),
                     HttpResponse.BodyHandlers.ofString());
 
@@ -900,6 +920,49 @@ final class ApiServerTest {
             assertEquals(
                     "{\"error\":{\"code\":\"invalid_request\",\"message\":\"dryRun must be a boolean\"}}",
                     wrongDryRun.body());
+        }
+    }
+
+    @Test
+    void rejectsInvalidDestinationPalettes() throws Exception {
+        try (ApiServer server = server(UNUSED_INSPECTOR, UNUSED_EDITOR);
+                HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+
+            HttpResponse<String> partialWeights = client.send(
+                    fillRequest(server, """
+                            {"world":"world","min":{"x":0,"y":60,"z":0},
+                             "max":{"x":0,"y":60,"z":0},"destinationPalette":[
+                               {"blockState":"minecraft:dirt","weight":50},
+                               {"blockState":"minecraft:stone"}]}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> wrongTotal = client.send(
+                    fillRequest(server, """
+                            {"world":"world","min":{"x":0,"y":60,"z":0},
+                             "max":{"x":0,"y":60,"z":0},"destinationPalette":[
+                               {"blockState":"minecraft:dirt","weight":40},
+                               {"blockState":"minecraft:stone","weight":40}]}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> empty = client.send(
+                    fillRequest(server, """
+                            {"world":"world","min":{"x":0,"y":60,"z":0},
+                             "max":{"x":0,"y":60,"z":0},"destinationPalette":[]}
+                            """),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(400, partialWeights.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"invalid_request\",\"message\":"
+                            + "\"destinationPalette weights must be provided for every entry or omitted from every entry\"}}",
+                    partialWeights.body());
+            assertEquals(400, wrongTotal.statusCode());
+            assertEquals(
+                    "{\"error\":{\"code\":\"invalid_request\","
+                            + "\"message\":\"destinationPalette weights must total 100\"}}",
+                    wrongTotal.body());
+            assertEquals(400, empty.statusCode());
         }
     }
 
@@ -918,7 +981,8 @@ final class ApiServerTest {
             HttpResponse<String> response = client.send(
                     fillRequest(server, """
                             {"world":"world","min":{"x":0,"y":60,"z":0},
-                             "max":{"x":0,"y":60,"z":0},"blockState":"minecraft:dirt","dryRun":true}
+                             "max":{"x":0,"y":60,"z":0},
+                             "destinationPalette":[{"blockState":"minecraft:dirt"}],"dryRun":true}
                             """),
                     HttpResponse.BodyHandlers.ofString());
 

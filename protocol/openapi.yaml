@@ -214,7 +214,7 @@ paths:
   /v1/replace-region-blocks:
     post:
       operationId: replaceRegionBlocks
-      summary: Replace one exact block state in a bounded region of loaded chunks
+      summary: Replace block-state patterns with a weighted palette in loaded chunks
       requestBody:
         required: true
         content:
@@ -251,7 +251,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '413':
-          description: Region volume or estimated changed-block count exceeds its configured limit
+          description: Region volume or exact changed-block count exceeds its configured limit
           content:
             application/json:
               schema:
@@ -271,7 +271,7 @@ paths:
   /v1/fill-region:
     post:
       operationId: fillRegion
-      summary: Fill a bounded region of loaded chunks with one block state
+      summary: Fill a bounded region of loaded chunks with a weighted palette
       requestBody:
         required: true
         content:
@@ -959,6 +959,21 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/OrthographicViewBlock'
+    DestinationPaletteEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - blockState
+      properties:
+        blockState:
+          type: string
+          minLength: 1
+          description: Exact canonical block state to place.
+        weight:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Whole-number percentage supplied for every entry or omitted from every entry.
     ReplaceRegionBlocksRequest:
       type: object
       additionalProperties: false
@@ -966,8 +981,8 @@ components:
         - world
         - min
         - max
-        - sourceBlockState
-        - destinationBlockState
+        - sourceBlockStatePatterns
+        - destinationPalette
       properties:
         world:
           type: string
@@ -976,12 +991,24 @@ components:
           $ref: '#/components/schemas/BlockPosition'
         max:
           $ref: '#/components/schemas/BlockPosition'
-        sourceBlockState:
-          type: string
-          minLength: 1
-        destinationBlockState:
-          type: string
-          minLength: 1
+        sourceBlockStatePatterns:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: ORed block-state patterns; omitted properties match any value.
+          items:
+            type: string
+            minLength: 1
+        destinationPalette:
+          type: array
+          minItems: 1
+          description: Exact destination states; weights are all omitted for equal probability or all total 100.
+          items:
+            $ref: '#/components/schemas/DestinationPaletteEntry'
+        seed:
+          type: integer
+          format: int32
+          description: Omission generates a fresh seed returned in the response.
         dryRun:
           type: boolean
           description: Omission uses the configured replace default.
@@ -991,8 +1018,9 @@ components:
       required:
         - world
         - bounds
-        - sourceBlockState
-        - destinationBlockState
+        - sourceBlockStatePatterns
+        - destinationPalette
+        - seed
         - dryRun
         - matchedBlockCount
         - changedBlockCount
@@ -1002,12 +1030,21 @@ components:
           minLength: 1
         bounds:
           $ref: '#/components/schemas/Bounds'
-        sourceBlockState:
-          type: string
-          minLength: 1
-        destinationBlockState:
-          type: string
-          minLength: 1
+        sourceBlockStatePatterns:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+        destinationPalette:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/DestinationPaletteEntry'
+        seed:
+          type: integer
+          format: int32
         dryRun:
           type: boolean
         matchedBlockCount:
@@ -1025,7 +1062,7 @@ components:
         - world
         - min
         - max
-        - blockState
+        - destinationPalette
       properties:
         world:
           type: string
@@ -1034,9 +1071,16 @@ components:
           $ref: '#/components/schemas/BlockPosition'
         max:
           $ref: '#/components/schemas/BlockPosition'
-        blockState:
-          type: string
-          minLength: 1
+        destinationPalette:
+          type: array
+          minItems: 1
+          description: Exact destination states; weights are all omitted for equal probability or all total 100.
+          items:
+            $ref: '#/components/schemas/DestinationPaletteEntry'
+        seed:
+          type: integer
+          format: int32
+          description: Omission generates a fresh seed returned in the response.
         dryRun:
           type: boolean
           description: Omission uses the configured fill default.
@@ -1046,7 +1090,8 @@ components:
       required:
         - world
         - bounds
-        - blockState
+        - destinationPalette
+        - seed
         - dryRun
         - volume
         - changedBlockCount
@@ -1056,9 +1101,14 @@ components:
           minLength: 1
         bounds:
           $ref: '#/components/schemas/Bounds'
-        blockState:
-          type: string
-          minLength: 1
+        destinationPalette:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/DestinationPaletteEntry'
+        seed:
+          type: integer
+          format: int32
         dryRun:
           type: boolean
         volume:

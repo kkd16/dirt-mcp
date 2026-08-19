@@ -98,12 +98,15 @@ session.
 `replace_region_blocks` and `fill_region` use the same already-loaded-chunk
 rule as inspection. `set_blocks` checks only the chunks containing its explicit
 positions. All three canonicalize Bukkit block-state strings at the Paper
-boundary and record only successful non-empty edits. Sparse edits reject
-duplicate positions and validate every position, state, and chunk before
-opening their single FAWE edit session. Fill and sparse edits count blocks
-already in the destination state before mutation so dry-runs are exact and the
-changed-block limit is checked before execution. Dirt explicitly uses FAWE's
-API side-effect profile for edits, which omits neighbor updates while retaining
+boundary and record only successful non-empty edits. Replacement expands its
+property-aware source patterns to a concrete FAWE mask on Paper's main thread.
+Cuboid destinations become a FAWE random pattern backed by a stateless
+seed-and-coordinate selector, making results independent of traversal order.
+The same selector pre-counts exact changes before mutation so dry runs are
+replayable and the changed-block limit is checked before execution. Sparse
+edits reject duplicate positions and validate every position, state, and chunk
+before opening their single FAWE edit session. Dirt explicitly uses FAWE's API
+side-effect profile for edits, which omits neighbor updates while retaining
 API-appropriate heightmap and lighting work.
 
 `undo_last_dirt_edit` uses the same world lock, applies the newest history entry

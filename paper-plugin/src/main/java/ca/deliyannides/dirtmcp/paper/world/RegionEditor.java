@@ -18,15 +18,17 @@ public interface RegionEditor {
             String world,
             BlockPosition min,
             BlockPosition max,
-            String sourceBlockState,
-            String destinationBlockState,
+            List<String> sourceBlockStatePatterns,
+            List<DestinationPaletteEntry> destinationPalette,
+            int seed,
             boolean dryRun) {}
 
     record ReplaceRegionBlocksResult(
             String world,
             Bounds bounds,
-            String sourceBlockState,
-            String destinationBlockState,
+            List<String> sourceBlockStatePatterns,
+            List<DestinationPaletteEntry> destinationPalette,
+            int seed,
             boolean dryRun,
             long matchedBlockCount,
             long changedBlockCount) {}
@@ -35,16 +37,20 @@ public interface RegionEditor {
             String world,
             BlockPosition min,
             BlockPosition max,
-            String blockState,
+            List<DestinationPaletteEntry> destinationPalette,
+            int seed,
             boolean dryRun) {}
 
     record FillRegionResult(
             String world,
             Bounds bounds,
-            String blockState,
+            List<DestinationPaletteEntry> destinationPalette,
+            int seed,
             boolean dryRun,
             long volume,
             long changedBlockCount) {}
+
+    record DestinationPaletteEntry(String blockState, Integer weight) {}
 
     record SetBlocksRequest(
             String world,
