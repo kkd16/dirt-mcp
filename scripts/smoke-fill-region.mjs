@@ -20,6 +20,10 @@ assert.ok(Number.isInteger(bridgePort) && bridgePort > 0 && bridgePort <= 65_535
 const world = 'world';
 const min = { x: 0, y: 0, z: 0 };
 const max = { x: 1, y: 1, z: 1 };
+const stairMin = { x: 2, y: 0, z: 0 };
+const stairMax = { x: 3, y: 0, z: 0 };
+const northStairs = 'minecraft:dark_oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]';
+const southStairs = 'minecraft:dark_oak_stairs[facing=south,half=bottom,shape=straight,waterlogged=false]';
 const baseUrl = `http://127.0.0.1:${bridgePort}`;
 
 async function getServerInfo() {
@@ -64,6 +68,10 @@ async function paperCommand(command) {
       }
     });
   });
+}
+
+async function paperSetBlock(position, blockState) {
+  await paperCommand(`setblock ${position.x} ${position.y} ${position.z} ${blockState} replace`);
 }
 
 async function waitForRegion(region) {
@@ -137,8 +145,10 @@ function assertExactBlocks(inspection, state) {
 }
 
 const region = { world, min, max };
+const stairRegion = { world, min: stairMin, max: stairMax };
 let editsToUndo = 0;
 let fixtureIsForceLoaded = false;
+let originalStairFixture;
 try {
   const serverInfo = await getServerInfo();
   assert.equal(serverInfo.configuration.bridge.port, bridgePort);
@@ -300,6 +310,80 @@ try {
 
   const restored = await bridgeRequest('/v1/count-region-block-states', region);
   assert.deepEqual(normalizedJson(restored), normalizedJson(original));
+
+  originalStairFixture = await bridgeRequest('/v1/get-region-blocks', {
+    ...stairRegion,
+    includeAir: true,
+  });
+  assert.equal(originalStairFixture.matchedBlockCount, 2);
+  await paperSetBlock(stairMin, northStairs);
+  await paperSetBlock(stairMax, southStairs);
+
+  const exactStatePreview = await bridgeRequest('/v1/replace-region-blocks', {
+    ...stairRegion,
+    sourceBlockState: northStairs,
+    destinationBlockState: 'minecraft:gold_block',
+    dryRun: true,
+  });
+  assert.equal(exactStatePreview.matchedBlockCount, 1);
+  assert.equal(exactStatePreview.changedBlockCount, 1);
+
+  const exactStateReplacement = await bridgeRequest('/v1/replace-region-blocks', {
+    ...stairRegion,
+    sourceBlockState: northStairs,
+    destinationBlockState: 'minecraft:gold_block',
+  });
+  editsToUndo += exactStateReplacement.changedBlockCount > 0 ? 1 : 0;
+  assert.equal(exactStateReplacement.matchedBlockCount, 1);
+  assert.equal(exactStateReplacement.changedBlockCount, 1);
+  const exactStateBlocks = await bridgeRequest('/v1/get-region-blocks', stairRegion);
+  assert.deepEqual(
+    sortedBlockKeys(exactStateBlocks.blocks),
+    [
+      `${stairMin.x},${stairMin.y},${stairMin.z}:minecraft:gold_block`,
+      `${stairMax.x},${stairMax.y},${stairMax.z}:${southStairs}`,
+    ],
+  );
+
+  const exactStateReplacementUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
+  editsToUndo -= 1;
+  assert.equal(exactStateReplacementUndone.changedBlockCount, 1);
+
+  const propertyFillPreview = await bridgeRequest('/v1/fill-region', {
+    world,
+    min: stairMin,
+    max: stairMin,
+    blockState: southStairs,
+    dryRun: true,
+  });
+  assert.equal(propertyFillPreview.changedBlockCount, 1);
+
+  const propertyFill = await bridgeRequest('/v1/fill-region', {
+    world,
+    min: stairMin,
+    max: stairMin,
+    blockState: southStairs,
+  });
+  editsToUndo += propertyFill.changedBlockCount > 0 ? 1 : 0;
+  assert.equal(propertyFill.changedBlockCount, 1);
+  const propertyFillBlocks = await bridgeRequest('/v1/get-region-blocks', {
+    world,
+    min: stairMin,
+    max: stairMin,
+  });
+  assert.deepEqual(
+    sortedBlockKeys(propertyFillBlocks.blocks),
+    [`${stairMin.x},${stairMin.y},${stairMin.z}:${southStairs}`],
+  );
+
+  const propertyFillUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
+  editsToUndo -= 1;
+  assert.equal(propertyFillUndone.changedBlockCount, 1);
+
+  for (const block of originalStairFixture.blocks) {
+    await paperSetBlock(block.position, block.blockState);
+  }
+  originalStairFixture = undefined;
   process.stdout.write(`managed bridge smoke test passed in ${world}\n`);
 } finally {
   if (editsToUndo > 0) {
@@ -310,6 +394,15 @@ try {
       }
     } catch (error) {
       process.stderr.write(`Could not restore smoke-test edit: ${error.message}\n`);
+    }
+  }
+  if (originalStairFixture) {
+    try {
+      for (const block of originalStairFixture.blocks) {
+        await paperSetBlock(block.position, block.blockState);
+      }
+    } catch (error) {
+      process.stderr.write(`Could not restore stair fixture: ${error.message}\n`);
     }
   }
   if (fixtureIsForceLoaded) {

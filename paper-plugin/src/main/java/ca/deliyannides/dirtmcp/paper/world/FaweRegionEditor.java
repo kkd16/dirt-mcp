@@ -12,19 +12,19 @@ import ca.deliyannides.dirtmcp.paper.world.RegionInspector.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.RegionInspector.Bounds;
 import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.NormalizedRegion;
 import ca.deliyannides.dirtmcp.paper.world.RegionGeometry.RegionTooLargeException;
+import com.fastasyncworldedit.core.function.mask.SingleBlockStateMask;
 import com.sk89q.worldedit.EditSession;
 import com.sk89q.worldedit.MaxChangedBlocksException;
 import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
+import com.sk89q.worldedit.function.mask.Mask;
 import com.sk89q.worldedit.regions.CuboidRegion;
-import com.sk89q.worldedit.regions.Region;
-import com.sk89q.worldedit.world.block.BaseBlock;
+import com.sk89q.worldedit.world.block.BlockState;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -141,7 +141,8 @@ public final class FaweRegionEditor implements RegionEditor {
         int matches;
         long changes;
         try (session) {
-            matches = session.countBlocks(selection, Set.of(prepared.sourceBlockState()));
+            Mask sourceMask = new SingleBlockStateMask(session, prepared.sourceBlockState());
+            matches = session.countBlocks(selection, sourceMask);
             long expectedChanges = changesBlocks ? matches : 0;
             enforceChangeLimit(expectedChanges);
 
@@ -149,7 +150,7 @@ public final class FaweRegionEditor implements RegionEditor {
             if (!request.dryRun() && expectedChanges > 0) {
                 changes = session.replaceBlocks(
                         selection,
-                        Set.of(prepared.sourceBlockState()),
+                        sourceMask,
                         prepared.destinationBlockState());
             }
         } catch (MaxChangedBlocksException exception) {
@@ -173,13 +174,14 @@ public final class FaweRegionEditor implements RegionEditor {
         EditSession session = newEditSession(prepared.world(), !request.dryRun());
         long changes;
         try (session) {
-            int matchingDestination = session.countBlocks(selection, Set.of(prepared.blockState()));
+            Mask destinationMask = new SingleBlockStateMask(session, prepared.blockState());
+            int matchingDestination = session.countBlocks(selection, destinationMask);
             long expectedChanges = region.volume() - matchingDestination;
             enforceChangeLimit(expectedChanges);
 
             changes = expectedChanges;
             if (!request.dryRun() && expectedChanges > 0) {
-                changes = session.setBlocks((Region) selection, prepared.blockState());
+                changes = session.replaceBlocks(selection, destinationMask.inverse(), prepared.blockState());
             }
         } catch (MaxChangedBlocksException exception) {
             throw new EditException(
@@ -290,8 +292,8 @@ public final class FaweRegionEditor implements RegionEditor {
         return new PreparedEdit(
                 prepared.worldName(),
                 prepared.world(),
-                BukkitAdapter.adapt(sourceBlockState).toBaseBlock(),
-                BukkitAdapter.adapt(destinationBlockState).toBaseBlock(),
+                BukkitAdapter.adapt(sourceBlockState),
+                BukkitAdapter.adapt(destinationBlockState),
                 sourceBlockState.getAsString(),
                 destinationBlockState.getAsString(),
                 chunkTickets);
@@ -308,7 +310,7 @@ public final class FaweRegionEditor implements RegionEditor {
         return new PreparedFill(
                 prepared.worldName(),
                 prepared.world(),
-                BukkitAdapter.adapt(blockState).toBaseBlock(),
+                BukkitAdapter.adapt(blockState),
                 blockState.getAsString(),
                 chunkTickets);
     }
@@ -434,8 +436,8 @@ public final class FaweRegionEditor implements RegionEditor {
     private record PreparedEdit(
             String worldName,
             com.sk89q.worldedit.world.World world,
-            BaseBlock sourceBlockState,
-            BaseBlock destinationBlockState,
+            BlockState sourceBlockState,
+            BlockState destinationBlockState,
             String sourceBlockStateName,
             String destinationBlockStateName,
             ChunkTickets chunkTickets) {}
@@ -443,7 +445,7 @@ public final class FaweRegionEditor implements RegionEditor {
     private record PreparedFill(
             String worldName,
             com.sk89q.worldedit.world.World world,
-            BaseBlock blockState,
+            BlockState blockState,
             String blockStateName,
             ChunkTickets chunkTickets) {}
 
