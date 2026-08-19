@@ -33,7 +33,12 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: '26'
+          check-latest: true
+          package-manager-cache: false
+
+      - name: Set up npm
+        run: npm install --global "$(node -p "require('./package.json').packageManager")"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
