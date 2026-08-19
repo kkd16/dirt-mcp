@@ -5,6 +5,7 @@
   behavior.
 - [`v1-design.md`](v1-design.md) defines the initial tools and editing
   semantics.
+- [`../TODO.md`](../TODO.md) tracks the remaining verification and release work.
 
 The implemented Java-to-TypeScript interface is always described by
 [`../protocol/openapi.yaml`](../protocol/openapi.yaml). Design documents do not
