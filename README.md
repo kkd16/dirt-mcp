@@ -139,7 +139,9 @@ mutation. It does not request Minecraft neighbor physics.
 order with console-equivalent permissions. Its Paper sender is not a player, so
 player-only commands, `@s`, and relative-position behavior differ from a real
 operator. Command effects are immediate and are not covered by Dirt edit limits
-or `undo_last_dirt_edit`.
+or `undo_last_dirt_edit`. Each result retains synchronous command `feedback`;
+dispatch failures also return an actionable underlying `message` and Paper's
+original wrapper text as `rawMessage`.
 
 ## Local development
 

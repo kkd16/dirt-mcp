@@ -118,8 +118,10 @@ to bounded plain text for the bridge response.
 Every command is attempted once in order, including after Paper finds no command
 target or a command executor throws. Bukkit does not expose the Brigadier result
 value, so ordinary command feedback is returned to the caller but is not
-interpreted as semantic success or failure. Command effects do not participate
-in FAWE locking, Dirt resource limits, or Dirt undo history.
+interpreted as semantic success or failure. Dispatch exceptions retain Paper's
+original message while presenting the deepest non-empty cause message as the
+actionable explanation. Command effects do not participate in FAWE locking,
+Dirt resource limits, or Dirt undo history.
 
 ## Dependency direction
 

@@ -1187,6 +1187,7 @@ components:
         - outcome
         - feedback
         - message
+        - rawMessage
       properties:
         command:
           type: string
@@ -1207,6 +1208,12 @@ components:
           type:
             - string
             - 'null'
+          description: Actionable underlying failure explanation, otherwise null.
+        rawMessage:
+          type:
+            - string
+            - 'null'
+          description: Original Paper CommandException message for dispatch failures, otherwise null.
     RunMinecraftCommandsResponse:
       type: object
       additionalProperties: false

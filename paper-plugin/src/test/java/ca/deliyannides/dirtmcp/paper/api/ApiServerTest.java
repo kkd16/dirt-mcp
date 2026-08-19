@@ -1045,16 +1045,19 @@ final class ApiServerTest {
                                     "say first",
                                     CommandOutcome.DISPATCHED,
                                     List.of("[Dirt] first"),
+                                    null,
                                     null),
                             new CommandResult(
                                     "missing",
                                     CommandOutcome.NOT_FOUND,
                                     List.of(),
-                                    "Paper found no target for this command"),
+                                    "Paper found no target for this command",
+                                    null),
                             new CommandResult(
                                     "say last",
                                     CommandOutcome.DISPATCHED,
                                     List.of("[Dirt] last"),
+                                    null,
                                     null)));
         };
 
@@ -1073,11 +1076,12 @@ final class ApiServerTest {
                     "{\"sender\":{\"name\":\"FeedbackForwardingSender\",\"isOperator\":true,"
                             + "\"isPlayer\":false},\"feedbackTruncated\":false,\"results\":[{"
                             + "\"command\":\"say first\",\"outcome\":\"dispatched\","
-                            + "\"feedback\":[\"[Dirt] first\"],\"message\":null},{"
+                            + "\"feedback\":[\"[Dirt] first\"],\"message\":null,\"rawMessage\":null},{"
                             + "\"command\":\"missing\",\"outcome\":\"not_found\","
-                            + "\"feedback\":[],\"message\":\"Paper found no target for this command\"},{"
+                            + "\"feedback\":[],\"message\":\"Paper found no target for this command\","
+                            + "\"rawMessage\":null},{"
                             + "\"command\":\"say last\",\"outcome\":\"dispatched\","
-                            + "\"feedback\":[\"[Dirt] last\"],\"message\":null}]}",
+                            + "\"feedback\":[\"[Dirt] last\"],\"message\":null,\"rawMessage\":null}]}",
                     response.body());
         }
     }

@@ -85,8 +85,8 @@ after successful completion.
 `run_minecraft_commands` accepts a non-empty `commands` array, even for one
 command. One leading in-game slash is optional. Paper attempts every command
 once in supplied order and returns its normalized text, bounded synchronous
-feedback, optional failure message, and one of `dispatched`, `not_found`, or
-`dispatch_failed`.
+feedback, optional actionable failure `message`, optional original Paper
+`rawMessage`, and one of `dispatched`, `not_found`, or `dispatch_failed`.
 
 The sender has console-equivalent permissions but is not a player. Player-only
 commands, `@s`, and relative-position context therefore differ from a real

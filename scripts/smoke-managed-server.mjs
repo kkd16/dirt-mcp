@@ -228,6 +228,34 @@ try {
   });
   assert.equal(afterContinuedCommandRun.blocks[0].blockState, 'minecraft:diamond_block');
 
+  const vanillaCommandRun = await bridgeRequest('/v1/run-minecraft-commands', {
+    commands: [
+      'time query gametime',
+      `execute if block ${commandPosition.x} ${commandPosition.y} ${commandPosition.z} minecraft:diamond_block run time query gametime`,
+    ],
+  });
+  assert.deepEqual(
+    vanillaCommandRun.results.map(({ outcome }) => outcome),
+    ['dispatched', 'dispatched'],
+  );
+  assert.ok(vanillaCommandRun.results.every(({ feedback }) => feedback.length > 0));
+  assert.ok(vanillaCommandRun.results.every(({ message }) => message === null));
+  assert.ok(vanillaCommandRun.results.every(({ rawMessage }) => rawMessage === null));
+
+  const invalidSyntaxRun = await bridgeRequest('/v1/run-minecraft-commands', {
+    commands: [
+      'time query daytime',
+      `setblock ${commandPosition.x} ${commandPosition.y} ${commandPosition.z} minecraft:diamond_block replace`,
+    ],
+  });
+  assert.deepEqual(
+    invalidSyntaxRun.results.map(({ outcome }) => outcome),
+    ['dispatch_failed', 'dispatched'],
+  );
+  assert.ok(invalidSyntaxRun.results[0].message.length > 0);
+  assert.ok(invalidSyntaxRun.results[0].rawMessage.length > 0);
+  assert.notEqual(invalidSyntaxRun.results[0].message, invalidSyntaxRun.results[0].rawMessage);
+
   await bridgeSetBlocks([{
     position: commandPosition,
     blockState: originalCommandFixture.blocks[0].blockState,

@@ -20,7 +20,8 @@ public interface CommandRunner {
             String command,
             CommandOutcome outcome,
             List<String> feedback,
-            String message) {}
+            String message,
+            String rawMessage) {}
 
     enum CommandOutcome {
         @SerializedName("dispatched")

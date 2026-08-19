@@ -140,22 +140,26 @@ public final class PaperCommandRunner implements CommandRunner {
                             command,
                             CommandOutcome.DISPATCHED,
                             snapshot(feedback),
+                            null,
                             null));
                 } else {
                     results.add(new CommandResult(
                             command,
                             CommandOutcome.NOT_FOUND,
                             snapshot(feedback),
-                            NOT_FOUND_MESSAGE));
+                            NOT_FOUND_MESSAGE,
+                            null));
                 }
             } catch (CommandException exception) {
+                String rawMessage = messageOrDefault(
+                        exception,
+                        "Paper command dispatch failed");
                 results.add(new CommandResult(
                         command,
                         CommandOutcome.DISPATCH_FAILED,
                         snapshot(feedback),
-                        exception.getMessage() == null
-                                ? "Paper command dispatch failed"
-                                : exception.getMessage()));
+                        actionableMessage(exception, rawMessage),
+                        rawMessage));
             }
         }
 
@@ -170,6 +174,28 @@ public final class PaperCommandRunner implements CommandRunner {
         synchronized (feedback) {
             return List.copyOf(feedback);
         }
+    }
+
+    private static String actionableMessage(CommandException exception, String fallback) {
+        String message = null;
+        Throwable cause = exception.getCause();
+        for (int depth = 0; cause != null && cause != exception && depth < 16; depth++) {
+            String candidate = cause.getMessage();
+            if (candidate != null && !candidate.isBlank()) {
+                message = candidate;
+            }
+            Throwable next = cause.getCause();
+            if (next == cause) {
+                break;
+            }
+            cause = next;
+        }
+        return message == null ? fallback : message;
+    }
+
+    private static String messageOrDefault(Throwable throwable, String fallback) {
+        String message = throwable.getMessage();
+        return message == null || message.isBlank() ? fallback : message;
     }
 
     private static final class FeedbackBudget {

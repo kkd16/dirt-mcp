@@ -225,12 +225,21 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
         outcome: 'dispatched',
         feedback: ['[FeedbackForwardingSender] hello'],
         message: null,
+        rawMessage: null,
       },
       {
         command: 'missing',
         outcome: 'not_found',
         feedback: [],
         message: 'Paper found no target for this command',
+        rawMessage: null,
+      },
+      {
+        command: 'time query daytime',
+        outcome: 'dispatch_failed',
+        feedback: [],
+        message: 'Incorrect argument at position 11',
+        rawMessage: "Unhandled exception executing 'time query daytime'",
       },
     ],
   };
@@ -437,7 +446,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     method: 'tools/call',
     params: modernParams({
       name: 'run_minecraft_commands',
-      arguments: { commands: ['/say hello', 'missing'] },
+      arguments: { commands: ['/say hello', 'missing', 'time query daytime'] },
     }),
   });
   const commands = await waitFor(messages, 9);
@@ -445,7 +454,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     isError: true,
     content: [{
       type: 'text',
-      text: 'Dispatched 1 of 2 command(s); see per-command outcomes.',
+      text: 'Dispatched 1 of 3 command(s); see per-command outcomes.',
     }],
     structuredContent: commandRun,
   }));
@@ -537,7 +546,9 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.equal(requests[4].headers['content-type'], 'application/json');
   assert.deepEqual(requests[6].body, { world: 'world', changes: sparseChanges });
   assert.equal(requests[6].headers['content-type'], 'application/json');
-  assert.deepEqual(requests[7].body, { commands: ['/say hello', 'missing'] });
+  assert.deepEqual(requests[7].body, {
+    commands: ['/say hello', 'missing', 'time query daytime'],
+  });
   assert.equal(requests[7].headers['content-type'], 'application/json');
   assert.deepEqual(requests[8].body, region);
   assert.deepEqual(requests[9].body, {

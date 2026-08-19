@@ -83,6 +83,27 @@ final class PaperCommandRunnerTest {
         assertEquals(List.of("abcde"), result.results().getFirst().feedback());
         assertEquals(CommandOutcome.DISPATCH_FAILED, result.results().get(1).outcome());
         assertEquals("boom", result.results().get(1).message());
+        assertEquals("boom", result.results().get(1).rawMessage());
         assertEquals(CommandOutcome.DISPATCHED, result.results().getLast().outcome());
+    }
+
+    @Test
+    void reportsTheUnderlyingFailureAndPreservesPapersRawMessage() {
+        RunCommandsResult result = PaperCommandRunner.runBatch(
+                List.of("time query daytime"),
+                100,
+                SENDER,
+                (command, feedback) -> {
+                    throw new CommandException(
+                            "Unhandled exception executing 'time query daytime'",
+                            new IllegalArgumentException("Incorrect argument at position 11"));
+                });
+
+        CommandRunner.CommandResult failure = result.results().getFirst();
+        assertEquals(CommandOutcome.DISPATCH_FAILED, failure.outcome());
+        assertEquals("Incorrect argument at position 11", failure.message());
+        assertEquals(
+                "Unhandled exception executing 'time query daytime'",
+                failure.rawMessage());
     }
 }

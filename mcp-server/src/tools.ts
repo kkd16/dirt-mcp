@@ -299,7 +299,9 @@ const RunMinecraftCommandsOutputSchema = z.object({
     command: z.string().min(1).describe('Normalized command dispatched without the in-game leading slash.'),
     outcome: CommandOutcomeSchema.describe('Paper dispatch outcome; dispatched is not a semantic success signal.'),
     feedback: z.array(z.string()).describe('Plain-text feedback emitted synchronously during dispatch.'),
-    message: z.string().nullable().describe('Dispatch failure explanation, otherwise null.'),
+    message: z.string().nullable().describe('Actionable underlying failure explanation, otherwise null.'),
+    rawMessage: z.string().nullable()
+      .describe('Original Paper CommandException message for dispatch failures, otherwise null.'),
   }).strict()).min(1).describe('One result per supplied command in the original order.'),
 }).strict().describe('Ordered Paper command dispatch results and bounded feedback.');
 
