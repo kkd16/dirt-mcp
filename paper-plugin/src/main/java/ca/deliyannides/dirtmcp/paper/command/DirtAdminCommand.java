@@ -278,9 +278,10 @@ public final class DirtAdminCommand {
         appendParagraph(
                 message,
                 "Canonical results are in structuredContent; text content is only a summary. "
-                        + "Dirt-mapped failures put code, message, callId, and code-specific "
-                        + "details in structuredContent.error, with an optional editId for "
-                        + "reconciliation. Internal errors omit details.");
+                        + "Dirt-mapped failures put callId in structuredContent.callId and a "
+                        + "strict error in structuredContent.error. The error contains code, "
+                        + "message, code-specific details, and may contain an editId. Internal "
+                        + "errors omit details.");
 
         message.append(Component.newline()).append(Component.newline());
         message.append(

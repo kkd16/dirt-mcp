@@ -545,6 +545,50 @@ final class BridgeOperationEndpointsTest {
     }
 
     @Test
+    void reportsAllowedValuesForUnsupportedInspectionOptions() throws Exception {
+        try (BridgeServer bridge =
+                        server(config(availablePort(), 4), new BridgeTestFixture.TestOperations());
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+
+            HttpResponse<String> format =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/get-region-blocks",
+                                    """
+                                    {"world":"world","min":{"x":0,"y":0,"z":0},
+                                     "max":{"x":0,"y":0,"z":0},"format":"columns"}
+                                    """));
+            HttpResponse<String> direction =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/scan-orthographic-view",
+                                    """
+                                    {"world":"world","origin":{"x":0,"y":0,"z":0},
+                                     "direction":"diagonal","horizontalRadius":0,
+                                     "verticalRadius":0,"maxDistance":1}
+                                    """));
+
+            assertError(format, "format must be blocks or runs");
+            assertEquals(
+                    json(
+                            "{reason:'unsupported_value',target:'format',"
+                                    + "allowedValues:['blocks','runs']}"),
+                    errorDetails(format));
+            assertError(direction, "direction must be north, east, south, west, up, or down");
+            assertEquals(
+                    json(
+                            "{reason:'unsupported_value',target:'direction',"
+                                    + "allowedValues:['north','east','south','west','up','down']}"),
+                    errorDetails(direction));
+        }
+    }
+
+    @Test
     void rejectsMalformedNumericValues() throws Exception {
         try (BridgeServer bridge =
                         server(config(availablePort(), 4), new BridgeTestFixture.TestOperations());
@@ -674,5 +718,12 @@ final class BridgeOperationEndpointsTest {
         assertEquals("invalid_request", error.get("code").getAsString());
         assertEquals(message, error.get("message").getAsString());
         assertTrue(error.has("details"));
+    }
+
+    private static com.google.gson.JsonObject errorDetails(HttpResponse<String> response) {
+        return json(response.body())
+                .getAsJsonObject()
+                .getAsJsonObject("error")
+                .getAsJsonObject("details");
     }
 }

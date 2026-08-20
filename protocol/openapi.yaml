@@ -677,6 +677,7 @@ components:
             details:
               type: object
               additionalProperties: false
+              description: requestedEditId and newestEditId identify distinct edits.
               required:
                 - world
                 - requestedEditId
@@ -949,17 +950,39 @@ components:
               pattern: '.*\S.*'
         - type: object
           additionalProperties: false
+          description: allowedValues is the non-empty unique list of values supported for target.
+          required:
+            - reason
+            - target
+            - allowedValues
+          properties:
+            reason:
+              const: unsupported_value
+            target:
+              type: string
+              minLength: 1
+              pattern: '.*\S.*'
+            allowedValues:
+              type: array
+              minItems: 1
+              uniqueItems: true
+              items:
+                type: string
+                minLength: 1
+                pattern: '.*\S.*'
+        - type: object
+          additionalProperties: false
           description: value must be outside the inclusive range from minimum through maximum, and minimum must be less than or equal to maximum.
           required:
             - reason
-            - field
+            - target
             - value
             - minimum
             - maximum
           properties:
             reason:
               const: out_of_range
-            field:
+            target:
               type: string
               minLength: 1
               pattern: '.*\S.*'
@@ -990,6 +1013,40 @@ components:
                 pattern: '.*\S.*'
             maximum:
               $ref: '#/components/schemas/PositiveInt32'
+        - type: object
+          additionalProperties: false
+          required:
+            - reason
+            - field
+          properties:
+            reason:
+              const: palette_weights_mixed
+            field:
+              type: string
+              minLength: 1
+              pattern: '.*\S.*'
+        - type: object
+          additionalProperties: false
+          description: requested is the positive palette weight total and must differ from required, which is always 100.
+          required:
+            - reason
+            - field
+            - requested
+            - required
+          properties:
+            reason:
+              const: palette_weight_total
+            field:
+              type: string
+              minLength: 1
+              pattern: '.*\S.*'
+            requested:
+              allOf:
+                - $ref: '#/components/schemas/PositiveJsonSafeInteger'
+                - not:
+                    const: 100
+            required:
+              const: 100
     RegionTooLargeDetails:
       oneOf:
         - type: object
@@ -1132,6 +1189,7 @@ components:
                 - paper_unavailable
                 - operation_failed
                 - rollback_failed
+                - rolled_back
         - type: object
           additionalProperties: false
           required:

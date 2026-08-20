@@ -126,14 +126,17 @@ test('OpenAPI error numbers preserve Java ranges and documented relationships', 
   );
 
   const invalidRequest = openapiSchema(openapi, 'InvalidRequestDetails');
+  const unsupportedValue = openapiObjectVariant(invalidRequest, 'unsupported_value');
   const outOfRange = openapiObjectVariant(invalidRequest, 'out_of_range');
   const tooManyItems = openapiObjectVariant(invalidRequest, 'too_many_items');
+  const paletteWeightTotal = openapiObjectVariant(invalidRequest, 'palette_weight_total');
   const regionTooLarge = openapiSchema(openapi, 'RegionTooLargeDetails');
   const resultTooLarge = openapiSchema(openapi, 'ResultTooLargeError');
   assert.equal(schemaReferenceCount(openapiSchema(openapi, 'BridgeBusyError'), 'PositiveInt32'), 1);
   assert.equal(schemaReferenceCount(openapiSchema(openapi, 'ChangeLimitExceededError'), 'PositiveInt32'), 1);
   assert.equal(schemaReferenceCount(invalidRequest, 'PositiveInt32'), 2);
   assert.equal(schemaReferenceCount(invalidRequest, 'JsonSafeInteger'), 3);
+  assert.equal(schemaReferenceCount(invalidRequest, 'PositiveJsonSafeInteger'), 1);
   assert.equal(schemaReferenceCount(regionTooLarge, 'PositiveInt32'), 4);
   assert.equal(schemaReferenceCount(regionTooLarge, 'PositiveJsonSafeInteger'), 1);
   assert.equal(schemaReferenceCount(resultTooLarge, 'PositiveInt32'), 1);
@@ -147,13 +150,27 @@ test('OpenAPI error numbers preserve Java ranges and documented relationships', 
     outOfRange,
     /description: value must be outside the inclusive range from minimum through maximum, and minimum must be less than or equal to maximum\./,
   );
-  assert.match(outOfRange, /required:\n(?:\s+- [a-z]+\n)*\s+- value\n/);
+  assert.match(outOfRange, /required:\n(?:\s+- [a-z]+\n)*\s+- target\n/);
+  assert.doesNotMatch(outOfRange, /^            field:$/m);
+  assert.match(unsupportedValue, /description: allowedValues is the non-empty unique list/);
+  assert.match(
+    unsupportedValue,
+    /allowedValues:\n              type: array\n              minItems: 1\n              uniqueItems: true/,
+  );
   assert.match(tooManyItems, /description: fields is a non-empty unique list/);
   assert.match(
     tooManyItems,
     /fields:\n              type: array\n              minItems: 1\n              uniqueItems: true/,
   );
   assert.doesNotMatch(tooManyItems, /^            field:$/m);
+  assert.match(paletteWeightTotal, /description: requested is the positive palette weight total and must differ/);
+  assert.match(paletteWeightTotal, /\$ref: '#\/components\/schemas\/PositiveJsonSafeInteger'/);
+  assert.match(paletteWeightTotal, /not:\n\s+const: 100/);
+  assert.match(
+    openapiSchema(openapi, 'EditNotLatestError'),
+    /requestedEditId and newestEditId identify distinct edits/,
+  );
+  assert.match(openapiSchema(openapi, 'WorldUnavailableDetails'), /^                - rolled_back$/m);
   assert.match(regionTooLarge, /description: The exact product of dimensions must be greater than maximum\./);
   assert.match(
     regionTooLarge,

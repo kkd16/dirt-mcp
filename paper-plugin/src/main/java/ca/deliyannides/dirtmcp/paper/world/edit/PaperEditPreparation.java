@@ -282,7 +282,7 @@ final class PaperEditPreparation implements AutoCloseable {
             World world, BlockPosition minimum, BlockPosition maximum) throws OperationException {
         if (minimum.y() < world.getMinHeight() || maximum.y() >= world.getMaxHeight()) {
             boolean minimumInvalid = minimum.y() < world.getMinHeight();
-            String field = minimumInvalid ? "min.y" : "max.y";
+            String target = minimumInvalid ? "bounds.min.y" : "bounds.max.y";
             int value = minimumInvalid ? minimum.y() : maximum.y();
             throw invalid(
                     "Y bounds must be between "
@@ -290,7 +290,7 @@ final class PaperEditPreparation implements AutoCloseable {
                             + " and "
                             + (world.getMaxHeight() - 1),
                     new ErrorDetails.InvalidRequest.OutOfRange(
-                            field, value, world.getMinHeight(), world.getMaxHeight() - 1));
+                            target, value, world.getMinHeight(), world.getMaxHeight() - 1));
         }
     }
 

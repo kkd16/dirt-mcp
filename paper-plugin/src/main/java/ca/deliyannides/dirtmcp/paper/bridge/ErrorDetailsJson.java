@@ -54,10 +54,24 @@ final class ErrorDetailsJson {
             case ErrorDetails.InvalidRequest.UnknownFields value ->
                     property(reason("unknown_fields"), "field", value.field());
             case ErrorDetails.InvalidRequest.OutOfRange value -> {
-                JsonObject object = property(reason("out_of_range"), "field", value.field());
+                JsonObject object = property(reason("out_of_range"), "target", value.target());
                 object.addProperty("value", value.value());
                 object.addProperty("minimum", value.minimum());
                 object.addProperty("maximum", value.maximum());
+                yield object;
+            }
+            case ErrorDetails.InvalidRequest.UnsupportedValue value -> {
+                JsonObject object = property(reason("unsupported_value"), "target", value.target());
+                object.add("allowedValues", strings(value.allowedValues()));
+                yield object;
+            }
+            case ErrorDetails.InvalidRequest.PaletteWeightsMixed value ->
+                    property(reason("palette_weights_mixed"), "field", value.field());
+            case ErrorDetails.InvalidRequest.PaletteWeightTotal value -> {
+                JsonObject object =
+                        property(reason("palette_weight_total"), "field", value.field());
+                object.addProperty("requested", value.requested());
+                object.addProperty("required", 100);
                 yield object;
             }
             case ErrorDetails.InvalidRequest.TooManyItems value -> {
@@ -137,6 +151,7 @@ final class ErrorDetailsJson {
                     reason("paper_unavailable");
             case ErrorDetails.WorldUnavailable.OperationFailed ignored ->
                     reason("operation_failed");
+            case ErrorDetails.WorldUnavailable.RolledBack ignored -> reason("rolled_back");
             case ErrorDetails.WorldUnavailable.RollbackFailed ignored -> reason("rollback_failed");
             case ErrorDetails.WorldUnavailable.WorldUnloaded value ->
                     property(reason("world_unloaded"), "world", value.world());

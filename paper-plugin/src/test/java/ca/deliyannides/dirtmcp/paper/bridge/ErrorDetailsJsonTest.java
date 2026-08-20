@@ -26,6 +26,12 @@ final class ErrorDetailsJsonTest {
         assertEquals(JsonParser.parseString(expected), ErrorDetailsJson.serialize(details));
     }
 
+    @ParameterizedTest
+    @MethodSource("codes")
+    void selectsTheMatchingTopLevelCode(ErrorDetails details, String expected) {
+        assertEquals(expected, ErrorDetailsJson.code(details));
+    }
+
     @Test
     void addsAnIndexedListFieldWithoutChangingTheHumanMessage() {
         OperationException failure =
@@ -70,7 +76,20 @@ final class ErrorDetailsJsonTest {
                         "{reason:'unknown_fields',field:'extra'}"),
                 detail(
                         new ErrorDetails.InvalidRequest.OutOfRange("maxResults", 101, 1, 100),
-                        "{reason:'out_of_range',field:'maxResults',value:101,minimum:1,maximum:100}"),
+                        "{reason:'out_of_range',target:'maxResults',value:101,minimum:1,maximum:100}"),
+                detail(
+                        new ErrorDetails.InvalidRequest.UnsupportedValue(
+                                "format", List.of("blocks", "runs")),
+                        "{reason:'unsupported_value',target:'format',"
+                                + "allowedValues:['blocks','runs']}"),
+                detail(
+                        new ErrorDetails.InvalidRequest.PaletteWeightsMixed("destinationPalette"),
+                        "{reason:'palette_weights_mixed',field:'destinationPalette'}"),
+                detail(
+                        new ErrorDetails.InvalidRequest.PaletteWeightTotal(
+                                "destinationPalette", 90),
+                        "{reason:'palette_weight_total',field:'destinationPalette',"
+                                + "requested:90,required:100}"),
                 detail(
                         new ErrorDetails.InvalidRequest.TooManyItems(
                                 List.of("includeBlockStatePatterns", "excludeBlockStatePatterns"),
@@ -153,6 +172,7 @@ final class ErrorDetailsJsonTest {
                 detail(
                         new ErrorDetails.WorldUnavailable.OperationFailed(),
                         "{reason:'operation_failed'}"),
+                detail(new ErrorDetails.WorldUnavailable.RolledBack(), "{reason:'rolled_back'}"),
                 detail(
                         new ErrorDetails.WorldUnavailable.RollbackFailed(),
                         "{reason:'rollback_failed'}"),
@@ -167,6 +187,36 @@ final class ErrorDetailsJsonTest {
                         new ErrorDetails.WorldUnavailable.ChunkLoadFailed(
                                 "world", new ErrorDetails.Chunk(-2, 3)),
                         "{reason:'chunk_load_failed',world:'world',chunk:{x:-2,z:3}}"));
+    }
+
+    private static Stream<Arguments> codes() {
+        return Stream.of(
+                Arguments.of(new ErrorDetails.Unauthorized(), "unauthorized"),
+                Arguments.of(new ErrorDetails.NotFound(), "not_found"),
+                Arguments.of(new ErrorDetails.MethodNotAllowed("GET"), "method_not_allowed"),
+                Arguments.of(new ErrorDetails.BridgeBusy(1), "bridge_busy"),
+                Arguments.of(new ErrorDetails.InvalidRequest.MalformedJson(), "invalid_request"),
+                Arguments.of(new ErrorDetails.ChangeLimitExceeded(1), "change_limit_exceeded"),
+                Arguments.of(
+                        new ErrorDetails.EditNotFound("world", REQUESTED_EDIT_ID),
+                        "edit_not_found"),
+                Arguments.of(
+                        new ErrorDetails.EditNotLatest("world", REQUESTED_EDIT_ID, NEWEST_EDIT_ID),
+                        "edit_not_latest"),
+                Arguments.of(
+                        new ErrorDetails.HistoryCapacityExceeded.EntriesPerWorld(1),
+                        "history_capacity_exceeded"),
+                Arguments.of(new ErrorDetails.RegionTooLarge.BlockCount(2, 1), "region_too_large"),
+                Arguments.of(new ErrorDetails.ResultTooLarge.Blocks(2, 1), "result_too_large"),
+                Arguments.of(
+                        new ErrorDetails.ServerUnavailable.PaperUnavailable(),
+                        "server_unavailable"),
+                Arguments.of(new ErrorDetails.Unhealthy.PluginDisabled(), "unhealthy"),
+                Arguments.of(new ErrorDetails.WorldBusy.OperationInProgress("world"), "world_busy"),
+                Arguments.of(new ErrorDetails.WorldNotFound("world"), "world_not_found"),
+                Arguments.of(
+                        new ErrorDetails.WorldUnavailable.WorldUnloaded("world"),
+                        "world_unavailable"));
     }
 
     private static Arguments detail(ErrorDetails details, String json) {

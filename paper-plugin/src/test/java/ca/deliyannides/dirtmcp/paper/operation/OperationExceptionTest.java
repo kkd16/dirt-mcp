@@ -104,6 +104,15 @@ final class OperationExceptionTest {
     }
 
     @Test
+    void requiresEditNotLatestIdsToIdentifyDifferentEdits() {
+        UUID editId = UUID.fromString("123e4567-e89b-42d3-a456-426614174000");
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new ErrorDetails.EditNotLatest("world", editId, editId));
+    }
+
+    @Test
     void rejectsWireIntegersThatJavaScriptCannotRepresentExactly() {
         long aboveSafeInteger = 9_007_199_254_740_992L;
 
@@ -113,6 +122,11 @@ final class OperationExceptionTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new ErrorDetails.InvalidRequest.OutOfRange("field", aboveSafeInteger, 0, 1));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new ErrorDetails.InvalidRequest.PaletteWeightTotal(
+                                "palette", aboveSafeInteger));
     }
 
     @Test
@@ -138,6 +152,28 @@ final class OperationExceptionTest {
                 () ->
                         new ErrorDetails.InvalidRequest.TooManyItems(
                                 List.of("palettes", "palettes"), 1));
+    }
+
+    @Test
+    void requiresUnsupportedValuesToOfferDistinctChoices() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new ErrorDetails.InvalidRequest.UnsupportedValue("format", List.of()));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new ErrorDetails.InvalidRequest.UnsupportedValue(
+                                "format", List.of("blocks", "blocks")));
+    }
+
+    @Test
+    void requiresPaletteWeightTotalsToDescribeAnActualMismatch() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new ErrorDetails.InvalidRequest.PaletteWeightTotal("palette", 100));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new ErrorDetails.InvalidRequest.PaletteWeightTotal("palette", 0));
     }
 
     @Test

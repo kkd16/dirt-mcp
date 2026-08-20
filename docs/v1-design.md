@@ -148,22 +148,29 @@ configured limits therefore remain hard.
 
 When a request fails after leaving a committed or recovery-required record, or
 when rollback cannot be confirmed after its world becomes unavailable, its
-structured bridge error includes `error.editId`. A transaction-finalization
-error may also include the generated ID after confirmed rollback. The MCP server
-preserves any received edit ID and recovers a valid nested ID from malformed
-success or non-2xx responses on edit and undo routes when possible. Callers can
-reconcile records returned by `get_edit_history` using `editId` or the record's
-creating `callId`; an absent record means no retryable history remains. Every
-failure mapped by a Dirt tool handler also includes its generated `error.callId`
-for request correlation.
+structured bridge error includes `error.editId`. An error may also include the
+generated ID after confirmed rollback. A `world_unavailable` error with
+`details.reason` set to `rolled_back` confirms the attempted edit left the world
+unchanged and its edit ID is only for correlation, not retained undo history. A
+internal failure remains an `internal_error` without details even when its
+message confirms rollback. The MCP server preserves any received edit ID and
+recovers a valid nested ID from malformed success or non-2xx responses on edit
+and undo routes when possible. Callers can reconcile records returned by
+`get_edit_history` using `editId` or the record's creating `callId`; an absent
+record means no retryable history remains. Each Dirt-mapped MCP failure puts its
+strict error under `structuredContent.error` and includes
+`structuredContent.callId`, the same UUID sent to Paper for that call, so MCP
+responses, bridge logs, and any retained record's creating `callId` can be
+correlated.
 
 Correctable bridge failures also include a strict `error.details` object whose
-shape is selected by `error.code`; reasons, rejected values or request fields,
-configured maxima, world or chunk identity, and edit ordering are
-machine-readable where relevant.
-`message` remains the human explanation. Internal errors deliberately omit
-`details` and never expose exception, path, or backend implementation data. The
-[OpenAPI contract](../protocol/openapi.yaml) defines every code-specific shape.
+shape is selected by `error.code`; reasons, rejected values, request inputs or
+derived targets, configured maxima, world or chunk identity, and edit ordering
+are machine-readable where relevant. Invalid requests distinguish unsupported
+choices and palette-weight mistakes from numeric ranges. `message` remains the
+human explanation. Internal errors deliberately omit `details` and never expose
+exception text, filesystem paths, or sensitive backend data. Every code-specific
+shape is defined by the [OpenAPI contract](../protocol/openapi.yaml).
 MCP-local transport failures use `bridge_unavailable.details.reason`
 (`timeout` or `request_failed`), `bridge_unauthorized.details.reason`
 (`authentication_failed`), or `bridge_http_error.details.status`; local protocol

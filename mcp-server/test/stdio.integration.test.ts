@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { fromJsonSchema, type JsonSchemaType } from '@modelcontextprotocol/server';
 import packageMetadata from '../package.json' with { type: 'json' };
 import { MCP_TOOL_NAMES, type McpToolConfiguration } from '../dist/tools/configuration.js';
 import {
@@ -376,6 +377,38 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { name: 'undo_edit', annotations: mutationAnnotations(false) },
     ],
   );
+  const advertisedFailure = {
+    callId: '11111111-1111-4111-8111-111111111111',
+    error: {
+      code: 'world_busy',
+      message: 'World is busy',
+      details: { reason: 'operation_in_progress', world: 'world' },
+    },
+  };
+  const advertisedSchemas = listedTools.map((tool) => {
+    assert.ok(tool.outputSchema, `${String(tool.name)} is missing outputSchema`);
+    const serialized = JSON.stringify(tool.outputSchema);
+    assert.ok(serialized);
+    return {
+      name: String(tool.name),
+      schema: tool.outputSchema as JsonSchemaType,
+      bytes: Buffer.byteLength(serialized),
+    };
+  });
+  const outputSchemaBytes = advertisedSchemas.reduce((total, advertised) => total + advertised.bytes, 0);
+  assert.ok(outputSchemaBytes < 100_000, `Tool output catalog grew to ${outputSchemaBytes} bytes`);
+  await Promise.all(
+    advertisedSchemas.map(async (advertised) => {
+      const schema = fromJsonSchema(advertised.schema);
+      const validFailure = await schema['~standard'].validate(advertisedFailure);
+      assert.equal(validFailure.issues, undefined, `${advertised.name} rejects an advertised failure`);
+      const missingDetails = await schema['~standard'].validate({
+        ...advertisedFailure,
+        error: { code: 'world_busy', message: 'World is busy' },
+      });
+      assert.ok(missingDetails.issues, `${advertised.name} allows a correctable failure without details`);
+    }),
+  );
   const listedView = listedTools.find((tool) => tool.name === 'scan_orthographic_view');
   assert.ok(listedView);
   const viewInputSchema = listedView.inputSchema as {
@@ -503,7 +536,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   });
   const failedFill = await waitFor(messages, 6);
   assert.ok(failedFill.result);
-  const failedFillCallId = failedFill.result.structuredContent?.error?.callId;
+  const failedFillCallId = failedFill.result.structuredContent?.callId;
   assert.ok(typeof failedFillCallId === 'string');
   assert.match(failedFillCallId, uuidV4Pattern);
   assert.deepEqual(
@@ -517,11 +550,11 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
         },
       ],
       structuredContent: {
+        callId: failedFillCallId,
         error: {
           code: 'change_limit_exceeded',
           message: 'Too many changes',
           details: { maximum: 100_000 },
-          callId: failedFillCallId,
         },
       },
     }),
@@ -866,6 +899,9 @@ test('serves the configured tool snapshot over MCP 2025-06-18 and rejects disabl
   assert.equal(typeof instructions, 'string');
   assert.match(instructions as string, /live Paper worlds/);
   assert.match(instructions as string, /Mutation tools can apply immediately/);
+  assert.match(instructions as string, /callId at the structuredContent root/);
+  assert.match(instructions as string, /structuredContent\.error/);
+  assert.match(instructions as string, /Correctable failures also include strict code-specific details/);
   assert.match(instructions as string, /undo_edit/);
   assert.doesNotMatch(instructions as string, /Enabled tools|Available inspection tools/);
   assert.doesNotMatch(instructions as string, /get_server_status|get_edit_history/);
@@ -1169,15 +1205,15 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
   const unauthorized = await callPing(10);
   assert.ok(unauthorized.result);
   assert.equal(unauthorized.result.isError, true);
-  const unauthorizedCallId = unauthorized.result.structuredContent?.error?.callId;
+  const unauthorizedCallId = unauthorized.result.structuredContent?.callId;
   assert.ok(typeof unauthorizedCallId === 'string');
   assert.match(unauthorizedCallId, uuidV4Pattern);
   assert.deepEqual(unauthorized.result.structuredContent, {
+    callId: unauthorizedCallId,
     error: {
       code: 'bridge_unauthorized',
       message: 'Paper bridge rejected DIRT_MCP_BRIDGE_TOKEN.',
       details: { reason: 'authentication_failed' },
-      callId: unauthorizedCallId,
     },
   });
 
@@ -1185,14 +1221,14 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
   const invalid = await callPing(11);
   assert.ok(invalid.result);
   assert.equal(invalid.result.isError, true);
-  const invalidCallId = invalid.result.structuredContent?.error?.callId;
+  const invalidCallId = invalid.result.structuredContent?.callId;
   assert.ok(typeof invalidCallId === 'string');
   assert.match(invalidCallId, uuidV4Pattern);
   assert.deepEqual(invalid.result.structuredContent, {
+    callId: invalidCallId,
     error: {
       code: 'bridge_invalid_response',
       message: 'Paper bridge response did not match the documented schema.',
-      callId: invalidCallId,
     },
   });
 
@@ -1200,14 +1236,14 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
   const malformed = await callPing(12);
   assert.ok(malformed.result);
   assert.equal(malformed.result.isError, true);
-  const malformedCallId = malformed.result.structuredContent?.error?.callId;
+  const malformedCallId = malformed.result.structuredContent?.callId;
   assert.ok(typeof malformedCallId === 'string');
   assert.match(malformedCallId, uuidV4Pattern);
   assert.deepEqual(malformed.result.structuredContent, {
+    callId: malformedCallId,
     error: {
       code: 'bridge_invalid_response',
       message: 'Paper bridge returned invalid JSON.',
-      callId: malformedCallId,
     },
   });
 
@@ -1215,15 +1251,15 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
   const unstructured = await callPing(13);
   assert.ok(unstructured.result);
   assert.equal(unstructured.result.isError, true);
-  const unstructuredCallId = unstructured.result.structuredContent?.error?.callId;
+  const unstructuredCallId = unstructured.result.structuredContent?.callId;
   assert.ok(typeof unstructuredCallId === 'string');
   assert.match(unstructuredCallId, uuidV4Pattern);
   assert.deepEqual(unstructured.result.structuredContent, {
+    callId: unstructuredCallId,
     error: {
       code: 'bridge_http_error',
       message: 'Paper bridge returned unstructured HTTP 502.',
       details: { status: 502 },
-      callId: unstructuredCallId,
     },
   });
 
@@ -1233,8 +1269,19 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
   const unavailable = await callPing(14);
   assert.ok(unavailable.result);
   assert.equal(unavailable.result.isError, true);
-  assert.equal(unavailable.result.structuredContent?.error?.code, 'bridge_unavailable');
-  assert.deepEqual(unavailable.result.structuredContent?.error?.details, { reason: 'request_failed' });
+  const unavailableCallId = unavailable.result.structuredContent?.callId;
+  assert.ok(typeof unavailableCallId === 'string');
+  assert.match(unavailableCallId, uuidV4Pattern);
+  const unavailableMessage = unavailable.result.structuredContent?.error?.message;
+  assert.ok(typeof unavailableMessage === 'string');
+  assert.deepEqual(unavailable.result.structuredContent, {
+    callId: unavailableCallId,
+    error: {
+      code: 'bridge_unavailable',
+      message: unavailableMessage,
+      details: { reason: 'request_failed' },
+    },
+  });
 
   const exited = once(child, 'exit');
   child.stdin.end();

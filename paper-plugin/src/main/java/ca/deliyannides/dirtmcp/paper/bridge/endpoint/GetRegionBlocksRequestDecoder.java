@@ -65,7 +65,8 @@ final class GetRegionBlocksRequestDecoder {
             default ->
                     throw RequestJson.invalid(
                             "format must be blocks or runs",
-                            new ErrorDetails.InvalidRequest.InvalidValue("format"));
+                            new ErrorDetails.InvalidRequest.UnsupportedValue(
+                                    "format", List.of("blocks", "runs")));
         };
     }
 }

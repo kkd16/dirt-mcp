@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import type { BridgeClient } from '../bridge/client.ts';
 import { BRIDGE_ROUTES } from '../bridge/contract.ts';
+import { toolOutputSchema } from '../bridge/errors.ts';
 import type { DirtLogger } from '../logging.ts';
 import {
   BlockPositionSchema,
@@ -504,7 +505,7 @@ export function registerInspectionTools(
       description:
         'Return a complete canonical block-state histogram for an inclusive region. Use this when totals are sufficient.',
       inputSchema: CountRegionBlockStatesInputSchema,
-      outputSchema: CountRegionBlockStatesOutputSchema,
+      outputSchema: toolOutputSchema(CountRegionBlockStatesOutputSchema),
       annotations: READ_WORLD_ANNOTATIONS,
     },
     async (input, context) =>
@@ -541,7 +542,7 @@ export function registerInspectionTools(
         'Return filtered exact blocks or lossless runs from an inclusive region. Use filters and runs to keep output compact. Results that exceed active scan or result ceilings fail rather than truncate.' +
         (toolConfiguration.get_server_status ? ' The active ceilings are reported by get_server_status.' : ''),
       inputSchema: GetRegionBlocksInputSchema,
-      outputSchema: GetRegionBlocksOutputSchema,
+      outputSchema: toolOutputSchema(GetRegionBlocksOutputSchema),
       annotations: READ_WORLD_ANNOTATIONS,
     },
     async (input, context) =>
@@ -582,7 +583,7 @@ export function registerInspectionTools(
           ? ' Active scan and result ceilings are reported by get_server_status.'
           : ''),
       inputSchema: ScanOrthographicViewInputSchema,
-      outputSchema: ScanOrthographicViewOutputSchema,
+      outputSchema: toolOutputSchema(ScanOrthographicViewOutputSchema),
       annotations: READ_WORLD_ANNOTATIONS,
     },
     async (input, context) =>

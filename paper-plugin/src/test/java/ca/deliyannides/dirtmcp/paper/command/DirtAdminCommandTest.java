@@ -237,6 +237,7 @@ final class DirtAdminCommandTest {
             assertTrue(plain.contains(spec.returns()), tool.id());
             assertTrue(plain.contains(spec.notes()), tool.id());
             assertTrue(plain.contains("Canonical results are in structuredContent"), tool.id());
+            assertTrue(plain.contains("structuredContent.callId"), tool.id());
             assertTrue(plain.contains("structuredContent.error"), tool.id());
             assertTrue(plain.contains("code-specific details"), tool.id());
             assertEquals(Set.of("/dirt tools"), runCommands(message), tool.id());

@@ -56,16 +56,12 @@ export class BridgeClient {
     try {
       response = await this.#fetch(new URL(route.path, this.origin), request);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new ToolFailure({
-        code: 'bridge_unavailable',
-        message: `Paper bridge request failed: ${message}`,
-        details: { reason: requestFailureReason(error) },
-      });
+      throw bridgeUnavailable(error);
     }
 
     if (!response.ok) {
-      const body: unknown = await response.json().catch(() => undefined);
+      const parsedBody = await readResponseJson(response);
+      const body: unknown = parsedBody.valid ? parsedBody.value : undefined;
       const editId = salvageEditId(route, body);
       if (response.status === 401) {
         throw new ToolFailure({
@@ -87,12 +83,11 @@ export class BridgeClient {
       });
     }
 
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch {
+    const parsedBody = await readResponseJson(response);
+    if (!parsedBody.valid) {
       throw new ToolFailure({ code: 'bridge_invalid_response', message: 'Paper bridge returned invalid JSON.' });
     }
+    const body = parsedBody.value;
     const parsed = responseSchema.safeParse(body);
     if (!parsed.success) {
       const editId = salvageEditId(route, body);
@@ -104,6 +99,26 @@ export class BridgeClient {
     }
     return parsed.data;
   }
+}
+
+type ResponseJson = { readonly valid: true; readonly value: unknown } | { readonly valid: false };
+
+async function readResponseJson(response: Response): Promise<ResponseJson> {
+  try {
+    return { valid: true, value: await response.json() };
+  } catch (error: unknown) {
+    if (error instanceof SyntaxError) return { valid: false };
+    throw bridgeUnavailable(error);
+  }
+}
+
+function bridgeUnavailable(error: unknown): ToolFailure {
+  const message = error instanceof Error ? error.message : String(error);
+  return new ToolFailure({
+    code: 'bridge_unavailable',
+    message: `Paper bridge request failed: ${message}`,
+    details: { reason: requestFailureReason(error) },
+  });
 }
 
 function requestFailureReason(error: unknown): 'timeout' | 'request_failed' {

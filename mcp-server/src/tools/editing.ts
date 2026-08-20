@@ -3,7 +3,7 @@ import * as z from 'zod/v4';
 import type { BridgeClient } from '../bridge/client.ts';
 import { BRIDGE_ROUTES } from '../bridge/contract.ts';
 import type { DirtLogger } from '../logging.ts';
-import { ToolFailure } from '../bridge/errors.ts';
+import { ToolFailure, toolOutputSchema } from '../bridge/errors.ts';
 import {
   BlockPositionSchema,
   BLOCK_AXES,
@@ -489,7 +489,7 @@ export function registerEditingTools(
       description:
         'Replace blocks matching any source pattern throughout an inclusive region. Omitted source properties match any value. Destination entries are exact states; omit every weight for equal probability or provide whole percentages totaling 100. Reuse the returned seed to reproduce a preview. Set dryRun=true to preview without mutation. Every committed non-empty edit returns retained edit metadata including its edit ID.',
       inputSchema: ReplaceRegionBlocksInputSchema,
-      outputSchema: ReplaceRegionBlocksOutputSchema,
+      outputSchema: toolOutputSchema(ReplaceRegionBlocksOutputSchema),
       annotations: NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
     },
     async (input, context) =>
@@ -530,7 +530,7 @@ export function registerEditingTools(
       description:
         'Fill an inclusive region from a destination palette of exact block states. Omit every weight for equal probability or provide whole percentages totaling 100. Reuse the returned seed to reproduce a preview. Set dryRun=true to preview without mutation. Every committed non-empty edit returns retained edit metadata including its edit ID.',
       inputSchema: FillRegionInputSchema,
-      outputSchema: FillRegionOutputSchema,
+      outputSchema: toolOutputSchema(FillRegionOutputSchema),
       annotations: NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
     },
     async (input, context) =>
@@ -563,7 +563,7 @@ export function registerEditingTools(
         (toolConfiguration.get_server_status ? ' Those limits are reported by get_server_status.' : '') +
         ' Placement does not trigger Minecraft neighbor physics. Set dryRun=true to preview exact counts. Every committed non-empty edit returns retained edit metadata including its edit ID.',
       inputSchema: SetBlocksInputSchema,
-      outputSchema: SetBlocksOutputSchema,
+      outputSchema: toolOutputSchema(SetBlocksOutputSchema),
       annotations: NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
     },
     async (input, context) =>
@@ -593,7 +593,7 @@ export function registerEditingTools(
       description:
         'Return every currently retained and undoable Dirt edit for one loaded world, ordered newest first. Dry runs, no-ops, consumed edits, and evicted edits are not included.',
       inputSchema: GetEditHistoryInputSchema,
-      outputSchema: GetEditHistoryOutputSchema,
+      outputSchema: toolOutputSchema(GetEditHistoryOutputSchema),
       annotations: READ_WORLD_ANNOTATIONS,
     },
     async (input, context) =>
@@ -623,7 +623,7 @@ export function registerEditingTools(
         'Undo the retained Dirt edit identified by editId in one loaded world. The edit must still be retained and must be the newest retained entry, preventing an intervening edit from being undone accidentally.' +
         (toolConfiguration.get_edit_history ? ' Use get_edit_history to identify that entry.' : ''),
       inputSchema: UndoEditInputSchema,
-      outputSchema: UndoEditOutputSchema,
+      outputSchema: toolOutputSchema(UndoEditOutputSchema),
       annotations: NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
     },
     async (input, context) =>

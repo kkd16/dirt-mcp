@@ -177,7 +177,7 @@ final class PaperRegionSnapshotSourceTest {
         assertEquals(new ErrorDetails.WorldNotFound("missing"), missing.details().orElseThrow());
         assertEquals(OperationFailure.INVALID_REQUEST, height.failure());
         assertEquals(
-                new ErrorDetails.InvalidRequest.OutOfRange("min.y", -65, -64, 319),
+                new ErrorDetails.InvalidRequest.OutOfRange("bounds.min.y", -65, -64, 319),
                 height.details().orElseThrow());
         assertEquals(OperationFailure.WORLD_UNAVAILABLE, chunk.failure());
         assertEquals(

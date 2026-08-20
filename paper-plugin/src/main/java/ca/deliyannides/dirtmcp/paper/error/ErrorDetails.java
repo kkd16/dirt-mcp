@@ -69,10 +69,10 @@ public sealed interface ErrorDetails extends Serializable {
             }
         }
 
-        record OutOfRange(String field, long value, long minimum, long maximum)
+        record OutOfRange(String target, long value, long minimum, long maximum)
                 implements InvalidRequest {
             public OutOfRange {
-                field = requireField(field);
+                target = requireField(target);
                 requireSafeInteger(value, "value");
                 requireSafeInteger(minimum, "minimum");
                 requireSafeInteger(maximum, "maximum");
@@ -85,19 +85,33 @@ public sealed interface ErrorDetails extends Serializable {
             }
         }
 
+        record UnsupportedValue(String target, List<String> allowedValues)
+                implements InvalidRequest {
+            public UnsupportedValue {
+                target = requireField(target);
+                allowedValues = requireDistinctNonBlank(allowedValues, "allowedValues");
+            }
+        }
+
+        record PaletteWeightsMixed(String field) implements InvalidRequest {
+            public PaletteWeightsMixed {
+                field = requireField(field);
+            }
+        }
+
+        record PaletteWeightTotal(String field, long requested) implements InvalidRequest {
+            public PaletteWeightTotal {
+                field = requireField(field);
+                requirePositive(requested, "requested");
+                if (requested == 100) {
+                    throw new IllegalArgumentException("requested must differ from required");
+                }
+            }
+        }
+
         record TooManyItems(List<String> fields, int maximum) implements InvalidRequest {
             public TooManyItems {
-                Objects.requireNonNull(fields, "fields");
-                if (fields.isEmpty()) {
-                    throw new IllegalArgumentException("fields must not be empty");
-                }
-                for (String field : fields) {
-                    requireField(field);
-                }
-                fields = List.copyOf(fields);
-                if (new HashSet<>(fields).size() != fields.size()) {
-                    throw new IllegalArgumentException("fields must not contain duplicates");
-                }
+                fields = requireDistinctNonBlank(fields, "fields");
                 requirePositive(maximum, "maximum");
             }
         }
@@ -122,6 +136,9 @@ public sealed interface ErrorDetails extends Serializable {
             world = requireWorld(world);
             UuidV4.require(requestedEditId, "requestedEditId");
             UuidV4.require(newestEditId, "newestEditId");
+            if (requestedEditId.equals(newestEditId)) {
+                throw new IllegalArgumentException("requestedEditId must differ from newestEditId");
+            }
         }
     }
 
@@ -261,6 +278,8 @@ public sealed interface ErrorDetails extends Serializable {
 
         record OperationFailed() implements WorldUnavailable {}
 
+        record RolledBack() implements WorldUnavailable {}
+
         record RollbackFailed() implements WorldUnavailable {}
 
         record WorldUnloaded(String world) implements WorldUnavailable {
@@ -306,6 +325,23 @@ public sealed interface ErrorDetails extends Serializable {
             throw new IllegalArgumentException("world must not be blank");
         }
         return value;
+    }
+
+    private static List<String> requireDistinctNonBlank(List<String> values, String name) {
+        Objects.requireNonNull(values, name);
+        if (values.isEmpty()) {
+            throw new IllegalArgumentException(name + " must not be empty");
+        }
+        for (String value : values) {
+            if (value == null || value.isBlank()) {
+                throw new IllegalArgumentException(name + " must not contain blank values");
+            }
+        }
+        List<String> copy = List.copyOf(values);
+        if (new HashSet<>(copy).size() != copy.size()) {
+            throw new IllegalArgumentException(name + " must not contain duplicates");
+        }
+        return copy;
     }
 
     private static void requirePositive(long value, String name) {

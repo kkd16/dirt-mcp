@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import type { BridgeClient } from '../bridge/client.ts';
 import { BRIDGE_ROUTES } from '../bridge/contract.ts';
+import { toolOutputSchema } from '../bridge/errors.ts';
 import type { DirtLogger } from '../logging.ts';
 import {
   BlockPositionSchema,
@@ -189,7 +190,7 @@ export function registerStatusTools(
       description:
         'Run a non-mutating end-to-end health check across the authenticated bridge, Dirt plugin, Paper, and a Paper-backed FAWE session. Returns only status ok on success.',
       inputSchema: EmptyInputSchema,
-      outputSchema: PingServerOutputSchema,
+      outputSchema: toolOutputSchema(PingServerOutputSchema),
       annotations: READ_WORLD_ANNOTATIONS,
     },
     async (_input, context) =>
@@ -215,7 +216,7 @@ export function registerStatusTools(
       description:
         'Return current Minecraft, Paper, Dirt MCP, and FAWE builds; TPS; online players, block positions, and cardinal facing directions; loaded worlds; and active Dirt limits, edit-history retention, defaults, logging, and MCP tool availability. Use this to ground later world operations.',
       inputSchema: EmptyInputSchema,
-      outputSchema: ServerStatusSchema,
+      outputSchema: toolOutputSchema(ServerStatusSchema),
       annotations: READ_WORLD_ANNOTATIONS,
     },
     async (_input, context) =>

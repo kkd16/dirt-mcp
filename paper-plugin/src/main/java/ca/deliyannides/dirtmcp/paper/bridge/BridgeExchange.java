@@ -165,6 +165,7 @@ public final class BridgeExchange {
         if (message == null || message.isEmpty()) {
             throw new IllegalArgumentException("Error message must not be empty");
         }
+        UUID checkedEditId = editId == null ? null : UuidV4.require(editId, "editId");
         this.errorCode = code;
         JsonObject detail = new JsonObject();
         detail.addProperty("code", code);
@@ -172,9 +173,9 @@ public final class BridgeExchange {
         if (details != null) {
             detail.add("details", ErrorDetailsJson.serialize(details));
         }
-        if (editId != null) {
-            this.editId = editId;
-            detail.addProperty("editId", editId.toString());
+        if (checkedEditId != null) {
+            this.editId = checkedEditId;
+            detail.addProperty("editId", checkedEditId.toString());
         }
         JsonObject envelope = new JsonObject();
         envelope.add("error", detail);
@@ -272,10 +273,11 @@ public final class BridgeExchange {
                             result.edit() == null ? null : result.edit().editId(),
                             null);
             case UndoEdit.Result result -> {
+                UUID checkedEditId = UuidV4.require(result.edit().editId(), "editId");
                 this.bounds = bounds(result.edit().bounds());
                 this.outcome = "undone";
                 this.changedBlockCount = result.edit().changedBlockCount();
-                this.editId = result.edit().editId();
+                this.editId = checkedEditId;
             }
             case GetEditHistory.Result result -> this.resultCount = (long) result.edits().size();
             case CountRegionBlockStates.Result result -> {
@@ -302,10 +304,12 @@ public final class BridgeExchange {
             long changedCount,
             UUID retainedEditId,
             Long count) {
+        UUID checkedEditId =
+                retainedEditId == null ? null : UuidV4.require(retainedEditId, "editId");
         this.bounds = bounds(editBounds);
         this.outcome = editOutcome;
         this.changedBlockCount = changedCount;
-        this.editId = retainedEditId;
+        this.editId = checkedEditId;
         this.resultCount = count;
     }
 

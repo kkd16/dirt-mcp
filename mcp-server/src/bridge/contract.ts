@@ -72,11 +72,17 @@ const NonBlankStringSchema = z
   .min(1)
   .refine((value) => value.trim().length > 0, 'Must contain a non-whitespace character.');
 const FieldSchema = NonBlankStringSchema.describe('Request field associated with the failure.');
-const FieldsSchema = z
-  .array(FieldSchema)
+const TargetSchema = NonBlankStringSchema.describe(
+  'Request input or derived operation target associated with the failure.',
+);
+const UniqueNonBlankStringsSchema = z
+  .array(NonBlankStringSchema)
   .min(1)
-  .refine((fields) => new Set(fields).size === fields.length, 'fields must not contain duplicates.')
-  .describe('Non-empty unique request fields associated with an aggregate item limit.');
+  .refine((values) => new Set(values).size === values.length, 'Values must not contain duplicates.');
+const FieldsSchema = UniqueNonBlankStringsSchema.describe(
+  'Non-empty unique request fields associated with an aggregate item limit.',
+);
+const AllowedValuesSchema = UniqueNonBlankStringsSchema.describe('Non-empty unique list of supported values.');
 const JsonSafeIntegerSchema = z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER);
 const PositiveJsonSafeIntegerSchema = JsonSafeIntegerSchema.positive();
 const SignedInt32Schema = JsonSafeIntegerSchema.min(-2_147_483_648).max(2_147_483_647);
@@ -120,10 +126,14 @@ const InvalidRequestDetailsSchema = z.discriminatedUnion('reason', [
   reason('malformed_json'),
   reasonWith('missing', { field: FieldSchema }),
   reasonWith('invalid_value', { field: FieldSchema }),
+  reasonWith('unsupported_value', {
+    target: TargetSchema,
+    allowedValues: AllowedValuesSchema,
+  }),
   reasonWith('duplicate', { field: FieldSchema }),
   reasonWith('unknown_fields', { field: FieldSchema }),
   reasonWith('out_of_range', {
-    field: FieldSchema,
+    target: TargetSchema,
     value: JsonSafeIntegerSchema.describe('Rejected value.'),
     minimum: JsonSafeIntegerSchema.describe('Minimum accepted value.'),
     maximum: JsonSafeIntegerSchema.describe('Maximum accepted value.'),
@@ -137,6 +147,12 @@ const InvalidRequestDetailsSchema = z.discriminatedUnion('reason', [
     fields: FieldsSchema,
     maximum: PositiveInt32Schema.describe('Maximum accepted item count.'),
   }),
+  reasonWith('palette_weights_mixed', { field: FieldSchema }),
+  reasonWith('palette_weight_total', {
+    field: FieldSchema,
+    requested: PositiveJsonSafeIntegerSchema.describe('Rejected palette weight total.'),
+    required: z.literal(100).describe('Required palette weight total.'),
+  }).refine((details) => details.requested !== details.required, 'requested must differ from required.'),
 ]);
 
 const RegionTooLargeDetailsSchema = z.discriminatedUnion('reason', [
@@ -223,6 +239,7 @@ const WorldUnavailableDetailsSchema = z.discriminatedUnion('reason', [
   reason('paper_unavailable'),
   reason('operation_failed'),
   reason('rollback_failed'),
+  reason('rolled_back'),
   reasonWith('world_unloaded', { world: NonBlankStringSchema }),
   reasonWith('chunk_unloaded', { world: NonBlankStringSchema, chunk: ChunkSchema }),
   reasonWith('chunk_load_failed', { world: NonBlankStringSchema, chunk: ChunkSchema }),
@@ -250,7 +267,11 @@ export const BridgeErrorSchema = z.discriminatedUnion('code', [
         requestedEditId: z.uuidv4(),
         newestEditId: z.uuidv4(),
       })
-      .strict(),
+      .strict()
+      .refine(
+        (details) => details.requestedEditId.toLowerCase() !== details.newestEditId.toLowerCase(),
+        'requestedEditId must differ from newestEditId.',
+      ),
   ),
   errorWithDetails('history_capacity_exceeded', HistoryCapacityDetailsSchema),
   z

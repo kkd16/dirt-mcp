@@ -85,7 +85,7 @@ public final class PaperRegionSnapshotSource implements RegionSnapshotSource {
         }
         if (region.min().y() < world.getMinHeight() || region.max().y() >= world.getMaxHeight()) {
             boolean minimumInvalid = region.min().y() < world.getMinHeight();
-            String field = minimumInvalid ? "min.y" : "max.y";
+            String target = minimumInvalid ? "bounds.min.y" : "bounds.max.y";
             int value = minimumInvalid ? region.min().y() : region.max().y();
             throw new OperationException(
                     OperationFailure.INVALID_REQUEST,
@@ -94,7 +94,7 @@ public final class PaperRegionSnapshotSource implements RegionSnapshotSource {
                             + " and "
                             + (world.getMaxHeight() - 1),
                     new ErrorDetails.InvalidRequest.OutOfRange(
-                            field, value, world.getMinHeight(), world.getMaxHeight() - 1));
+                            target, value, world.getMinHeight(), world.getMaxHeight() - 1));
         }
 
         List<BlockData> includePatterns =

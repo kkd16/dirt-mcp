@@ -44,7 +44,8 @@ export async function executeToolCall(
       callLogger.error('tool.unexpected_failure', 'Tool call failed unexpectedly.', safeErrorFields(error));
     }
     const structuredContent = ToolFailureResultSchema.parse({
-      error: { ...failure.data, callId },
+      callId,
+      error: failure.data,
     });
     return {
       content: [{ type: 'text', text: `${details.failureContext}: ${failure.message}` }],

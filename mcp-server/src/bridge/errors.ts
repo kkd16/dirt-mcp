@@ -1,5 +1,5 @@
 import * as z from 'zod/v4';
-import { BridgeErrorSchema } from './contract.ts';
+import { BRIDGE_ERROR_CODES, BridgeErrorSchema } from './contract.ts';
 
 const MessageSchema = z.string().min(1);
 const EditIdSchema = z.uuidv4().optional();
@@ -25,35 +25,74 @@ function localFailureWithDetails<const Code extends string, Details extends z.Zo
     .strict();
 }
 
+const BridgeUnavailableFailureSchema = localFailureWithDetails(
+  'bridge_unavailable',
+  z.object({ reason: z.enum(['timeout', 'request_failed']) }).strict(),
+);
+const BridgeUnauthorizedFailureSchema = localFailureWithDetails(
+  'bridge_unauthorized',
+  z.object({ reason: z.literal('authentication_failed') }).strict(),
+);
+const BridgeHttpFailureSchema = localFailureWithDetails(
+  'bridge_http_error',
+  z.object({ status: z.number().int().min(100).max(599) }).strict(),
+);
+
 const LocalToolFailureSchema = z.discriminatedUnion('code', [
-  localFailureWithDetails('bridge_unavailable', z.object({ reason: z.enum(['timeout', 'request_failed']) }).strict()),
-  localFailureWithDetails('bridge_unauthorized', z.object({ reason: z.literal('authentication_failed') }).strict()),
-  localFailureWithDetails('bridge_http_error', z.object({ status: z.number().int().min(100).max(599) }).strict()),
+  BridgeUnavailableFailureSchema,
+  BridgeUnauthorizedFailureSchema,
+  BridgeHttpFailureSchema,
   localFailure('bridge_invalid_response'),
   localFailure('dirt_internal_error'),
 ]);
+
+const AdvertisedCorrectableBridgeFailureSchema = z
+  .object({
+    code: z.enum(BRIDGE_ERROR_CODES).exclude(['internal_error']),
+    message: MessageSchema,
+    details: z
+      .record(z.string(), z.unknown())
+      .describe('Code-specific details validated against the full bridge contract before emission.'),
+    editId: EditIdSchema,
+  })
+  .strict();
+
+const AdvertisedInternalFailureSchema = z
+  .object({
+    code: z.enum(['internal_error', 'bridge_invalid_response', 'dirt_internal_error']),
+    message: MessageSchema,
+    editId: EditIdSchema,
+  })
+  .strict();
+
+const AdvertisedToolFailureDataSchema = z.discriminatedUnion('code', [
+  AdvertisedCorrectableBridgeFailureSchema,
+  BridgeUnavailableFailureSchema,
+  BridgeUnauthorizedFailureSchema,
+  BridgeHttpFailureSchema,
+  AdvertisedInternalFailureSchema,
+]);
+
+const AdvertisedToolFailureResultSchema = z
+  .object({
+    callId: z.uuidv4(),
+    error: AdvertisedToolFailureDataSchema,
+  })
+  .strict()
+  .describe('Compact advertised envelope for a fully validated Dirt tool failure.');
 
 export const ToolFailureDataSchema = z.discriminatedUnion('code', [BridgeErrorSchema, LocalToolFailureSchema]);
 export type ToolFailureData = z.infer<typeof ToolFailureDataSchema>;
 type ToolFailureCode = ToolFailureData['code'];
 
-const ToolFailureWireErrorSchema = z.preprocess(
-  (value) => {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
-    const callId = Reflect.get(value, 'callId');
-    const data = Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'callId'));
-    return { callId, data };
-  },
-  z
-    .object({ callId: z.uuidv4(), data: ToolFailureDataSchema })
-    .strict()
-    .transform(({ callId, data }) => ({ ...data, callId })),
-);
-
 export const ToolFailureResultSchema = z
-  .object({ error: ToolFailureWireErrorSchema })
+  .object({ callId: z.uuidv4(), error: ToolFailureDataSchema })
   .strict()
   .describe('Structured MCP tool execution failure.');
+
+export function toolOutputSchema<Success extends z.ZodType>(success: Success) {
+  return z.union([success, AdvertisedToolFailureResultSchema]);
+}
 
 type ToolFailureLogLevel = 'info' | 'warning' | 'error';
 

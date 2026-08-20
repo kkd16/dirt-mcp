@@ -56,6 +56,20 @@ final class BridgeDispatcherTest {
     }
 
     @Test
+    void rejectsNonVersionFourEditIdsInTheFinalErrorEnvelope() {
+        UUID versionOne = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+        try (RequestBodyReader reader = new RequestBodyReader(1)) {
+            FailingExchange rawExchange = new FailingExchange(DeliveryFailure.NONE);
+            BridgeExchange exchange = new BridgeExchange(rawExchange, 1_024, reader);
+
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> exchange.sendInternalError(500, "safe failure", versionOne));
+            assertEquals(-1, rawExchange.getResponseCode());
+        }
+    }
+
+    @Test
     void rejectsDuplicatePaths() {
         BridgeEndpoint first = endpoint("first", "GET", "/v1/ping");
         BridgeEndpoint duplicate = endpoint("duplicate", "POST", "/v1/ping");
@@ -202,6 +216,57 @@ final class BridgeDispatcherTest {
     }
 
     @Test
+    void invalidSuccessEditMetadataFallsBackToAnUncorrelatedInternalError() throws IOException {
+        BridgeEndpoint endpoint =
+                new BridgeEndpoint() {
+                    @Override
+                    public String operation() {
+                        return "fill_region";
+                    }
+
+                    @Override
+                    public String method() {
+                        return "GET";
+                    }
+
+                    @Override
+                    public String path() {
+                        return "/v1/ping";
+                    }
+
+                    @Override
+                    public void handle(BridgeExchange exchange) throws IOException {
+                        exchange.ok(
+                                committedFillResult(
+                                        UUID.fromString("123e4567-e89b-12d3-a456-426614174000")));
+                    }
+
+                    @Override
+                    public String internalErrorMessage() {
+                        return "safe failure";
+                    }
+                };
+        BridgeDispatcher dispatcher =
+                new BridgeDispatcher(
+                        List.of(endpoint),
+                        new BearerAuthenticator(BridgeTestFixture.TOKEN),
+                        1,
+                        1_024,
+                        1,
+                        log());
+        FailingExchange exchange = new FailingExchange(DeliveryFailure.NONE);
+
+        try (dispatcher) {
+            dispatcher.handle(exchange);
+        }
+
+        assertEquals(500, exchange.getResponseCode());
+        assertEquals(
+                BridgeTestFixture.json("{error:{code:'internal_error',message:'safe failure'}}"),
+                BridgeTestFixture.json(exchange.responseBody()));
+    }
+
+    @Test
     void dispatcherOwnsAndClosesTheExchangeOnce() throws IOException {
         BridgeEndpoint endpoint = endpoint("ping_server", "GET", "/v1/ping");
         BridgeDispatcher dispatcher =
@@ -251,11 +316,15 @@ final class BridgeDispatcherTest {
     }
 
     private static FillRegion.Result committedFillResult() {
+        return committedFillResult(EDIT_ID);
+    }
+
+    private static FillRegion.Result committedFillResult(UUID editId) {
         BlockBounds bounds =
                 new BlockBounds(new BlockPosition(0, 0, 0), new BlockPosition(0, 0, 0));
         EditRecord edit =
                 new EditRecord(
-                        EDIT_ID,
+                        editId,
                         UUID.fromString("22222222-2222-4222-8222-222222222222"),
                         EditOperation.FILL_REGION,
                         "world",

@@ -9,6 +9,7 @@ import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.io.IOException;
+import java.util.List;
 import java.util.Set;
 
 final class ScanOrthographicViewRequestDecoder {
@@ -69,7 +70,9 @@ final class ScanOrthographicViewRequestDecoder {
             default ->
                     throw RequestJson.invalid(
                             "direction must be north, east, south, west, up, or down",
-                            new ErrorDetails.InvalidRequest.InvalidValue("direction"));
+                            new ErrorDetails.InvalidRequest.UnsupportedValue(
+                                    "direction",
+                                    List.of("north", "east", "south", "west", "up", "down")));
         };
     }
 }

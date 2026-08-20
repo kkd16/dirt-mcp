@@ -19,8 +19,8 @@ export interface JsonRpcResult {
   readonly content?: readonly { readonly type: string; readonly text: string }[];
   readonly isError?: boolean;
   readonly structuredContent?: {
+    readonly callId?: string;
     readonly error?: {
-      readonly callId: string;
       readonly code: string;
       readonly details?: Readonly<Record<string, unknown>>;
       readonly editId?: string;

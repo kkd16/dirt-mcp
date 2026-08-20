@@ -236,18 +236,23 @@ final class FaweWorldEditorTest {
                                         List.of(),
                                         0,
                                         false)));
-        assertFailure(
-                OperationFailure.INVALID_REQUEST,
-                () ->
-                        set(
-                                editor,
-                                new SetBlocks.Request(
-                                        "world",
-                                        position(0, 0, 0),
-                                        palettes(),
-                                        List.of(new SetBlocks.Placement(1, 0, 0, 0)),
-                                        0,
-                                        false)));
+        OperationException paletteReference =
+                assertThrows(
+                        OperationException.class,
+                        () ->
+                                set(
+                                        editor,
+                                        new SetBlocks.Request(
+                                                "world",
+                                                position(0, 0, 0),
+                                                palettes(),
+                                                List.of(new SetBlocks.Placement(1, 0, 0, 0)),
+                                                0,
+                                                false)));
+        assertEquals(OperationFailure.INVALID_REQUEST, paletteReference.failure());
+        assertEquals(
+                new ErrorDetails.InvalidRequest.OutOfRange("placements[0][0]", 1, 0, 0),
+                paletteReference.details().orElseThrow());
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
@@ -273,7 +278,7 @@ final class FaweWorldEditorTest {
         assertEquals(OperationFailure.INVALID_REQUEST, coordinateOverflow.failure());
         assertEquals(
                 new ErrorDetails.InvalidRequest.OutOfRange(
-                        "placements[0][1]",
+                        "placements[0].resolved.x",
                         (long) Integer.MAX_VALUE + 1,
                         Integer.MIN_VALUE,
                         Integer.MAX_VALUE),
@@ -309,33 +314,50 @@ final class FaweWorldEditorTest {
                                         palette(),
                                         0,
                                         false)));
-        assertFailure(
-                OperationFailure.INVALID_REQUEST,
-                () ->
-                        fill(
-                                editor,
-                                new FillRegion.Request(
-                                        "world",
-                                        position(0, 0, 0),
-                                        position(0, 0, 0),
-                                        List.of(new DestinationPaletteEntry("minecraft:stone", 40)),
-                                        0,
-                                        false)));
-        assertFailure(
-                OperationFailure.INVALID_REQUEST,
-                () ->
-                        fill(
-                                editor,
-                                new FillRegion.Request(
-                                        "world",
-                                        position(0, 0, 0),
-                                        position(0, 0, 0),
-                                        List.of(
-                                                new DestinationPaletteEntry("minecraft:stone", 50),
-                                                new DestinationPaletteEntry(
-                                                        "minecraft:dirt", null)),
-                                        0,
-                                        false)));
+        OperationException wrongWeightTotal =
+                assertThrows(
+                        OperationException.class,
+                        () ->
+                                fill(
+                                        editor,
+                                        new FillRegion.Request(
+                                                "world",
+                                                position(0, 0, 0),
+                                                position(0, 0, 0),
+                                                List.of(
+                                                        new DestinationPaletteEntry(
+                                                                "minecraft:stone", 40)),
+                                                0,
+                                                false)));
+        assertEquals(OperationFailure.INVALID_REQUEST, wrongWeightTotal.failure());
+        assertEquals("destinationPalette weights must total 100", wrongWeightTotal.getMessage());
+        assertEquals(
+                new ErrorDetails.InvalidRequest.PaletteWeightTotal("destinationPalette", 40),
+                wrongWeightTotal.details().orElseThrow());
+        OperationException mixedWeights =
+                assertThrows(
+                        OperationException.class,
+                        () ->
+                                fill(
+                                        editor,
+                                        new FillRegion.Request(
+                                                "world",
+                                                position(0, 0, 0),
+                                                position(0, 0, 0),
+                                                List.of(
+                                                        new DestinationPaletteEntry(
+                                                                "minecraft:stone", 50),
+                                                        new DestinationPaletteEntry(
+                                                                "minecraft:dirt", null)),
+                                                0,
+                                                false)));
+        assertEquals(OperationFailure.INVALID_REQUEST, mixedWeights.failure());
+        assertEquals(
+                "destinationPalette weights must be provided for every entry or omitted from every entry",
+                mixedWeights.getMessage());
+        assertEquals(
+                new ErrorDetails.InvalidRequest.PaletteWeightsMixed("destinationPalette"),
+                mixedWeights.details().orElseThrow());
     }
 
     @Test
@@ -700,7 +722,7 @@ final class FaweWorldEditorTest {
             assertEquals(OperationFailure.WORLD_UNAVAILABLE, failure.failure());
             assertTrue(failure.editId().isPresent());
             assertEquals(
-                    new ErrorDetails.WorldUnavailable.OperationFailed(),
+                    new ErrorDetails.WorldUnavailable.RolledBack(),
                     failure.details().orElseThrow());
             assertTrue(failure.getMessage().contains("was rolled back"));
             assertTrue(failure.getMessage().contains(failure.editId().orElseThrow().toString()));
@@ -732,7 +754,7 @@ final class FaweWorldEditorTest {
             assertEquals(OperationFailure.WORLD_UNAVAILABLE, failure.failure());
             assertTrue(failure.editId().isPresent());
             assertEquals(
-                    new ErrorDetails.WorldUnavailable.OperationFailed(),
+                    new ErrorDetails.WorldUnavailable.RolledBack(),
                     failure.details().orElseThrow());
             assertTrue(failure.getMessage().contains("unretained recovery was rolled back"));
         }

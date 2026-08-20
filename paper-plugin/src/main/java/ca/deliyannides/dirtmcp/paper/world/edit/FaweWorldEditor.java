@@ -476,7 +476,7 @@ public final class FaweWorldEditor
                 "The edit completed after its world became unavailable and was rolled back; edit "
                         + "ID: "
                         + editId,
-                new ErrorDetails.WorldUnavailable.OperationFailed(),
+                new ErrorDetails.WorldUnavailable.RolledBack(),
                 null,
                 editId);
     }
@@ -612,7 +612,7 @@ public final class FaweWorldEditor
         throw new OperationException(
                 failure.failure(),
                 "The edit failed, but its unretained recovery was rolled back; edit ID: " + editId,
-                new ErrorDetails.WorldUnavailable.OperationFailed(),
+                new ErrorDetails.WorldUnavailable.RolledBack(),
                 failure,
                 editId);
     }
@@ -780,7 +780,11 @@ public final class FaweWorldEditor
                     || placement.paletteIndex() >= request.palettes().size()) {
                 throw invalid(
                         placementName + "[0] must reference an entry in palettes",
-                        new ErrorDetails.InvalidRequest.InvalidValue(placementName + "[0]"));
+                        new ErrorDetails.InvalidRequest.OutOfRange(
+                                placementName + "[0]",
+                                placement.paletteIndex(),
+                                0,
+                                request.palettes().size() - 1));
             }
             BlockPosition position = resolvePosition(request.origin(), placement, placementName);
             if (!positions.add(position)) {
@@ -857,23 +861,26 @@ public final class FaweWorldEditor
         long y = (long) origin.y() + placement.y();
         long z = (long) origin.z() + placement.z();
         if (x < Integer.MIN_VALUE || x > Integer.MAX_VALUE) {
-            throw resolvedPositionOutOfRange(field, "[1]", x);
+            throw resolvedPositionOutOfRange(field, ".resolved.x", x);
         }
         if (y < Integer.MIN_VALUE || y > Integer.MAX_VALUE) {
-            throw resolvedPositionOutOfRange(field, "[2]", y);
+            throw resolvedPositionOutOfRange(field, ".resolved.y", y);
         }
         if (z < Integer.MIN_VALUE || z > Integer.MAX_VALUE) {
-            throw resolvedPositionOutOfRange(field, "[3]", z);
+            throw resolvedPositionOutOfRange(field, ".resolved.z", z);
         }
         return new BlockPosition((int) x, (int) y, (int) z);
     }
 
     private static OperationException resolvedPositionOutOfRange(
-            String placementField, String component, long value) {
+            String placementField, String resolvedCoordinate, long value) {
         return invalid(
                 placementField + " resolves outside the signed 32-bit coordinate range",
                 new ErrorDetails.InvalidRequest.OutOfRange(
-                        placementField + component, value, Integer.MIN_VALUE, Integer.MAX_VALUE));
+                        placementField + resolvedCoordinate,
+                        value,
+                        Integer.MIN_VALUE,
+                        Integer.MAX_VALUE));
     }
 
     private EditPlatform.WorldHandle resolveWorld(String worldName) throws OperationException {
@@ -907,7 +914,7 @@ public final class FaweWorldEditor
         }
         boolean weighted = false;
         boolean unweighted = false;
-        int totalWeight = 0;
+        long totalWeight = 0;
         for (int index = 0; index < palette.size(); index++) {
             DestinationPaletteEntry entry = palette.get(index);
             if (entry == null || entry.blockState() == null || entry.blockState().isBlank()) {
@@ -934,12 +941,12 @@ public final class FaweWorldEditor
         if (weighted && unweighted) {
             throw invalid(
                     field + " weights must be provided for every entry or omitted from every entry",
-                    new ErrorDetails.InvalidRequest.InvalidValue(field));
+                    new ErrorDetails.InvalidRequest.PaletteWeightsMixed(field));
         }
         if (weighted && totalWeight != 100) {
             throw invalid(
                     field + " weights must total 100",
-                    new ErrorDetails.InvalidRequest.InvalidValue(field));
+                    new ErrorDetails.InvalidRequest.PaletteWeightTotal(field, totalWeight));
         }
     }
 

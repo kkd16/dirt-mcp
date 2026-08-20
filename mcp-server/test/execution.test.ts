@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ServerContext } from '@modelcontextprotocol/server';
-import { ToolFailure, ToolFailureDataSchema } from '../dist/bridge/errors.js';
+import * as z from 'zod/v4';
+import { BRIDGE_ERROR_CODES } from '../dist/bridge/contract.js';
+import {
+  ToolFailure,
+  ToolFailureDataSchema,
+  ToolFailureResultSchema,
+  toolOutputSchema,
+} from '../dist/bridge/errors.js';
 import { createLogger, type DirtLogger } from '../dist/logging.js';
 import { executeToolCall, successResult } from '../dist/tools/execution.js';
 
@@ -42,6 +49,70 @@ test('keeps MCP-local failure details strict and code-specific', () => {
   }
 });
 
+test('advertises every failure code with a compact envelope', () => {
+  const schema = toolOutputSchema(z.object({ value: z.string() }).strict());
+  const callId = '22222222-2222-4222-8222-222222222222';
+
+  assert.equal(schema.safeParse({ value: 'ok' }).success, true);
+  for (const code of BRIDGE_ERROR_CODES) {
+    assert.equal(
+      schema.safeParse({
+        callId,
+        error: {
+          code,
+          message: 'Failure',
+          ...(code === 'internal_error' ? {} : { details: {} }),
+        },
+      }).success,
+      true,
+      code,
+    );
+  }
+  for (const error of [
+    { code: 'bridge_unavailable', message: 'Unavailable', details: { reason: 'timeout' } },
+    { code: 'bridge_unauthorized', message: 'Unauthorized', details: { reason: 'authentication_failed' } },
+    { code: 'bridge_http_error', message: 'Bad gateway', details: { status: 502 } },
+    { code: 'bridge_invalid_response', message: 'Invalid response' },
+    { code: 'dirt_internal_error', message: 'Internal error' },
+  ]) {
+    assert.equal(schema.safeParse({ callId, error }).success, true, error.code);
+  }
+
+  for (const failure of [
+    { callId, error: { code: 'world_busy', message: 'Busy' } },
+    { callId, error: { code: 'internal_error', message: 'Internal', details: {} } },
+    { callId, error: { code: 'bridge_unavailable', message: 'Unavailable', details: {} } },
+    { callId, error: { code: 'unknown_error', message: 'Unknown', details: {} } },
+    { error: { code: 'world_busy', message: 'Busy', details: {} } },
+    { error: { code: 'world_busy', message: 'Busy', details: {}, callId } },
+  ]) {
+    assert.equal(schema.safeParse(failure).success, false);
+  }
+});
+
+test('fully validates the canonical failure result at runtime', () => {
+  const callId = '22222222-2222-4222-8222-222222222222';
+  const failure = {
+    callId,
+    error: {
+      code: 'world_busy',
+      message: 'Busy',
+      details: { reason: 'operation_in_progress', world: 'world' },
+    },
+  };
+
+  assert.equal(ToolFailureResultSchema.safeParse(failure).success, true);
+  assert.equal(
+    ToolFailureResultSchema.safeParse({
+      ...failure,
+      error: { ...failure.error, details: { reason: 'operation_in_progress' } },
+    }).success,
+    false,
+  );
+  assert.equal(ToolFailureResultSchema.safeParse({ ...failure, error: { ...failure.error, callId } }).success, false);
+  assert.doesNotThrow(() => z.toJSONSchema(ToolFailureResultSchema));
+});
+
 test('maps expected tool failures and emits an unknown-client audit', async () => {
   const captured = await captureLogs((logger) =>
     executeToolCall(
@@ -57,14 +128,17 @@ test('maps expected tool failures and emits an unknown-client audit', async () =
     ),
   );
 
-  const error = (captured.result.structuredContent as { error: Record<string, unknown> }).error;
-  assert.match(error.callId as string, UUID_V4_PATTERN);
+  const structuredContent = captured.result.structuredContent as {
+    callId: string;
+    error: Record<string, unknown>;
+  };
+  assert.match(structuredContent.callId, UUID_V4_PATTERN);
   assert.deepEqual(captured.result.structuredContent, {
+    callId: structuredContent.callId,
     error: {
       code: 'world_busy',
       message: 'World is busy',
       details: { reason: 'operation_in_progress', world: 'world' },
-      callId: error.callId,
     },
   });
   assert.equal(captured.result.isError, true);
@@ -78,7 +152,7 @@ test('maps expected tool failures and emits an unknown-client audit', async () =
     message: 'Tool call completed.',
     pid: process.pid,
     operation: 'test_tool',
-    call_id: error.callId,
+    call_id: structuredContent.callId,
     request_id: 17,
     client: 'unknown',
     success: false,
@@ -105,14 +179,17 @@ test('exposes a retained edit ID on expected failures only when present', async 
     ),
   );
 
-  const error = (captured.result.structuredContent as { error: Record<string, unknown> }).error;
-  assert.match(error.callId as string, UUID_V4_PATTERN);
+  const structuredContent = captured.result.structuredContent as {
+    callId: string;
+    error: Record<string, unknown>;
+  };
+  assert.match(structuredContent.callId, UUID_V4_PATTERN);
   assert.deepEqual(captured.result.structuredContent, {
+    callId: structuredContent.callId,
     error: {
       code: 'history_capacity_exceeded',
       message: 'Recovery is required',
       details: { reason: 'retained_changed_blocks', maximum: 100_000 },
-      callId: error.callId,
       editId: EDIT_ID,
     },
   });
@@ -185,13 +262,16 @@ test('sanitizes unexpected failures without logging their messages', async () =>
     ),
   );
 
-  const error = (captured.result.structuredContent as { error: Record<string, unknown> }).error;
-  assert.match(error.callId as string, UUID_V4_PATTERN);
+  const structuredContent = captured.result.structuredContent as {
+    callId: string;
+    error: Record<string, unknown>;
+  };
+  assert.match(structuredContent.callId, UUID_V4_PATTERN);
   assert.deepEqual(captured.result.structuredContent, {
+    callId: structuredContent.callId,
     error: {
       code: 'dirt_internal_error',
       message: 'Dirt MCP encountered an unexpected internal error.',
-      callId: error.callId,
     },
   });
   assert.equal(captured.records.length, 2);

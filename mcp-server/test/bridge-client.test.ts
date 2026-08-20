@@ -88,6 +88,54 @@ test('classifies fetch timeout failures without exposing transport objects', asy
   });
 });
 
+test('classifies response-body transport failures for successful and failed HTTP responses', async () => {
+  const cases = [
+    { status: 200, error: new DOMException('timed out', 'TimeoutError'), reason: 'timeout' },
+    { status: 503, error: new TypeError('socket closed'), reason: 'request_failed' },
+  ] as const;
+
+  await Promise.all(
+    cases.map(async ({ status, error: streamError, reason: expectedReason }) => {
+      const client = new BridgeClient(
+        { origin: 'http://127.0.0.1', token: 'token' },
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(streamError);
+              },
+            }),
+            { status },
+          ),
+      );
+
+      await assert.rejects(client.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema), (error: unknown) => {
+        if (!(error instanceof ToolFailure) || error.data.code !== 'bridge_unavailable') return false;
+        assert.deepEqual(error.data.details, { reason: expectedReason });
+        return true;
+      });
+    }),
+  );
+});
+
+test('keeps malformed JSON classified by HTTP outcome', async () => {
+  await Promise.all(
+    [
+      { status: 200, code: 'bridge_invalid_response' },
+      { status: 503, code: 'bridge_http_error' },
+    ].map(async ({ status, code }) => {
+      const client = new BridgeClient(
+        { origin: 'http://127.0.0.1', token: 'token' },
+        async () => new Response('{', { status, headers: { 'Content-Type': 'application/json' } }),
+      );
+      await assert.rejects(
+        client.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema),
+        (error: unknown) => error instanceof ToolFailure && error.code === code,
+      );
+    }),
+  );
+});
+
 test('enforces code-specific bridge error details and optional UUIDv4 edit IDs', () => {
   const worldBusy = {
     error: {
@@ -156,7 +204,7 @@ test('accepts one strict details variant for every bridge error code', () => {
     {
       code: 'invalid_request',
       message: 'Invalid request',
-      details: { reason: 'out_of_range', field: 'maxResults', value: 0, minimum: 1, maximum: 1_000 },
+      details: { reason: 'out_of_range', target: 'maxResults', value: 0, minimum: 1, maximum: 1_000 },
     },
     { code: 'method_not_allowed', message: 'Wrong method', details: { allowedMethod: 'POST' } },
     { code: 'not_found', message: 'Unknown route', details: { reason: 'route_not_found' } },
@@ -207,10 +255,13 @@ test('accepts every reason-discriminated bridge detail variant', () => {
       { reason: 'malformed_json' },
       { reason: 'missing', field: 'world' },
       { reason: 'invalid_value', field: 'world' },
+      { reason: 'unsupported_value', target: 'mode', allowedValues: ['replace', 'keep'] },
       { reason: 'duplicate', field: 'positions' },
       { reason: 'unknown_fields', field: 'legacyOption' },
-      { reason: 'out_of_range', field: 'maxResults', value: 0, minimum: 1, maximum: 1_000 },
+      { reason: 'out_of_range', target: 'maxResults', value: 0, minimum: 1, maximum: 1_000 },
       { reason: 'too_many_items', fields: ['positions'], maximum: 10_000 },
+      { reason: 'palette_weights_mixed', field: 'palette' },
+      { reason: 'palette_weight_total', field: 'palette', requested: 99, required: 100 },
     ],
     region_too_large: [
       { reason: 'volume', dimensions: { x: 10, y: 20, z: 30 }, maximum: 5_000 },
@@ -249,6 +300,7 @@ test('accepts every reason-discriminated bridge detail variant', () => {
       { reason: 'paper_unavailable' },
       { reason: 'operation_failed' },
       { reason: 'rollback_failed' },
+      { reason: 'rolled_back' },
       { reason: 'world_unloaded', world: 'world' },
       { reason: 'chunk_unloaded', world: 'world', chunk: { x: -2, z: 3 } },
       { reason: 'chunk_load_failed', world: 'world', chunk: { x: -2, z: 3 } },
@@ -273,7 +325,7 @@ test('enforces Java-aligned numeric ranges and cross-field invariants', () => {
       code: 'invalid_request',
       details: {
         reason: 'out_of_range',
-        field: 'coordinate',
+        target: 'coordinate',
         value: Number.MIN_SAFE_INTEGER,
         minimum: Number.MIN_SAFE_INTEGER + 1,
         maximum: Number.MAX_SAFE_INTEGER,
@@ -283,7 +335,7 @@ test('enforces Java-aligned numeric ranges and cross-field invariants', () => {
       code: 'invalid_request',
       details: {
         reason: 'out_of_range',
-        field: 'coordinate',
+        target: 'coordinate',
         value: Number.MAX_SAFE_INTEGER,
         minimum: Number.MIN_SAFE_INTEGER,
         maximum: Number.MAX_SAFE_INTEGER - 1,
@@ -292,6 +344,15 @@ test('enforces Java-aligned numeric ranges and cross-field invariants', () => {
     {
       code: 'invalid_request',
       details: { reason: 'too_many_items', fields: ['include', 'exclude'], maximum: INT32_MAX },
+    },
+    {
+      code: 'invalid_request',
+      details: {
+        reason: 'palette_weight_total',
+        field: 'palette',
+        requested: Number.MAX_SAFE_INTEGER,
+        required: 100,
+      },
     },
     {
       code: 'history_capacity_exceeded',
@@ -332,7 +393,7 @@ test('enforces Java-aligned numeric ranges and cross-field invariants', () => {
       code: 'invalid_request',
       details: {
         reason: 'out_of_range',
-        field: 'coordinate',
+        target: 'coordinate',
         value: Number.MIN_SAFE_INTEGER,
         minimum: Number.MIN_SAFE_INTEGER - 1,
         maximum: Number.MIN_SAFE_INTEGER - 1,
@@ -342,7 +403,7 @@ test('enforces Java-aligned numeric ranges and cross-field invariants', () => {
       code: 'invalid_request',
       details: {
         reason: 'out_of_range',
-        field: 'coordinate',
+        target: 'coordinate',
         value: Number.MAX_SAFE_INTEGER + 1,
         minimum: 0,
         maximum: 1,
@@ -370,11 +431,11 @@ test('enforces Java-aligned numeric ranges and cross-field invariants', () => {
     },
     {
       code: 'invalid_request',
-      details: { reason: 'out_of_range', field: 'limit', value: 0, minimum: 2, maximum: 1 },
+      details: { reason: 'out_of_range', target: 'limit', value: 0, minimum: 2, maximum: 1 },
     },
     {
       code: 'invalid_request',
-      details: { reason: 'out_of_range', field: 'limit', value: 2, minimum: 1, maximum: 3 },
+      details: { reason: 'out_of_range', target: 'limit', value: 2, minimum: 1, maximum: 3 },
     },
     {
       code: 'invalid_request',
@@ -395,6 +456,35 @@ test('enforces Java-aligned numeric ranges and cross-field invariants', () => {
     {
       code: 'invalid_request',
       details: { reason: 'too_many_items', fields: ['positions'], maximum: INT32_MAX + 1 },
+    },
+    {
+      code: 'invalid_request',
+      details: { reason: 'unsupported_value', target: 'mode', allowedValues: [] },
+    },
+    {
+      code: 'invalid_request',
+      details: { reason: 'unsupported_value', target: 'mode', allowedValues: ['replace', 'replace'] },
+    },
+    {
+      code: 'invalid_request',
+      details: { reason: 'palette_weight_total', field: 'palette', requested: 100, required: 100 },
+    },
+    {
+      code: 'invalid_request',
+      details: { reason: 'palette_weight_total', field: 'palette', requested: 0, required: 100 },
+    },
+    {
+      code: 'invalid_request',
+      details: {
+        reason: 'palette_weight_total',
+        field: 'palette',
+        requested: Number.MAX_SAFE_INTEGER + 1,
+        required: 100,
+      },
+    },
+    {
+      code: 'edit_not_latest',
+      details: { world: 'world', requestedEditId: EDIT_ID, newestEditId: EDIT_ID },
     },
     {
       code: 'region_too_large',
