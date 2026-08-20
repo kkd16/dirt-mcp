@@ -52,10 +52,19 @@ final class FaweEditExecutor {
             if (!dryRun && expectedChanges > 0) {
                 requireNotInterrupted();
                 session.replaceBlocks(selection, sourceMask, edit.palette().pattern());
+                requireNotInterrupted();
                 changes = session.getChangeSet().longSize();
             }
         } catch (MaxChangedBlocksException exception) {
-            throw changeLimit(exception);
+            OperationException failure = changeLimit(exception);
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, failure);
+            throw failure;
+        } catch (OperationException exception) {
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
+            throw exception;
+        } catch (RuntimeException exception) {
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
+            throw exception;
         }
         EditPlatform.UndoToken undo =
                 !dryRun && changes > 0 ? new StoredUndo(session, changes, edit.chunks()) : null;
@@ -83,10 +92,19 @@ final class FaweEditExecutor {
                 requireNotInterrupted();
                 session.setBlocks(
                         (com.sk89q.worldedit.regions.Region) selection, edit.palette().pattern());
+                requireNotInterrupted();
                 changes = session.getChangeSet().longSize();
             }
         } catch (MaxChangedBlocksException exception) {
-            throw changeLimit(exception);
+            OperationException failure = changeLimit(exception);
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, failure);
+            throw failure;
+        } catch (OperationException exception) {
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
+            throw exception;
+        } catch (RuntimeException exception) {
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
+            throw exception;
         }
         EditPlatform.UndoToken undo =
                 !dryRun && changes > 0 ? new StoredUndo(session, changes, edit.chunks()) : null;
@@ -110,17 +128,33 @@ final class FaweEditExecutor {
             if (!dryRun) {
                 requireNotInterrupted();
                 for (PaperEditPreparation.PreparedBlockChange change : pending) {
+                    requireNotInterrupted();
                     session.setBlock(
                             change.position().x(),
                             change.position().y(),
                             change.position().z(),
                             change.blockState());
                 }
+                requireNotInterrupted();
             }
         } catch (MaxChangedBlocksException exception) {
-            throw changeLimit(exception);
+            OperationException failure = changeLimit(exception);
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, failure);
+            throw failure;
+        } catch (OperationException exception) {
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
+            throw exception;
+        } catch (RuntimeException exception) {
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
+            throw exception;
         }
-        long changes = dryRun ? expectedChanges : session.getChangeSet().longSize();
+        long changes;
+        try {
+            changes = dryRun ? expectedChanges : session.getChangeSet().longSize();
+        } catch (RuntimeException exception) {
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
+            throw exception;
+        }
         EditPlatform.UndoToken undo =
                 !dryRun && changes > 0 ? new StoredUndo(session, changes, edit.chunks()) : null;
         return new EditPlatform.EditResult(0, changes, undo);
@@ -130,6 +164,35 @@ final class FaweEditExecutor {
         requireNotInterrupted();
         try (EditSession session = newEditSession(world.worldEditWorld(), false)) {
             undo.session().undo(session);
+        }
+    }
+
+    private void rollbackAfterFailure(
+            PaperEditPreparation.PaperWorld world,
+            EditSession failedSession,
+            List<ChunkPosition> chunks,
+            boolean dryRun,
+            Throwable failure)
+            throws EditRecoveryException {
+        long changes = dryRun ? 0 : failedSession.getChangeSet().longSize();
+        if (changes == 0) {
+            return;
+        }
+        boolean interrupted = Thread.interrupted();
+        try {
+            try (EditSession rollback = newEditSession(world.worldEditWorld(), false)) {
+                failedSession.undo(rollback);
+            } catch (RuntimeException rollbackFailure) {
+                failure.addSuppressed(rollbackFailure);
+                throw new EditRecoveryException(
+                        "World edit failed and its automatic rollback also failed",
+                        failure,
+                        new StoredUndo(failedSession, changes, chunks));
+            }
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 

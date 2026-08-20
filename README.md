@@ -69,13 +69,17 @@ bridge:
   port: 8765
   backlog: 0
   shutdown-delay-seconds: 5
+  request-body-timeout-seconds: 5
   minimum-token-bytes: 32
   max-concurrent-requests: 32
+  max-concurrent-inspections: 2
 
 limits:
   max-request-bytes: 262144
   max-region-volume: 262144
   max-touched-chunks: 256
+  max-inspection-touched-chunks: 32
+  max-block-state-patterns: 64
   max-changed-blocks: 65536
   max-inspection-volume: 16384
   default-inspection-results: 512

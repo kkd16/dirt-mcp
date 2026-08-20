@@ -21,6 +21,7 @@ public final class FaweWorldEditor
     private final EditCoordinator coordinator;
     private final int maxRegionVolume;
     private final int maxTouchedChunks;
+    private final int maxBlockStatePatterns;
 
     public FaweWorldEditor(JavaPlugin plugin, MainThread mainThread, DirtConfig.Limits limits) {
         this(
@@ -30,7 +31,8 @@ public final class FaweWorldEditor
                         Objects.requireNonNull(limits, "limits").maxChangedBlocks()),
                 limits.maxRegionVolume(),
                 limits.maxTouchedChunks(),
-                limits.undoHistoryPerWorld());
+                limits.undoHistoryPerWorld(),
+                limits.maxBlockStatePatterns());
     }
 
     FaweWorldEditor(
@@ -38,12 +40,22 @@ public final class FaweWorldEditor
             int maxRegionVolume,
             int maxTouchedChunks,
             int undoHistoryPerWorld) {
+        this(platform, maxRegionVolume, maxTouchedChunks, undoHistoryPerWorld, 64);
+    }
+
+    private FaweWorldEditor(
+            EditPlatform platform,
+            int maxRegionVolume,
+            int maxTouchedChunks,
+            int undoHistoryPerWorld,
+            int maxBlockStatePatterns) {
         this.platform = Objects.requireNonNull(platform, "platform");
-        if (maxRegionVolume < 1 || maxTouchedChunks < 1) {
+        if (maxRegionVolume < 1 || maxTouchedChunks < 1 || maxBlockStatePatterns < 1) {
             throw new IllegalArgumentException("Edit region and chunk limits must be positive");
         }
         this.maxRegionVolume = maxRegionVolume;
         this.maxTouchedChunks = maxTouchedChunks;
+        this.maxBlockStatePatterns = maxBlockStatePatterns;
         this.coordinator = new EditCoordinator(undoHistoryPerWorld);
     }
 
@@ -53,6 +65,8 @@ public final class FaweWorldEditor
         if (request == null || request.min() == null || request.max() == null) {
             throw invalid("min and max are required");
         }
+        validateBlockStateList(request.sourceBlockStatePatterns(), "sourceBlockStatePatterns");
+        validatePaletteSize(request.destinationPalette());
         Cuboid region = boundedRegion(request.min(), request.max());
         EditPlatform.WorldHandle world = resolveWorld(request.world());
         try (EditCoordinator.Lease lease = this.coordinator.enter(world.id(), world.name())) {
@@ -61,7 +75,12 @@ public final class FaweWorldEditor
             List<DestinationPaletteEntry> destinationPalette;
             try (EditPlatform.PreparedReplace prepared =
                     this.platform.prepareReplace(world, request, region)) {
-                execution = this.platform.replace(prepared, region, request.dryRun());
+                try {
+                    execution = this.platform.replace(prepared, region, request.dryRun());
+                } catch (EditRecoveryException failure) {
+                    lease.rememberRecovery(failure.recovery());
+                    throw failure;
+                }
                 sourcePatterns = prepared.sourcePatterns();
                 destinationPalette = prepared.destinationPalette();
                 if (!request.dryRun()) {
@@ -85,6 +104,7 @@ public final class FaweWorldEditor
         if (request == null || request.min() == null || request.max() == null) {
             throw invalid("min and max are required");
         }
+        validatePaletteSize(request.destinationPalette());
         Cuboid region = boundedRegion(request.min(), request.max());
         EditPlatform.WorldHandle world = resolveWorld(request.world());
         try (EditCoordinator.Lease lease = this.coordinator.enter(world.id(), world.name())) {
@@ -92,7 +112,12 @@ public final class FaweWorldEditor
             List<DestinationPaletteEntry> destinationPalette;
             try (EditPlatform.PreparedFill prepared =
                     this.platform.prepareFill(world, request, region)) {
-                execution = this.platform.fill(prepared, region, request.dryRun());
+                try {
+                    execution = this.platform.fill(prepared, region, request.dryRun());
+                } catch (EditRecoveryException failure) {
+                    lease.rememberRecovery(failure.recovery());
+                    throw failure;
+                }
                 destinationPalette = prepared.destinationPalette();
                 if (!request.dryRun()) {
                     lease.remember(execution.undo());
@@ -118,7 +143,12 @@ public final class FaweWorldEditor
             int blockCount;
             try (EditPlatform.PreparedSet prepared =
                     this.platform.prepareSet(world, request, chunks)) {
-                execution = this.platform.set(prepared, request.dryRun());
+                try {
+                    execution = this.platform.set(prepared, request.dryRun());
+                } catch (EditRecoveryException failure) {
+                    lease.rememberRecovery(failure.recovery());
+                    throw failure;
+                }
                 blockCount = prepared.blockCount();
                 if (!request.dryRun()) {
                     lease.remember(execution.undo());
@@ -143,7 +173,8 @@ public final class FaweWorldEditor
             throw invalid("request is required");
         }
         EditPlatform.WorldHandle world = resolveWorld(request.world());
-        try (EditCoordinator.Lease lease = this.coordinator.enter(world.id(), world.name())) {
+        try (EditCoordinator.Lease lease =
+                this.coordinator.enterForUndo(world.id(), world.name())) {
             EditPlatform.UndoToken undo = lease.latestUndo();
             if (undo == null) {
                 throw new OperationException(
@@ -166,8 +197,18 @@ public final class FaweWorldEditor
 
     @Override
     public void close() {
+        if (!closeIfQuiescent()) {
+            throw new IllegalStateException("Cannot close world editing while an edit is active");
+        }
+    }
+
+    public boolean closeIfQuiescent() {
         beginStopping();
+        if (!this.coordinator.isQuiescent()) {
+            return false;
+        }
         this.platform.close();
+        return true;
     }
 
     private Cuboid boundedRegion(BlockPosition min, BlockPosition max) throws OperationException {
@@ -214,6 +255,68 @@ public final class FaweWorldEditor
             throw invalid("world must be a non-empty string");
         }
         return this.platform.resolveWorld(worldName);
+    }
+
+    private void validatePaletteSize(List<DestinationPaletteEntry> palette)
+            throws OperationException {
+        if (palette == null || palette.isEmpty()) {
+            throw invalid("destinationPalette must contain at least one entry");
+        }
+        if (palette.size() > this.maxBlockStatePatterns) {
+            throw invalid(
+                    "destinationPalette may contain at most "
+                            + this.maxBlockStatePatterns
+                            + " entries");
+        }
+        boolean weighted = false;
+        boolean unweighted = false;
+        int totalWeight = 0;
+        for (int index = 0; index < palette.size(); index++) {
+            DestinationPaletteEntry entry = palette.get(index);
+            if (entry == null || entry.blockState() == null || entry.blockState().isBlank()) {
+                throw invalid(
+                        "destinationPalette[" + index + "].blockState must be a non-empty string");
+            }
+            Integer weight = entry.weight();
+            if (weight == null) {
+                unweighted = true;
+            } else {
+                if (weight < 1 || weight > 100) {
+                    throw invalid(
+                            "destinationPalette[" + index + "].weight must be between 1 and 100");
+                }
+                weighted = true;
+                totalWeight += weight;
+            }
+        }
+        if (weighted && unweighted) {
+            throw invalid(
+                    "destinationPalette weights must be provided for every entry or omitted from every entry");
+        }
+        if (weighted && totalWeight != 100) {
+            throw invalid("destinationPalette weights must total 100");
+        }
+    }
+
+    private void validateBlockStateList(List<String> values, String field)
+            throws OperationException {
+        if (values == null || values.isEmpty()) {
+            throw invalid(field + " must contain at least one entry");
+        }
+        if (values.size() > this.maxBlockStatePatterns) {
+            throw invalid(
+                    field + " may contain at most " + this.maxBlockStatePatterns + " entries");
+        }
+        Set<String> distinct = new LinkedHashSet<>();
+        for (int index = 0; index < values.size(); index++) {
+            String value = values.get(index);
+            if (value == null || value.isBlank()) {
+                throw invalid(field + "[" + index + "] must be a non-empty string");
+            }
+            if (!distinct.add(value)) {
+                throw invalid(field + " contains a duplicate pattern: " + value);
+            }
+        }
     }
 
     private static OperationException invalid(String message) {

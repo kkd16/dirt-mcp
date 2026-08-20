@@ -1,8 +1,10 @@
 package ca.deliyannides.dirtmcp.paper.world.edit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
@@ -58,6 +60,23 @@ final class EditCoordinatorTest {
         active.remember(() -> 5);
         assertNull(active.latestUndo());
         active.close();
+        assertEquals(0, coordinator.trackedWorldCount());
+    }
+
+    @Test
+    void closingRetainsActiveStateUntilItsLeaseFinishes() throws OperationException {
+        EditCoordinator coordinator = new EditCoordinator(2);
+        EditCoordinator.Lease active = coordinator.enter(WORLD_ID, "world");
+
+        coordinator.close();
+
+        assertFalse(coordinator.isQuiescent());
+        assertEquals(
+                OperationFailure.WORLD_UNAVAILABLE,
+                assertThrows(OperationException.class, () -> coordinator.enter(WORLD_ID, "world"))
+                        .failure());
+        active.close();
+        assertTrue(coordinator.isQuiescent());
         assertEquals(0, coordinator.trackedWorldCount());
     }
 }

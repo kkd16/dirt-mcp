@@ -26,12 +26,7 @@ public interface ScanOrthographicView {
             int horizontalRadius,
             int verticalRadius,
             int maxDistance,
-            int maxResults) {
-        public Request {
-            Objects.requireNonNull(world, "world");
-            Objects.requireNonNull(origin, "origin");
-        }
-    }
+            int maxResults) {}
 
     record AxisVector(int x, int y, int z) {}
 

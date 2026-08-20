@@ -20,6 +20,7 @@ final class BridgeDispatcherTest {
                                 new BearerAuthenticator(BridgeTestFixture.TOKEN, 32),
                                 1,
                                 1024,
+                                1,
                                 Logger.getAnonymousLogger()));
     }
 
@@ -33,6 +34,7 @@ final class BridgeDispatcherTest {
                                 new BearerAuthenticator(BridgeTestFixture.TOKEN, 32),
                                 1,
                                 1024,
+                                1,
                                 Logger.getAnonymousLogger()));
     }
 

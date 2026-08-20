@@ -93,8 +93,4 @@ public final class RequestJson {
             throw new InvalidRequestException("Request contains missing or unknown fields");
         }
     }
-
-    public static InvalidRequestException invalidJsonValues() {
-        return new InvalidRequestException("Request body must contain valid JSON values");
-    }
 }

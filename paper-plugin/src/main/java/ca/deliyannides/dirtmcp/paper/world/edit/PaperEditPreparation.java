@@ -191,11 +191,7 @@ final class PaperEditPreparation implements AutoCloseable {
         }
         List<DestinationPaletteEntry> canonical = new ArrayList<>(inputs.size());
         Set<String> statesSeen = new LinkedHashSet<>();
-        List<BlockPalette.WeightedValue<BlockState>> weightedStates =
-                new ArrayList<>(inputs.size());
-        boolean weighted = false;
-        boolean unweighted = false;
-        int totalWeight = 0;
+        List<WeightedState> weightedStates = new ArrayList<>(inputs.size());
         for (int index = 0; index < inputs.size(); index++) {
             DestinationPaletteEntry entry = inputs.get(index);
             if (entry == null) {
@@ -210,33 +206,12 @@ final class PaperEditPreparation implements AutoCloseable {
                         "destinationPalette contains a duplicate block state: " + canonicalState);
             }
             Integer weight = entry.weight();
-            if (weight == null) {
-                unweighted = true;
-            } else {
-                if (weight < 1 || weight > 100) {
-                    throw invalid(
-                            "destinationPalette[" + index + "].weight must be between 1 and 100");
-                }
-                weighted = true;
-                totalWeight = Math.addExact(totalWeight, weight);
-            }
             canonical.add(new DestinationPaletteEntry(canonicalState, weight));
             weightedStates.add(
-                    new BlockPalette.WeightedValue<>(
-                            BukkitAdapter.adapt(data), weight == null ? 1 : weight));
+                    new WeightedState(BukkitAdapter.adapt(data), weight == null ? 1 : weight));
         }
-        if (weighted && unweighted) {
-            throw invalid(
-                    "destinationPalette weights must be provided for every entry or omitted from"
-                            + " every entry");
-        }
-        if (weighted && totalWeight != 100) {
-            throw invalid("destinationPalette weights must total 100");
-        }
-
-        BlockPalette<BlockState> palette = new BlockPalette<>(weightedStates, seed);
-        RandomPattern pattern = new RandomPattern(new PaletteRandom(palette));
-        for (BlockPalette.WeightedValue<BlockState> state : weightedStates) {
+        RandomPattern pattern = new RandomPattern(new PaletteRandom(new CoordinateRandom(seed)));
+        for (WeightedState state : weightedStates) {
             pattern.add(state.value(), state.weight());
         }
         return new PreparedPalette(List.copyOf(canonical), pattern);
@@ -410,15 +385,17 @@ final class PaperEditPreparation implements AutoCloseable {
     }
 
     private static final class PaletteRandom implements SimpleRandom {
-        private final BlockPalette<?> palette;
+        private final CoordinateRandom random;
 
-        private PaletteRandom(BlockPalette<?> palette) {
-            this.palette = palette;
+        private PaletteRandom(CoordinateRandom random) {
+            this.random = random;
         }
 
         @Override
         public double nextDouble(int x, int y, int z) {
-            return this.palette.randomAt(x, y, z);
+            return this.random.at(x, y, z);
         }
     }
+
+    private record WeightedState(BlockState value, int weight) {}
 }

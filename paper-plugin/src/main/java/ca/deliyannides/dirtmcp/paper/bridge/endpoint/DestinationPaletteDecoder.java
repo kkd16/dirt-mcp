@@ -21,9 +21,6 @@ final class DestinationPaletteDecoder {
             throw new InvalidRequestException("destinationPalette must be a non-empty array");
         }
         List<DestinationPaletteEntry> entries = new ArrayList<>(element.getAsJsonArray().size());
-        boolean hasWeights = false;
-        boolean hasUnweightedEntries = false;
-        int weightTotal = 0;
         for (int index = 0; index < element.getAsJsonArray().size(); index++) {
             JsonElement value = element.getAsJsonArray().get(index);
             if (!value.isJsonObject()) {
@@ -37,14 +34,6 @@ final class DestinationPaletteDecoder {
                 weight =
                         RequestJson.integer(
                                 object.get("weight"), "destinationPalette[" + index + "].weight");
-                if (weight < 1 || weight > 100) {
-                    throw new InvalidRequestException(
-                            "destinationPalette[" + index + "].weight must be between 1 and 100");
-                }
-                hasWeights = true;
-                weightTotal = Math.addExact(weightTotal, weight);
-            } else {
-                hasUnweightedEntries = true;
             }
             entries.add(
                     new DestinationPaletteEntry(
@@ -52,13 +41,6 @@ final class DestinationPaletteDecoder {
                                     object.get("blockState"),
                                     "destinationPalette[" + index + "].blockState"),
                             weight));
-        }
-        if (hasWeights && hasUnweightedEntries) {
-            throw new InvalidRequestException(
-                    "destinationPalette weights must be provided for every entry or omitted from every entry");
-        }
-        if (hasWeights && weightTotal != 100) {
-            throw new InvalidRequestException("destinationPalette weights must total 100");
         }
         return List.copyOf(entries);
     }

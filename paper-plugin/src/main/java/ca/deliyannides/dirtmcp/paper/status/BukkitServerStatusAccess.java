@@ -97,6 +97,8 @@ public final class BukkitServerStatusAccess implements PaperServerStatusService.
                         limits.maxRequestBytes(),
                         limits.maxRegionVolume(),
                         limits.maxTouchedChunks(),
+                        limits.maxInspectionTouchedChunks(),
+                        limits.maxBlockStatePatterns(),
                         limits.maxChangedBlocks(),
                         limits.maxInspectionVolume(),
                         limits.defaultInspectionResultLimit(),

@@ -69,4 +69,19 @@ final class RegionGeometryTest {
                         RegionGeometry.normalize(
                                 new BlockPosition(0, 0, 0), new BlockPosition(0, 0, 0), 0));
     }
+
+    @Test
+    void cuboidRejectsReversedAndOverflowingPublicBounds() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new Cuboid(new BlockPosition(1, 0, 0), new BlockPosition(0, 0, 0)));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new Cuboid(
+                                new BlockPosition(
+                                        Integer.MIN_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE),
+                                new BlockPosition(
+                                        Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE)));
+    }
 }

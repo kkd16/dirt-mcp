@@ -9,10 +9,12 @@ import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.Captu
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.Viewport;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import ca.deliyannides.dirtmcp.paper.world.model.RegionGeometry;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Semaphore;
 
 public final class RegionInspectionService
         implements CountRegionBlockStates, GetRegionBlocks, ScanOrthographicView {
@@ -21,17 +23,23 @@ public final class RegionInspectionService
     private final long maxInspectionVolume;
     private final int maxInspectionResults;
     private final long maxTouchedChunks;
+    private final int maxBlockStatePatterns;
+    private final Semaphore admissions;
 
     public RegionInspectionService(
             RegionSnapshotSource snapshots,
             long maxRegionVolume,
             long maxInspectionVolume,
             int maxInspectionResults,
-            long maxTouchedChunks) {
+            long maxTouchedChunks,
+            int maxBlockStatePatterns,
+            int maxConcurrentInspections) {
         if (maxRegionVolume < 1
                 || maxInspectionVolume < 1
                 || maxInspectionResults < 1
-                || maxTouchedChunks < 1) {
+                || maxTouchedChunks < 1
+                || maxBlockStatePatterns < 1
+                || maxConcurrentInspections < 1) {
             throw new IllegalArgumentException("Inspection limits must be positive");
         }
         this.snapshots = Objects.requireNonNull(snapshots, "snapshots");
@@ -39,89 +47,121 @@ public final class RegionInspectionService
         this.maxInspectionVolume = maxInspectionVolume;
         this.maxInspectionResults = maxInspectionResults;
         this.maxTouchedChunks = maxTouchedChunks;
+        this.maxBlockStatePatterns = maxBlockStatePatterns;
+        this.admissions = new Semaphore(maxConcurrentInspections);
     }
 
     @Override
     public CountRegionBlockStates.Result countRegionBlockStates(
             CountRegionBlockStates.Request request) throws OperationException {
-        Objects.requireNonNull(request, "request");
-        Cuboid region =
-                RegionGeometry.normalize(request.min(), request.max(), this.maxRegionVolume);
-        enforceChunkLimit(region);
-        CapturedRegion capture =
-                this.snapshots.capture(request.world(), region, List.of(), List.of());
-        Map<String, Long> counts = RegionBlockAlgorithms.countBlockStates(region, capture);
-        return new CountRegionBlockStates.Result(
-                capture.worldName(), region.bounds(), region.dimensions(), region.volume(), counts);
+        validateRegionRequest(
+                request == null ? null : request.world(),
+                request == null ? null : request.min(),
+                request == null ? null : request.max());
+        return admitted(
+                () -> {
+                    Cuboid region =
+                            RegionGeometry.normalize(
+                                    request.min(), request.max(), this.maxRegionVolume);
+                    enforceChunkLimit(region);
+                    CapturedRegion capture =
+                            this.snapshots.capture(request.world(), region, List.of(), List.of());
+                    Map<String, Long> counts =
+                            RegionBlockAlgorithms.countBlockStates(region, capture);
+                    return new CountRegionBlockStates.Result(
+                            capture.worldName(),
+                            region.bounds(),
+                            region.dimensions(),
+                            region.volume(),
+                            counts);
+                });
     }
 
     @Override
     public GetRegionBlocks.Result getRegionBlocks(GetRegionBlocks.Request request)
             throws OperationException {
-        Objects.requireNonNull(request, "request");
+        validateDetailedRequest(request);
         validateMaxResults(request.maxResults());
-        long maximumVolume = Math.min(this.maxRegionVolume, this.maxInspectionVolume);
-        Cuboid region = RegionGeometry.normalize(request.min(), request.max(), maximumVolume);
-        enforceChunkLimit(region);
-        CapturedRegion capture =
-                this.snapshots.capture(
-                        request.world(),
-                        region,
-                        request.includeBlockStatePatterns(),
-                        request.excludeBlockStatePatterns());
-        List<InspectedBlock> blocks =
-                RegionBlockAlgorithms.collectBlocks(
-                        region,
-                        capture,
-                        request.includeAir(),
-                        request.maxResults(),
-                        request.format());
-        if (request.format() == GetRegionBlocks.Format.BLOCKS) {
-            return new BlockListResult(
-                    capture.worldName(),
-                    region.bounds(),
-                    region.volume(),
-                    blocks.size(),
-                    "blocks",
-                    blocks);
+        List<String> includes = canonicalPatterns(request.includeBlockStatePatterns());
+        List<String> excludes = canonicalPatterns(request.excludeBlockStatePatterns());
+        if ((long) request.includeBlockStatePatterns().size()
+                        + request.excludeBlockStatePatterns().size()
+                > this.maxBlockStatePatterns) {
+            throw invalid(
+                    "includeBlockStatePatterns and excludeBlockStatePatterns may contain at most "
+                            + this.maxBlockStatePatterns
+                            + " entries combined");
         }
+        return admitted(
+                () -> {
+                    long maximumVolume = Math.min(this.maxRegionVolume, this.maxInspectionVolume);
+                    Cuboid region =
+                            RegionGeometry.normalize(request.min(), request.max(), maximumVolume);
+                    enforceChunkLimit(region);
+                    CapturedRegion capture =
+                            this.snapshots.capture(request.world(), region, includes, excludes);
+                    List<InspectedBlock> blocks =
+                            RegionBlockAlgorithms.collectBlocks(
+                                    region,
+                                    capture,
+                                    request.includeAir(),
+                                    request.maxResults(),
+                                    request.format());
+                    if (request.format() == GetRegionBlocks.Format.BLOCKS) {
+                        return new BlockListResult(
+                                capture.worldName(),
+                                region.bounds(),
+                                region.volume(),
+                                blocks.size(),
+                                "blocks",
+                                blocks);
+                    }
 
-        return new BlockRunsResult(
-                capture.worldName(),
-                region.bounds(),
-                region.volume(),
-                blocks.size(),
-                "runs",
-                RegionBlockAlgorithms.groupSortedRuns(blocks, request.maxResults()));
+                    return new BlockRunsResult(
+                            capture.worldName(),
+                            region.bounds(),
+                            region.volume(),
+                            blocks.size(),
+                            "runs",
+                            RegionBlockAlgorithms.groupSortedRuns(blocks, request.maxResults()));
+                });
     }
 
     @Override
     public ScanOrthographicView.Result scanOrthographicView(ScanOrthographicView.Request request)
             throws OperationException {
-        Objects.requireNonNull(request, "request");
+        if (request == null || request.origin() == null || request.direction() == null) {
+            throw invalid("world, origin, and direction are required");
+        }
+        validateWorld(request.world());
         validateMaxResults(request.maxResults());
-        long maximumVolume = Math.min(this.maxRegionVolume, this.maxInspectionVolume);
-        OrthographicViewAlgorithms.ViewGeometry geometry =
-                OrthographicViewAlgorithms.geometry(request, maximumVolume);
-        enforceChunkLimit(geometry.region());
-        CapturedRegion capture =
-                this.snapshots.capture(request.world(), geometry.region(), List.of(), List.of());
-        List<ScanOrthographicView.ViewBlock> blocks =
-                OrthographicViewAlgorithms.collectVisibleBlocks(request, geometry, capture);
-        return new ScanOrthographicView.Result(
-                capture.worldName(),
-                request.origin(),
-                request.direction().name().toLowerCase(Locale.ROOT),
-                "blocks",
-                geometry.basis(),
-                new Viewport(
-                        request.horizontalRadius(),
-                        request.verticalRadius(),
-                        request.maxDistance()),
-                geometry.region().bounds(),
-                geometry.scannedVolume(),
-                blocks.size(),
-                blocks);
+        return admitted(
+                () -> {
+                    long maximumVolume = Math.min(this.maxRegionVolume, this.maxInspectionVolume);
+                    OrthographicViewAlgorithms.ViewGeometry geometry =
+                            OrthographicViewAlgorithms.geometry(request, maximumVolume);
+                    enforceChunkLimit(geometry.region());
+                    CapturedRegion capture =
+                            this.snapshots.capture(
+                                    request.world(), geometry.region(), List.of(), List.of());
+                    List<ScanOrthographicView.ViewBlock> blocks =
+                            OrthographicViewAlgorithms.collectVisibleBlocks(
+                                    request, geometry, capture);
+                    return new ScanOrthographicView.Result(
+                            capture.worldName(),
+                            request.origin(),
+                            request.direction().name().toLowerCase(Locale.ROOT),
+                            "blocks",
+                            geometry.basis(),
+                            new Viewport(
+                                    request.horizontalRadius(),
+                                    request.verticalRadius(),
+                                    request.maxDistance()),
+                            geometry.region().bounds(),
+                            geometry.scannedVolume(),
+                            blocks.size(),
+                            blocks);
+                });
     }
 
     private void validateMaxResults(int maxResults) throws OperationException {
@@ -134,5 +174,73 @@ public final class RegionInspectionService
 
     private void enforceChunkLimit(Cuboid region) throws OperationException {
         RegionGeometry.touchedChunks(region, this.maxTouchedChunks);
+    }
+
+    private <T> T admitted(Inspection<T> inspection) throws OperationException {
+        if (!this.admissions.tryAcquire()) {
+            throw new OperationException(
+                    OperationFailure.SERVER_UNAVAILABLE,
+                    "The server is handling too many region inspections");
+        }
+        try {
+            return inspection.run();
+        } finally {
+            this.admissions.release();
+        }
+    }
+
+    private void validateDetailedRequest(GetRegionBlocks.Request request)
+            throws OperationException {
+        if (request == null
+                || request.min() == null
+                || request.max() == null
+                || request.includeBlockStatePatterns() == null
+                || request.excludeBlockStatePatterns() == null
+                || request.format() == null) {
+            throw invalid("world, min, max, pattern lists, and format are required");
+        }
+        validateWorld(request.world());
+        validatePatterns(request.includeBlockStatePatterns(), "includeBlockStatePatterns");
+        validatePatterns(request.excludeBlockStatePatterns(), "excludeBlockStatePatterns");
+    }
+
+    private void validateRegionRequest(
+            String world,
+            ca.deliyannides.dirtmcp.paper.world.model.BlockPosition min,
+            ca.deliyannides.dirtmcp.paper.world.model.BlockPosition max)
+            throws OperationException {
+        if (min == null || max == null) {
+            throw invalid("world, min, and max are required");
+        }
+        validateWorld(world);
+    }
+
+    private static void validateWorld(String world) throws OperationException {
+        if (world == null || world.isBlank()) {
+            throw invalid("world must be a non-empty string");
+        }
+    }
+
+    private static void validatePatterns(List<String> patterns, String field)
+            throws OperationException {
+        for (int index = 0; index < patterns.size(); index++) {
+            String pattern = patterns.get(index);
+            if (pattern == null || pattern.isBlank()) {
+                throw invalid(field + "[" + index + "] must be a non-empty string");
+            }
+        }
+    }
+
+    private static List<String> canonicalPatterns(List<String> patterns) {
+        return List.copyOf(new LinkedHashSet<>(patterns));
+    }
+
+    private static OperationException invalid(String message) {
+        return new OperationException(OperationFailure.INVALID_REQUEST, message);
+    }
+
+    @FunctionalInterface
+    private interface Inspection<T> {
+        T run() throws OperationException;
     }
 }

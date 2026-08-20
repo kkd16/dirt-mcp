@@ -11,6 +11,10 @@ import * as z from 'zod/v4';
 
 const INT32_MIN = -2_147_483_648;
 const INT32_MAX = 2_147_483_647;
+const NonBlankStringSchema = z
+  .string()
+  .min(1)
+  .refine((value) => value.trim().length > 0, 'Must contain a non-whitespace character.');
 
 export interface BridgeConfig {
   baseUrl: string;
@@ -46,7 +50,7 @@ const DimensionsSchema = z
 
 const CountRegionBlockStatesInputSchema = z
   .object({
-    world: z.string().min(1).describe('Exact name of an already loaded Paper world.'),
+    world: NonBlankStringSchema.describe('Exact name of an already loaded Paper world.'),
     min: BlockPositionSchema.describe('One inclusive corner; ordering relative to max does not matter.'),
     max: BlockPositionSchema.describe('The other inclusive corner; ordering relative to min does not matter.'),
   })
@@ -68,18 +72,20 @@ const CountRegionBlockStatesOutputSchema = z
 
 const GetRegionBlocksInputSchema = z
   .object({
-    world: z.string().min(1).describe('Exact name of an already loaded Paper world.'),
+    world: NonBlankStringSchema.describe('Exact name of an already loaded Paper world.'),
     min: BlockPositionSchema.describe('One inclusive corner; ordering relative to max does not matter.'),
     max: BlockPositionSchema.describe('The other inclusive corner; ordering relative to min does not matter.'),
     includeBlockStatePatterns: z
-      .array(z.string().min(1))
+      .array(NonBlankStringSchema)
+      .max(64)
       .optional()
       .default([])
       .describe(
         'Optional allowlist of block-state patterns. Omitted properties match any value; an empty list allows all states.',
       ),
     excludeBlockStatePatterns: z
-      .array(z.string().min(1))
+      .array(NonBlankStringSchema)
+      .max(64)
       .optional()
       .default([])
       .describe('Block-state patterns rejected after include filtering. Omitted properties match any value.'),
@@ -104,6 +110,14 @@ const GetRegionBlocksInputSchema = z
       ),
   })
   .strict()
+  .superRefine((input, context) => {
+    if (input.includeBlockStatePatterns.length + input.excludeBlockStatePatterns.length > 64) {
+      context.addIssue({
+        code: 'custom',
+        message: 'include and exclude block-state patterns may contain at most 64 entries combined',
+      });
+    }
+  })
   .describe('Filters and return format for exact region block data.');
 
 const RegionBlocksOutputBase = {
@@ -159,7 +173,7 @@ const OrthographicViewDirectionSchema = z
 
 const ScanOrthographicViewInputSchema = z
   .object({
-    world: z.string().min(1).describe('Exact name of an already loaded Paper world.'),
+    world: NonBlankStringSchema.describe('Exact name of an already loaded Paper world.'),
     origin: BlockPositionSchema.describe('View anchor; scanning begins one block away and excludes the origin.'),
     direction: OrthographicViewDirectionSchema,
     horizontalRadius: z
@@ -329,8 +343,9 @@ function compactView(view: ScanOrthographicViewBlocksOutput): z.infer<typeof Sca
 }
 
 const SourceBlockStatePatternsSchema = z
-  .array(z.string().min(1))
+  .array(NonBlankStringSchema)
   .min(1)
+  .max(64)
   .superRefine((patterns, context) => {
     const seen = new Set<string>();
     patterns.forEach((pattern, index) => {
@@ -348,7 +363,7 @@ const SourceBlockStatePatternsSchema = z
 
 const DestinationPaletteEntrySchema = z
   .object({
-    blockState: z.string().min(1).describe('Exact canonical block state to place.'),
+    blockState: NonBlankStringSchema.describe('Exact canonical block state to place.'),
     weight: z
       .number()
       .int()
@@ -363,6 +378,7 @@ const DestinationPaletteEntrySchema = z
 const DestinationPaletteSchema = z
   .array(DestinationPaletteEntrySchema)
   .min(1)
+  .max(64)
   .superRefine((entries, context) => {
     const weightedCount = entries.filter((entry) => entry.weight !== undefined).length;
     if (weightedCount !== 0 && weightedCount !== entries.length) {
@@ -400,7 +416,7 @@ const SeedSchema = z
 
 const ReplaceRegionBlocksInputSchema = z
   .object({
-    world: z.string().min(1).describe('Exact name of an already loaded Paper world.'),
+    world: NonBlankStringSchema.describe('Exact name of an already loaded Paper world.'),
     min: BlockPositionSchema.describe('One inclusive corner; ordering relative to max does not matter.'),
     max: BlockPositionSchema.describe('The other inclusive corner; ordering relative to min does not matter.'),
     sourceBlockStatePatterns: SourceBlockStatePatternsSchema,
@@ -432,7 +448,7 @@ const ReplaceRegionBlocksOutputSchema = z
 
 const FillRegionInputSchema = z
   .object({
-    world: z.string().min(1).describe('Exact name of an already loaded Paper world.'),
+    world: NonBlankStringSchema.describe('Exact name of an already loaded Paper world.'),
     min: BlockPositionSchema.describe('One inclusive corner; ordering relative to max does not matter.'),
     max: BlockPositionSchema.describe('The other inclusive corner; ordering relative to min does not matter.'),
     destinationPalette: DestinationPaletteSchema,
@@ -462,13 +478,13 @@ const FillRegionOutputSchema = z
 
 const SetBlocksInputSchema = z
   .object({
-    world: z.string().min(1).describe('Exact name of an already loaded Paper world.'),
+    world: NonBlankStringSchema.describe('Exact name of an already loaded Paper world.'),
     changes: z
       .array(
         z
           .object({
             position: BlockPositionSchema,
-            blockState: z.string().min(1).describe('Canonical block state to write at this position.'),
+            blockState: NonBlankStringSchema.describe('Canonical block state to write at this position.'),
           })
           .strict(),
       )
@@ -495,7 +511,7 @@ const SetBlocksOutputSchema = z
 
 const UndoLastDirtEditInputSchema = z
   .object({
-    world: z.string().min(1).describe('Exact name of the loaded world whose Dirt edit should be undone.'),
+    world: NonBlankStringSchema.describe('Exact name of the loaded world whose Dirt edit should be undone.'),
   })
   .strict()
   .describe('World-scoped Dirt edit history lookup.');
@@ -511,7 +527,7 @@ const UndoLastDirtEditOutputSchema = z
 const RunMinecraftCommandsInputSchema = z
   .object({
     commands: z
-      .array(z.string().min(1))
+      .array(NonBlankStringSchema)
       .min(1)
       .describe('Registered Minecraft commands in execution order. Each may include one in-game leading slash.'),
   })
@@ -600,11 +616,19 @@ const LimitConfigurationSchema = z
       .int()
       .positive()
       .describe('Maximum cuboid mutation/count volume or explicit positions in set_blocks.'),
-    maxTouchedChunks: z
+    maxTouchedChunks: z.number().int().positive().describe('Maximum distinct loaded chunks one mutation may touch.'),
+    maxInspectionTouchedChunks: z
       .number()
       .int()
       .positive()
-      .describe('Maximum distinct loaded chunks one inspection or mutation may touch.'),
+      .describe('Maximum distinct loaded chunks one inspection may snapshot.'),
+    maxBlockStatePatterns: z
+      .number()
+      .int()
+      .positive()
+      .describe(
+        'Maximum block-state patterns or palette entries in one operation; inspection include and exclude lists share this cap.',
+      ),
     maxChangedBlocks: z.number().int().positive().describe('Maximum blocks one edit may change.'),
     maxInspectionVolume: z
       .number()

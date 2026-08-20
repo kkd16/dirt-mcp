@@ -35,8 +35,7 @@ public final class RegionGeometry {
                     "Region exceeds the maximum volume of " + maxVolume + " blocks");
         }
 
-        return new Cuboid(
-                min, max, new BlockDimensions(sizeX, sizeY, sizeZ), sizeX * sizeY * sizeZ);
+        return new Cuboid(min, max);
     }
 
     public static long touchedChunks(Cuboid region, long maximum) throws OperationException {

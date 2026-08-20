@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
@@ -23,6 +24,9 @@ import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 final class RegionInspectionServiceTest {
@@ -149,7 +153,7 @@ final class RegionInspectionServiceTest {
     @Test
     void appliesInspectionVolumeAndResultLimits() {
         FakeSnapshotSource source = new FakeSnapshotSource();
-        RegionInspectionService service = new RegionInspectionService(source, 100, 2, 2, 16);
+        RegionInspectionService service = new RegionInspectionService(source, 100, 2, 2, 16, 8, 1);
         GetRegionBlocks.Request oversized =
                 new GetRegionBlocks.Request(
                         "world",
@@ -189,20 +193,144 @@ final class RegionInspectionServiceTest {
         FakeSnapshotSource source = new FakeSnapshotSource();
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new RegionInspectionService(source, 0, 1, 1, 1));
+                () -> new RegionInspectionService(source, 0, 1, 1, 1, 1, 1));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new RegionInspectionService(source, 1, 0, 1, 1));
+                () -> new RegionInspectionService(source, 1, 0, 1, 1, 1, 1));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new RegionInspectionService(source, 1, 1, 0, 1));
+                () -> new RegionInspectionService(source, 1, 1, 0, 1, 1, 1));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new RegionInspectionService(source, 1, 1, 1, 0));
+                () -> new RegionInspectionService(source, 1, 1, 1, 0, 1, 1));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new RegionInspectionService(source, 1, 1, 1, 1, 0, 1));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new RegionInspectionService(source, 1, 1, 1, 1, 1, 0));
+    }
+
+    @Test
+    void capsRawPatternCountAndDeduplicatesBeforePaperCapture() throws Exception {
+        FakeSnapshotSource source = new FakeSnapshotSource();
+        RegionInspectionService service =
+                new RegionInspectionService(source, 100, 100, 10, 16, 2, 1);
+        GetRegionBlocks.Request tooMany =
+                new GetRegionBlocks.Request(
+                        "world",
+                        position(0, 0, 0),
+                        position(0, 0, 0),
+                        List.of("stone", "stone"),
+                        List.of("dirt"),
+                        false,
+                        1,
+                        Format.BLOCKS);
+
+        assertEquals(
+                OperationFailure.INVALID_REQUEST,
+                assertThrows(OperationException.class, () -> service.getRegionBlocks(tooMany))
+                        .failure());
+        assertFalse(source.captured);
+
+        service.getRegionBlocks(
+                new GetRegionBlocks.Request(
+                        "world",
+                        position(0, 0, 0),
+                        position(0, 0, 0),
+                        List.of("stone", "stone"),
+                        List.of(),
+                        false,
+                        1,
+                        Format.BLOCKS));
+        assertEquals(List.of("stone"), source.includes);
+    }
+
+    @Test
+    void rejectsConcurrentInspectionWithoutQueueing() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        FakeSnapshotSource source =
+                new FakeSnapshotSource() {
+                    @Override
+                    public CapturedRegion capture(
+                            String world,
+                            Cuboid region,
+                            List<String> includes,
+                            List<String> excludes)
+                            throws OperationException {
+                        entered.countDown();
+                        try {
+                            if (!release.await(2, TimeUnit.SECONDS)) {
+                                throw new AssertionError("inspection test did not release");
+                            }
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            throw new OperationException(
+                                    OperationFailure.WORLD_UNAVAILABLE,
+                                    "inspection interrupted",
+                                    exception);
+                        }
+                        return super.capture(world, region, includes, excludes);
+                    }
+                };
+        RegionInspectionService service =
+                new RegionInspectionService(source, 100, 100, 10, 16, 8, 1);
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var first =
+                    executor.submit(
+                            () ->
+                                    service.countRegionBlockStates(
+                                            new Request(
+                                                    "world",
+                                                    position(0, 0, 0),
+                                                    position(0, 0, 0))));
+            assertTrue(entered.await(2, TimeUnit.SECONDS));
+            OperationException busy =
+                    assertThrows(
+                            OperationException.class,
+                            () ->
+                                    service.countRegionBlockStates(
+                                            new Request(
+                                                    "world",
+                                                    position(0, 0, 0),
+                                                    position(0, 0, 0))));
+            assertEquals(OperationFailure.SERVER_UNAVAILABLE, busy.failure());
+            release.countDown();
+            first.get(2, TimeUnit.SECONDS);
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void invalidDirectRequestsReturnTypedFailures() {
+        RegionInspectionService service = service(new FakeSnapshotSource(), 16);
+
+        assertEquals(
+                OperationFailure.INVALID_REQUEST,
+                assertThrows(
+                                OperationException.class,
+                                () -> service.countRegionBlockStates(new Request(" ", null, null)))
+                        .failure());
+        assertEquals(
+                OperationFailure.INVALID_REQUEST,
+                assertThrows(OperationException.class, () -> service.getRegionBlocks(null))
+                        .failure());
+        assertEquals(
+                OperationFailure.INVALID_REQUEST,
+                assertThrows(
+                                OperationException.class,
+                                () ->
+                                        service.scanOrthographicView(
+                                                new ScanOrthographicView.Request(
+                                                        "world", null, null, 0, 0, 1, 1)))
+                        .failure());
     }
 
     private static RegionInspectionService service(FakeSnapshotSource source, long maxChunks) {
-        return new RegionInspectionService(source, 100, 100, 10, maxChunks);
+        return new RegionInspectionService(source, 100, 100, 10, maxChunks, 8, 1);
     }
 
     private static BlockPosition position(int x, int y, int z) {
@@ -213,7 +341,7 @@ final class RegionInspectionServiceTest {
         return new BlockSample(state, false, true);
     }
 
-    private static final class FakeSnapshotSource implements RegionSnapshotSource {
+    private static class FakeSnapshotSource implements RegionSnapshotSource {
         private final Map<BlockPosition, BlockSample> samples = new HashMap<>();
         private boolean captured;
         private List<String> includes = List.of();
@@ -224,7 +352,8 @@ final class RegionInspectionServiceTest {
                 String world,
                 Cuboid region,
                 List<String> includeBlockStatePatterns,
-                List<String> excludeBlockStatePatterns) {
+                List<String> excludeBlockStatePatterns)
+                throws OperationException {
             this.captured = true;
             this.includes = List.copyOf(includeBlockStatePatterns);
             this.excludes = List.copyOf(excludeBlockStatePatterns);

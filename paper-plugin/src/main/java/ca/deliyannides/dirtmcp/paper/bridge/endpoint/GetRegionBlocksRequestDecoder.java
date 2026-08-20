@@ -27,43 +27,34 @@ final class GetRegionBlocksRequestDecoder {
 
     static GetRegionBlocks.Request decode(BridgeExchange exchange, DirtConfig config)
             throws IOException, InvalidRequestException {
-        try {
-            JsonObject object = RequestJson.object(exchange);
-            RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS);
-            int maxResults =
-                    object.has("maxResults")
-                            ? RequestJson.integer(object.get("maxResults"), "maxResults")
-                            : config.limits().defaultInspectionResultLimit();
-            if (maxResults < 1 || maxResults > config.limits().maxInspectionResultLimit()) {
-                throw new InvalidRequestException(
-                        "maxResults must be between 1 and "
-                                + config.limits().maxInspectionResultLimit());
-            }
-            return new GetRegionBlocks.Request(
-                    RequestJson.string(object.get("world"), "world"),
-                    RequestJson.position(object.get("min"), "min"),
-                    RequestJson.position(object.get("max"), "max"),
-                    object.has("includeBlockStatePatterns")
-                            ? RequestJson.stringList(
-                                    object.get("includeBlockStatePatterns"),
-                                    "includeBlockStatePatterns")
-                            : List.of(),
-                    object.has("excludeBlockStatePatterns")
-                            ? RequestJson.stringList(
-                                    object.get("excludeBlockStatePatterns"),
-                                    "excludeBlockStatePatterns")
-                            : List.of(),
-                    object.has("includeAir")
-                            ? RequestJson.bool(object.get("includeAir"), "includeAir")
-                            : config.defaults().regionBlocksIncludeAir(),
-                    maxResults,
-                    format(
-                            object.has("format")
-                                    ? RequestJson.string(object.get("format"), "format")
-                                    : config.defaults().regionBlocksFormat()));
-        } catch (NumberFormatException | ArithmeticException exception) {
-            throw RequestJson.invalidJsonValues();
-        }
+        JsonObject object = RequestJson.object(exchange);
+        RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS);
+        int maxResults =
+                object.has("maxResults")
+                        ? RequestJson.integer(object.get("maxResults"), "maxResults")
+                        : config.limits().defaultInspectionResultLimit();
+        return new GetRegionBlocks.Request(
+                RequestJson.string(object.get("world"), "world"),
+                RequestJson.position(object.get("min"), "min"),
+                RequestJson.position(object.get("max"), "max"),
+                object.has("includeBlockStatePatterns")
+                        ? RequestJson.stringList(
+                                object.get("includeBlockStatePatterns"),
+                                "includeBlockStatePatterns")
+                        : List.of(),
+                object.has("excludeBlockStatePatterns")
+                        ? RequestJson.stringList(
+                                object.get("excludeBlockStatePatterns"),
+                                "excludeBlockStatePatterns")
+                        : List.of(),
+                object.has("includeAir")
+                        ? RequestJson.bool(object.get("includeAir"), "includeAir")
+                        : config.defaults().regionBlocksIncludeAir(),
+                maxResults,
+                format(
+                        object.has("format")
+                                ? RequestJson.string(object.get("format"), "format")
+                                : config.defaults().regionBlocksFormat()));
     }
 
     private static GetRegionBlocks.Format format(String format) throws InvalidRequestException {

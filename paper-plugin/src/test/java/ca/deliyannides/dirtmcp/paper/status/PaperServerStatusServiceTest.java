@@ -82,7 +82,7 @@ final class PaperServerStatusServiceTest {
                 new GetServerStatus.Performance(20, 1),
                 new GetServerStatus.PlayerSummary(0, 20, List.of()),
                 List.of(),
-                new GetServerStatus.EffectiveLimits(1, 1, 1, 1, 1, 1, 1, 1, 1, 0),
+                new GetServerStatus.EffectiveLimits(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0),
                 new GetServerStatus.EffectiveDefaults(false, "blocks", false));
     }
 

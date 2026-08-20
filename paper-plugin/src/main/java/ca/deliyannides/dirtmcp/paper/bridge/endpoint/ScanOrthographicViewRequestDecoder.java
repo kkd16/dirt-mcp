@@ -33,41 +33,24 @@ final class ScanOrthographicViewRequestDecoder {
 
     static ScanOrthographicView.Request decode(BridgeExchange exchange, DirtConfig config)
             throws IOException, InvalidRequestException {
-        try {
-            JsonObject object = RequestJson.object(exchange);
-            RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS);
-            int horizontalRadius =
-                    RequestJson.integer(object.get("horizontalRadius"), "horizontalRadius");
-            int verticalRadius =
-                    RequestJson.integer(object.get("verticalRadius"), "verticalRadius");
-            int maxDistance = RequestJson.integer(object.get("maxDistance"), "maxDistance");
-            int maxResults =
-                    object.has("maxResults")
-                            ? RequestJson.integer(object.get("maxResults"), "maxResults")
-                            : config.limits().defaultInspectionResultLimit();
-            if (horizontalRadius < 0 || verticalRadius < 0) {
-                throw new InvalidRequestException(
-                        "horizontalRadius and verticalRadius must be non-negative");
-            }
-            if (maxDistance < 1) {
-                throw new InvalidRequestException("maxDistance must be positive");
-            }
-            if (maxResults < 1 || maxResults > config.limits().maxInspectionResultLimit()) {
-                throw new InvalidRequestException(
-                        "maxResults must be between 1 and "
-                                + config.limits().maxInspectionResultLimit());
-            }
-            return new ScanOrthographicView.Request(
-                    RequestJson.string(object.get("world"), "world"),
-                    RequestJson.position(object.get("origin"), "origin"),
-                    direction(object.get("direction")),
-                    horizontalRadius,
-                    verticalRadius,
-                    maxDistance,
-                    maxResults);
-        } catch (NumberFormatException | ArithmeticException exception) {
-            throw RequestJson.invalidJsonValues();
-        }
+        JsonObject object = RequestJson.object(exchange);
+        RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS);
+        int horizontalRadius =
+                RequestJson.integer(object.get("horizontalRadius"), "horizontalRadius");
+        int verticalRadius = RequestJson.integer(object.get("verticalRadius"), "verticalRadius");
+        int maxDistance = RequestJson.integer(object.get("maxDistance"), "maxDistance");
+        int maxResults =
+                object.has("maxResults")
+                        ? RequestJson.integer(object.get("maxResults"), "maxResults")
+                        : config.limits().defaultInspectionResultLimit();
+        return new ScanOrthographicView.Request(
+                RequestJson.string(object.get("world"), "world"),
+                RequestJson.position(object.get("origin"), "origin"),
+                direction(object.get("direction")),
+                horizontalRadius,
+                verticalRadius,
+                maxDistance,
+                maxResults);
     }
 
     private static ScanOrthographicView.Direction direction(JsonElement element)

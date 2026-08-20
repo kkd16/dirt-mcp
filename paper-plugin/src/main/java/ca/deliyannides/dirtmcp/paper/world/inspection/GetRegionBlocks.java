@@ -25,18 +25,14 @@ public interface GetRegionBlocks {
             int maxResults,
             Format format) {
         public Request {
-            Objects.requireNonNull(world, "world");
-            Objects.requireNonNull(min, "min");
-            Objects.requireNonNull(max, "max");
             includeBlockStatePatterns =
-                    List.copyOf(
-                            Objects.requireNonNull(
-                                    includeBlockStatePatterns, "includeBlockStatePatterns"));
+                    includeBlockStatePatterns == null
+                            ? null
+                            : List.copyOf(includeBlockStatePatterns);
             excludeBlockStatePatterns =
-                    List.copyOf(
-                            Objects.requireNonNull(
-                                    excludeBlockStatePatterns, "excludeBlockStatePatterns"));
-            Objects.requireNonNull(format, "format");
+                    excludeBlockStatePatterns == null
+                            ? null
+                            : List.copyOf(excludeBlockStatePatterns);
         }
     }
 

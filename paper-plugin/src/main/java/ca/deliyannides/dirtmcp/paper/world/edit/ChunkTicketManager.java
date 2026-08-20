@@ -16,7 +16,7 @@ final class ChunkTicketManager implements AutoCloseable {
     private final MainThread mainThread;
     private final Map<TicketKey, TicketState> tickets = new HashMap<>();
     private final AtomicBoolean stopping = new AtomicBoolean();
-    private final AtomicBoolean released = new AtomicBoolean();
+    private final AtomicBoolean closed = new AtomicBoolean();
 
     ChunkTicketManager(MainThread mainThread) {
         this.mainThread = Objects.requireNonNull(mainThread, "mainThread");
@@ -62,7 +62,11 @@ final class ChunkTicketManager implements AutoCloseable {
                 }
             }
         } catch (RuntimeException | OperationException exception) {
-            releaseOnMainThread(acquired);
+            try {
+                releaseOnMainThread(acquired);
+            } catch (RuntimeException cleanupFailure) {
+                exception.addSuppressed(cleanupFailure);
+            }
             throw exception;
         }
         return new Lease(List.copyOf(acquired));
@@ -75,7 +79,7 @@ final class ChunkTicketManager implements AutoCloseable {
     @Override
     public void close() {
         beginStopping();
-        if (!this.released.compareAndSet(false, true)) {
+        if (this.closed.get()) {
             return;
         }
         try {
@@ -83,10 +87,21 @@ final class ChunkTicketManager implements AutoCloseable {
         } catch (PaperMainThreadException exception) {
             throw new IllegalStateException("Could not release plugin chunk tickets", exception);
         }
+        synchronized (this.tickets) {
+            if (!this.tickets.isEmpty()) {
+                throw new IllegalStateException(
+                        "Could not release plugin chunk tickets while edits are still active");
+            }
+            this.closed.set(true);
+        }
     }
 
     private void release(List<TicketKey> keys) {
-        if (keys.isEmpty() || this.stopping.get()) {
+        if (keys.isEmpty()) {
+            return;
+        }
+        if (this.stopping.get()) {
+            releaseReferencesOnly(keys);
             return;
         }
         try {
@@ -96,11 +111,13 @@ final class ChunkTicketManager implements AutoCloseable {
                 throw new IllegalStateException(
                         "Could not release plugin chunk tickets", exception);
             }
+            releaseReferencesOnly(keys);
         }
     }
 
     private void releaseOnMainThread(List<TicketKey> keys) {
         synchronized (this.tickets) {
+            RuntimeException cleanupFailure = null;
             for (TicketKey key : keys) {
                 TicketState state = this.tickets.get(key);
                 if (state == null) {
@@ -108,25 +125,65 @@ final class ChunkTicketManager implements AutoCloseable {
                 }
                 state.references--;
                 if (state.references == 0) {
-                    this.tickets.remove(key);
-                    if (state.owned) {
-                        state.world.removeTicket(key.chunk());
+                    try {
+                        if (state.owned) {
+                            state.world.removeTicket(key.chunk());
+                        }
+                        this.tickets.remove(key);
+                    } catch (RuntimeException exception) {
+                        cleanupFailure = combine(cleanupFailure, exception);
                     }
                 }
+            }
+            if (cleanupFailure != null) {
+                throw cleanupFailure;
             }
         }
     }
 
     private void releaseAllOnMainThread() {
         synchronized (this.tickets) {
-            this.tickets.forEach(
-                    (key, state) -> {
-                        if (state.owned) {
-                            state.world.removeTicket(key.chunk());
-                        }
-                    });
-            this.tickets.clear();
+            RuntimeException cleanupFailure = null;
+            var iterator = this.tickets.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<TicketKey, TicketState> entry = iterator.next();
+                TicketState state = entry.getValue();
+                if (state.references > 0) {
+                    continue;
+                }
+                try {
+                    if (state.owned) {
+                        state.world.removeTicket(entry.getKey().chunk());
+                    }
+                    iterator.remove();
+                } catch (RuntimeException exception) {
+                    cleanupFailure = combine(cleanupFailure, exception);
+                }
+            }
+            if (cleanupFailure != null) {
+                throw cleanupFailure;
+            }
         }
+    }
+
+    private void releaseReferencesOnly(List<TicketKey> keys) {
+        synchronized (this.tickets) {
+            for (TicketKey key : keys) {
+                TicketState state = this.tickets.get(key);
+                if (state != null && state.references > 0) {
+                    state.references--;
+                }
+            }
+        }
+    }
+
+    private static RuntimeException combine(
+            RuntimeException accumulated, RuntimeException failure) {
+        if (accumulated == null) {
+            return failure;
+        }
+        accumulated.addSuppressed(failure);
+        return accumulated;
     }
 
     interface TicketWorld {

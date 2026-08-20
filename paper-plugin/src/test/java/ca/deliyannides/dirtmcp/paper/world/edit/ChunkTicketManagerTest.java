@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.platform.MainThread;
+import ca.deliyannides.dirtmcp.paper.platform.PaperMainThreadException;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -86,9 +87,10 @@ final class ChunkTicketManagerTest {
         ChunkTicketManager manager = new ChunkTicketManager(mainThread);
         ChunkTicketManager.Lease lease = manager.acquire(world, List.of(FIRST, SECOND), "Edit");
 
-        manager.close();
-        manager.close();
+        manager.beginStopping();
         lease.close();
+        manager.close();
+        manager.close();
 
         assertEquals(Set.of(FIRST, SECOND), world.removed);
         assertEquals(1, mainThread.runs);
@@ -123,6 +125,50 @@ final class ChunkTicketManagerTest {
         assertEquals(Set.of(FIRST), world.removed);
     }
 
+    @Test
+    void shutdownRaceStillReleasesTheWorkerReference() throws Exception {
+        StoppingRaceMainThread mainThread = new StoppingRaceMainThread();
+        FakeWorld world = new FakeWorld();
+        ChunkTicketManager manager = new ChunkTicketManager(mainThread);
+        mainThread.manager = manager;
+        ChunkTicketManager.Lease lease = manager.acquire(world, List.of(FIRST), "Edit");
+
+        lease.close();
+        manager.close();
+
+        assertEquals(Set.of(FIRST), world.removed);
+    }
+
+    @Test
+    void failedNormalRemovalRemainsTrackedForShutdownRetry() throws Exception {
+        FakeWorld world = new FakeWorld();
+        world.failRemoveOnce.add(FIRST);
+        ChunkTicketManager manager = new ChunkTicketManager(new FakeMainThread());
+        ChunkTicketManager.Lease lease = manager.acquire(world, List.of(FIRST), "Edit");
+
+        assertThrows(IllegalStateException.class, lease::close);
+        assertTrue(world.removed.isEmpty());
+
+        manager.close();
+        assertEquals(Set.of(FIRST), world.removed);
+    }
+
+    @Test
+    void shutdownContinuesAfterOneRemovalFailureAndCanBeRetried() throws Exception {
+        FakeWorld world = new FakeWorld();
+        world.failRemoveOnce.add(FIRST);
+        ChunkTicketManager manager = new ChunkTicketManager(new FakeMainThread());
+        ChunkTicketManager.Lease lease = manager.acquire(world, List.of(FIRST, SECOND), "Edit");
+        manager.beginStopping();
+        lease.close();
+
+        assertThrows(IllegalStateException.class, manager::close);
+        assertEquals(Set.of(SECOND), world.removed);
+
+        manager.close();
+        assertEquals(Set.of(FIRST, SECOND), world.removed);
+    }
+
     private static final class FakeMainThread implements MainThread {
         private int runs;
 
@@ -142,11 +188,36 @@ final class ChunkTicketManagerTest {
         public void close() {}
     }
 
+    private static final class StoppingRaceMainThread implements MainThread {
+        private ChunkTicketManager manager;
+        private boolean raced;
+
+        @Override
+        public <T> T call(CheckedSupplier<T> action) throws PaperMainThreadException {
+            if (!this.raced) {
+                this.raced = true;
+                this.manager.beginStopping();
+                throw new PaperMainThreadException("shutdown interrupted ticket release");
+            }
+            try {
+                return action.get();
+            } catch (RuntimeException exception) {
+                throw exception;
+            } catch (Exception exception) {
+                throw new AssertionError(exception);
+            }
+        }
+
+        @Override
+        public void close() {}
+    }
+
     private static final class FakeWorld implements ChunkTicketManager.TicketWorld {
         private final UUID id = UUID.randomUUID();
         private final Set<ChunkPosition> unloaded = new HashSet<>();
         private final Set<ChunkPosition> added = new HashSet<>();
         private final Set<ChunkPosition> removed = new HashSet<>();
+        private final Set<ChunkPosition> failRemoveOnce = new HashSet<>();
         private boolean addResult = true;
         private ChunkPosition failAdd;
 
@@ -172,6 +243,9 @@ final class ChunkTicketManagerTest {
 
         @Override
         public void removeTicket(ChunkPosition chunk) {
+            if (this.failRemoveOnce.remove(chunk)) {
+                throw new IllegalStateException("ticket removal failure");
+            }
             this.removed.add(chunk);
         }
     }

@@ -13,13 +13,7 @@ import java.util.TreeMap;
 public interface CountRegionBlockStates {
     Result countRegionBlockStates(Request request) throws OperationException;
 
-    record Request(String world, BlockPosition min, BlockPosition max) {
-        public Request {
-            Objects.requireNonNull(world, "world");
-            Objects.requireNonNull(min, "min");
-            Objects.requireNonNull(max, "max");
-        }
-    }
+    record Request(String world, BlockPosition min, BlockPosition max) {}
 
     record Result(
             String world,
@@ -34,9 +28,23 @@ public interface CountRegionBlockStates {
             if (volume < 1) {
                 throw new IllegalArgumentException("Region volume must be positive");
             }
-            blockStateCounts =
-                    Collections.unmodifiableMap(
-                            new TreeMap<>(Objects.requireNonNull(blockStateCounts, "counts")));
+            Objects.requireNonNull(blockStateCounts, "counts");
+            long counted = 0;
+            for (Map.Entry<String, Long> entry : blockStateCounts.entrySet()) {
+                if (entry.getKey() == null
+                        || entry.getKey().isBlank()
+                        || entry.getValue() == null
+                        || entry.getValue() < 0) {
+                    throw new IllegalArgumentException(
+                            "Block-state counts must use non-empty states and non-negative values");
+                }
+                counted = Math.addExact(counted, entry.getValue());
+            }
+            if (counted != volume) {
+                throw new IllegalArgumentException("Block-state counts must total region volume");
+            }
+            TreeMap<String, Long> sorted = new TreeMap<>(blockStateCounts);
+            blockStateCounts = Collections.unmodifiableMap(sorted);
         }
     }
 }

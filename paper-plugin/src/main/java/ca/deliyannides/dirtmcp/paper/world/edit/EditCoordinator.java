@@ -22,6 +22,15 @@ final class EditCoordinator implements AutoCloseable {
     }
 
     Lease enter(UUID worldId, String worldName) throws OperationException {
+        return enter(worldId, worldName, false);
+    }
+
+    Lease enterForUndo(UUID worldId, String worldName) throws OperationException {
+        return enter(worldId, worldName, true);
+    }
+
+    private Lease enter(UUID worldId, String worldName, boolean allowRecovery)
+            throws OperationException {
         WorldState state;
         long generation;
         synchronized (this.worlds) {
@@ -31,6 +40,9 @@ final class EditCoordinator implements AutoCloseable {
             state = this.worlds.computeIfAbsent(worldId, ignored -> new WorldState());
             if (state.invalidated) {
                 throw busy(worldName);
+            }
+            if (state.recovery != null && !allowRecovery) {
+                throw recoveryRequired(worldName);
             }
             state.reservations++;
             generation = state.generation;
@@ -54,6 +66,7 @@ final class EditCoordinator implements AutoCloseable {
                 state.generation++;
                 state.invalidated = true;
                 state.history.clear();
+                state.recovery = null;
                 pruneInvalidated(worldId, state);
             }
         }
@@ -63,16 +76,24 @@ final class EditCoordinator implements AutoCloseable {
     public void close() {
         if (this.closed.compareAndSet(false, true)) {
             synchronized (this.worlds) {
-                this.worlds
-                        .values()
-                        .forEach(
-                                state -> {
-                                    state.generation++;
-                                    state.invalidated = true;
-                                    state.history.clear();
-                                });
-                this.worlds.clear();
+                var iterator = this.worlds.entrySet().iterator();
+                while (iterator.hasNext()) {
+                    WorldState state = iterator.next().getValue();
+                    state.generation++;
+                    state.invalidated = true;
+                    state.history.clear();
+                    state.recovery = null;
+                    if (state.reservations == 0) {
+                        iterator.remove();
+                    }
+                }
             }
+        }
+    }
+
+    boolean isQuiescent() {
+        synchronized (this.worlds) {
+            return this.worlds.values().stream().allMatch(state -> state.reservations == 0);
         }
     }
 
@@ -106,6 +127,12 @@ final class EditCoordinator implements AutoCloseable {
                 OperationFailure.WORLD_UNAVAILABLE, "World editing is stopping");
     }
 
+    private static OperationException recoveryRequired(String worldName) {
+        return new OperationException(
+                OperationFailure.WORLD_BUSY,
+                "The previous failed edit must be undone before editing world: " + worldName);
+    }
+
     final class Lease implements AutoCloseable {
         private final UUID worldId;
         private final WorldState state;
@@ -121,21 +148,35 @@ final class EditCoordinator implements AutoCloseable {
         EditPlatform.UndoToken latestUndo() {
             synchronized (worlds) {
                 return this.generation == this.state.generation
-                        ? this.state.history.peekLast()
+                        ? (this.state.recovery != null
+                                ? this.state.recovery
+                                : this.state.history.peekLast())
                         : null;
             }
         }
 
         void remember(EditPlatform.UndoToken undo) {
+            remember(undo, historyCapacity);
+        }
+
+        void rememberRecovery(EditPlatform.UndoToken undo) {
+            synchronized (worlds) {
+                if (undo != null && this.generation == this.state.generation && !closed.get()) {
+                    this.state.recovery = undo;
+                }
+            }
+        }
+
+        private void remember(EditPlatform.UndoToken undo, int capacity) {
             synchronized (worlds) {
                 if (undo == null
-                        || historyCapacity == 0
+                        || capacity == 0
                         || this.generation != this.state.generation
                         || closed.get()) {
                     return;
                 }
                 this.state.history.addLast(undo);
-                while (this.state.history.size() > historyCapacity) {
+                while (this.state.history.size() > capacity) {
                     this.state.history.pollFirst();
                 }
             }
@@ -144,7 +185,11 @@ final class EditCoordinator implements AutoCloseable {
         void removeLatest(EditPlatform.UndoToken undo) {
             synchronized (worlds) {
                 if (this.generation == this.state.generation) {
-                    this.state.history.removeLastOccurrence(undo);
+                    if (this.state.recovery == undo) {
+                        this.state.recovery = null;
+                    } else {
+                        this.state.history.removeLastOccurrence(undo);
+                    }
                 }
             }
         }
@@ -162,6 +207,7 @@ final class EditCoordinator implements AutoCloseable {
     private static final class WorldState {
         private final ReentrantLock lock = new ReentrantLock();
         private final ArrayDeque<EditPlatform.UndoToken> history = new ArrayDeque<>();
+        private EditPlatform.UndoToken recovery;
         private long generation;
         private int reservations;
         private boolean invalidated;

@@ -144,7 +144,6 @@ tasks {
                     exclude(
                         "ca/deliyannides/dirtmcp/paper/DirtMcpPlugin.class",
                         "ca/deliyannides/dirtmcp/paper/bootstrap/DirtRuntime.class",
-                        "ca/deliyannides/dirtmcp/paper/platform/PaperMainThread*.class",
                         "ca/deliyannides/dirtmcp/paper/command/BukkitCommandAccess*.class",
                         "ca/deliyannides/dirtmcp/paper/status/BukkitServerStatusAccess*.class",
                         "ca/deliyannides/dirtmcp/paper/world/edit/PaperEditPreparation*.class",

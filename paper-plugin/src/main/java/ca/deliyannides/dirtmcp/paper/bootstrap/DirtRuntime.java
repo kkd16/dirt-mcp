@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Logger;
 import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -34,17 +35,20 @@ public final class DirtRuntime implements AutoCloseable {
     private final FaweWorldEditor worldEditor;
     private final WorldEditLifecycleListener worldLifecycle;
     private final BridgeServer bridge;
+    private final Logger logger;
     private final AtomicBoolean closed = new AtomicBoolean();
 
     private DirtRuntime(
             PaperMainThread mainThread,
             FaweWorldEditor worldEditor,
             WorldEditLifecycleListener worldLifecycle,
-            BridgeServer bridge) {
+            BridgeServer bridge,
+            Logger logger) {
         this.mainThread = mainThread;
         this.worldEditor = worldEditor;
         this.worldLifecycle = worldLifecycle;
         this.bridge = bridge;
+        this.logger = logger;
     }
 
     public static DirtRuntime start(JavaPlugin plugin, DirtConfig config, String bearerToken)
@@ -74,7 +78,9 @@ public final class DirtRuntime implements AutoCloseable {
                             limits.maxRegionVolume(),
                             limits.maxInspectionVolume(),
                             limits.maxInspectionResultLimit(),
-                            limits.maxTouchedChunks());
+                            limits.maxInspectionTouchedChunks(),
+                            limits.maxBlockStatePatterns(),
+                            config.bridge().maxConcurrentInspections());
             worldEditor = new FaweWorldEditor(plugin, mainThread, limits);
             worldLifecycle = new WorldEditLifecycleListener(worldEditor);
             plugin.getServer().getPluginManager().registerEvents(worldLifecycle, plugin);
@@ -96,16 +102,29 @@ public final class DirtRuntime implements AutoCloseable {
                                     new RunMinecraftCommandsEndpoint(commands)),
                             plugin.getLogger());
             bridge.start();
-            return new DirtRuntime(mainThread, worldEditor, worldLifecycle, bridge);
+            return new DirtRuntime(
+                    mainThread, worldEditor, worldLifecycle, bridge, plugin.getLogger());
         } catch (IOException | RuntimeException failure) {
             if (bridge != null) {
-                bridge.close();
+                try {
+                    bridge.close();
+                } catch (RuntimeException cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
             }
             if (worldLifecycle != null) {
-                HandlerList.unregisterAll(worldLifecycle);
+                try {
+                    HandlerList.unregisterAll(worldLifecycle);
+                } catch (RuntimeException cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
             }
             if (worldEditor != null) {
-                worldEditor.close();
+                try {
+                    worldEditor.close();
+                } catch (RuntimeException cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
             }
             mainThread.close();
             throw failure;
@@ -123,7 +142,11 @@ public final class DirtRuntime implements AutoCloseable {
             this.bridge.close();
         } finally {
             try {
-                this.worldEditor.close();
+                if (!this.worldEditor.closeIfQuiescent()) {
+                    this.logger.severe(
+                            "Dirt MCP left resources owned by an active edit intact after the "
+                                    + "shutdown deadline; Paper will finish plugin cleanup.");
+                }
             } finally {
                 this.mainThread.close();
             }

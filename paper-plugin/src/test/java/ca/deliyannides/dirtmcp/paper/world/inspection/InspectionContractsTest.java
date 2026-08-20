@@ -8,6 +8,7 @@ import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockDimensions;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,9 +45,9 @@ final class InspectionContractsTest {
         CountRegionBlockStates.Result result =
                 new CountRegionBlockStates.Result(
                         "world",
-                        new BlockBounds(new BlockPosition(0, 0, 0), new BlockPosition(0, 0, 0)),
-                        new BlockDimensions(1, 1, 1),
-                        1,
+                        new BlockBounds(new BlockPosition(0, 0, 0), new BlockPosition(2, 0, 0)),
+                        new BlockDimensions(3, 1, 1),
+                        3,
                         counts);
 
         counts.put("dirt", 3L);
@@ -55,5 +56,23 @@ final class InspectionContractsTest {
         assertThrows(
                 UnsupportedOperationException.class,
                 () -> result.blockStateCounts().put("glass", 1L));
+    }
+
+    @Test
+    void countResultRejectsNullStatesAndCountsDeliberately() {
+        BlockBounds bounds =
+                new BlockBounds(new BlockPosition(0, 0, 0), new BlockPosition(0, 0, 0));
+        BlockDimensions dimensions = new BlockDimensions(1, 1, 1);
+        Map<String, Long> nullState = new HashMap<>();
+        nullState.put(null, 1L);
+        Map<String, Long> nullCount = new HashMap<>();
+        nullCount.put("stone", null);
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new CountRegionBlockStates.Result("world", bounds, dimensions, 1, nullState));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new CountRegionBlockStates.Result("world", bounds, dimensions, 1, nullCount));
     }
 }

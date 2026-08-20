@@ -42,9 +42,9 @@ final class BridgeTestFixture {
 
     static DirtConfig config(int port, int maximumConcurrentRequests) {
         return new DirtConfig(
-                new DirtConfig.Bridge(port, 0, 1, 32, maximumConcurrentRequests),
+                new DirtConfig.Bridge(port, 0, 1, 1, 32, maximumConcurrentRequests, 1),
                 new DirtConfig.Limits(
-                        262_144, 1_000_000, 256, 250_000, 32_768, 321, 654, 20, 32_768, 20),
+                        262_144, 1_000_000, 256, 32, 64, 250_000, 32_768, 321, 654, 20, 32_768, 20),
                 new DirtConfig.Defaults(false, "blocks", false));
     }
 
@@ -119,7 +119,8 @@ final class BridgeTestFixture {
                     new GetServerStatus.PlayerSummary(0, 20, List.of()),
                     List.of(),
                     new GetServerStatus.EffectiveLimits(
-                            262_144, 1_000_000, 256, 250_000, 32_768, 321, 654, 20, 32_768, 20),
+                            262_144, 1_000_000, 256, 32, 64, 250_000, 32_768, 321, 654, 20, 32_768,
+                            20),
                     new GetServerStatus.EffectiveDefaults(false, "blocks", false));
         }
 

@@ -34,7 +34,8 @@ then run off-thread.
 `count_region_block_states` returns a complete histogram, including air.
 `get_region_blocks` returns geometry and defaults to non-air `blocks`. Its
 optional include and exclude filters accept block-state patterns: omitted state
-properties match any value. The `runs` format returns a deterministic,
+properties match any value. Both lists are limited to 64 entries combined and
+exact duplicates are evaluated once. The `runs` format returns a deterministic,
 non-overlapping exact cover using inclusive axis-aligned spans.
 
 `scan_orthographic_view` scans away from an origin, beginning at distance one,
@@ -75,6 +76,8 @@ region-volume limit, and all edits must stay within the changed-block limit.
 
 Each executed non-empty operation uses one FAWE edit session. A world accepts
 one Dirt mutation at a time, and a competing request fails with `world_busy`.
+If an edit and its automatic rollback both fail, its recovery undo is pinned and
+new mutations remain blocked until that undo succeeds.
 Successful non-empty edits enter bounded, in-memory, per-world history when
 history is enabled. Dry runs and no-ops create no history. History is cleared on
 restart and can be disabled by setting its depth to zero.
@@ -112,12 +115,14 @@ covered by FAWE limits, per-world mutation locks, or Dirt undo history.
 
 ## Limits and security
 
-The shipped defaults allow regions of 262,144 blocks and at most 256 touched
-chunks, 65,536 changed blocks per edit, detailed scans of 16,384 blocks, 512
-results by default and at most 2,048, 10 commands per request, 8,192 retained
-command-feedback characters, and 20 undo entries per world. JSON request bodies
-are capped at 262,144 bytes, and at most 32 authenticated bridge requests execute
-concurrently. Active values are available through `get_server_status` and are
+The shipped defaults allow regions of 262,144 blocks, at most 256 touched edit
+chunks, at most 32 snapshotted inspection chunks, 65,536 changed blocks per edit,
+detailed scans of 16,384 blocks, 512 results by default and at most 2,048, 10
+commands per request, 8,192 retained command-feedback characters, and 20 undo
+entries per world. JSON request bodies are capped at 262,144 bytes with a
+five-second upload deadline. At most 32 authenticated bridge requests and two
+inspection scans execute concurrently. Active world-operation limits are available
+through `get_server_status` and are
 configured in `plugins/DirtMCP/config.yml`; the complete shipped file is shown
 in the repository [README](../README.md#running-on-a-paper-server).
 

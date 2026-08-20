@@ -15,15 +15,11 @@ final class CountRegionBlockStatesRequestDecoder {
 
     static CountRegionBlockStates.Request decode(BridgeExchange exchange)
             throws IOException, InvalidRequestException {
-        try {
-            JsonObject object = RequestJson.object(exchange);
-            RequestJson.requireExactFields(object, FIELDS, "Request");
-            return new CountRegionBlockStates.Request(
-                    RequestJson.string(object.get("world"), "world"),
-                    RequestJson.position(object.get("min"), "min"),
-                    RequestJson.position(object.get("max"), "max"));
-        } catch (NumberFormatException | ArithmeticException exception) {
-            throw RequestJson.invalidJsonValues();
-        }
+        JsonObject object = RequestJson.object(exchange);
+        RequestJson.requireExactFields(object, FIELDS, "Request");
+        return new CountRegionBlockStates.Request(
+                RequestJson.string(object.get("world"), "world"),
+                RequestJson.position(object.get("min"), "min"),
+                RequestJson.position(object.get("max"), "max"));
     }
 }

@@ -18,10 +18,10 @@ final class DirtConfigLoaderTest {
     void loadsTheCompleteShippedConfiguration() {
         DirtConfig config = DirtConfigLoader.load(defaultConfiguration(), null);
 
-        assertEquals(new DirtConfig.Bridge(8_765, 0, 5, 32, 32), config.bridge());
+        assertEquals(new DirtConfig.Bridge(8_765, 0, 5, 5, 32, 32, 2), config.bridge());
         assertEquals(
                 new DirtConfig.Limits(
-                        262_144, 262_144, 256, 65_536, 16_384, 512, 2_048, 10, 8_192, 20),
+                        262_144, 262_144, 256, 32, 64, 65_536, 16_384, 512, 2_048, 10, 8_192, 20),
                 config.limits());
         assertEquals(new DirtConfig.Defaults(false, "blocks", false), config.defaults());
     }
@@ -71,11 +71,20 @@ final class DirtConfigLoaderTest {
                 Arguments.of("bridge.port", 0),
                 Arguments.of("bridge.backlog", -1),
                 Arguments.of("bridge.shutdown-delay-seconds", -1),
+                Arguments.of("bridge.shutdown-delay-seconds", 0),
+                Arguments.of("bridge.shutdown-delay-seconds", 31),
+                Arguments.of("bridge.request-body-timeout-seconds", 0),
                 Arguments.of("bridge.minimum-token-bytes", 0),
                 Arguments.of("bridge.max-concurrent-requests", 0),
+                Arguments.of("bridge.max-concurrent-inspections", 0),
+                Arguments.of("bridge.max-concurrent-inspections", 33),
                 Arguments.of("limits.max-request-bytes", Integer.MAX_VALUE),
                 Arguments.of("limits.max-region-volume", 0),
                 Arguments.of("limits.max-touched-chunks", 0),
+                Arguments.of("limits.max-inspection-touched-chunks", 0),
+                Arguments.of("limits.max-inspection-touched-chunks", 257),
+                Arguments.of("limits.max-block-state-patterns", 0),
+                Arguments.of("limits.max-block-state-patterns", 65),
                 Arguments.of("limits.max-changed-blocks", 262_145),
                 Arguments.of("limits.max-inspection-volume", 262_145),
                 Arguments.of("limits.default-inspection-results", 2_049),

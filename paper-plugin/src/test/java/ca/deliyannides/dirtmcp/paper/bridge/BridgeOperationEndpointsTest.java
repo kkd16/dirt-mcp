@@ -324,6 +324,8 @@ final class BridgeOperationEndpointsTest {
                                 64,
                                 limits.maxRegionVolume(),
                                 limits.maxTouchedChunks(),
+                                limits.maxInspectionTouchedChunks(),
+                                limits.maxBlockStatePatterns(),
                                 limits.maxChangedBlocks(),
                                 limits.maxInspectionVolume(),
                                 limits.defaultInspectionResultLimit(),
@@ -360,45 +362,11 @@ final class BridgeOperationEndpointsTest {
     }
 
     @Test
-    void rejectsInvalidPalettesAndViewBounds() throws Exception {
+    void rejectsMalformedNumericValues() throws Exception {
         try (BridgeServer bridge =
                         server(config(availablePort(), 4), new BridgeTestFixture.TestOperations());
                 HttpClient client = HttpClient.newHttpClient()) {
             bridge.start();
-            String prefix =
-                    "{\"world\":\"world\",\"min\":{\"x\":0,\"y\":0,\"z\":0},"
-                            + "\"max\":{\"x\":0,\"y\":0,\"z\":0},\"destinationPalette\":";
-            assertError(
-                    send(
-                            client,
-                            post(
-                                    bridge,
-                                    "/v1/fill-region",
-                                    prefix
-                                            + "[{\"blockState\":\"minecraft:dirt\",\"weight\":40}] }")),
-                    "destinationPalette weights must total 100");
-            assertError(
-                    send(
-                            client,
-                            post(
-                                    bridge,
-                                    "/v1/fill-region",
-                                    prefix
-                                            + "[{\"blockState\":\"minecraft:dirt\",\"weight\":50},"
-                                            + "{\"blockState\":\"minecraft:stone\"}] }")),
-                    "destinationPalette weights must be provided for every entry or omitted from every entry");
-            assertError(
-                    send(
-                            client,
-                            post(
-                                    bridge,
-                                    "/v1/scan-orthographic-view",
-                                    """
-                                    {"world":"world","origin":{"x":0,"y":0,"z":0},
-                                     "direction":"north","horizontalRadius":-1,"verticalRadius":0,
-                                     "maxDistance":1}
-                                    """)),
-                    "horizontalRadius and verticalRadius must be non-negative");
             assertError(
                     send(
                             client,

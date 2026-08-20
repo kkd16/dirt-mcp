@@ -14,14 +14,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.status.PingServer;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -65,7 +67,7 @@ final class BridgeServerProtocolTest {
                 HttpClient client = HttpClient.newHttpClient()) {
             bridge.start();
 
-            for (String path : List.of("/v1/not-real", "/v1/ping?probe=true")) {
+            for (String path : List.of("/v1", "/v1/not-real", "/v1/ping?probe=true")) {
                 HttpResponse<String> response =
                         client.send(
                                 HttpRequest.newBuilder(uri(bridge, path))
@@ -91,7 +93,8 @@ final class BridgeServerProtocolTest {
                 HttpClient client = HttpClient.newHttpClient()) {
             bridge.start();
 
-            for (String path : List.of("/v1/not-real", "/v1/ping/extra", "/v1/ping?probe=true")) {
+            for (String path :
+                    List.of("/v1", "/v1/not-real", "/v1/ping/extra", "/v1/ping?probe=true")) {
                 HttpResponse<String> response =
                         client.send(
                                 authorized(bridge, path).GET().build(),
@@ -104,6 +107,14 @@ final class BridgeServerProtocolTest {
                                 .getAsJsonObject("error")
                                 .get("code")
                                 .getAsString());
+            }
+
+            for (String path : List.of("/v10", "/v1evil")) {
+                HttpResponse<String> response =
+                        client.send(
+                                HttpRequest.newBuilder(uri(bridge, path)).GET().build(),
+                                HttpResponse.BodyHandlers.ofString());
+                assertEquals(404, response.statusCode());
             }
 
             HttpResponse<String> wrongMethod =
@@ -215,11 +226,47 @@ final class BridgeServerProtocolTest {
         bridge.close();
         bridge.close();
         assertThrows(IllegalStateException.class, bridge::boundPort);
+        assertThrows(IllegalStateException.class, bridge::start);
+    }
+
+    @Test
+    void rejectsDeclaredOversizeAndMalformedUtf8Bodies() throws Exception {
+        try (BridgeServer bridge =
+                server(config(availablePort(), 4), new BridgeTestFixture.TestOperations())) {
+            bridge.start();
+
+            String oversized = rawRequest(bridge, 262_145, "{}".getBytes(StandardCharsets.UTF_8));
+            String malformed = rawRequest(bridge, 2, new byte[] {(byte) 0xc3, 0x28});
+
+            assertTrue(oversized.startsWith("HTTP/1.1 400"));
+            assertTrue(oversized.contains("invalid_request"));
+            assertTrue(malformed.startsWith("HTTP/1.1 400"));
+            assertTrue(malformed.contains("valid JSON values"));
+        }
+    }
+
+    @Test
+    void timesOutIncompleteAuthenticatedRequestBodies() throws Exception {
+        try (BridgeServer bridge =
+                        server(config(availablePort(), 4), new BridgeTestFixture.TestOperations());
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+
+            String response = rawRequest(bridge, 100, "{".getBytes(StandardCharsets.UTF_8));
+
+            assertEquals("", response);
+            assertEquals(
+                    200,
+                    client.send(
+                                    authorized(bridge, "/v1/ping").GET().build(),
+                                    HttpResponse.BodyHandlers.ofString())
+                            .statusCode());
+        }
     }
 
     @Test
     void sanitizesUnexpectedFailuresAndWritesOneAuditRecord() throws Exception {
-        List<String> messages = new ArrayList<>();
+        List<String> messages = new CopyOnWriteArrayList<>();
         Logger logger = Logger.getAnonymousLogger();
         logger.setUseParentHandlers(false);
         logger.addHandler(
@@ -349,5 +396,55 @@ final class BridgeServerProtocolTest {
                 Arguments.of(OperationFailure.SERVER_UNAVAILABLE, 503, "server_unavailable"),
                 Arguments.of(OperationFailure.UNHEALTHY, 503, "unhealthy"),
                 Arguments.of(OperationFailure.WORLD_UNAVAILABLE, 503, "world_unavailable"));
+    }
+
+    private static String rawRequest(BridgeServer bridge, int contentLength, byte[] partialBody)
+            throws IOException {
+        try (Socket socket = new Socket("127.0.0.1", bridge.boundPort())) {
+            socket.setSoTimeout(4_000);
+            String headers =
+                    "POST /v1/count-region-block-states HTTP/1.1\r\n"
+                            + "Host: 127.0.0.1\r\n"
+                            + "Authorization: Bearer "
+                            + BridgeTestFixture.TOKEN
+                            + "\r\n"
+                            + "Content-Type: application/json\r\n"
+                            + "Content-Length: "
+                            + contentLength
+                            + "\r\n"
+                            + "Connection: close\r\n\r\n";
+            socket.getOutputStream().write(headers.getBytes(StandardCharsets.US_ASCII));
+            socket.getOutputStream().write(partialBody);
+            socket.getOutputStream().flush();
+            ByteArrayOutputStream headerBytes = new ByteArrayOutputStream();
+            int matched = 0;
+            while (matched < 4) {
+                int next = socket.getInputStream().read();
+                if (next < 0) {
+                    return "";
+                }
+                headerBytes.write(next);
+                matched =
+                        switch (matched) {
+                            case 0 -> next == '\r' ? 1 : 0;
+                            case 1 -> next == '\n' ? 2 : 0;
+                            case 2 -> next == '\r' ? 3 : 0;
+                            case 3 -> next == '\n' ? 4 : 0;
+                            default -> matched;
+                        };
+            }
+            String responseHeaders = headerBytes.toString(StandardCharsets.US_ASCII);
+            int responseLength =
+                    responseHeaders
+                            .lines()
+                            .filter(line -> line.regionMatches(true, 0, "Content-Length:", 0, 15))
+                            .map(line -> line.substring(line.indexOf(':') + 1).trim())
+                            .mapToInt(Integer::parseInt)
+                            .findFirst()
+                            .orElseThrow(
+                                    () -> new IOException("HTTP response has no Content-Length"));
+            byte[] responseBody = socket.getInputStream().readNBytes(responseLength);
+            return responseHeaders + new String(responseBody, StandardCharsets.UTF_8);
+        }
     }
 }

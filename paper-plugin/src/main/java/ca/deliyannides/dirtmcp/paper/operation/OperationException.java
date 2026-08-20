@@ -3,7 +3,7 @@ package ca.deliyannides.dirtmcp.paper.operation;
 import java.io.Serial;
 import java.util.Objects;
 
-public final class OperationException extends Exception {
+public class OperationException extends Exception {
     @Serial private static final long serialVersionUID = 1L;
 
     private final OperationFailure failure;

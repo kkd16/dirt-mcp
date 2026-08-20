@@ -1,6 +1,7 @@
 package ca.deliyannides.dirtmcp.paper.world.edit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -147,6 +148,43 @@ final class FaweWorldEditorTest {
                                                 change(2, 0, 0),
                                                 change(3, 0, 0)),
                                         false)));
+        assertFailure(
+                OperationFailure.INVALID_REQUEST,
+                () ->
+                        editor.replaceRegionBlocks(
+                                new ReplaceRegionBlocks.Request(
+                                        "world",
+                                        position(0, 0, 0),
+                                        position(0, 0, 0),
+                                        java.util.Collections.nCopies(65, "minecraft:stone"),
+                                        palette(),
+                                        0,
+                                        false)));
+        assertFailure(
+                OperationFailure.INVALID_REQUEST,
+                () ->
+                        editor.fillRegion(
+                                new FillRegion.Request(
+                                        "world",
+                                        position(0, 0, 0),
+                                        position(0, 0, 0),
+                                        List.of(new DestinationPaletteEntry("minecraft:stone", 40)),
+                                        0,
+                                        false)));
+        assertFailure(
+                OperationFailure.INVALID_REQUEST,
+                () ->
+                        editor.fillRegion(
+                                new FillRegion.Request(
+                                        "world",
+                                        position(0, 0, 0),
+                                        position(0, 0, 0),
+                                        List.of(
+                                                new DestinationPaletteEntry("minecraft:stone", 50),
+                                                new DestinationPaletteEntry(
+                                                        "minecraft:dirt", null)),
+                                        0,
+                                        false)));
     }
 
     @Test
@@ -175,6 +213,25 @@ final class FaweWorldEditorTest {
 
         UndoLastEdit.Result result = editor.undoLastEdit(new UndoLastEdit.Request("world"));
         assertEquals(1, result.changedBlockCount());
+    }
+
+    @Test
+    void retainsRecoveryHistoryWhenAutomaticRollbackFails() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        platform.nextChanges = 3;
+        platform.failWithRecovery = true;
+        FaweWorldEditor editor = editor(platform, 0);
+
+        assertThrows(
+                EditRecoveryException.class, () -> editor.fillRegion(fillRequest("world", false)));
+        platform.failWithRecovery = false;
+
+        assertFailure(
+                OperationFailure.WORLD_BUSY, () -> editor.fillRegion(fillRequest("world", false)));
+
+        UndoLastEdit.Result result = editor.undoLastEdit(new UndoLastEdit.Request("world"));
+        assertEquals(3, result.changedBlockCount());
+        assertEquals(3, editor.fillRegion(fillRequest("world", false)).changedBlockCount());
     }
 
     @Test
@@ -314,6 +371,28 @@ final class FaweWorldEditorTest {
     }
 
     @Test
+    void shutdownDoesNotClosePlatformUntilActiveEditQuiesces() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        platform.nextChanges = 1;
+        platform.blockWorld = WORLD_ID;
+        FaweWorldEditor editor = editor(platform, 3);
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var edit = executor.submit(() -> editor.fillRegion(fillRequest("world", false)));
+            platform.entered.await();
+
+            assertFalse(editor.closeIfQuiescent());
+            assertFalse(platform.closed);
+
+            platform.release.countDown();
+            edit.get();
+        }
+
+        assertTrue(editor.closeIfQuiescent());
+        assertTrue(platform.closed);
+    }
+
+    @Test
     void requestListsAreDefensiveCopies() {
         List<BlockChange> changes = new ArrayList<>();
         changes.add(change(0, 0, 0));
@@ -368,6 +447,7 @@ final class FaweWorldEditorTest {
         private int nextUndoId;
         private UUID blockWorld;
         private boolean failExecution;
+        private boolean failWithRecovery;
         private boolean failClose;
         private boolean failUndo;
         private boolean returnUndoForDryRun;
@@ -437,6 +517,12 @@ final class FaweWorldEditorTest {
             prepared.executedBeforeClose = !prepared.closed;
             if (this.failExecution) {
                 throw new OperationException(OperationFailure.WORLD_UNAVAILABLE, "edit failed");
+            }
+            if (this.failWithRecovery) {
+                throw new EditRecoveryException(
+                        "rollback failed",
+                        new IllegalStateException("edit failed"),
+                        new FakeUndo(++this.nextUndoId, this.nextChanges));
             }
             if (prepared.world.id().equals(this.blockWorld)) {
                 this.entered.countDown();

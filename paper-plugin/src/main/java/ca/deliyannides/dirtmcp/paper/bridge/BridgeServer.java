@@ -21,6 +21,7 @@ public final class BridgeServer implements AutoCloseable {
 
     private HttpServer server;
     private ExecutorService executor;
+    private boolean closed;
 
     public BridgeServer(
             DirtConfig config, String bearerToken, List<BridgeEndpoint> endpoints, Logger logger) {
@@ -36,10 +37,14 @@ public final class BridgeServer implements AutoCloseable {
                         authenticator,
                         config.bridge().maxConcurrentRequests(),
                         config.limits().maxRequestBytes(),
+                        config.bridge().requestBodyTimeoutSeconds(),
                         logger);
     }
 
     public synchronized void start() throws IOException {
+        if (this.closed) {
+            throw new IllegalStateException("Dirt MCP bridge has been closed");
+        }
         if (this.server != null) {
             throw new IllegalStateException("Dirt MCP bridge is already running");
         }
@@ -52,6 +57,16 @@ public final class BridgeServer implements AutoCloseable {
                             new InetSocketAddress(LOOPBACK_ADDRESS, this.config.bridge().port()),
                             this.config.bridge().backlog());
             newServer.createContext("/v1/", this.dispatcher::handle);
+            newServer.createContext(
+                    "/v1",
+                    exchange -> {
+                        if ("/v1".equals(exchange.getRequestURI().getRawPath())) {
+                            this.dispatcher.handle(exchange);
+                        } else {
+                            exchange.sendResponseHeaders(404, -1);
+                            exchange.close();
+                        }
+                    });
             newServer.setExecutor(newExecutor);
             newServer.start();
         } catch (IOException | RuntimeException exception) {
@@ -79,35 +94,43 @@ public final class BridgeServer implements AutoCloseable {
 
     @Override
     public synchronized void close() {
+        if (this.closed) {
+            return;
+        }
+        this.closed = true;
         HttpServer runningServer = this.server;
         ExecutorService runningExecutor = this.executor;
         this.server = null;
         this.executor = null;
-        if (runningServer == null) {
-            return;
-        }
-
-        // Plugin disable runs on Paper's main thread. Stop accepting work and
-        // interrupt handlers before waiting, so a handler awaiting a Paper task
-        // cannot deadlock shutdown.
-        runningServer.stop(0);
-        if (runningExecutor != null) {
-            runningExecutor.shutdownNow();
-            try {
-                boolean terminated =
-                        runningExecutor.awaitTermination(
-                                this.config.bridge().shutdownDelaySeconds(), TimeUnit.SECONDS);
-                if (!terminated && this.logger.isLoggable(Level.WARNING)) {
-                    this.logger.warning(
-                            "Dirt MCP request workers exceeded the shutdown deadline; "
-                                    + "Paper shutdown will continue.");
+        try {
+            if (runningServer != null) {
+                // Plugin disable runs on Paper's main thread. Stop accepting work and
+                // interrupt handlers before waiting, so a handler awaiting a Paper task
+                // cannot deadlock shutdown.
+                runningServer.stop(0);
+                if (runningExecutor != null) {
+                    runningExecutor.shutdownNow();
+                    try {
+                        boolean terminated =
+                                runningExecutor.awaitTermination(
+                                        this.config.bridge().shutdownDelaySeconds(),
+                                        TimeUnit.SECONDS);
+                        if (!terminated && this.logger.isLoggable(Level.WARNING)) {
+                            this.logger.warning(
+                                    "Dirt MCP request workers exceeded the shutdown deadline; "
+                                            + "Paper shutdown will continue without releasing "
+                                            + "resources still owned by active edits.");
+                        }
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                    }
                 }
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
             }
-        }
-        if (this.logger.isLoggable(Level.INFO)) {
-            this.logger.info("Dirt MCP bridge stopped.");
+        } finally {
+            this.dispatcher.close();
+            if (this.logger.isLoggable(Level.INFO)) {
+                this.logger.info("Dirt MCP bridge stopped.");
+            }
         }
     }
 }

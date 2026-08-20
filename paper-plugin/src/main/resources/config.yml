@@ -9,18 +9,26 @@ bridge:
   backlog: 0
   # Seconds to wait for interrupted bridge request workers during shutdown.
   shutdown-delay-seconds: 5
+  # Maximum seconds an authenticated request may take to upload its JSON body.
+  request-body-timeout-seconds: 5
   # Lowering this below 32 weakens bearer-token security.
   minimum-token-bytes: 32
   # Maximum authenticated requests allowed to execute concurrently.
   max-concurrent-requests: 32
+  # Maximum inspection operations allowed to capture and scan concurrently.
+  max-concurrent-inspections: 2
 
 limits:
   # Maximum JSON request body. Oversized requests fail before parsing or mutation.
   max-request-bytes: 262144
   # Maximum inclusive cuboid volume or explicit positions in one operation.
   max-region-volume: 262144
-  # Maximum distinct loaded chunks one inspection or edit may touch.
+  # Maximum distinct loaded chunks one edit may touch.
   max-touched-chunks: 256
+  # Maximum distinct loaded chunks one inspection may snapshot.
+  max-inspection-touched-chunks: 32
+  # Maximum block-state patterns or palette entries; inspection filters share it.
+  max-block-state-patterns: 64
   # Maximum blocks one mutation may change.
   max-changed-blocks: 65536
   # Maximum blocks scanned by exact block retrieval or an orthographic view.

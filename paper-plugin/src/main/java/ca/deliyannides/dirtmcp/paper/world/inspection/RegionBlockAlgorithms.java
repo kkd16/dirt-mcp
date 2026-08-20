@@ -10,22 +10,15 @@ import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.Captu
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 
 final class RegionBlockAlgorithms {
-    private static final Comparator<InspectedBlock> BLOCK_ORDER =
-            Comparator.comparingInt((InspectedBlock block) -> block.position().y())
-                    .thenComparingInt(block -> block.position().z())
-                    .thenComparingInt(block -> block.position().x());
-
     private RegionBlockAlgorithms() {}
 
     static Map<String, Long> countBlockStates(Cuboid region, CapturedRegion capture) {
-        Map<String, Long> counts = new TreeMap<>();
+        Map<String, Long> counts = new HashMap<>();
         forEachPosition(
                 region,
                 position -> counts.merge(capture.sample(position).blockState(), 1L, Long::sum));
@@ -55,7 +48,6 @@ final class RegionBlockAlgorithms {
                 }
             }
         }
-        blocks.sort(BLOCK_ORDER);
         return List.copyOf(blocks);
     }
 

@@ -11,7 +11,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
-final class BridgeDispatcher {
+final class BridgeDispatcher implements AutoCloseable {
     private static final String CALL_ID_HEADER = "X-Dirt-Call-Id";
     private static final Pattern CALL_ID_PATTERN =
             Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}");
@@ -20,6 +20,7 @@ final class BridgeDispatcher {
     private final BearerAuthenticator authenticator;
     private final Semaphore admissions;
     private final int maximumRequestBytes;
+    private final RequestBodyReader bodyReader;
     private final Logger logger;
 
     BridgeDispatcher(
@@ -27,17 +28,20 @@ final class BridgeDispatcher {
             BearerAuthenticator authenticator,
             int maximumConcurrentRequests,
             int maximumRequestBytes,
+            int requestBodyTimeoutSeconds,
             Logger logger) {
         this.routes = routes(endpoints);
         this.authenticator = authenticator;
         this.admissions = new Semaphore(maximumConcurrentRequests);
         this.maximumRequestBytes = maximumRequestBytes;
+        this.bodyReader = new RequestBodyReader(requestBodyTimeoutSeconds);
         this.logger = logger;
     }
 
     void handle(HttpExchange rawExchange) throws IOException {
         long started = System.nanoTime();
-        BridgeExchange exchange = new BridgeExchange(rawExchange, this.maximumRequestBytes);
+        BridgeExchange exchange =
+                new BridgeExchange(rawExchange, this.maximumRequestBytes, this.bodyReader);
         String operation = "unknown";
         try {
             if (!this.authenticator.accepts(
@@ -74,6 +78,8 @@ final class BridgeDispatcher {
             }
             try {
                 endpoint.handle(exchange);
+            } catch (RequestTimeoutException exception) {
+                exchange.abort();
             } catch (InvalidRequestException exception) {
                 exchange.sendError(400, "invalid_request", exception.getMessage());
             } catch (OperationException exception) {
@@ -96,6 +102,11 @@ final class BridgeDispatcher {
                 rawExchange.close();
             }
         }
+    }
+
+    @Override
+    public void close() {
+        this.bodyReader.close();
     }
 
     private void audit(

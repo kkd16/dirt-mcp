@@ -7,21 +7,17 @@ ordered by priority.
 ## 1. Expand Paper and FAWE integration coverage
 
 - Verify live change-limit rejection before mutation.
+- Exercise partial FAWE failure with both successful automatic rollback and
+  failed rollback followed by the required recovery undo.
 - Exercise in-flight plugin shutdown during a FAWE mutation and verify live
   edit-session and chunk-ticket cleanup.
 
-## 2. Strengthen MCP bridge failure coverage
+## 2. Extend contract consistency
 
-- Add a deterministic request-timeout test without materially slowing the
-  offline suite.
+- Compare request/response fields and duplicated safety-limit constraints across
+  Java, OpenAPI, and TypeScript; current checks cover routes and error codes.
 
-## 3. Enforce contract consistency
-
-- Add checks that keep Java endpoints and error envelopes, OpenAPI schemas, and
-  TypeScript/Zod schemas synchronized.
-- Fail CI when implemented behavior is added to only one layer.
-
-## 4. Wire up releases
+## 3. Wire up releases
 
 - Establish one non-snapshot version shared by the Paper plugin, bridge contract,
   and MCP package.

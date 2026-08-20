@@ -27,24 +27,20 @@ final class ReplaceRegionBlocksRequestDecoder {
 
     static ReplaceRegionBlocks.Request decode(BridgeExchange exchange, DirtConfig config)
             throws IOException, InvalidRequestException {
-        try {
-            JsonObject object = RequestJson.object(exchange);
-            RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS);
-            return new ReplaceRegionBlocks.Request(
-                    RequestJson.string(object.get("world"), "world"),
-                    RequestJson.position(object.get("min"), "min"),
-                    RequestJson.position(object.get("max"), "max"),
-                    RequestJson.nonEmptyStringList(
-                            object.get("sourceBlockStatePatterns"), "sourceBlockStatePatterns"),
-                    DestinationPaletteDecoder.decode(object.get("destinationPalette")),
-                    object.has("seed")
-                            ? RequestJson.integer(object.get("seed"), "seed")
-                            : ThreadLocalRandom.current().nextInt(),
-                    object.has("dryRun")
-                            ? RequestJson.bool(object.get("dryRun"), "dryRun")
-                            : config.defaults().editDryRun());
-        } catch (NumberFormatException | ArithmeticException exception) {
-            throw RequestJson.invalidJsonValues();
-        }
+        JsonObject object = RequestJson.object(exchange);
+        RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS);
+        return new ReplaceRegionBlocks.Request(
+                RequestJson.string(object.get("world"), "world"),
+                RequestJson.position(object.get("min"), "min"),
+                RequestJson.position(object.get("max"), "max"),
+                RequestJson.nonEmptyStringList(
+                        object.get("sourceBlockStatePatterns"), "sourceBlockStatePatterns"),
+                DestinationPaletteDecoder.decode(object.get("destinationPalette")),
+                object.has("seed")
+                        ? RequestJson.integer(object.get("seed"), "seed")
+                        : ThreadLocalRandom.current().nextInt(),
+                object.has("dryRun")
+                        ? RequestJson.bool(object.get("dryRun"), "dryRun")
+                        : config.defaults().editDryRun());
     }
 }

@@ -16,8 +16,10 @@ public record DirtConfig(Bridge bridge, Limits limits, Defaults defaults) {
             int port,
             int backlog,
             int shutdownDelaySeconds,
+            int requestBodyTimeoutSeconds,
             int minimumTokenBytes,
-            int maxConcurrentRequests) {
+            int maxConcurrentRequests,
+            int maxConcurrentInspections) {
         public Bridge {
             if (port < 1 || port > 65_535) {
                 throw new IllegalArgumentException("bridge.port must be between 1 and 65535");
@@ -25,9 +27,13 @@ public record DirtConfig(Bridge bridge, Limits limits, Defaults defaults) {
             if (backlog < 0) {
                 throw new IllegalArgumentException("bridge.backlog must be non-negative");
             }
-            if (shutdownDelaySeconds < 0) {
+            if (shutdownDelaySeconds < 1 || shutdownDelaySeconds > 30) {
                 throw new IllegalArgumentException(
-                        "bridge.shutdown-delay-seconds must be non-negative");
+                        "bridge.shutdown-delay-seconds must be between 1 and 30");
+            }
+            if (requestBodyTimeoutSeconds < 1 || requestBodyTimeoutSeconds > 30) {
+                throw new IllegalArgumentException(
+                        "bridge.request-body-timeout-seconds must be between 1 and 30");
             }
             if (minimumTokenBytes < 1) {
                 throw new IllegalArgumentException("bridge.minimum-token-bytes must be positive");
@@ -36,6 +42,11 @@ public record DirtConfig(Bridge bridge, Limits limits, Defaults defaults) {
                 throw new IllegalArgumentException(
                         "bridge.max-concurrent-requests must be positive");
             }
+            if (maxConcurrentInspections < 1 || maxConcurrentInspections > maxConcurrentRequests) {
+                throw new IllegalArgumentException(
+                        "bridge.max-concurrent-inspections must be positive and not exceed "
+                                + "bridge.max-concurrent-requests");
+            }
         }
     }
 
@@ -43,6 +54,8 @@ public record DirtConfig(Bridge bridge, Limits limits, Defaults defaults) {
             int maxRequestBytes,
             int maxRegionVolume,
             int maxTouchedChunks,
+            int maxInspectionTouchedChunks,
+            int maxBlockStatePatterns,
             int maxChangedBlocks,
             int maxInspectionVolume,
             int defaultInspectionResultLimit,
@@ -58,6 +71,8 @@ public record DirtConfig(Bridge bridge, Limits limits, Defaults defaults) {
             }
             requirePositive("limits.max-region-volume", maxRegionVolume);
             requirePositive("limits.max-touched-chunks", maxTouchedChunks);
+            requirePositive("limits.max-inspection-touched-chunks", maxInspectionTouchedChunks);
+            requirePositive("limits.max-block-state-patterns", maxBlockStatePatterns);
             requirePositive("limits.max-changed-blocks", maxChangedBlocks);
             requirePositive("limits.max-inspection-volume", maxInspectionVolume);
             requirePositive("limits.default-inspection-results", defaultInspectionResultLimit);
@@ -68,6 +83,16 @@ public record DirtConfig(Bridge bridge, Limits limits, Defaults defaults) {
                 throw new IllegalArgumentException(
                         "limits.undo-history-per-world must be non-negative");
             }
+            requireAtMost(
+                    "limits.max-inspection-touched-chunks",
+                    maxInspectionTouchedChunks,
+                    "limits.max-touched-chunks",
+                    maxTouchedChunks);
+            requireAtMost(
+                    "limits.max-block-state-patterns",
+                    maxBlockStatePatterns,
+                    "the protocol maximum",
+                    64);
             requireAtMost(
                     "limits.max-changed-blocks",
                     maxChangedBlocks,

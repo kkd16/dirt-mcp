@@ -44,6 +44,30 @@ final class ArchitectureTest {
     }
 
     @Test
+    void featureInterfacesStayIndependentOfTransportPaperAndFawe() {
+        noClasses()
+                .that()
+                .areInterfaces()
+                .and()
+                .arePublic()
+                .and()
+                .resideInAnyPackage(
+                        "ca.deliyannides.dirtmcp.paper.status..",
+                        "ca.deliyannides.dirtmcp.paper.command..",
+                        "ca.deliyannides.dirtmcp.paper.world.inspection..",
+                        "ca.deliyannides.dirtmcp.paper.world.edit..")
+                .should()
+                .dependOnClassesThat()
+                .resideInAnyPackage(
+                        "com.google.gson..",
+                        "com.sun.net.httpserver..",
+                        "org.bukkit..",
+                        "com.sk89q.worldedit..",
+                        "com.fastasyncworldedit..")
+                .check(PRODUCTION_CLASSES);
+    }
+
+    @Test
     void transportLibrariesStayInsideTheBridge() {
         noClasses()
                 .that()

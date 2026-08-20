@@ -38,6 +38,7 @@ final class PaperRegionSnapshotSourceTest {
                         ChunkSnapshot.class,
                         (ignored, method, arguments) -> {
                             if (method.getName().equals("getBlockData")) {
+                                assertFalse(mainThread.inAction);
                                 calls.add(
                                         "sample:"
                                                 + arguments[0]
@@ -61,10 +62,12 @@ final class PaperRegionSnapshotSourceTest {
                         (ignored, method, arguments) -> {
                             switch (method.getName()) {
                                 case "isChunkLoaded" -> {
+                                    assertTrue(mainThread.inAction);
                                     calls.add("loaded:" + arguments[0] + "," + arguments[1]);
                                     return true;
                                 }
                                 case "getChunkAt" -> {
+                                    assertTrue(mainThread.inAction);
                                     calls.add("chunk:" + arguments[0] + "," + arguments[1]);
                                     return chunk;
                                 }
@@ -175,6 +178,36 @@ final class PaperRegionSnapshotSourceTest {
         assertEquals(OperationFailure.INVALID_REQUEST, pattern.failure());
     }
 
+    @Test
+    void mapsSchedulerFailureToWorldUnavailable() throws Exception {
+        MainThread failing =
+                new MainThread() {
+                    @Override
+                    public <T> T call(CheckedSupplier<T> action) throws PaperMainThreadException {
+                        throw new PaperMainThreadException("scheduler stopped");
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        PaperRegionSnapshotSource source =
+                new PaperRegionSnapshotSource(server(null, null, false), failing);
+
+        OperationException failure =
+                assertThrows(
+                        OperationException.class,
+                        () ->
+                                source.capture(
+                                        "world",
+                                        cuboid(
+                                                new BlockPosition(0, 0, 0),
+                                                new BlockPosition(0, 0, 0)),
+                                        List.of(),
+                                        List.of()));
+
+        assertEquals(OperationFailure.WORLD_UNAVAILABLE, failure.failure());
+    }
+
     private static World world(InvocationHandler additional) {
         return proxy(
                 World.class,
@@ -243,23 +276,22 @@ final class PaperRegionSnapshotSourceTest {
 
     private static final class DirectMainThread implements MainThread {
         private boolean called;
+        private boolean inAction;
 
         @Override
         public <T> T call(CheckedSupplier<T> action) throws PaperMainThreadException {
             this.called = true;
+            this.inAction = true;
             try {
                 return action.get();
             } catch (Exception exception) {
-                return sneakyThrow(exception);
+                throw new PaperMainThreadException("main-thread action failed", exception);
+            } finally {
+                this.inAction = false;
             }
         }
 
         @Override
         public void close() {}
-
-        @SuppressWarnings("unchecked")
-        private static <T, E extends Throwable> T sneakyThrow(Throwable failure) throws E {
-            throw (E) failure;
-        }
     }
 }

@@ -47,6 +47,8 @@ public interface GetServerStatus {
             int maxRequestBytes,
             int maxRegionVolume,
             int maxTouchedChunks,
+            int maxInspectionTouchedChunks,
+            int maxBlockStatePatterns,
             int maxChangedBlocks,
             int maxInspectionVolume,
             int defaultInspectionResultLimit,

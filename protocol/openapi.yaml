@@ -104,7 +104,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          description: Region contains an unloaded chunk or inspection was interrupted
+          description: Region contains an unloaded chunk, inspection was interrupted, or inspection capacity is exhausted
           content:
             application/json:
               schema:
@@ -155,7 +155,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          description: Region contains an unloaded chunk or inspection was interrupted
+          description: Region contains an unloaded chunk, inspection was interrupted, or inspection capacity is exhausted
           content:
             application/json:
               schema:
@@ -206,7 +206,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          description: View contains an unloaded chunk or inspection was interrupted
+          description: View contains an unloaded chunk, inspection was interrupted, or inspection capacity is exhausted
           content:
             application/json:
               schema:
@@ -245,7 +245,7 @@ paths:
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '409':
-          description: Another Dirt MCP edit is active in this world
+          description: Another Dirt MCP edit is active or a failed edit requires recovery undo
           content:
             application/json:
               schema:
@@ -302,7 +302,7 @@ paths:
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '409':
-          description: Another Dirt MCP edit is active in this world
+          description: Another Dirt MCP edit is active or a failed edit requires recovery undo
           content:
             application/json:
               schema:
@@ -359,7 +359,7 @@ paths:
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '409':
-          description: Another Dirt MCP edit is active in this world
+          description: Another Dirt MCP edit is active or a failed edit requires recovery undo
           content:
             application/json:
               schema:
@@ -608,6 +608,7 @@ components:
         world:
           type: string
           minLength: 1
+          pattern: '.*\S.*'
         min:
           $ref: '#/components/schemas/BlockPosition'
         max:
@@ -650,22 +651,27 @@ components:
         world:
           type: string
           minLength: 1
+          pattern: '.*\S.*'
         min:
           $ref: '#/components/schemas/BlockPosition'
         max:
           $ref: '#/components/schemas/BlockPosition'
         includeBlockStatePatterns:
           type: array
-          description: Block-state patterns to include; omitted properties match any value.
+          maxItems: 64
+          description: Block-state patterns to include; include and exclude lists are limited to 64 entries combined.
           items:
             type: string
             minLength: 1
+            pattern: '.*\S.*'
         excludeBlockStatePatterns:
           type: array
-          description: Block-state patterns to exclude after include filtering.
+          maxItems: 64
+          description: Block-state patterns to exclude after include filtering; both lists are limited to 64 entries combined.
           items:
             type: string
             minLength: 1
+            pattern: '.*\S.*'
         includeAir:
           type: boolean
           description: Include air-family states; omission uses the configured default.
@@ -792,6 +798,7 @@ components:
         world:
           type: string
           minLength: 1
+          pattern: '.*\S.*'
         origin:
           description: Center anchor of the orthographic view; scanning starts one block forward.
           $ref: '#/components/schemas/BlockPosition'
@@ -977,6 +984,7 @@ components:
         blockState:
           type: string
           minLength: 1
+          pattern: '.*\S.*'
           description: Exact canonical block state to place.
         weight:
           type: integer
@@ -996,6 +1004,7 @@ components:
         world:
           type: string
           minLength: 1
+          pattern: '.*\S.*'
         min:
           $ref: '#/components/schemas/BlockPosition'
         max:
@@ -1003,14 +1012,17 @@ components:
         sourceBlockStatePatterns:
           type: array
           minItems: 1
+          maxItems: 64
           uniqueItems: true
           description: ORed block-state patterns; omitted properties match any value.
           items:
             type: string
             minLength: 1
+            pattern: '.*\S.*'
         destinationPalette:
           type: array
           minItems: 1
+          maxItems: 64
           description: Exact destination states; weights are all omitted for equal probability or all total 100.
           items:
             $ref: '#/components/schemas/DestinationPaletteEntry'
@@ -1042,13 +1054,16 @@ components:
         sourceBlockStatePatterns:
           type: array
           minItems: 1
+          maxItems: 64
           uniqueItems: true
           items:
             type: string
             minLength: 1
+            pattern: '.*\S.*'
         destinationPalette:
           type: array
           minItems: 1
+          maxItems: 64
           items:
             $ref: '#/components/schemas/DestinationPaletteEntry'
         seed:
@@ -1076,6 +1091,7 @@ components:
         world:
           type: string
           minLength: 1
+          pattern: '.*\S.*'
         min:
           $ref: '#/components/schemas/BlockPosition'
         max:
@@ -1083,6 +1099,7 @@ components:
         destinationPalette:
           type: array
           minItems: 1
+          maxItems: 64
           description: Exact destination states; weights are all omitted for equal probability or all total 100.
           items:
             $ref: '#/components/schemas/DestinationPaletteEntry'
@@ -1113,6 +1130,7 @@ components:
         destinationPalette:
           type: array
           minItems: 1
+          maxItems: 64
           items:
             $ref: '#/components/schemas/DestinationPaletteEntry'
         seed:
@@ -1140,6 +1158,7 @@ components:
         blockState:
           type: string
           minLength: 1
+          pattern: '.*\S.*'
           description: Canonical block state to write at this position.
     SetBlocksRequest:
       type: object
@@ -1151,6 +1170,7 @@ components:
         world:
           type: string
           minLength: 1
+          pattern: '.*\S.*'
         changes:
           type: array
           minItems: 1
@@ -1196,6 +1216,7 @@ components:
         world:
           type: string
           minLength: 1
+          pattern: '.*\S.*'
     UndoLastDirtEditResponse:
       type: object
       additionalProperties: false
@@ -1223,6 +1244,7 @@ components:
           items:
             type: string
             minLength: 1
+            pattern: '.*\S.*'
     CommandSender:
       type: object
       additionalProperties: false
@@ -1299,6 +1321,8 @@ components:
         - maxRequestBytes
         - maxRegionVolume
         - maxTouchedChunks
+        - maxInspectionTouchedChunks
+        - maxBlockStatePatterns
         - maxChangedBlocks
         - maxInspectionVolume
         - defaultInspectionResultLimit
@@ -1321,7 +1345,17 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum distinct loaded chunks one inspection or mutation may touch.
+          description: Maximum distinct loaded chunks one mutation may touch.
+        maxInspectionTouchedChunks:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Maximum distinct loaded chunks one inspection may snapshot.
+        maxBlockStatePatterns:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Maximum block-state patterns or palette entries in one operation; inspection include and exclude lists share this cap.
         maxChangedBlocks:
           type: integer
           format: int32
