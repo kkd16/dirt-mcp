@@ -1,14 +1,16 @@
 package ca.deliyannides.dirtmcp.paper.world.edit;
 
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 @FunctionalInterface
 public interface SetBlocks {
-    Result setBlocks(Request request) throws OperationException;
+    Result setBlocks(Request request, UUID callId) throws OperationException;
 
     record Placement(int paletteIndex, int x, int y, int z) {}
 
@@ -32,16 +34,20 @@ public interface SetBlocks {
 
     record Result(
             String world,
+            BlockBounds bounds,
             List<List<DestinationPaletteEntry>> palettes,
             int seed,
-            boolean dryRun,
+            EditOutcome outcome,
             long blockCount,
             long changedBlockCount,
-            long unchangedBlockCount) {
+            long unchangedBlockCount,
+            EditRecord edit) {
         public Result {
             if (palettes != null) {
                 palettes = immutablePalettes(palettes);
             }
+            EditRecord.validateResult(
+                    outcome, edit, EditOperation.SET_BLOCKS, world, bounds, changedBlockCount);
         }
     }
 

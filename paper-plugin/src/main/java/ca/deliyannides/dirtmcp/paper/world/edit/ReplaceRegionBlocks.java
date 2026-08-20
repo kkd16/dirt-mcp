@@ -6,10 +6,11 @@ import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 @FunctionalInterface
 public interface ReplaceRegionBlocks {
-    Result replaceRegionBlocks(Request request) throws OperationException;
+    Result replaceRegionBlocks(Request request, UUID callId) throws OperationException;
 
     record Request(
             String world,
@@ -31,12 +32,20 @@ public interface ReplaceRegionBlocks {
             List<String> sourceBlockStatePatterns,
             List<DestinationPaletteEntry> destinationPalette,
             int seed,
-            boolean dryRun,
+            EditOutcome outcome,
             long matchedBlockCount,
-            long changedBlockCount) {
+            long changedBlockCount,
+            EditRecord edit) {
         public Result {
             sourceBlockStatePatterns = List.copyOf(sourceBlockStatePatterns);
             destinationPalette = List.copyOf(destinationPalette);
+            EditRecord.validateResult(
+                    outcome,
+                    edit,
+                    EditOperation.REPLACE_REGION_BLOCKS,
+                    world,
+                    bounds,
+                    changedBlockCount);
         }
     }
 

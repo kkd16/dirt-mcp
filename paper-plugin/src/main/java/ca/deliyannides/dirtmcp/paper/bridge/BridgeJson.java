@@ -1,7 +1,9 @@
 package ca.deliyannides.dirtmcp.paper.bridge;
 
-import ca.deliyannides.dirtmcp.paper.command.RunMinecraftCommands;
 import ca.deliyannides.dirtmcp.paper.world.edit.DestinationPaletteEntry;
+import ca.deliyannides.dirtmcp.paper.world.edit.EditOperation;
+import ca.deliyannides.dirtmcp.paper.world.edit.EditOutcome;
+import ca.deliyannides.dirtmcp.paper.world.edit.EditStatus;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
@@ -23,10 +25,20 @@ final class BridgeJson {
                                         return object;
                                     })
                     .registerTypeAdapter(
-                            RunMinecraftCommands.Outcome.class,
-                            (JsonSerializer<RunMinecraftCommands.Outcome>)
+                            EditOperation.class,
+                            (JsonSerializer<EditOperation>)
+                                    (operation, ignoredType, ignoredContext) ->
+                                            new com.google.gson.JsonPrimitive(operation.wireName()))
+                    .registerTypeAdapter(
+                            EditOutcome.class,
+                            (JsonSerializer<EditOutcome>)
                                     (outcome, ignoredType, ignoredContext) ->
                                             new com.google.gson.JsonPrimitive(outcome.wireName()))
+                    .registerTypeAdapter(
+                            EditStatus.class,
+                            (JsonSerializer<EditStatus>)
+                                    (status, ignoredType, ignoredContext) ->
+                                            new com.google.gson.JsonPrimitive(status.wireName()))
                     .create();
 
     private BridgeJson() {}

@@ -4,25 +4,40 @@ import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.platform.MainThread;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import ca.deliyannides.dirtmcp.paper.world.model.RegionGeometry;
+import java.time.Clock;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class FaweWorldEditor
-        implements ReplaceRegionBlocks, FillRegion, SetBlocks, UndoLastEdit, AutoCloseable {
+        implements ReplaceRegionBlocks,
+                FillRegion,
+                SetBlocks,
+                GetEditHistory,
+                UndoEdit,
+                AutoCloseable {
     private final EditPlatform platform;
     private final EditCoordinator coordinator;
     private final int maxRegionVolume;
     private final int maxTouchedChunks;
     private final int maxBlockStatePatterns;
+    private final int maxChangedBlocks;
+    private final Clock clock;
+    private final Supplier<UUID> editIds;
 
-    public FaweWorldEditor(JavaPlugin plugin, MainThread mainThread, DirtConfig.Limits limits) {
+    public FaweWorldEditor(
+            JavaPlugin plugin,
+            MainThread mainThread,
+            DirtConfig.Limits limits,
+            DirtConfig.EditHistory history) {
         this(
                 new PaperFaweEditPlatform(
                         Objects.requireNonNull(plugin, "plugin"),
@@ -30,29 +45,69 @@ public final class FaweWorldEditor
                         Objects.requireNonNull(limits, "limits").maxChangedBlocks()),
                 limits.maxRegionVolume(),
                 limits.maxTouchedChunks(),
-                limits.undoHistoryPerWorld(),
-                limits.maxBlockStatePatterns());
+                limits.maxBlockStatePatterns(),
+                limits.maxChangedBlocks(),
+                Objects.requireNonNull(history, "history"),
+                Clock.systemUTC(),
+                UUID::randomUUID);
     }
 
     FaweWorldEditor(
             EditPlatform platform,
             int maxRegionVolume,
             int maxTouchedChunks,
-            int undoHistoryPerWorld,
-            int maxBlockStatePatterns) {
+            int maxBlockStatePatterns,
+            int maxChangedBlocks,
+            DirtConfig.EditHistory history) {
+        this(
+                platform,
+                maxRegionVolume,
+                maxTouchedChunks,
+                maxBlockStatePatterns,
+                maxChangedBlocks,
+                history,
+                Clock.systemUTC(),
+                UUID::randomUUID);
+    }
+
+    FaweWorldEditor(
+            EditPlatform platform,
+            int maxRegionVolume,
+            int maxTouchedChunks,
+            int maxBlockStatePatterns,
+            int maxChangedBlocks,
+            DirtConfig.EditHistory history,
+            Clock clock,
+            Supplier<UUID> editIds) {
         this.platform = Objects.requireNonNull(platform, "platform");
-        if (maxRegionVolume < 1 || maxTouchedChunks < 1 || maxBlockStatePatterns < 1) {
-            throw new IllegalArgumentException("Edit region and chunk limits must be positive");
+        if (maxRegionVolume < 1
+                || maxTouchedChunks < 1
+                || maxBlockStatePatterns < 1
+                || maxChangedBlocks < 1) {
+            throw new IllegalArgumentException("Edit and chunk limits must be positive");
         }
         this.maxRegionVolume = maxRegionVolume;
         this.maxTouchedChunks = maxTouchedChunks;
         this.maxBlockStatePatterns = maxBlockStatePatterns;
-        this.coordinator = new EditCoordinator(undoHistoryPerWorld);
+        this.maxChangedBlocks = maxChangedBlocks;
+        DirtConfig.EditHistory checkedHistory = Objects.requireNonNull(history, "history");
+        if (maxChangedBlocks > checkedHistory.maxRetainedChangedBlocks()) {
+            throw new IllegalArgumentException(
+                    "Maximum changed blocks must fit the edit-history block budget");
+        }
+        this.coordinator =
+                new EditCoordinator(
+                        checkedHistory.maxEntriesPerWorld(),
+                        checkedHistory.maxEntriesTotal(),
+                        checkedHistory.maxRetainedChangedBlocks());
+        this.clock = Objects.requireNonNull(clock, "clock");
+        this.editIds = Objects.requireNonNull(editIds, "editIds");
     }
 
     @Override
-    public ReplaceRegionBlocks.Result replaceRegionBlocks(ReplaceRegionBlocks.Request request)
-            throws OperationException {
+    public ReplaceRegionBlocks.Result replaceRegionBlocks(
+            ReplaceRegionBlocks.Request request, UUID callId) throws OperationException {
+        requireCallId(callId);
         if (request == null || request.min() == null || request.max() == null) {
             throw invalid("min and max are required");
         }
@@ -60,125 +115,438 @@ public final class FaweWorldEditor
         validatePalette(request.destinationPalette(), "destinationPalette");
         Cuboid region = boundedRegion(request.min(), request.max());
         EditPlatform.WorldHandle world = resolveWorld(request.world());
-        try (EditCoordinator.Lease lease = this.coordinator.enter(world.id(), world.name())) {
+        UUID editId = pendingEditId(request.dryRun());
+        try (EditCoordinator.Lease lease =
+                this.coordinator.enterMutation(world.id(), world.name())) {
             EditPlatform.EditResult execution;
+            EditRecord edit = null;
             List<String> sourcePatterns;
             List<DestinationPaletteEntry> destinationPalette;
             try (EditPlatform.PreparedReplace prepared =
                     this.platform.prepareReplace(world, request, region)) {
                 try {
-                    execution = this.platform.replace(prepared, region, request.dryRun());
+                    execution =
+                            this.platform.replace(
+                                    prepared,
+                                    region,
+                                    request.dryRun(),
+                                    () ->
+                                            lease.reserveHistory(
+                                                    Math.min(
+                                                            (long) this.maxChangedBlocks,
+                                                            region.volume())));
                 } catch (EditRecoveryException failure) {
-                    lease.rememberRecovery(failure.recovery());
-                    throw failure;
+                    rememberRecovery(
+                            lease,
+                            world,
+                            region.bounds(),
+                            callId,
+                            editId,
+                            EditOperation.REPLACE_REGION_BLOCKS,
+                            failure);
+                    throw recoveryFailure(failure, editId);
                 }
                 sourcePatterns = prepared.sourcePatterns();
                 destinationPalette = prepared.destinationPalette();
-                if (!request.dryRun()) {
-                    lease.remember(execution.undo());
+                edit =
+                        retainCommitted(
+                                lease,
+                                world,
+                                region.bounds(),
+                                callId,
+                                editId,
+                                EditOperation.REPLACE_REGION_BLOCKS,
+                                request.dryRun(),
+                                execution);
+            } catch (OperationException failure) {
+                throw retainedFailure(failure, edit);
+            } catch (RuntimeException failure) {
+                if (edit == null) {
+                    throw failure;
                 }
+                throw retainedFailure(failure, edit);
             }
-            return new ReplaceRegionBlocks.Result(
-                    world.name(),
-                    region.bounds(),
-                    sourcePatterns,
-                    destinationPalette,
-                    request.seed(),
-                    request.dryRun(),
-                    execution.matchedBlockCount(),
-                    execution.changedBlockCount());
+            try {
+                return new ReplaceRegionBlocks.Result(
+                        world.name(),
+                        region.bounds(),
+                        sourcePatterns,
+                        destinationPalette,
+                        request.seed(),
+                        outcome(request.dryRun(), execution.changedBlockCount()),
+                        execution.matchedBlockCount(),
+                        execution.changedBlockCount(),
+                        edit);
+            } catch (RuntimeException failure) {
+                throw retainedFailure(failure, edit);
+            }
         }
     }
 
     @Override
-    public FillRegion.Result fillRegion(FillRegion.Request request) throws OperationException {
+    public FillRegion.Result fillRegion(FillRegion.Request request, UUID callId)
+            throws OperationException {
+        requireCallId(callId);
         if (request == null || request.min() == null || request.max() == null) {
             throw invalid("min and max are required");
         }
         validatePalette(request.destinationPalette(), "destinationPalette");
         Cuboid region = boundedRegion(request.min(), request.max());
         EditPlatform.WorldHandle world = resolveWorld(request.world());
-        try (EditCoordinator.Lease lease = this.coordinator.enter(world.id(), world.name())) {
+        UUID editId = pendingEditId(request.dryRun());
+        try (EditCoordinator.Lease lease =
+                this.coordinator.enterMutation(world.id(), world.name())) {
             EditPlatform.EditResult execution;
+            EditRecord edit = null;
             List<DestinationPaletteEntry> destinationPalette;
             try (EditPlatform.PreparedFill prepared =
                     this.platform.prepareFill(world, request, region)) {
                 try {
-                    execution = this.platform.fill(prepared, region, request.dryRun());
+                    execution =
+                            this.platform.fill(
+                                    prepared,
+                                    region,
+                                    request.dryRun(),
+                                    () ->
+                                            lease.reserveHistory(
+                                                    Math.min(
+                                                            (long) this.maxChangedBlocks,
+                                                            region.volume())));
                 } catch (EditRecoveryException failure) {
-                    lease.rememberRecovery(failure.recovery());
-                    throw failure;
+                    rememberRecovery(
+                            lease,
+                            world,
+                            region.bounds(),
+                            callId,
+                            editId,
+                            EditOperation.FILL_REGION,
+                            failure);
+                    throw recoveryFailure(failure, editId);
                 }
                 destinationPalette = prepared.destinationPalette();
-                if (!request.dryRun()) {
-                    lease.remember(execution.undo());
+                edit =
+                        retainCommitted(
+                                lease,
+                                world,
+                                region.bounds(),
+                                callId,
+                                editId,
+                                EditOperation.FILL_REGION,
+                                request.dryRun(),
+                                execution);
+            } catch (OperationException failure) {
+                throw retainedFailure(failure, edit);
+            } catch (RuntimeException failure) {
+                if (edit == null) {
+                    throw failure;
                 }
+                throw retainedFailure(failure, edit);
             }
-            return new FillRegion.Result(
-                    world.name(),
-                    region.bounds(),
-                    destinationPalette,
-                    request.seed(),
-                    request.dryRun(),
-                    region.volume(),
-                    execution.changedBlockCount());
+            try {
+                return new FillRegion.Result(
+                        world.name(),
+                        region.bounds(),
+                        destinationPalette,
+                        request.seed(),
+                        outcome(request.dryRun(), execution.changedBlockCount()),
+                        region.volume(),
+                        execution.changedBlockCount(),
+                        edit);
+            } catch (RuntimeException failure) {
+                throw retainedFailure(failure, edit);
+            }
         }
     }
 
     @Override
-    public SetBlocks.Result setBlocks(SetBlocks.Request request) throws OperationException {
-        List<ChunkPosition> chunks = validateSetRequest(request);
+    public SetBlocks.Result setBlocks(SetBlocks.Request request, UUID callId)
+            throws OperationException {
+        requireCallId(callId);
+        SetRequestGeometry geometry = validateSetRequest(request);
         EditPlatform.WorldHandle world = resolveWorld(request.world());
-        try (EditCoordinator.Lease lease = this.coordinator.enter(world.id(), world.name())) {
+        UUID editId = pendingEditId(request.dryRun());
+        try (EditCoordinator.Lease lease =
+                this.coordinator.enterMutation(world.id(), world.name())) {
             EditPlatform.EditResult execution;
+            EditRecord edit = null;
             int blockCount;
             List<List<DestinationPaletteEntry>> palettes;
             try (EditPlatform.PreparedSet prepared =
-                    this.platform.prepareSet(world, request, chunks)) {
+                    this.platform.prepareSet(world, request, geometry.chunks())) {
                 try {
-                    execution = this.platform.set(prepared, request.dryRun());
+                    execution =
+                            this.platform.set(
+                                    prepared,
+                                    request.dryRun(),
+                                    () ->
+                                            lease.reserveHistory(
+                                                    Math.min(
+                                                            (long) this.maxChangedBlocks,
+                                                            request.placements().size())));
                 } catch (EditRecoveryException failure) {
-                    lease.rememberRecovery(failure.recovery());
-                    throw failure;
+                    rememberRecovery(
+                            lease,
+                            world,
+                            geometry.bounds(),
+                            callId,
+                            editId,
+                            EditOperation.SET_BLOCKS,
+                            failure);
+                    throw recoveryFailure(failure, editId);
                 }
                 blockCount = prepared.blockCount();
                 palettes = prepared.palettes();
-                if (!request.dryRun()) {
-                    lease.remember(execution.undo());
+                if (execution.changedBlockCount() > blockCount) {
+                    throw new IllegalStateException(
+                            "Edit backend returned an invalid change count");
                 }
+                edit =
+                        retainCommitted(
+                                lease,
+                                world,
+                                geometry.bounds(),
+                                callId,
+                                editId,
+                                EditOperation.SET_BLOCKS,
+                                request.dryRun(),
+                                execution);
+            } catch (OperationException failure) {
+                throw retainedFailure(failure, edit);
+            } catch (RuntimeException failure) {
+                if (edit == null) {
+                    throw failure;
+                }
+                throw retainedFailure(failure, edit);
             }
-            if (execution.changedBlockCount() > blockCount) {
-                throw new IllegalStateException("Edit backend returned an invalid change count");
+            try {
+                return new SetBlocks.Result(
+                        world.name(),
+                        geometry.bounds(),
+                        palettes,
+                        request.seed(),
+                        outcome(request.dryRun(), execution.changedBlockCount()),
+                        blockCount,
+                        execution.changedBlockCount(),
+                        blockCount - execution.changedBlockCount(),
+                        edit);
+            } catch (RuntimeException failure) {
+                throw retainedFailure(failure, edit);
             }
-            return new SetBlocks.Result(
-                    world.name(),
-                    palettes,
-                    request.seed(),
-                    request.dryRun(),
-                    blockCount,
-                    execution.changedBlockCount(),
-                    blockCount - execution.changedBlockCount());
         }
     }
 
     @Override
-    public UndoLastEdit.Result undoLastEdit(UndoLastEdit.Request request)
+    public GetEditHistory.Result getEditHistory(GetEditHistory.Request request)
             throws OperationException {
         if (request == null) {
             throw invalid("request is required");
         }
         EditPlatform.WorldHandle world = resolveWorld(request.world());
         try (EditCoordinator.Lease lease =
-                this.coordinator.enterForUndo(world.id(), world.name())) {
-            EditPlatform.UndoToken undo = lease.latestUndo();
-            if (undo == null) {
-                throw new OperationException(
-                        OperationFailure.NOTHING_TO_UNDO, "No Dirt MCP edit is available to undo");
-            }
-            this.platform.undo(world, undo);
-            lease.removeLatest(undo);
-            return new UndoLastEdit.Result(world.name(), undo.changedBlockCount());
+                this.coordinator.enterHistory(world.id(), world.name())) {
+            return new GetEditHistory.Result(world.name(), lease.history());
         }
+    }
+
+    @Override
+    public UndoEdit.Result undoEdit(UndoEdit.Request request, UUID callId)
+            throws OperationException {
+        requireCallId(callId);
+        if (request == null || request.editId() == null) {
+            throw invalid("world and editId are required");
+        }
+        EditPlatform.WorldHandle world = resolveWorld(request.world());
+        try (EditCoordinator.Lease lease = this.coordinator.enterUndo(world.id(), world.name())) {
+            RetainedEdit edit = lease.latest();
+            if (edit == null || !edit.record().editId().equals(request.editId())) {
+                OperationFailure failure =
+                        lease.contains(request.editId())
+                                ? OperationFailure.EDIT_NOT_LATEST
+                                : OperationFailure.EDIT_NOT_FOUND;
+                String message =
+                        failure == OperationFailure.EDIT_NOT_LATEST
+                                ? "Edit is retained but is not the next edit eligible for undo"
+                                : "Edit is not retained for this world: " + request.editId();
+                throw new OperationException(failure, message);
+            }
+            try {
+                this.platform.undo(world, edit.undo());
+            } catch (OperationException failure) {
+                lease.markRecoveryRequired(edit);
+                throw recoveryUndoFailure(failure, edit.record().editId());
+            } catch (RuntimeException failure) {
+                lease.markRecoveryRequired(edit);
+                throw new OperationException(
+                        OperationFailure.INTERNAL_ERROR,
+                        "Undo failed; recovery edit ID: " + edit.record().editId(),
+                        failure,
+                        edit.record().editId());
+            }
+            lease.removeLatest(edit);
+            return new UndoEdit.Result(edit.record(), callId, this.clock.instant().toString());
+        }
+    }
+
+    private EditRecord retainCommitted(
+            EditCoordinator.Lease lease,
+            EditPlatform.WorldHandle world,
+            BlockBounds bounds,
+            UUID callId,
+            UUID editId,
+            EditOperation operation,
+            boolean dryRun,
+            EditPlatform.EditResult execution)
+            throws OperationException {
+        if (dryRun || execution.changedBlockCount() == 0) {
+            if (execution.undo() != null) {
+                execution.undo().close();
+                throw new IllegalStateException("Preview and no-change results cannot retain undo");
+            }
+            return null;
+        }
+        if (editId == null || execution.undo() == null) {
+            throw new IllegalStateException("A non-empty committed edit requires an ID and undo");
+        }
+        EditRecord record =
+                editRecord(
+                        editId,
+                        callId,
+                        operation,
+                        world,
+                        bounds,
+                        execution.changedBlockCount(),
+                        EditStatus.COMMITTED);
+        RetainedEdit retained = new RetainedEdit(record, execution.undo());
+        if (lease.remember(retained)) {
+            return record;
+        }
+
+        try {
+            this.platform.undo(world, execution.undo());
+        } catch (OperationException | RuntimeException rollbackFailure) {
+            throw new OperationException(
+                    OperationFailure.WORLD_UNAVAILABLE,
+                    "The edit completed after its world became unavailable, but rollback failed; "
+                            + "edit ID: "
+                            + editId,
+                    rollbackFailure,
+                    editId);
+        } finally {
+            execution.undo().close();
+        }
+        throw new OperationException(
+                OperationFailure.WORLD_UNAVAILABLE,
+                "The edit completed after its world became unavailable and was rolled back");
+    }
+
+    private void rememberRecovery(
+            EditCoordinator.Lease lease,
+            EditPlatform.WorldHandle world,
+            BlockBounds bounds,
+            UUID callId,
+            UUID editId,
+            EditOperation operation,
+            EditRecoveryException failure) {
+        if (editId == null) {
+            failure.recovery().close();
+            throw new IllegalStateException("A dry run unexpectedly produced recovery history");
+        }
+        EditRecord record =
+                editRecord(
+                        editId,
+                        callId,
+                        operation,
+                        world,
+                        bounds,
+                        failure.recovery().changedBlockCount(),
+                        EditStatus.RECOVERY_REQUIRED);
+        lease.rememberRecovery(new RetainedEdit(record, failure.recovery()));
+    }
+
+    private EditRecord editRecord(
+            UUID editId,
+            UUID callId,
+            EditOperation operation,
+            EditPlatform.WorldHandle world,
+            BlockBounds bounds,
+            long changedBlockCount,
+            EditStatus status) {
+        return new EditRecord(
+                editId,
+                callId,
+                operation,
+                world.name(),
+                world.id(),
+                bounds,
+                changedBlockCount,
+                this.clock.instant().toString(),
+                status);
+    }
+
+    private UUID pendingEditId(boolean dryRun) {
+        if (dryRun) {
+            return null;
+        }
+        UUID editId = Objects.requireNonNull(this.editIds.get(), "generated editId");
+        if (editId.version() != 4 || editId.variant() != 2) {
+            throw new IllegalStateException("Generated edit IDs must be UUID version 4");
+        }
+        return editId;
+    }
+
+    private static EditOutcome outcome(boolean dryRun, long changedBlockCount) {
+        if (dryRun) {
+            return EditOutcome.PREVIEW;
+        }
+        return changedBlockCount == 0 ? EditOutcome.NO_CHANGE : EditOutcome.COMMITTED;
+    }
+
+    private static void requireCallId(UUID callId) throws OperationException {
+        if (callId == null || callId.version() != 4 || callId.variant() != 2) {
+            throw invalid("callId must be a UUID version 4");
+        }
+    }
+
+    private static OperationException recoveryFailure(EditRecoveryException failure, UUID editId) {
+        return new OperationException(
+                failure.failure(),
+                failure.getMessage() + "; recovery edit ID: " + editId,
+                failure,
+                editId);
+    }
+
+    private static OperationException retainedFailure(OperationException failure, EditRecord edit) {
+        if (edit == null || failure.editId().isPresent()) {
+            return failure;
+        }
+        return new OperationException(
+                failure.failure(),
+                failure.getMessage() + "; committed edit ID: " + edit.editId(),
+                failure,
+                edit.editId());
+    }
+
+    private static OperationException recoveryUndoFailure(OperationException failure, UUID editId) {
+        if (failure.editId().isPresent()) {
+            return failure;
+        }
+        return new OperationException(
+                failure.failure(),
+                failure.getMessage() + "; recovery edit ID: " + editId,
+                failure,
+                editId);
+    }
+
+    private static OperationException retainedFailure(RuntimeException failure, EditRecord edit) {
+        if (edit == null) {
+            throw failure;
+        }
+        return new OperationException(
+                OperationFailure.INTERNAL_ERROR,
+                "The edit committed but response finalization failed; committed edit ID: "
+                        + edit.editId(),
+                failure,
+                edit.editId());
     }
 
     public void invalidateWorld(UUID worldId) {
@@ -212,7 +580,7 @@ public final class FaweWorldEditor
         return region;
     }
 
-    private List<ChunkPosition> validateSetRequest(SetBlocks.Request request)
+    private SetRequestGeometry validateSetRequest(SetBlocks.Request request)
             throws OperationException {
         if (request == null || request.origin() == null) {
             throw invalid("origin is required");
@@ -256,7 +624,29 @@ public final class FaweWorldEditor
                                 + " chunks");
             }
         }
-        return List.copyOf(chunks);
+        BlockPosition min = null;
+        BlockPosition max = null;
+        for (BlockPosition position : positions) {
+            min =
+                    min == null
+                            ? position
+                            : new BlockPosition(
+                                    Math.min(min.x(), position.x()),
+                                    Math.min(min.y(), position.y()),
+                                    Math.min(min.z(), position.z()));
+            max =
+                    max == null
+                            ? position
+                            : new BlockPosition(
+                                    Math.max(max.x(), position.x()),
+                                    Math.max(max.y(), position.y()),
+                                    Math.max(max.z(), position.z()));
+        }
+        return new SetRequestGeometry(
+                List.copyOf(chunks),
+                new BlockBounds(
+                        Objects.requireNonNull(min, "minimum position"),
+                        Objects.requireNonNull(max, "maximum position")));
     }
 
     private void validateSetPalettes(List<List<DestinationPaletteEntry>> palettes)
@@ -359,5 +749,12 @@ public final class FaweWorldEditor
 
     private static OperationException invalid(String message) {
         return new OperationException(OperationFailure.INVALID_REQUEST, message);
+    }
+
+    private record SetRequestGeometry(List<ChunkPosition> chunks, BlockBounds bounds) {
+        private SetRequestGeometry {
+            chunks = List.copyOf(chunks);
+            Objects.requireNonNull(bounds, "bounds");
+        }
     }
 }

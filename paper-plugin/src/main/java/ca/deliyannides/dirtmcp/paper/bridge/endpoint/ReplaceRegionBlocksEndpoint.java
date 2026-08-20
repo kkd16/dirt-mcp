@@ -39,7 +39,7 @@ public final class ReplaceRegionBlocksEndpoint implements BridgeEndpoint {
             throws IOException, InvalidRequestException, OperationException {
         ReplaceRegionBlocks.Request request = this.decoder.decode(exchange);
         exchange.world(request.world());
-        exchange.ok(this.operation.replaceRegionBlocks(request));
+        exchange.ok(this.operation.replaceRegionBlocks(request, exchange.requiredCallId()));
     }
 
     @Override

@@ -27,14 +27,14 @@ export const BRIDGE_ROUTES = {
   },
   fillRegion: { method: 'POST', path: '/v1/fill-region', timeoutMilliseconds: 120_000 },
   setBlocks: { method: 'POST', path: '/v1/set-blocks', timeoutMilliseconds: 120_000 },
-  undoLastDirtEdit: {
+  getEditHistory: {
     method: 'POST',
-    path: '/v1/undo-last-dirt-edit',
-    timeoutMilliseconds: 120_000,
+    path: '/v1/get-edit-history',
+    timeoutMilliseconds: 3_000,
   },
-  runMinecraftCommands: {
+  undoEdit: {
     method: 'POST',
-    path: '/v1/run-minecraft-commands',
+    path: '/v1/undo-edit',
     timeoutMilliseconds: 120_000,
   },
 } as const satisfies Record<string, BridgeRoute>;
@@ -42,11 +42,13 @@ export const BRIDGE_ROUTES = {
 export const BRIDGE_ERROR_CODES = [
   'bridge_busy',
   'change_limit_exceeded',
+  'edit_not_found',
+  'edit_not_latest',
+  'history_capacity_exceeded',
   'internal_error',
   'invalid_request',
   'method_not_allowed',
   'not_found',
-  'nothing_to_undo',
   'region_too_large',
   'result_too_large',
   'server_unavailable',
@@ -62,6 +64,10 @@ export const BridgeErrorResponseSchema = z
     error: z
       .object({
         code: z.enum(BRIDGE_ERROR_CODES).describe('Stable machine-readable error code.'),
+        editId: z
+          .uuidv4()
+          .optional()
+          .describe('Edit transaction associated with this failure when its mutation may remain or is undoable.'),
         message: z.string().min(1).describe('Human-readable explanation.'),
       })
       .strict(),

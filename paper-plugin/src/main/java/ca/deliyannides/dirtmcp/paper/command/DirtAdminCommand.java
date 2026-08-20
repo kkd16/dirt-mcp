@@ -149,10 +149,12 @@ public final class DirtAdminCommand {
         appendValue(message, "max-inspection-volume", limits.maxInspectionVolume());
         appendValue(message, "default-inspection-results", limits.defaultInspectionResultLimit());
         appendValue(message, "max-inspection-results", limits.maxInspectionResultLimit());
-        appendValue(message, "max-commands-per-request", limits.maxCommandsPerRequest());
-        appendValue(
-                message, "max-command-feedback-characters", limits.maxCommandFeedbackCharacters());
-        appendValue(message, "undo-history-per-world", limits.undoHistoryPerWorld());
+
+        DirtConfig.EditHistory editHistory = this.config.editHistory();
+        appendSection(message, "Edit History");
+        appendValue(message, "max-entries-per-world", editHistory.maxEntriesPerWorld());
+        appendValue(message, "max-entries-total", editHistory.maxEntriesTotal());
+        appendValue(message, "max-retained-changed-blocks", editHistory.maxRetainedChangedBlocks());
 
         DirtConfig.Defaults defaults = this.config.defaults();
         appendSection(message, "Defaults");

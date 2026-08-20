@@ -6,10 +6,11 @@ import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 @FunctionalInterface
 public interface FillRegion {
-    Result fillRegion(Request request) throws OperationException;
+    Result fillRegion(Request request, UUID callId) throws OperationException;
 
     record Request(
             String world,
@@ -31,11 +32,14 @@ public interface FillRegion {
             BlockBounds bounds,
             List<DestinationPaletteEntry> destinationPalette,
             int seed,
-            boolean dryRun,
+            EditOutcome outcome,
             long volume,
-            long changedBlockCount) {
+            long changedBlockCount,
+            EditRecord edit) {
         public Result {
             destinationPalette = List.copyOf(destinationPalette);
+            EditRecord.validateResult(
+                    outcome, edit, EditOperation.FILL_REGION, world, bounds, changedBlockCount);
         }
     }
 }

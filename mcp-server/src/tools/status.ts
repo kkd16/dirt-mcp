@@ -49,16 +49,22 @@ const LimitConfigurationSchema = z
       .int()
       .positive()
       .describe('Maximum caller-selectable result limit for detailed inspections.'),
-    maxCommandsPerRequest: z.number().int().positive().describe('Maximum commands accepted in one ordered batch.'),
-    maxCommandFeedbackCharacters: z
-      .number()
-      .int()
-      .positive()
-      .describe('Maximum plain-text feedback characters retained per command batch.'),
-    undoHistoryPerWorld: z.number().int().nonnegative().describe('In-memory Dirt undo entries retained per world.'),
   })
   .strict()
   .describe('Active limits that constrain Dirt inspection and mutation tools.');
+
+const EditHistoryConfigurationSchema = z
+  .object({
+    maxEntriesPerWorld: z.number().int().positive().describe('Maximum retained undoable edits in one loaded world.'),
+    maxEntriesTotal: z.number().int().positive().describe('Maximum retained undoable edits across all loaded worlds.'),
+    maxRetainedChangedBlocks: z
+      .number()
+      .int()
+      .positive()
+      .describe('Maximum sum of changed-block counts across all retained undoable edits.'),
+  })
+  .strict()
+  .describe('Active bounded in-memory edit-history retention settings.');
 
 const DefaultConfigurationSchema = z
   .object({
@@ -127,10 +133,13 @@ const ServerStatusSchema = z
       )
       .describe('All currently loaded worlds in Paper order.'),
     limits: LimitConfigurationSchema,
+    editHistory: EditHistoryConfigurationSchema,
     defaults: DefaultConfigurationSchema,
   })
   .strict()
-  .describe('Current lightweight Paper context for grounding subsequent Dirt tool calls.');
+  .describe(
+    'Current lightweight Paper context, limits, and edit-history retention for grounding subsequent Dirt calls.',
+  );
 
 export function registerStatusTools(server: McpServer, bridge: BridgeClient): void {
   server.registerTool(
@@ -162,7 +171,7 @@ export function registerStatusTools(server: McpServer, bridge: BridgeClient): vo
     {
       title: 'Get Dirt server status',
       description:
-        'Return current Minecraft, Paper, Dirt MCP, and FAWE builds; TPS; online players, block positions, and cardinal facing directions; loaded worlds; and active Dirt limits/defaults. Use this to ground later world operations.',
+        'Return current Minecraft, Paper, Dirt MCP, and FAWE builds; TPS; online players, block positions, and cardinal facing directions; loaded worlds; and active Dirt limits, edit-history retention, and defaults. Use this to ground later world operations.',
       inputSchema: EmptyInputSchema,
       outputSchema: ServerStatusSchema,
       annotations: READ_WORLD_ANNOTATIONS,

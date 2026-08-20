@@ -5,6 +5,7 @@ import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.Builds;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.EffectiveDefaults;
+import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.EffectiveEditHistory;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.EffectiveLimits;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.OnlinePlayer;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.Performance;
@@ -83,6 +84,7 @@ public final class BukkitServerStatusAccess implements PaperServerStatusService.
                 server.getWorlds().stream().map(BukkitServerStatusAccess::worldStatus).toList();
         double[] tps = server.getTPS();
         DirtConfig.Limits limits = this.config.limits();
+        DirtConfig.EditHistory editHistory = this.config.editHistory();
         DirtConfig.Defaults defaults = this.config.defaults();
         return new GetServerStatus.Result(
                 new Builds(
@@ -102,10 +104,11 @@ public final class BukkitServerStatusAccess implements PaperServerStatusService.
                         limits.maxChangedBlocks(),
                         limits.maxInspectionVolume(),
                         limits.defaultInspectionResultLimit(),
-                        limits.maxInspectionResultLimit(),
-                        limits.maxCommandsPerRequest(),
-                        limits.maxCommandFeedbackCharacters(),
-                        limits.undoHistoryPerWorld()),
+                        limits.maxInspectionResultLimit()),
+                new EffectiveEditHistory(
+                        editHistory.maxEntriesPerWorld(),
+                        editHistory.maxEntriesTotal(),
+                        editHistory.maxRetainedChangedBlocks()),
                 new EffectiveDefaults(
                         defaults.regionBlocksIncludeAir(),
                         defaults.regionBlocksFormat(),

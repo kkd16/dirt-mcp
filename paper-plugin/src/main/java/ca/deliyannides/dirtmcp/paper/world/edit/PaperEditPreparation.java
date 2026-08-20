@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.block.data.BlockData;
@@ -27,11 +28,13 @@ final class PaperEditPreparation implements AutoCloseable {
     private final JavaPlugin plugin;
     private final MainThread mainThread;
     private final ChunkTicketManager tickets;
+    private final UndoChunkLoader undoChunks;
 
     PaperEditPreparation(JavaPlugin plugin, MainThread mainThread) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.mainThread = Objects.requireNonNull(mainThread, "mainThread");
         this.tickets = new ChunkTicketManager(mainThread);
+        this.undoChunks = new UndoChunkLoader(mainThread, this.tickets);
     }
 
     void beginStopping() {
@@ -109,11 +112,7 @@ final class PaperEditPreparation implements AutoCloseable {
 
     ChunkTicketManager.Lease prepareUndo(PaperWorld world, List<ChunkPosition> chunks)
             throws OperationException {
-        return onMainThread(
-                () -> {
-                    requireAvailable(world);
-                    return this.tickets.acquire(world, chunks, "Undo operation");
-                });
+        return this.undoChunks.prepare(world, chunks);
     }
 
     @Override
@@ -278,7 +277,19 @@ final class PaperEditPreparation implements AutoCloseable {
             World bukkitWorld,
             com.sk89q.worldedit.world.World worldEditWorld,
             JavaPlugin plugin)
-            implements EditPlatform.WorldHandle, ChunkTicketManager.TicketWorld {
+            implements EditPlatform.WorldHandle, UndoChunkLoader.UndoWorld {
+        @Override
+        public boolean isAvailable() {
+            return this.plugin.getServer().getWorld(this.id) == this.bukkitWorld;
+        }
+
+        @Override
+        public CompletableFuture<Boolean> loadExistingChunk(ChunkPosition chunk) {
+            return this.bukkitWorld
+                    .getChunkAtAsync(chunk.x(), chunk.z(), false)
+                    .thenApply(Objects::nonNull);
+        }
+
         @Override
         public boolean isChunkLoaded(ChunkPosition chunk) {
             return this.bukkitWorld.isChunkLoaded(chunk.x(), chunk.z());

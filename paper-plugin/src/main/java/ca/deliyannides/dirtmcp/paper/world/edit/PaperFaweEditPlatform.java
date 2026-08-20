@@ -15,7 +15,7 @@ final class PaperFaweEditPlatform implements EditPlatform {
             throw new IllegalArgumentException("Maximum changed blocks must be positive");
         }
         this.preparation = new PaperEditPreparation(plugin, mainThread);
-        this.executor = new FaweEditExecutor(maxChangedBlocks);
+        this.executor = new FaweEditExecutor(maxChangedBlocks, plugin.getLogger());
     }
 
     @Override
@@ -44,20 +44,23 @@ final class PaperFaweEditPlatform implements EditPlatform {
     }
 
     @Override
-    public EditResult replace(PreparedReplace prepared, Cuboid region, boolean dryRun)
+    public EditResult replace(
+            PreparedReplace prepared, Cuboid region, boolean dryRun, MutationAdmission admission)
             throws OperationException {
-        return this.executor.replace(requireReplace(prepared), region, dryRun);
+        return this.executor.replace(requireReplace(prepared), region, dryRun, admission);
     }
 
     @Override
-    public EditResult fill(PreparedFill prepared, Cuboid region, boolean dryRun)
+    public EditResult fill(
+            PreparedFill prepared, Cuboid region, boolean dryRun, MutationAdmission admission)
             throws OperationException {
-        return this.executor.fill(requireFill(prepared), region, dryRun);
+        return this.executor.fill(requireFill(prepared), region, dryRun, admission);
     }
 
     @Override
-    public EditResult set(PreparedSet prepared, boolean dryRun) throws OperationException {
-        return this.executor.set(requireSet(prepared), dryRun);
+    public EditResult set(PreparedSet prepared, boolean dryRun, MutationAdmission admission)
+            throws OperationException {
+        return this.executor.set(requireSet(prepared), dryRun, admission);
     }
 
     @Override

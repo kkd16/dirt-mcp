@@ -37,12 +37,14 @@ limits:
   default-inspection-results: 512
   # Highest maxResults accepted for a detailed inspection.
   max-inspection-results: 2048
-  # Maximum commands accepted in one ordered batch.
-  max-commands-per-request: 10
-  # Maximum plain-text command feedback retained across one request.
-  max-command-feedback-characters: 8192
-  # Zero disables retaining undo entries while leaving edit tools enabled.
-  undo-history-per-world: 20
+
+edit-history:
+  # Maximum undoable edits retained for any one world.
+  max-entries-per-world: 20
+  # Maximum undoable edits retained across all loaded worlds.
+  max-entries-total: 100
+  # Maximum changed blocks represented by all retained undo entries.
+  max-retained-changed-blocks: 1310720
 
 defaults:
   # Whether get_region_blocks includes air-family states when includeAir is omitted.

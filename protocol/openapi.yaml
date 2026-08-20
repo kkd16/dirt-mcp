@@ -215,6 +215,8 @@ paths:
     post:
       operationId: replaceRegionBlocks
       summary: Replace block-state patterns with a weighted palette in loaded chunks
+      parameters:
+        - $ref: '#/components/parameters/DirtCallId'
       requestBody:
         required: true
         content:
@@ -229,7 +231,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ReplaceRegionBlocksResponse'
         '400':
-          description: Invalid JSON, fields, coordinates, world height, or block state
+          description: Invalid call ID, JSON, fields, coordinates, world height, or block state
           content:
             application/json:
               schema:
@@ -245,7 +247,7 @@ paths:
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '409':
-          description: Another Dirt MCP edit is active or a failed edit requires recovery undo
+          description: Another Dirt MCP world operation is active or the newest retained edit requires recovery
           content:
             application/json:
               schema:
@@ -263,7 +265,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          description: Region contains an unloaded chunk or editing was interrupted
+          description: Region contains an unloaded chunk, editing was interrupted, or bounded history capacity was unavailable before mutation
           content:
             application/json:
               schema:
@@ -272,6 +274,8 @@ paths:
     post:
       operationId: fillRegion
       summary: Fill a bounded region of loaded chunks with a weighted palette
+      parameters:
+        - $ref: '#/components/parameters/DirtCallId'
       requestBody:
         required: true
         content:
@@ -286,7 +290,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/FillRegionResponse'
         '400':
-          description: Invalid JSON, fields, coordinates, world height, or block state
+          description: Invalid call ID, JSON, fields, coordinates, world height, or block state
           content:
             application/json:
               schema:
@@ -302,7 +306,7 @@ paths:
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '409':
-          description: Another Dirt MCP edit is active or a failed edit requires recovery undo
+          description: Another Dirt MCP world operation is active or the newest retained edit requires recovery
           content:
             application/json:
               schema:
@@ -320,7 +324,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          description: Region contains an unloaded chunk or editing was interrupted
+          description: Region contains an unloaded chunk, editing was interrupted, or bounded history capacity was unavailable before mutation
           content:
             application/json:
               schema:
@@ -329,6 +333,8 @@ paths:
     post:
       operationId: setBlocks
       summary: Place weighted-palette states at origin-relative offsets in one edit
+      parameters:
+        - $ref: '#/components/parameters/DirtCallId'
       requestBody:
         required: true
         content:
@@ -343,7 +349,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/SetBlocksResponse'
         '400':
-          description: Invalid JSON, fields, palettes, placements, resolved coordinates, world height, block state, or duplicate position
+          description: Invalid call ID, JSON, fields, palettes, placements, resolved coordinates, world height, block state, or duplicate position
           content:
             application/json:
               schema:
@@ -359,7 +365,7 @@ paths:
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '409':
-          description: Another Dirt MCP edit is active or a failed edit requires recovery undo
+          description: Another Dirt MCP world operation is active or the newest retained edit requires recovery
           content:
             application/json:
               schema:
@@ -377,28 +383,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          description: A listed position is in an unloaded chunk or editing was interrupted
+          description: A listed position is in an unloaded chunk, editing was interrupted, or bounded history capacity was unavailable before mutation
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /v1/undo-last-dirt-edit:
+  /v1/get-edit-history:
     post:
-      operationId: undoLastDirtEdit
-      summary: Undo the newest successful Dirt MCP edit in a loaded world
+      operationId: getEditHistory
+      summary: Return the retained undoable Dirt edit history for a loaded world
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UndoLastDirtEditRequest'
+              $ref: '#/components/schemas/GetEditHistoryRequest'
       responses:
         '200':
-          description: Completed undo
+          description: Retained undoable edits ordered newest first
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UndoLastDirtEditResponse'
+                $ref: '#/components/schemas/GetEditHistoryResponse'
         '400':
           description: Invalid JSON or fields
           content:
@@ -416,7 +422,60 @@ paths:
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '409':
-          description: No undo is available or another Dirt MCP edit is active in this world
+          description: Another Dirt MCP world operation is active in this world
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected history lookup failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Edit history is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/undo-edit:
+    post:
+      operationId: undoEdit
+      summary: Undo an identified retained Dirt edit in a loaded world
+      parameters:
+        - $ref: '#/components/parameters/DirtCallId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UndoEditRequest'
+      responses:
+        '200':
+          description: Completed identified undo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UndoEditResponse'
+        '400':
+          description: Invalid call ID, JSON, fields, or edit ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: World is not loaded or the edit is not retained
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          $ref: '#/components/responses/PostMethodNotAllowed'
+        '409':
+          description: The edit is not the newest retained edit or another Dirt MCP world operation is active in this world
           content:
             application/json:
               schema:
@@ -428,51 +487,20 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          description: Undo was interrupted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-  /v1/run-minecraft-commands:
-    post:
-      operationId: runMinecraftCommands
-      summary: Run registered Minecraft commands sequentially with operator-level permissions
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RunMinecraftCommandsRequest'
-      responses:
-        '200':
-          description: Ordered dispatch outcomes and bounded synchronous command feedback
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RunMinecraftCommandsResponse'
-        '400':
-          description: Invalid JSON, fields, command strings, or command count
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '405':
-          $ref: '#/components/responses/PostMethodNotAllowed'
-        '500':
-          description: Unexpected command-runner failure
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '503':
-          description: Paper command execution is unavailable or was interrupted
+          description: Undo was interrupted, its world became unavailable, or an existing touched chunk could not be loaded
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
 components:
+  parameters:
+    DirtCallId:
+      name: X-Dirt-Call-Id
+      in: header
+      required: true
+      description: UUIDv4 correlation ID. Creating edits retain it as callId; successful undo returns it as undoCallId.
+      schema:
+        $ref: '#/components/schemas/UuidV4'
   responses:
     InternalError:
       description: Unexpected internal failure
@@ -537,8 +565,10 @@ components:
                 - invalid_request
                 - method_not_allowed
                 - change_limit_exceeded
+                - edit_not_found
+                - edit_not_latest
+                - history_capacity_exceeded
                 - not_found
-                - nothing_to_undo
                 - region_too_large
                 - result_too_large
                 - server_unavailable
@@ -547,8 +577,18 @@ components:
                 - world_busy
                 - world_not_found
                 - world_unavailable
+            editId:
+              description: Edit transaction associated with the failure when its mutation may remain or its undo record is retained.
+              $ref: '#/components/schemas/UuidV4'
             message:
               type: string
+    Uuid:
+      type: string
+      format: uuid
+    UuidV4:
+      type: string
+      format: uuid
+      pattern: '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-4[0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$'
     BlockPosition:
       type: object
       additionalProperties: false
@@ -1003,6 +1043,50 @@ components:
           minimum: 1
           maximum: 100
           description: Whole-number percentage supplied for every entry or omitted from every entry.
+    EditRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - editId
+        - callId
+        - operation
+        - world
+        - worldId
+        - bounds
+        - changedBlockCount
+        - completedAt
+        - status
+      properties:
+        editId:
+          $ref: '#/components/schemas/UuidV4'
+        callId:
+          $ref: '#/components/schemas/UuidV4'
+        operation:
+          type: string
+          enum:
+            - replace_region_blocks
+            - fill_region
+            - set_blocks
+        world:
+          type: string
+          minLength: 1
+        worldId:
+          $ref: '#/components/schemas/Uuid'
+        bounds:
+          description: Normalized operation bounds; set-block edits use the smallest inclusive bounds containing every requested position.
+          $ref: '#/components/schemas/Bounds'
+        changedBlockCount:
+          type: integer
+          format: int64
+          minimum: 1
+        completedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum:
+            - committed
+            - recovery_required
     ReplaceRegionBlocksRequest:
       type: object
       additionalProperties: false
@@ -1048,13 +1132,34 @@ components:
     ReplaceRegionBlocksResponse:
       type: object
       additionalProperties: false
+      oneOf:
+        - properties:
+            outcome:
+              const: preview
+            edit:
+              type: 'null'
+        - properties:
+            outcome:
+              const: no_change
+            changedBlockCount:
+              const: 0
+            edit:
+              type: 'null'
+        - properties:
+            outcome:
+              const: committed
+            changedBlockCount:
+              minimum: 1
+            edit:
+              $ref: '#/components/schemas/EditRecord'
       required:
         - world
         - bounds
         - sourceBlockStatePatterns
         - destinationPalette
         - seed
-        - dryRun
+        - outcome
+        - edit
         - matchedBlockCount
         - changedBlockCount
       properties:
@@ -1081,8 +1186,16 @@ components:
         seed:
           type: integer
           format: int32
-        dryRun:
-          type: boolean
+        outcome:
+          type: string
+          enum:
+            - preview
+            - no_change
+            - committed
+        edit:
+          oneOf:
+            - $ref: '#/components/schemas/EditRecord'
+            - type: 'null'
         matchedBlockCount:
           type: integer
           format: int64
@@ -1125,12 +1238,33 @@ components:
     FillRegionResponse:
       type: object
       additionalProperties: false
+      oneOf:
+        - properties:
+            outcome:
+              const: preview
+            edit:
+              type: 'null'
+        - properties:
+            outcome:
+              const: no_change
+            changedBlockCount:
+              const: 0
+            edit:
+              type: 'null'
+        - properties:
+            outcome:
+              const: committed
+            changedBlockCount:
+              minimum: 1
+            edit:
+              $ref: '#/components/schemas/EditRecord'
       required:
         - world
         - bounds
         - destinationPalette
         - seed
-        - dryRun
+        - outcome
+        - edit
         - volume
         - changedBlockCount
       properties:
@@ -1148,8 +1282,16 @@ components:
         seed:
           type: integer
           format: int32
-        dryRun:
-          type: boolean
+        outcome:
+          type: string
+          enum:
+            - preview
+            - no_change
+            - committed
+        edit:
+          oneOf:
+            - $ref: '#/components/schemas/EditRecord'
+            - type: 'null'
         volume:
           type: integer
           format: int64
@@ -1209,11 +1351,33 @@ components:
     SetBlocksResponse:
       type: object
       additionalProperties: false
+      oneOf:
+        - properties:
+            outcome:
+              const: preview
+            edit:
+              type: 'null'
+        - properties:
+            outcome:
+              const: no_change
+            changedBlockCount:
+              const: 0
+            edit:
+              type: 'null'
+        - properties:
+            outcome:
+              const: committed
+            changedBlockCount:
+              minimum: 1
+            edit:
+              $ref: '#/components/schemas/EditRecord'
       required:
         - world
+        - bounds
         - palettes
         - seed
-        - dryRun
+        - outcome
+        - edit
         - blockCount
         - changedBlockCount
         - unchangedBlockCount
@@ -1221,6 +1385,8 @@ components:
         world:
           type: string
           minLength: 1
+        bounds:
+          $ref: '#/components/schemas/Bounds'
         palettes:
           type: array
           minItems: 1
@@ -1235,8 +1401,16 @@ components:
         seed:
           type: integer
           format: int32
-        dryRun:
-          type: boolean
+        outcome:
+          type: string
+          enum:
+            - preview
+            - no_change
+            - committed
+        edit:
+          oneOf:
+            - $ref: '#/components/schemas/EditRecord'
+            - type: 'null'
         blockCount:
           type: integer
           format: int64
@@ -1249,7 +1423,7 @@ components:
           type: integer
           format: int64
           minimum: 0
-    UndoLastDirtEditRequest:
+    GetEditHistoryRequest:
       type: object
       additionalProperties: false
       required:
@@ -1259,103 +1433,49 @@ components:
           type: string
           minLength: 1
           pattern: '.*\S.*'
-    UndoLastDirtEditResponse:
+    GetEditHistoryResponse:
       type: object
       additionalProperties: false
       required:
         - world
-        - changedBlockCount
+        - edits
       properties:
         world:
           type: string
           minLength: 1
-        changedBlockCount:
-          type: integer
-          format: int64
-          minimum: 1
-    RunMinecraftCommandsRequest:
-      type: object
-      additionalProperties: false
-      required:
-        - commands
-      properties:
-        commands:
+        edits:
           type: array
-          minItems: 1
-          description: Commands in execution order. Each may include one in-game leading slash.
+          description: Retained undoable edit records ordered newest first.
           items:
-            type: string
-            minLength: 1
-            pattern: '.*\S.*'
-    CommandSender:
+            $ref: '#/components/schemas/EditRecord'
+    UndoEditRequest:
       type: object
       additionalProperties: false
       required:
-        - name
-        - isOperator
-        - isPlayer
+        - world
+        - editId
       properties:
-        name:
+        world:
           type: string
           minLength: 1
-        isOperator:
-          const: true
-        isPlayer:
-          const: false
-    CommandResult:
+          pattern: '.*\S.*'
+        editId:
+          $ref: '#/components/schemas/UuidV4'
+    UndoEditResponse:
       type: object
       additionalProperties: false
       required:
-        - command
-        - outcome
-        - feedback
-        - message
-        - rawMessage
+        - edit
+        - undoCallId
+        - undoneAt
       properties:
-        command:
+        edit:
+          $ref: '#/components/schemas/EditRecord'
+        undoCallId:
+          $ref: '#/components/schemas/UuidV4'
+        undoneAt:
           type: string
-          minLength: 1
-          description: Normalized command passed to Paper without the in-game leading slash.
-        outcome:
-          type: string
-          enum:
-            - dispatched
-            - not_found
-            - dispatch_failed
-        feedback:
-          type: array
-          description: Plain-text feedback emitted synchronously while dispatching this command.
-          items:
-            type: string
-        message:
-          type:
-            - string
-            - 'null'
-          description: Actionable underlying failure explanation, otherwise null.
-        rawMessage:
-          type:
-            - string
-            - 'null'
-          description: Original Paper CommandException message for dispatch failures, otherwise null.
-    RunMinecraftCommandsResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - sender
-        - feedbackTruncated
-        - results
-      properties:
-        sender:
-          $ref: '#/components/schemas/CommandSender'
-        feedbackTruncated:
-          type: boolean
-          description: Whether feedback exceeded the configured request-wide character limit.
-        results:
-          type: array
-          minItems: 1
-          description: One result per supplied command; every command is attempted once in the original order.
-          items:
-            $ref: '#/components/schemas/CommandResult'
+          format: date-time
     LimitConfiguration:
       type: object
       additionalProperties: false
@@ -1369,9 +1489,6 @@ components:
         - maxInspectionVolume
         - defaultInspectionResultLimit
         - maxInspectionResultLimit
-        - maxCommandsPerRequest
-        - maxCommandFeedbackCharacters
-        - undoHistoryPerWorld
       properties:
         maxRequestBytes:
           type: integer
@@ -1418,18 +1535,29 @@ components:
           format: int32
           minimum: 1
           description: Maximum caller-selectable exact-block, run, or visible-block result limit.
-        maxCommandsPerRequest:
+    EditHistoryConfiguration:
+      type: object
+      additionalProperties: false
+      required:
+        - maxEntriesPerWorld
+        - maxEntriesTotal
+        - maxRetainedChangedBlocks
+      properties:
+        maxEntriesPerWorld:
           type: integer
           format: int32
           minimum: 1
-        maxCommandFeedbackCharacters:
+          description: Maximum retained undoable edits in one loaded world.
+        maxEntriesTotal:
           type: integer
           format: int32
           minimum: 1
-        undoHistoryPerWorld:
+          description: Maximum retained undoable edits across all loaded worlds.
+        maxRetainedChangedBlocks:
           type: integer
           format: int32
-          minimum: 0
+          minimum: 1
+          description: Maximum sum of changed-block counts across all retained undoable edits.
     DefaultConfiguration:
       type: object
       additionalProperties: false
@@ -1595,6 +1723,7 @@ components:
         - players
         - worlds
         - limits
+        - editHistory
         - defaults
       properties:
         builds:
@@ -1609,5 +1738,7 @@ components:
             $ref: '#/components/schemas/WorldStatus'
         limits:
           $ref: '#/components/schemas/LimitConfiguration'
+        editHistory:
+          $ref: '#/components/schemas/EditHistoryConfiguration'
         defaults:
           $ref: '#/components/schemas/DefaultConfiguration'

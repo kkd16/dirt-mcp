@@ -14,6 +14,7 @@ public interface GetServerStatus {
             PlayerSummary players,
             List<WorldStatus> worlds,
             EffectiveLimits limits,
+            EffectiveEditHistory editHistory,
             EffectiveDefaults defaults) {
         public Result {
             worlds = List.copyOf(worlds);
@@ -57,10 +58,10 @@ public interface GetServerStatus {
             int maxChangedBlocks,
             int maxInspectionVolume,
             int defaultInspectionResultLimit,
-            int maxInspectionResultLimit,
-            int maxCommandsPerRequest,
-            int maxCommandFeedbackCharacters,
-            int undoHistoryPerWorld) {}
+            int maxInspectionResultLimit) {}
+
+    record EffectiveEditHistory(
+            int maxEntriesPerWorld, int maxEntriesTotal, int maxRetainedChangedBlocks) {}
 
     record EffectiveDefaults(
             boolean regionBlocksIncludeAir, String regionBlocksFormat, boolean editDryRun) {}

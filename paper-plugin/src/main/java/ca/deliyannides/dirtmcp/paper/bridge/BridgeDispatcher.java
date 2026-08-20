@@ -5,6 +5,7 @@ import com.sun.net.httpserver.HttpExchange;
 import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
 import java.util.logging.Level;
@@ -14,7 +15,8 @@ import java.util.regex.Pattern;
 final class BridgeDispatcher implements AutoCloseable {
     private static final String CALL_ID_HEADER = "X-Dirt-Call-Id";
     private static final Pattern CALL_ID_PATTERN =
-            Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}");
+            Pattern.compile(
+                    "[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-4[0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}");
 
     private final Map<String, Map<String, BridgeEndpoint>> routes;
     private final BearerAuthenticator authenticator;
@@ -126,7 +128,7 @@ final class BridgeDispatcher implements AutoCloseable {
                 message.append(" world=").append(BridgeJson.GSON.toJson(world));
             }
             if (callId != null && CALL_ID_PATTERN.matcher(callId).matches()) {
-                message.append(" call=").append(callId);
+                message.append(" call=").append(callId.toLowerCase(Locale.ROOT));
             }
             message.append(" duration_ms=")
                     .append(Math.max(0, (System.nanoTime() - started) / 1_000_000));

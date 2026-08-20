@@ -4,7 +4,8 @@ import java.util.Set;
 import org.bukkit.configuration.file.FileConfiguration;
 
 public final class DirtConfigLoader {
-    private static final Set<String> SECTIONS = Set.of("bridge", "limits", "defaults");
+    private static final Set<String> SECTIONS =
+            Set.of("bridge", "limits", "edit-history", "defaults");
     private static final Set<String> PATHS =
             Set.of(
                     "bridge.port",
@@ -23,9 +24,9 @@ public final class DirtConfigLoader {
                     "limits.max-inspection-volume",
                     "limits.default-inspection-results",
                     "limits.max-inspection-results",
-                    "limits.max-commands-per-request",
-                    "limits.max-command-feedback-characters",
-                    "limits.undo-history-per-world",
+                    "edit-history.max-entries-per-world",
+                    "edit-history.max-entries-total",
+                    "edit-history.max-retained-changed-blocks",
                     "defaults.region-blocks-include-air",
                     "defaults.region-blocks-format",
                     "defaults.edit-dry-run");
@@ -55,10 +56,11 @@ public final class DirtConfigLoader {
                         requiredInteger(config, "limits.max-changed-blocks"),
                         requiredInteger(config, "limits.max-inspection-volume"),
                         requiredInteger(config, "limits.default-inspection-results"),
-                        requiredInteger(config, "limits.max-inspection-results"),
-                        requiredInteger(config, "limits.max-commands-per-request"),
-                        requiredInteger(config, "limits.max-command-feedback-characters"),
-                        requiredInteger(config, "limits.undo-history-per-world")),
+                        requiredInteger(config, "limits.max-inspection-results")),
+                new DirtConfig.EditHistory(
+                        requiredInteger(config, "edit-history.max-entries-per-world"),
+                        requiredInteger(config, "edit-history.max-entries-total"),
+                        requiredInteger(config, "edit-history.max-retained-changed-blocks")),
                 new DirtConfig.Defaults(
                         requiredBoolean(config, "defaults.region-blocks-include-air"),
                         requiredString(config, "defaults.region-blocks-format"),

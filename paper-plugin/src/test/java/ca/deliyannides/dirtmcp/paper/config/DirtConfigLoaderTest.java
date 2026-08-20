@@ -20,9 +20,9 @@ final class DirtConfigLoaderTest {
 
         assertEquals(new DirtConfig.Bridge(8_765, 0, 5, 5, 32, 32, 2), config.bridge());
         assertEquals(
-                new DirtConfig.Limits(
-                        262_144, 262_144, 256, 32, 64, 65_536, 16_384, 512, 2_048, 10, 8_192, 20),
+                new DirtConfig.Limits(262_144, 262_144, 256, 32, 64, 65_536, 16_384, 512, 2_048),
                 config.limits());
+        assertEquals(new DirtConfig.EditHistory(20, 100, 1_310_720), config.editHistory());
         assertEquals(new DirtConfig.Defaults(false, "blocks", false), config.defaults());
     }
 
@@ -89,9 +89,14 @@ final class DirtConfigLoaderTest {
                 Arguments.of("limits.max-inspection-volume", 262_145),
                 Arguments.of("limits.default-inspection-results", 2_049),
                 Arguments.of("limits.max-inspection-results", 16_385),
-                Arguments.of("limits.max-commands-per-request", 0),
-                Arguments.of("limits.max-command-feedback-characters", 0),
-                Arguments.of("limits.undo-history-per-world", -1),
+                Arguments.of("edit-history.max-entries-per-world", null),
+                Arguments.of("edit-history.max-entries-per-world", 0),
+                Arguments.of("edit-history.max-entries-per-world", 101),
+                Arguments.of("edit-history.max-entries-total", 0),
+                Arguments.of("edit-history.max-entries-total", 19),
+                Arguments.of("edit-history.max-retained-changed-blocks", 0),
+                Arguments.of("edit-history.max-retained-changed-blocks", 65_535),
+                Arguments.of("limits.undo-history-per-world", 20),
                 Arguments.of("defaults.region-blocks-format", "summary"),
                 Arguments.of("defaults.region-blocks-format", " "),
                 Arguments.of("defaults.region-blocks-include-air", "false"),

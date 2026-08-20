@@ -3,9 +3,11 @@ package ca.deliyannides.dirtmcp.paper.world.edit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
@@ -24,6 +26,7 @@ final class FaweWorldEditorTest {
     private static final UUID WORLD_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static final UUID OTHER_WORLD_ID =
             UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    private static final UUID CALL_ID = UUID.fromString("123e4567-e89b-42d3-a456-426614174000");
 
     @Test
     void replaceNormalizesBoundsAndUsesCanonicalPreparedValues() throws Exception {
@@ -33,7 +36,8 @@ final class FaweWorldEditorTest {
         FaweWorldEditor editor = editor(platform, 10);
 
         ReplaceRegionBlocks.Result result =
-                editor.replaceRegionBlocks(
+                replace(
+                        editor,
                         new ReplaceRegionBlocks.Request(
                                 "world",
                                 position(5, 4, 3),
@@ -51,6 +55,15 @@ final class FaweWorldEditorTest {
                 result.destinationPalette());
         assertEquals(9, result.matchedBlockCount());
         assertEquals(4, result.changedBlockCount());
+        assertEquals(EditOutcome.COMMITTED, result.outcome());
+        assertNotNull(result.edit());
+        assertEquals(CALL_ID, result.edit().callId());
+        assertEquals(EditOperation.REPLACE_REGION_BLOCKS, result.edit().operation());
+        assertEquals(WORLD_ID, result.edit().worldId());
+        assertEquals(result.bounds(), result.edit().bounds());
+        assertEquals(4, result.edit().changedBlockCount());
+        assertEquals(EditStatus.COMMITTED, result.edit().status());
+        assertNotNull(java.time.Instant.parse(result.edit().completedAt()));
         assertTrue(platform.lastPrepared.closed);
         assertTrue(platform.lastPrepared.executedBeforeClose);
     }
@@ -61,9 +74,10 @@ final class FaweWorldEditorTest {
         platform.nextChanges = 2;
         FaweWorldEditor editor = editor(platform, 10);
 
-        FillRegion.Result fill = editor.fillRegion(fillRequest("world", false));
+        FillRegion.Result fill = fill(editor, fillRequest("world", false));
         SetBlocks.Result set =
-                editor.setBlocks(
+                set(
+                        editor,
                         setRequest(
                                 "world",
                                 List.of(placement(0, 0, 0), placement(1, 0, 0), placement(2, 0, 0)),
@@ -72,6 +86,8 @@ final class FaweWorldEditorTest {
         assertEquals(8, fill.volume());
         assertEquals(2, fill.changedBlockCount());
         assertEquals(3, set.blockCount());
+        assertEquals(position(0, 0, 0), set.bounds().min());
+        assertEquals(position(2, 0, 0), set.bounds().max());
         assertEquals(2, set.changedBlockCount());
         assertEquals(1, set.unchangedBlockCount());
         assertEquals(
@@ -84,13 +100,14 @@ final class FaweWorldEditorTest {
     void rejectsRegionTouchingTooManyChunksBeforeResolvingWorld() {
         FakePlatform platform = new FakePlatform();
         FaweWorldEditor editor =
-                new FaweWorldEditor(platform, 1_000, 2, 3, MAX_BLOCK_STATE_PATTERNS);
+                new FaweWorldEditor(platform, 1_000, 2, MAX_BLOCK_STATE_PATTERNS, 100, history(3));
 
         OperationException exception =
                 assertThrows(
                         OperationException.class,
                         () ->
-                                editor.fillRegion(
+                                fill(
+                                        editor,
                                         new FillRegion.Request(
                                                 "world",
                                                 position(0, 0, 0),
@@ -107,13 +124,15 @@ final class FaweWorldEditorTest {
     @Test
     void rejectsSetBlockChunkLimitBeforeWorldAndStatePreparation() {
         FakePlatform platform = new FakePlatform();
-        FaweWorldEditor editor = new FaweWorldEditor(platform, 100, 1, 3, MAX_BLOCK_STATE_PATTERNS);
+        FaweWorldEditor editor =
+                new FaweWorldEditor(platform, 100, 1, MAX_BLOCK_STATE_PATTERNS, 100, history(3));
 
         OperationException exception =
                 assertThrows(
                         OperationException.class,
                         () ->
-                                editor.setBlocks(
+                                set(
+                                        editor,
                                         setRequest(
                                                 "world",
                                                 List.of(placement(0, 0, 0), placement(16, 0, 0)),
@@ -128,18 +147,20 @@ final class FaweWorldEditorTest {
     void validatesRequestsWithoutLeakingRuntimeExceptions() {
         FaweWorldEditor editor = editor(new FakePlatform(), 3);
 
-        assertFailure(OperationFailure.INVALID_REQUEST, () -> editor.fillRegion(null));
-        assertFailure(OperationFailure.INVALID_REQUEST, () -> editor.setBlocks(null));
+        assertFailure(OperationFailure.INVALID_REQUEST, () -> fill(editor, null));
+        assertFailure(OperationFailure.INVALID_REQUEST, () -> set(editor, null));
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
-                        editor.fillRegion(
+                        fill(
+                                editor,
                                 new FillRegion.Request(
                                         "world", null, position(0, 0, 0), palette(), 0, false)));
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
-                        editor.setBlocks(
+                        set(
+                                editor,
                                 new SetBlocks.Request(
                                         "world",
                                         position(0, 0, 0),
@@ -150,7 +171,8 @@ final class FaweWorldEditorTest {
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
-                        editor.setBlocks(
+                        set(
+                                editor,
                                 new SetBlocks.Request(
                                         "world",
                                         position(0, 0, 0),
@@ -161,7 +183,8 @@ final class FaweWorldEditorTest {
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
-                        editor.setBlocks(
+                        set(
+                                editor,
                                 setRequest(
                                         "world",
                                         List.of(placement(0, 0, 0), placement(0, 0, 0)),
@@ -169,7 +192,8 @@ final class FaweWorldEditorTest {
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
-                        editor.setBlocks(
+                        set(
+                                editor,
                                 new SetBlocks.Request(
                                         "world",
                                         position(Integer.MAX_VALUE, 0, 0),
@@ -177,15 +201,15 @@ final class FaweWorldEditorTest {
                                         List.of(new SetBlocks.Placement(0, 1, 0, 0)),
                                         0,
                                         false)));
-        assertFailure(
-                OperationFailure.INVALID_REQUEST,
-                () -> editor.undoLastEdit(new UndoLastEdit.Request(" ")));
+        assertFailure(OperationFailure.INVALID_REQUEST, () -> undo(editor, " ", UUID.randomUUID()));
         FaweWorldEditor smallEditor =
-                new FaweWorldEditor(new FakePlatform(), 3, 10, 3, MAX_BLOCK_STATE_PATTERNS);
+                new FaweWorldEditor(
+                        new FakePlatform(), 3, 10, MAX_BLOCK_STATE_PATTERNS, 3, history(3));
         assertFailure(
                 OperationFailure.REGION_TOO_LARGE,
                 () ->
-                        smallEditor.setBlocks(
+                        set(
+                                smallEditor,
                                 setRequest(
                                         "world",
                                         List.of(
@@ -197,7 +221,8 @@ final class FaweWorldEditorTest {
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
-                        editor.replaceRegionBlocks(
+                        replace(
+                                editor,
                                 new ReplaceRegionBlocks.Request(
                                         "world",
                                         position(0, 0, 0),
@@ -210,7 +235,8 @@ final class FaweWorldEditorTest {
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
-                        editor.fillRegion(
+                        fill(
+                                editor,
                                 new FillRegion.Request(
                                         "world",
                                         position(0, 0, 0),
@@ -221,7 +247,8 @@ final class FaweWorldEditorTest {
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
-                        editor.fillRegion(
+                        fill(
+                                editor,
                                 new FillRegion.Request(
                                         "world",
                                         position(0, 0, 0),
@@ -242,7 +269,8 @@ final class FaweWorldEditorTest {
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
-                        editor.setBlocks(
+                        set(
+                                editor,
                                 new SetBlocks.Request(
                                         "world",
                                         null,
@@ -253,7 +281,8 @@ final class FaweWorldEditorTest {
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
-                        editor.setBlocks(
+                        set(
+                                editor,
                                 new SetBlocks.Request(
                                         "world",
                                         origin,
@@ -264,7 +293,8 @@ final class FaweWorldEditorTest {
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
-                        editor.setBlocks(
+                        set(
+                                editor,
                                 new SetBlocks.Request(
                                         "world",
                                         origin,
@@ -275,7 +305,8 @@ final class FaweWorldEditorTest {
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
-                        editor.setBlocks(
+                        set(
+                                editor,
                                 new SetBlocks.Request(
                                         "world",
                                         origin,
@@ -291,7 +322,8 @@ final class FaweWorldEditorTest {
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
-                        editor.setBlocks(
+                        set(
+                                editor,
                                 new SetBlocks.Request(
                                         "world",
                                         origin,
@@ -310,7 +342,8 @@ final class FaweWorldEditorTest {
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
-                        editor.setBlocks(
+                        set(
+                                editor,
                                 new SetBlocks.Request(
                                         "world",
                                         origin,
@@ -321,7 +354,8 @@ final class FaweWorldEditorTest {
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
-                        editor.setBlocks(
+                        set(
+                                editor,
                                 new SetBlocks.Request(
                                         "world",
                                         origin,
@@ -332,7 +366,8 @@ final class FaweWorldEditorTest {
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
-                        editor.setBlocks(
+                        set(
+                                editor,
                                 new SetBlocks.Request(
                                         "world",
                                         origin,
@@ -348,8 +383,7 @@ final class FaweWorldEditorTest {
         platform.failExecution = true;
         FaweWorldEditor editor = editor(platform, 3);
 
-        assertThrows(
-                OperationException.class, () -> editor.fillRegion(fillRequest("world", false)));
+        assertThrows(OperationException.class, () -> fill(editor, fillRequest("world", false)));
 
         assertNotNull(platform.lastPrepared);
         assertTrue(platform.lastPrepared.closed);
@@ -362,12 +396,15 @@ final class FaweWorldEditorTest {
         platform.failClose = true;
         FaweWorldEditor editor = editor(platform, 3);
 
-        assertThrows(
-                OperationException.class, () -> editor.fillRegion(fillRequest("world", false)));
+        OperationException failure =
+                assertThrows(
+                        OperationException.class, () -> fill(editor, fillRequest("world", false)));
         platform.failClose = false;
 
-        UndoLastEdit.Result result = editor.undoLastEdit(new UndoLastEdit.Request("world"));
-        assertEquals(1, result.changedBlockCount());
+        EditRecord retained = history(editor, "world").getFirst();
+        assertEquals(java.util.Optional.of(retained.editId()), failure.editId());
+        UndoEdit.Result result = undo(editor, "world", retained.editId());
+        assertEquals(1, result.edit().changedBlockCount());
     }
 
     @Test
@@ -377,63 +414,88 @@ final class FaweWorldEditorTest {
         platform.failWithRecovery = true;
         FaweWorldEditor editor = editor(platform, 0);
 
-        assertThrows(
-                EditRecoveryException.class, () -> editor.fillRegion(fillRequest("world", false)));
+        OperationException failure =
+                assertThrows(
+                        OperationException.class, () -> fill(editor, fillRequest("world", false)));
         platform.failWithRecovery = false;
 
-        assertFailure(
-                OperationFailure.WORLD_BUSY, () -> editor.fillRegion(fillRequest("world", false)));
+        assertFailure(OperationFailure.WORLD_BUSY, () -> fill(editor, fillRequest("world", false)));
 
-        UndoLastEdit.Result result = editor.undoLastEdit(new UndoLastEdit.Request("world"));
-        assertEquals(3, result.changedBlockCount());
-        assertEquals(3, editor.fillRegion(fillRequest("world", false)).changedBlockCount());
+        EditRecord recovery = history(editor, "world").getFirst();
+        assertEquals(java.util.Optional.of(recovery.editId()), failure.editId());
+        assertEquals(EditStatus.RECOVERY_REQUIRED, recovery.status());
+        UndoEdit.Result result = undo(editor, "world", recovery.editId());
+        assertEquals(3, result.edit().changedBlockCount());
+        assertEquals(3, fill(editor, fillRequest("world", false)).changedBlockCount());
+    }
+
+    @Test
+    void rejectsBeforeMutationWhenPinnedRecoveryExhaustsGlobalHistoryCapacity() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        platform.nextChanges = 1;
+        platform.failWithRecovery = true;
+        FaweWorldEditor editor =
+                new FaweWorldEditor(
+                        platform,
+                        100,
+                        10,
+                        MAX_BLOCK_STATE_PATTERNS,
+                        1,
+                        new DirtConfig.EditHistory(1, 1, 1));
+        assertThrows(OperationException.class, () -> fill(editor, fillRequest("world", false)));
+        platform.failWithRecovery = false;
+
+        OperationException capacity =
+                assertThrows(
+                        OperationException.class, () -> fill(editor, fillRequest("other", false)));
+
+        assertEquals(OperationFailure.HISTORY_CAPACITY_EXCEEDED, capacity.failure());
+        assertTrue(capacity.editId().isEmpty());
+        assertTrue(platform.undoneIds.isEmpty());
+        assertTrue(history(editor, "other").isEmpty());
+        assertEquals(EditStatus.RECOVERY_REQUIRED, history(editor, "world").getFirst().status());
     }
 
     @Test
     void dryRunsAndNoOpsNeverEnterUndoHistory() throws Exception {
         FakePlatform platform = new FakePlatform();
         platform.nextChanges = 1;
-        platform.returnUndoForDryRun = true;
         FaweWorldEditor editor = editor(platform, 3);
 
-        editor.fillRegion(fillRequest("world", true));
-        assertFailure(
-                OperationFailure.NOTHING_TO_UNDO,
-                () -> editor.undoLastEdit(new UndoLastEdit.Request("world")));
+        FillRegion.Result preview = fill(editor, fillRequest("world", true));
+        assertEquals(EditOutcome.PREVIEW, preview.outcome());
+        assertNull(preview.edit());
+        assertTrue(history(editor, "world").isEmpty());
 
         platform.nextChanges = 0;
-        editor.fillRegion(fillRequest("world", false));
-        assertFailure(
-                OperationFailure.NOTHING_TO_UNDO,
-                () -> editor.undoLastEdit(new UndoLastEdit.Request("world")));
+        FillRegion.Result noChange = fill(editor, fillRequest("world", false));
+        assertEquals(EditOutcome.NO_CHANGE, noChange.outcome());
+        assertNull(noChange.edit());
+        assertTrue(history(editor, "world").isEmpty());
     }
 
     @Test
-    void zeroCapacityStoresNothingAndBoundedHistoryEvictsOldest() throws Exception {
-        FakePlatform zeroPlatform = new FakePlatform();
-        zeroPlatform.nextChanges = 1;
-        FaweWorldEditor zero =
-                new FaweWorldEditor(zeroPlatform, 100, 10, 0, MAX_BLOCK_STATE_PATTERNS);
-        zero.fillRegion(fillRequest("world", false));
-        assertFailure(
-                OperationFailure.NOTHING_TO_UNDO,
-                () -> zero.undoLastEdit(new UndoLastEdit.Request("world")));
-
+    void boundedHistoryEvictsOldestAndListsNewestFirst() throws Exception {
         FakePlatform boundedPlatform = new FakePlatform();
         boundedPlatform.nextChanges = 1;
         FaweWorldEditor bounded =
-                new FaweWorldEditor(boundedPlatform, 100, 10, 2, MAX_BLOCK_STATE_PATTERNS);
-        bounded.fillRegion(fillRequest("world", false));
-        bounded.fillRegion(fillRequest("world", false));
-        bounded.fillRegion(fillRequest("world", false));
+                new FaweWorldEditor(
+                        boundedPlatform, 100, 10, MAX_BLOCK_STATE_PATTERNS, 100, history(2));
+        EditRecord first = fill(bounded, fillRequest("world", false)).edit();
+        EditRecord second = fill(bounded, fillRequest("world", false)).edit();
+        EditRecord third = fill(bounded, fillRequest("world", false)).edit();
 
-        bounded.undoLastEdit(new UndoLastEdit.Request("world"));
-        bounded.undoLastEdit(new UndoLastEdit.Request("world"));
+        assertEquals(List.of(third, second), history(bounded, "world"));
+        assertFailure(
+                OperationFailure.EDIT_NOT_LATEST, () -> undo(bounded, "world", second.editId()));
+        assertFailure(
+                OperationFailure.EDIT_NOT_FOUND, () -> undo(bounded, "world", first.editId()));
+        undo(bounded, "world", third.editId());
+        undo(bounded, "world", second.editId());
 
         assertEquals(List.of(3, 2), boundedPlatform.undoneIds);
         assertFailure(
-                OperationFailure.NOTHING_TO_UNDO,
-                () -> bounded.undoLastEdit(new UndoLastEdit.Request("world")));
+                OperationFailure.EDIT_NOT_FOUND, () -> undo(bounded, "world", second.editId()));
     }
 
     @Test
@@ -441,20 +503,19 @@ final class FaweWorldEditorTest {
         FakePlatform platform = new FakePlatform();
         platform.nextChanges = 7;
         FaweWorldEditor editor = editor(platform, 3);
-        editor.fillRegion(fillRequest("world", false));
+        EditRecord edit = fill(editor, fillRequest("world", false)).edit();
         platform.failUndo = true;
 
-        assertThrows(
-                OperationException.class,
-                () -> editor.undoLastEdit(new UndoLastEdit.Request("world")));
+        OperationException failure =
+                assertThrows(OperationException.class, () -> undo(editor, "world", edit.editId()));
+        assertEquals(java.util.Optional.of(edit.editId()), failure.editId());
+        assertEquals(EditStatus.RECOVERY_REQUIRED, history(editor, "world").getFirst().status());
         platform.failUndo = false;
-        UndoLastEdit.Result result = editor.undoLastEdit(new UndoLastEdit.Request("world"));
+        UndoEdit.Result result = undo(editor, "world", edit.editId());
 
-        assertEquals(7, result.changedBlockCount());
+        assertEquals(7, result.edit().changedBlockCount());
         assertEquals(List.of(1), platform.undoneIds);
-        assertFailure(
-                OperationFailure.NOTHING_TO_UNDO,
-                () -> editor.undoLastEdit(new UndoLastEdit.Request("world")));
+        assertFailure(OperationFailure.EDIT_NOT_FOUND, () -> undo(editor, "world", edit.editId()));
     }
 
     @Test
@@ -462,13 +523,11 @@ final class FaweWorldEditorTest {
         FakePlatform platform = new FakePlatform();
         platform.nextChanges = 1;
         FaweWorldEditor editor = editor(platform, 3);
-        editor.fillRegion(fillRequest("world", false));
+        EditRecord edit = fill(editor, fillRequest("world", false)).edit();
 
         editor.invalidateWorld(WORLD_ID);
 
-        assertFailure(
-                OperationFailure.NOTHING_TO_UNDO,
-                () -> editor.undoLastEdit(new UndoLastEdit.Request("world")));
+        assertFailure(OperationFailure.EDIT_NOT_FOUND, () -> undo(editor, "world", edit.editId()));
     }
 
     @Test
@@ -479,16 +538,51 @@ final class FaweWorldEditorTest {
         FaweWorldEditor editor = editor(platform, 3);
 
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var edit = executor.submit(() -> editor.fillRegion(fillRequest("world", false)));
+            var edit = executor.submit(() -> fill(editor, fillRequest("world", false)));
             platform.entered.await();
             editor.invalidateWorld(WORLD_ID);
             platform.release.countDown();
-            edit.get();
+            OperationException failure =
+                    (OperationException)
+                            assertThrows(java.util.concurrent.ExecutionException.class, edit::get)
+                                    .getCause();
+            assertEquals(OperationFailure.WORLD_UNAVAILABLE, failure.failure());
+            assertTrue(failure.editId().isEmpty());
+            assertTrue(failure.getMessage().contains("was rolled back"));
         }
 
-        assertFailure(
-                OperationFailure.NOTHING_TO_UNDO,
-                () -> editor.undoLastEdit(new UndoLastEdit.Request("world")));
+        assertEquals(List.of(1), platform.undoneIds);
+        assertTrue(platform.lastUndo.closed);
+        assertTrue(history(editor, "world").isEmpty());
+    }
+
+    @Test
+    void invalidationRollbackFailureReturnsTheUnrecoveredEditId() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        platform.nextChanges = 1;
+        platform.blockWorld = WORLD_ID;
+        platform.failUndo = true;
+        FaweWorldEditor editor = editor(platform, 3);
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var edit = executor.submit(() -> fill(editor, fillRequest("world", false)));
+            platform.entered.await();
+            editor.invalidateWorld(WORLD_ID);
+            platform.release.countDown();
+            OperationException failure =
+                    (OperationException)
+                            assertThrows(java.util.concurrent.ExecutionException.class, edit::get)
+                                    .getCause();
+
+            assertEquals(OperationFailure.WORLD_UNAVAILABLE, failure.failure());
+            assertTrue(failure.editId().isPresent());
+            assertTrue(failure.getMessage().contains("rollback failed"));
+            assertTrue(failure.getMessage().contains(failure.editId().orElseThrow().toString()));
+        }
+
+        assertTrue(platform.undoneIds.isEmpty());
+        assertTrue(platform.lastUndo.closed);
+        assertTrue(history(editor, "world").isEmpty());
     }
 
     @Test
@@ -499,13 +593,12 @@ final class FaweWorldEditorTest {
         FaweWorldEditor editor = editor(platform, 3);
 
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var first = executor.submit(() -> editor.fillRegion(fillRequest("world", false)));
+            var first = executor.submit(() -> fill(editor, fillRequest("world", false)));
             platform.entered.await();
 
             assertFailure(
-                    OperationFailure.WORLD_BUSY,
-                    () -> editor.fillRegion(fillRequest("world", false)));
-            FillRegion.Result other = editor.fillRegion(fillRequest("other", false));
+                    OperationFailure.WORLD_BUSY, () -> fill(editor, fillRequest("world", false)));
+            FillRegion.Result other = fill(editor, fillRequest("other", false));
             assertEquals("other", other.world());
 
             platform.release.countDown();
@@ -525,7 +618,7 @@ final class FaweWorldEditorTest {
         assertTrue(platform.closed);
         assertFailure(
                 OperationFailure.WORLD_UNAVAILABLE,
-                () -> editor.fillRegion(fillRequest("world", false)));
+                () -> fill(editor, fillRequest("world", false)));
     }
 
     @Test
@@ -536,7 +629,7 @@ final class FaweWorldEditorTest {
         FaweWorldEditor editor = editor(platform, 3);
 
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var edit = executor.submit(() -> editor.fillRegion(fillRequest("world", false)));
+            var edit = executor.submit(() -> fill(editor, fillRequest("world", false)));
             platform.entered.await();
 
             assertFalse(editor.closeIfQuiescent());
@@ -544,7 +637,7 @@ final class FaweWorldEditorTest {
             assertFalse(platform.closed);
 
             platform.release.countDown();
-            edit.get();
+            assertThrows(java.util.concurrent.ExecutionException.class, edit::get);
         }
 
         assertTrue(editor.closeIfQuiescent());
@@ -573,7 +666,37 @@ final class FaweWorldEditorTest {
     }
 
     private static FaweWorldEditor editor(FakePlatform platform, int history) {
-        return new FaweWorldEditor(platform, 100, 10, history, MAX_BLOCK_STATE_PATTERNS);
+        return new FaweWorldEditor(
+                platform, 100, 10, MAX_BLOCK_STATE_PATTERNS, 100, history(Math.max(1, history)));
+    }
+
+    private static DirtConfig.EditHistory history(int perWorld) {
+        return new DirtConfig.EditHistory(perWorld, Math.max(perWorld, 10), 1_000);
+    }
+
+    private static FillRegion.Result fill(FaweWorldEditor editor, FillRegion.Request request)
+            throws OperationException {
+        return editor.fillRegion(request, CALL_ID);
+    }
+
+    private static SetBlocks.Result set(FaweWorldEditor editor, SetBlocks.Request request)
+            throws OperationException {
+        return editor.setBlocks(request, CALL_ID);
+    }
+
+    private static ReplaceRegionBlocks.Result replace(
+            FaweWorldEditor editor, ReplaceRegionBlocks.Request request) throws OperationException {
+        return editor.replaceRegionBlocks(request, CALL_ID);
+    }
+
+    private static List<EditRecord> history(FaweWorldEditor editor, String world)
+            throws OperationException {
+        return editor.getEditHistory(new GetEditHistory.Request(world)).edits();
+    }
+
+    private static UndoEdit.Result undo(FaweWorldEditor editor, String world, UUID editId)
+            throws OperationException {
+        return editor.undoEdit(new UndoEdit.Request(world, editId), CALL_ID);
     }
 
     private static FillRegion.Request fillRequest(String world, boolean dryRun) {
@@ -627,10 +750,10 @@ final class FaweWorldEditorTest {
         private boolean failWithRecovery;
         private boolean failClose;
         private boolean failUndo;
-        private boolean returnUndoForDryRun;
         private boolean stopping;
         private boolean closed;
         private FakePrepared lastPrepared;
+        private FakeUndo lastUndo;
 
         private FakePlatform() {
             this.worlds.put("world", new FakeWorld(WORLD_ID, "world"));
@@ -674,33 +797,37 @@ final class FaweWorldEditorTest {
         }
 
         @Override
-        public EditResult replace(PreparedReplace prepared, Cuboid region, boolean dryRun)
+        public EditResult replace(
+                PreparedReplace prepared,
+                Cuboid region,
+                boolean dryRun,
+                MutationAdmission admission)
                 throws OperationException {
-            return execute((FakePrepared) prepared, dryRun);
+            return execute((FakePrepared) prepared, dryRun, admission);
         }
 
         @Override
-        public EditResult fill(PreparedFill prepared, Cuboid region, boolean dryRun)
+        public EditResult fill(
+                PreparedFill prepared, Cuboid region, boolean dryRun, MutationAdmission admission)
                 throws OperationException {
-            return execute((FakePrepared) prepared, dryRun);
+            return execute((FakePrepared) prepared, dryRun, admission);
         }
 
         @Override
-        public EditResult set(PreparedSet prepared, boolean dryRun) throws OperationException {
-            return execute((FakePrepared) prepared, dryRun);
+        public EditResult set(PreparedSet prepared, boolean dryRun, MutationAdmission admission)
+                throws OperationException {
+            return execute((FakePrepared) prepared, dryRun, admission);
         }
 
-        private EditResult execute(FakePrepared prepared, boolean dryRun)
+        private EditResult execute(
+                FakePrepared prepared, boolean dryRun, MutationAdmission admission)
                 throws OperationException {
             prepared.executedBeforeClose = !prepared.closed;
             if (this.failExecution) {
                 throw new OperationException(OperationFailure.WORLD_UNAVAILABLE, "edit failed");
             }
-            if (this.failWithRecovery) {
-                throw new EditRecoveryException(
-                        "rollback failed",
-                        new IllegalStateException("edit failed"),
-                        new FakeUndo(++this.nextUndoId, this.nextChanges));
+            if (!dryRun && this.nextChanges > 0) {
+                admission.beforeMutation();
             }
             if (prepared.world.id().equals(this.blockWorld)) {
                 this.entered.countDown();
@@ -712,11 +839,16 @@ final class FaweWorldEditorTest {
                             OperationFailure.WORLD_UNAVAILABLE, "interrupted", exception);
                 }
             }
-            FakeUndo undo =
-                    this.nextChanges > 0 && (!dryRun || this.returnUndoForDryRun)
+            if (this.failWithRecovery) {
+                this.lastUndo = new FakeUndo(++this.nextUndoId, this.nextChanges);
+                throw new EditRecoveryException(
+                        "rollback failed", new IllegalStateException("edit failed"), this.lastUndo);
+            }
+            this.lastUndo =
+                    this.nextChanges > 0 && !dryRun
                             ? new FakeUndo(++this.nextUndoId, this.nextChanges)
                             : null;
-            return new EditResult(this.nextMatches, this.nextChanges, undo);
+            return new EditResult(this.nextMatches, this.nextChanges, this.lastUndo);
         }
 
         @Override
@@ -784,5 +916,28 @@ final class FaweWorldEditorTest {
 
     private record FakeWorld(UUID id, String name) implements EditPlatform.WorldHandle {}
 
-    private record FakeUndo(int id, long changedBlockCount) implements EditPlatform.UndoToken {}
+    private static final class FakeUndo implements EditPlatform.UndoToken {
+        private final int id;
+        private final long changedBlockCount;
+        private boolean closed;
+
+        private FakeUndo(int id, long changedBlockCount) {
+            this.id = id;
+            this.changedBlockCount = changedBlockCount;
+        }
+
+        private int id() {
+            return this.id;
+        }
+
+        @Override
+        public long changedBlockCount() {
+            return this.changedBlockCount;
+        }
+
+        @Override
+        public void close() {
+            this.closed = true;
+        }
+    }
 }

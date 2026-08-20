@@ -11,6 +11,8 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
+import java.util.Objects;
+import java.util.UUID;
 
 public final class BridgeExchange {
     private final HttpExchange exchange;
@@ -85,12 +87,45 @@ public final class BridgeExchange {
         this.world = world;
     }
 
+    public UUID requiredCallId() throws InvalidRequestException {
+        String value = this.exchange.getRequestHeaders().getFirst("X-Dirt-Call-Id");
+        if (value == null) {
+            throw new InvalidRequestException("X-Dirt-Call-Id must be a UUID version 4");
+        }
+        try {
+            UUID callId = UUID.fromString(value);
+            if (callId.version() != 4
+                    || callId.variant() != 2
+                    || !callId.toString().equals(value.toLowerCase(Locale.ROOT))) {
+                throw new IllegalArgumentException("not a canonical UUID version 4");
+            }
+            return callId;
+        } catch (IllegalArgumentException exception) {
+            throw new InvalidRequestException("X-Dirt-Call-Id must be a UUID version 4");
+        }
+    }
+
     public void ok(Object body) throws IOException {
         send(200, body);
     }
 
     void sendError(int status, String code, String message) throws IOException {
-        send(status, new ErrorEnvelope(new ErrorDetail(code, message)));
+        JsonObject detail = new JsonObject();
+        detail.addProperty("code", code);
+        detail.addProperty("message", message);
+        JsonObject envelope = new JsonObject();
+        envelope.add("error", detail);
+        send(status, envelope);
+    }
+
+    void sendError(int status, String code, String message, UUID editId) throws IOException {
+        JsonObject detail = new JsonObject();
+        detail.addProperty("code", code);
+        detail.addProperty("message", message);
+        detail.addProperty("editId", Objects.requireNonNull(editId, "editId").toString());
+        JsonObject envelope = new JsonObject();
+        envelope.add("error", detail);
+        send(status, envelope);
     }
 
     void allow(String method) {
@@ -125,8 +160,4 @@ public final class BridgeExchange {
             output.write(bytes);
         }
     }
-
-    private record ErrorEnvelope(ErrorDetail error) {}
-
-    private record ErrorDetail(String code, String message) {}
 }

@@ -195,15 +195,27 @@ restart_server() {
 
   local was_running=false
   local shutdown_log_start=0
+  local shutdown_log_identity=''
+  local current_log_identity=''
+  local current_log_lines=0
   if session_exists; then
     was_running=true
     if [[ -f "${run_dir}/logs/latest.log" ]]; then
       shutdown_log_start="$(wc -l < "${run_dir}/logs/latest.log")"
+      shutdown_log_identity="$(stat -c '%d:%i' "${run_dir}/logs/latest.log")"
     fi
     send_console_command 'kick @a Server restarting for a Dirt MCP update. Please reconnect in a moment.'
   fi
   stop_server
   if [[ "${was_running}" == true ]]; then
+    if [[ -n "${shutdown_log_identity}" && -f "${run_dir}/logs/latest.log" ]]; then
+      current_log_identity="$(stat -c '%d:%i' "${run_dir}/logs/latest.log")"
+      current_log_lines="$(wc -l < "${run_dir}/logs/latest.log")"
+      if [[ "${current_log_identity}" != "${shutdown_log_identity}" ]] \
+        || (( current_log_lines < shutdown_log_start )); then
+        shutdown_log_start=0
+      fi
+    fi
     "${repo_root}/scripts/validate-paper-log" shutdown "${shutdown_log_start}"
   fi
   start_server "${mc_port}" "${bridge_port}"

@@ -8,7 +8,7 @@ of individual block calls.
 The core workflow is:
 
 ```text
-inspect region -> describe an edit -> optionally preview -> execute -> inspect -> undo
+inspect -> describe -> preview -> execute -> verify -> get history -> undo newest by ID
 ```
 
 ## Product principles
@@ -35,14 +35,19 @@ V1 provides these world capabilities:
 - replace matching blocks;
 - fill a bounded region;
 - set weighted-palette block states at origin-relative offsets as one edit;
-- undo the most recent Dirt MCP edit in a world; and
-- run an ordered batch of registered Minecraft commands with operator-level
-  permissions through a non-player Paper sender.
+- receive identity and bounds metadata for every committed non-empty edit;
+- inspect the retained, undoable edit history for a loaded world;
+- undo the identified newest retained edit.
 
 [FastAsyncWorldEdit (FAWE)](https://github.com/IntellectualSites/FastAsyncWorldEdit)
 is a required server dependency. Dirt MCP validates inputs and enforces
 configurable region and changed-block limits. Server access and world backups
 remain the operator's responsibility.
+
+V1 edit history is deliberately bounded and in memory. Positive per-world,
+global-entry, and aggregate changed-block limits keep every listed record backed
+by live undo data. History survives chunk unloads but not world unloads or Paper
+restarts; it is not a substitute for backups.
 
 ## Outside v1
 
@@ -50,6 +55,6 @@ remain the operator's responsibility.
 - terrain, biome, road, or vegetation tools;
 - image rendering or visual critique;
 - Mineflayer or an embodied player;
-- durable jobs or undo history across restarts;
+- durable jobs or retained edit history across restarts;
 - databases, web interfaces, Docker orchestration, and remote MCP hosting; and
 - support for multiple Paper versions.

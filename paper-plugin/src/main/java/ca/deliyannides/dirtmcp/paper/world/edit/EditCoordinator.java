@@ -3,34 +3,52 @@ package ca.deliyannides.dirtmcp.paper.world.edit;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
 final class EditCoordinator implements AutoCloseable {
     private final Map<UUID, WorldState> worlds = new HashMap<>();
-    private final int historyCapacity;
+    private final LinkedHashMap<UUID, RetainedEdit> retained = new LinkedHashMap<>();
+    private final int maxEntriesPerWorld;
+    private final int maxEntriesTotal;
+    private final long maxRetainedChangedBlocks;
     private final AtomicBoolean closed = new AtomicBoolean();
+    private long retainedChangedBlocks;
+    private int reservedHistoryEntries;
+    private long reservedHistoryChangedBlocks;
 
-    EditCoordinator(int historyCapacity) {
-        if (historyCapacity < 0) {
-            throw new IllegalArgumentException("Undo history capacity must be non-negative");
+    EditCoordinator(int maxEntriesPerWorld, int maxEntriesTotal, long maxRetainedChangedBlocks) {
+        if (maxEntriesPerWorld < 1
+                || maxEntriesTotal < maxEntriesPerWorld
+                || maxRetainedChangedBlocks < 1) {
+            throw new IllegalArgumentException("Edit history limits are invalid");
         }
-        this.historyCapacity = historyCapacity;
+        this.maxEntriesPerWorld = maxEntriesPerWorld;
+        this.maxEntriesTotal = maxEntriesTotal;
+        this.maxRetainedChangedBlocks = maxRetainedChangedBlocks;
     }
 
-    Lease enter(UUID worldId, String worldName) throws OperationException {
-        return enter(worldId, worldName, false);
+    Lease enterMutation(UUID worldId, String worldName) throws OperationException {
+        return enter(worldId, worldName, Access.MUTATION);
     }
 
-    Lease enterForUndo(UUID worldId, String worldName) throws OperationException {
-        return enter(worldId, worldName, true);
+    Lease enterHistory(UUID worldId, String worldName) throws OperationException {
+        return enter(worldId, worldName, Access.HISTORY);
     }
 
-    private Lease enter(UUID worldId, String worldName, boolean allowRecovery)
-            throws OperationException {
+    Lease enterUndo(UUID worldId, String worldName) throws OperationException {
+        return enter(worldId, worldName, Access.UNDO);
+    }
+
+    private Lease enter(UUID worldId, String worldName, Access access) throws OperationException {
         WorldState state;
         long generation;
         synchronized (this.worlds) {
@@ -39,9 +57,9 @@ final class EditCoordinator implements AutoCloseable {
             }
             state = this.worlds.computeIfAbsent(worldId, ignored -> new WorldState());
             if (state.invalidated) {
-                throw busy(worldName);
+                throw unavailable(worldName);
             }
-            if (state.recovery != null && !allowRecovery) {
+            if (access == Access.MUTATION && recoveryRequired(state)) {
                 throw recoveryRequired(worldName);
             }
             state.reservations++;
@@ -51,12 +69,17 @@ final class EditCoordinator implements AutoCloseable {
             releaseReservation(worldId, state);
             throw busy(worldName);
         }
-        if (this.closed.get()) {
-            state.lock.unlock();
-            releaseReservation(worldId, state);
-            throw unavailable();
+        synchronized (this.worlds) {
+            if (this.closed.get() || state.invalidated || generation != state.generation) {
+                state.lock.unlock();
+                releaseReservation(worldId, state);
+                throw unavailable(worldName);
+            }
+            if (access == Access.UNDO) {
+                state.undoActive = true;
+            }
         }
-        return new Lease(worldId, state, generation);
+        return new Lease(worldId, state, generation, access);
     }
 
     void invalidate(UUID worldId) {
@@ -65,8 +88,6 @@ final class EditCoordinator implements AutoCloseable {
             if (state != null) {
                 state.generation++;
                 state.invalidated = true;
-                state.history.clear();
-                state.recovery = null;
                 pruneInvalidated(worldId, state);
             }
         }
@@ -81,9 +102,8 @@ final class EditCoordinator implements AutoCloseable {
                     WorldState state = iterator.next().getValue();
                     state.generation++;
                     state.invalidated = true;
-                    state.history.clear();
-                    state.recovery = null;
                     if (state.reservations == 0) {
+                        discardHistory(state);
                         iterator.remove();
                     }
                 }
@@ -103,6 +123,18 @@ final class EditCoordinator implements AutoCloseable {
         }
     }
 
+    int retainedEditCount() {
+        synchronized (this.worlds) {
+            return this.retained.size();
+        }
+    }
+
+    long retainedChangedBlockCount() {
+        synchronized (this.worlds) {
+            return this.retainedChangedBlocks;
+        }
+    }
+
     private void releaseReservation(UUID worldId, WorldState state) {
         synchronized (this.worlds) {
             state.reservations--;
@@ -112,14 +144,131 @@ final class EditCoordinator implements AutoCloseable {
 
     private void pruneInvalidated(UUID worldId, WorldState state) {
         if (state.invalidated && state.reservations == 0) {
+            discardHistory(state);
             this.worlds.remove(worldId, state);
         }
+    }
+
+    private void discardHistory(WorldState state) {
+        while (!state.history.isEmpty()) {
+            evict(state.history.peekFirst(), true);
+        }
+    }
+
+    private void reserveHistory(WorldState state, long maximumChangedBlocks)
+            throws OperationException {
+        if (maximumChangedBlocks < 1 || maximumChangedBlocks > this.maxRetainedChangedBlocks) {
+            throw historyCapacity();
+        }
+
+        Set<RetainedEdit> evictions = new LinkedHashSet<>();
+        long evictedChangedBlocks = 0;
+        while ((long) state.history.size() + state.historyReservations + 1 - evictions.size()
+                > this.maxEntriesPerWorld) {
+            RetainedEdit eviction = oldestEvictable(state.history, evictions);
+            if (eviction == null) {
+                throw historyCapacity();
+            }
+            evictions.add(eviction);
+            evictedChangedBlocks += eviction.record().changedBlockCount();
+        }
+
+        while ((long) this.retained.size() + this.reservedHistoryEntries + 1 - evictions.size()
+                        > this.maxEntriesTotal
+                || this.retainedChangedBlocks
+                                + this.reservedHistoryChangedBlocks
+                                + maximumChangedBlocks
+                                - evictedChangedBlocks
+                        > this.maxRetainedChangedBlocks) {
+            RetainedEdit eviction = oldestEvictable(this.retained.values(), evictions);
+            if (eviction == null) {
+                throw historyCapacity();
+            }
+            evictions.add(eviction);
+            evictedChangedBlocks += eviction.record().changedBlockCount();
+        }
+
+        for (RetainedEdit eviction : evictions) {
+            evict(eviction, true);
+        }
+        state.historyReservations++;
+        this.reservedHistoryEntries++;
+        this.reservedHistoryChangedBlocks += maximumChangedBlocks;
+    }
+
+    private void retainReserved(WorldState state, RetainedEdit edit, long reservedChangedBlocks) {
+        UUID editId = edit.record().editId();
+        if (this.retained.containsKey(editId)) {
+            throw new IllegalArgumentException("Duplicate edit ID: " + editId);
+        }
+        if (reservedChangedBlocks < edit.record().changedBlockCount()
+                || state.historyReservations < 1
+                || this.reservedHistoryEntries < 1
+                || this.reservedHistoryChangedBlocks < reservedChangedBlocks) {
+            throw new IllegalStateException("Edit exceeds its retained-history reservation");
+        }
+        releaseHistoryReservation(state, reservedChangedBlocks);
+        state.history.addLast(edit);
+        this.retained.put(editId, edit);
+        this.retainedChangedBlocks += edit.record().changedBlockCount();
+        if (state.history.size() > this.maxEntriesPerWorld
+                || this.retained.size() > this.maxEntriesTotal
+                || this.retainedChangedBlocks > this.maxRetainedChangedBlocks) {
+            throw new IllegalStateException("Retained edit exceeded its bounded reservation");
+        }
+    }
+
+    private void releaseHistoryReservation(WorldState state, long changedBlocks) {
+        state.historyReservations--;
+        this.reservedHistoryEntries--;
+        this.reservedHistoryChangedBlocks -= changedBlocks;
+    }
+
+    private void removeWithoutClosing(RetainedEdit edit) {
+        WorldState owner = this.worlds.get(edit.record().worldId());
+        if (owner != null) {
+            owner.history.removeLastOccurrence(edit);
+        }
+        if (this.retained.remove(edit.record().editId(), edit)) {
+            this.retainedChangedBlocks -= edit.record().changedBlockCount();
+        }
+    }
+
+    private void evict(RetainedEdit edit, boolean closeToken) {
+        removeWithoutClosing(edit);
+        if (closeToken) {
+            edit.undo().close();
+        }
+    }
+
+    private RetainedEdit oldestEvictable(
+            Iterable<RetainedEdit> candidates, Set<RetainedEdit> excluded) {
+        for (RetainedEdit candidate : candidates) {
+            WorldState owner = this.worlds.get(candidate.record().worldId());
+            if (!excluded.contains(candidate)
+                    && candidate.record().status() == EditStatus.COMMITTED
+                    && (owner == null || !owner.undoActive)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static boolean recoveryRequired(WorldState state) {
+        RetainedEdit latest = state.history.peekLast();
+        return latest != null && latest.record().status() == EditStatus.RECOVERY_REQUIRED;
     }
 
     private static OperationException busy(String worldName) {
         return new OperationException(
                 OperationFailure.WORLD_BUSY,
-                "Another Dirt MCP edit is running in world: " + worldName);
+                "Another Dirt MCP world operation is running in world: " + worldName);
+    }
+
+    private static OperationException historyCapacity() {
+        return new OperationException(
+                OperationFailure.HISTORY_CAPACITY_EXCEEDED,
+                "No bounded edit-history slot is available; the world was not changed");
     }
 
     private static OperationException unavailable() {
@@ -127,70 +276,138 @@ final class EditCoordinator implements AutoCloseable {
                 OperationFailure.WORLD_UNAVAILABLE, "World editing is stopping");
     }
 
+    private static OperationException unavailable(String worldName) {
+        return new OperationException(
+                OperationFailure.WORLD_UNAVAILABLE, "World is unavailable: " + worldName);
+    }
+
     private static OperationException recoveryRequired(String worldName) {
         return new OperationException(
                 OperationFailure.WORLD_BUSY,
-                "The previous failed edit must be undone before editing world: " + worldName);
+                "The newest retained edit requires recovery before editing world: " + worldName);
     }
 
     final class Lease implements AutoCloseable {
         private final UUID worldId;
         private final WorldState state;
         private final long generation;
+        private final Access access;
+        private long historyReservation;
         private boolean released;
 
-        private Lease(UUID worldId, WorldState state, long generation) {
+        private Lease(UUID worldId, WorldState state, long generation, Access access) {
             this.worldId = worldId;
             this.state = state;
             this.generation = generation;
+            this.access = access;
         }
 
-        EditPlatform.UndoToken latestUndo() {
+        void reserveHistory(long maximumChangedBlocks) throws OperationException {
+            synchronized (worlds) {
+                if (this.access != Access.MUTATION
+                        || this.historyReservation != 0
+                        || this.released) {
+                    throw new IllegalStateException(
+                            "History can only be reserved once by a current mutation lease");
+                }
+                if (this.generation != this.state.generation
+                        || this.state.invalidated
+                        || closed.get()) {
+                    throw unavailable();
+                }
+                EditCoordinator.this.reserveHistory(this.state, maximumChangedBlocks);
+                this.historyReservation = maximumChangedBlocks;
+            }
+        }
+
+        boolean remember(RetainedEdit edit) {
+            synchronized (worlds) {
+                if (!isCurrent(edit)) {
+                    return false;
+                }
+                requireHistoryReservation();
+                retainReserved(this.state, edit, this.historyReservation);
+                this.historyReservation = 0;
+                return true;
+            }
+        }
+
+        void rememberRecovery(RetainedEdit edit) {
+            synchronized (worlds) {
+                if (isCurrent(edit)) {
+                    requireHistoryReservation();
+                    retainReserved(this.state, edit.requireRecovery(), this.historyReservation);
+                    this.historyReservation = 0;
+                } else {
+                    edit.undo().close();
+                }
+            }
+        }
+
+        RetainedEdit latest() {
             synchronized (worlds) {
                 return this.generation == this.state.generation
-                        ? (this.state.recovery != null
-                                ? this.state.recovery
-                                : this.state.history.peekLast())
+                        ? this.state.history.peekLast()
                         : null;
             }
         }
 
-        void remember(EditPlatform.UndoToken undo) {
-            remember(undo, historyCapacity);
-        }
-
-        void rememberRecovery(EditPlatform.UndoToken undo) {
+        boolean contains(UUID editId) {
             synchronized (worlds) {
-                if (undo != null && this.generation == this.state.generation && !closed.get()) {
-                    this.state.recovery = undo;
+                if (this.generation != this.state.generation) {
+                    return false;
                 }
+                return this.state.history.stream()
+                        .anyMatch(edit -> edit.record().editId().equals(editId));
             }
         }
 
-        private void remember(EditPlatform.UndoToken undo, int capacity) {
+        List<EditRecord> history() {
             synchronized (worlds) {
-                if (undo == null
-                        || capacity == 0
-                        || this.generation != this.state.generation
-                        || closed.get()) {
+                if (this.generation != this.state.generation) {
+                    return List.of();
+                }
+                List<EditRecord> snapshot = new ArrayList<>(this.state.history.size());
+                var iterator = this.state.history.descendingIterator();
+                while (iterator.hasNext()) {
+                    snapshot.add(iterator.next().record());
+                }
+                return List.copyOf(snapshot);
+            }
+        }
+
+        void markRecoveryRequired(RetainedEdit expected) {
+            synchronized (worlds) {
+                if (this.generation != this.state.generation
+                        || this.state.history.peekLast() != expected) {
                     return;
                 }
-                this.state.history.addLast(undo);
-                while (this.state.history.size() > capacity) {
-                    this.state.history.pollFirst();
+                RetainedEdit replacement = expected.requireRecovery();
+                this.state.history.removeLast();
+                this.state.history.addLast(replacement);
+                retained.replace(expected.record().editId(), expected, replacement);
+            }
+        }
+
+        void removeLatest(RetainedEdit expected) {
+            synchronized (worlds) {
+                if (this.generation == this.state.generation
+                        && this.state.history.peekLast() == expected) {
+                    evict(expected, true);
                 }
             }
         }
 
-        void removeLatest(EditPlatform.UndoToken undo) {
-            synchronized (worlds) {
-                if (this.generation == this.state.generation) {
-                    if (this.state.recovery == undo) {
-                        this.state.recovery = null;
-                    } else {
-                        this.state.history.removeLastOccurrence(undo);
-                    }
-                }
+        private boolean isCurrent(RetainedEdit edit) {
+            return edit.record().worldId().equals(this.worldId)
+                    && this.generation == this.state.generation
+                    && !closed.get();
+        }
+
+        private void requireHistoryReservation() {
+            if (this.historyReservation < 1) {
+                throw new IllegalStateException(
+                        "A live edit must reserve bounded history before mutation");
             }
         }
 
@@ -198,18 +415,34 @@ final class EditCoordinator implements AutoCloseable {
         public void close() {
             if (!this.released) {
                 this.released = true;
+                synchronized (worlds) {
+                    if (this.historyReservation != 0) {
+                        releaseHistoryReservation(this.state, this.historyReservation);
+                        this.historyReservation = 0;
+                    }
+                    if (this.access == Access.UNDO) {
+                        this.state.undoActive = false;
+                    }
+                }
                 this.state.lock.unlock();
                 releaseReservation(this.worldId, this.state);
             }
         }
     }
 
+    private enum Access {
+        MUTATION,
+        HISTORY,
+        UNDO
+    }
+
     private static final class WorldState {
         private final ReentrantLock lock = new ReentrantLock();
-        private final ArrayDeque<EditPlatform.UndoToken> history = new ArrayDeque<>();
-        private EditPlatform.UndoToken recovery;
+        private final ArrayDeque<RetainedEdit> history = new ArrayDeque<>();
         private long generation;
         private int reservations;
+        private int historyReservations;
         private boolean invalidated;
+        private boolean undoActive;
     }
 }

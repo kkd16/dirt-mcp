@@ -51,7 +51,7 @@ export class BridgeClient {
       const body: unknown = await response.json().catch(() => undefined);
       const detail = BridgeErrorResponseSchema.safeParse(body);
       if (detail.success) {
-        throw new ToolFailure(detail.data.error.code, detail.data.error.message);
+        throw new ToolFailure(detail.data.error.code, detail.data.error.message, detail.data.error.editId);
       }
       throw new ToolFailure('bridge_http_error', `Paper bridge returned unstructured HTTP ${response.status}.`);
     }

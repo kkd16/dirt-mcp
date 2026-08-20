@@ -3,17 +3,15 @@ package ca.deliyannides.dirtmcp.paper.bootstrap;
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeServer;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.CountRegionBlockStatesEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.FillRegionEndpoint;
+import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetEditHistoryEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetRegionBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.PingEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ReplaceRegionBlocksEndpoint;
-import ca.deliyannides.dirtmcp.paper.bridge.endpoint.RunMinecraftCommandsEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ScanOrthographicViewEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ServerStatusEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.SetBlocksEndpoint;
-import ca.deliyannides.dirtmcp.paper.bridge.endpoint.UndoLastEditEndpoint;
-import ca.deliyannides.dirtmcp.paper.command.BukkitCommandAccess;
+import ca.deliyannides.dirtmcp.paper.bridge.endpoint.UndoEditEndpoint;
 import ca.deliyannides.dirtmcp.paper.command.DirtAdminCommand;
-import ca.deliyannides.dirtmcp.paper.command.PaperCommandService;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.platform.PaperMainThread;
 import ca.deliyannides.dirtmcp.paper.status.BukkitServerStatusAccess;
@@ -69,12 +67,6 @@ public final class DirtRuntime implements AutoCloseable {
                     new PaperServerStatusService(
                             mainThread, new BukkitServerStatusAccess(plugin, config));
             DirtConfig.Limits limits = config.limits();
-            PaperCommandService commands =
-                    new PaperCommandService(
-                            mainThread,
-                            new BukkitCommandAccess(plugin),
-                            limits.maxCommandsPerRequest(),
-                            limits.maxCommandFeedbackCharacters());
             RegionInspectionService inspection =
                     new RegionInspectionService(
                             new PaperRegionSnapshotSource(plugin.getServer(), mainThread),
@@ -84,7 +76,7 @@ public final class DirtRuntime implements AutoCloseable {
                             limits.maxInspectionTouchedChunks(),
                             limits.maxBlockStatePatterns(),
                             config.bridge().maxConcurrentInspections());
-            worldEditor = new FaweWorldEditor(plugin, mainThread, limits);
+            worldEditor = new FaweWorldEditor(plugin, mainThread, limits, config.editHistory());
             worldLifecycle = new WorldEditLifecycleListener(worldEditor);
             plugin.getServer().getPluginManager().registerEvents(worldLifecycle, plugin);
 
@@ -101,8 +93,8 @@ public final class DirtRuntime implements AutoCloseable {
                                     new ReplaceRegionBlocksEndpoint(worldEditor, config),
                                     new FillRegionEndpoint(worldEditor, config),
                                     new SetBlocksEndpoint(worldEditor, config),
-                                    new UndoLastEditEndpoint(worldEditor),
-                                    new RunMinecraftCommandsEndpoint(commands)),
+                                    new GetEditHistoryEndpoint(worldEditor),
+                                    new UndoEditEndpoint(worldEditor)),
                             plugin.getLogger());
             bridge.start();
             registerAdminCommand(plugin, config, status);

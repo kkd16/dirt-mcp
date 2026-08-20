@@ -129,9 +129,10 @@ final class DirtAdminCommandTest {
         assertTrue(plain.contains("max-inspection-volume  8192"));
         assertTrue(plain.contains("default-inspection-results  256"));
         assertTrue(plain.contains("max-inspection-results  1024"));
-        assertTrue(plain.contains("max-commands-per-request  8"));
-        assertTrue(plain.contains("max-command-feedback-characters  4096"));
-        assertTrue(plain.contains("undo-history-per-world  10"));
+        assertTrue(plain.contains("EDIT HISTORY"));
+        assertTrue(plain.contains("max-entries-per-world  10"));
+        assertTrue(plain.contains("max-entries-total  50"));
+        assertTrue(plain.contains("max-retained-changed-blocks  655360"));
         assertTrue(plain.contains("region-blocks-include-air  true"));
         assertTrue(plain.contains("region-blocks-format  runs"));
         assertTrue(plain.contains("edit-dry-run  true"));
@@ -173,8 +174,8 @@ final class DirtAdminCommandTest {
     private static DirtConfig config() {
         return new DirtConfig(
                 new DirtConfig.Bridge(8_765, 0, 5, 6, 32, 30, 2),
-                new DirtConfig.Limits(
-                        262_144, 131_072, 128, 16, 32, 65_536, 8_192, 256, 1_024, 8, 4_096, 10),
+                new DirtConfig.Limits(262_144, 131_072, 128, 16, 32, 65_536, 8_192, 256, 1_024),
+                new DirtConfig.EditHistory(10, 50, 655_360),
                 new DirtConfig.Defaults(true, "runs", true));
     }
 
@@ -205,7 +206,8 @@ final class DirtAdminCommandTest {
                                         false,
                                         false,
                                         1)),
-                        new GetServerStatus.EffectiveLimits(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0),
+                        new GetServerStatus.EffectiveLimits(1, 1, 1, 1, 1, 1, 1, 1, 1),
+                        new GetServerStatus.EffectiveEditHistory(2, 3, 4),
                         new GetServerStatus.EffectiveDefaults(false, "blocks", false));
         return () -> result;
     }

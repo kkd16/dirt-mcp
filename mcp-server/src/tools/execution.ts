@@ -36,7 +36,14 @@ export async function executeToolCall(
     }
     return {
       content: [{ type: 'text', text: `${details.failureContext}: ${failure.message}` }],
-      structuredContent: { error: { code: failure.code, message: failure.message } },
+      structuredContent: {
+        error: {
+          code: failure.code,
+          message: failure.message,
+          callId,
+          ...(failure.editId === undefined ? {} : { editId: failure.editId }),
+        },
+      },
       isError: true,
     };
   } finally {

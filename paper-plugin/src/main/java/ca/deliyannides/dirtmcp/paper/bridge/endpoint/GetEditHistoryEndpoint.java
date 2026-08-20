@@ -5,22 +5,22 @@ import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
 import ca.deliyannides.dirtmcp.paper.bridge.InvalidRequestException;
 import ca.deliyannides.dirtmcp.paper.bridge.RequestDecoder;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
-import ca.deliyannides.dirtmcp.paper.world.edit.UndoLastEdit;
+import ca.deliyannides.dirtmcp.paper.world.edit.GetEditHistory;
 import java.io.IOException;
 import java.util.Objects;
 
-public final class UndoLastEditEndpoint implements BridgeEndpoint {
-    private final UndoLastEdit operation;
-    private final RequestDecoder<UndoLastEdit.Request> decoder;
+public final class GetEditHistoryEndpoint implements BridgeEndpoint {
+    private final GetEditHistory operation;
+    private final RequestDecoder<GetEditHistory.Request> decoder;
 
-    public UndoLastEditEndpoint(UndoLastEdit operation) {
+    public GetEditHistoryEndpoint(GetEditHistory operation) {
         this.operation = Objects.requireNonNull(operation, "operation");
-        this.decoder = UndoLastEditRequestDecoder::decode;
+        this.decoder = GetEditHistoryRequestDecoder::decode;
     }
 
     @Override
     public String operation() {
-        return "undo_last_dirt_edit";
+        return "get_edit_history";
     }
 
     @Override
@@ -30,19 +30,19 @@ public final class UndoLastEditEndpoint implements BridgeEndpoint {
 
     @Override
     public String path() {
-        return "/v1/undo-last-dirt-edit";
+        return "/v1/get-edit-history";
     }
 
     @Override
     public void handle(BridgeExchange exchange)
             throws IOException, InvalidRequestException, OperationException {
-        UndoLastEdit.Request request = this.decoder.decode(exchange);
+        GetEditHistory.Request request = this.decoder.decode(exchange);
         exchange.world(request.world());
-        exchange.ok(this.operation.undoLastEdit(request));
+        exchange.ok(this.operation.getEditHistory(request));
     }
 
     @Override
     public String internalErrorMessage() {
-        return "The edit could not be undone";
+        return "Edit history could not be read";
     }
 }

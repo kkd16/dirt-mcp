@@ -2,8 +2,11 @@ package ca.deliyannides.dirtmcp.paper.operation;
 
 public enum OperationFailure {
     CHANGE_LIMIT_EXCEEDED,
+    EDIT_NOT_FOUND,
+    EDIT_NOT_LATEST,
+    HISTORY_CAPACITY_EXCEEDED,
+    INTERNAL_ERROR,
     INVALID_REQUEST,
-    NOTHING_TO_UNDO,
     REGION_TOO_LARGE,
     RESULT_TOO_LARGE,
     SERVER_UNAVAILABLE,

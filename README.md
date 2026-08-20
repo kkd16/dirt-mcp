@@ -9,15 +9,16 @@ while Paper remains the owner of the live world.
 
 The repository ships the Paper plugin, authenticated loopback bridge, and MCP
 tools for server status, bounded inspection, FAWE-backed cuboid and palette-based
-edits, undo, and ordered operator-level Minecraft command dispatch.
+edits, inspectable edit history, and ID-checked undo.
 
 ## Platform support
 
 Dirt MCP tracks the latest stable Paper release only. The current baseline is:
 
-- Paper 26.2;
+- [Paper 26.2](https://docs.papermc.io/paper/dev/project-setup/), pinned to API
+  build 112 stable;
 - FAWE 2.15.4;
-- Java 25;
+- [Java 25](https://docs.papermc.io/paper/getting-started/#requirements);
 - Node.js 26 or newer;
 - pnpm 11.22.0 or newer.
 
@@ -70,7 +71,8 @@ The bridge always binds to `127.0.0.1`; do not proxy or expose it publicly. Give
 the same `DIRT_MCP_BRIDGE_TOKEN` to the MCP process. Tokens must satisfy the
 configured byte minimum, which defaults to 32; lowering it weakens
 authentication. Never commit or log tokens. All settings are validated at
-startup; active tool limits and defaults are reported by `get_server_status`.
+startup; active tool limits, edit-history configuration, and defaults are
+reported by `get_server_status`.
 Restart Paper after changing them. Configuration is intentionally strict:
 missing, unknown, or invalid keys stop plugin startup instead of being migrated
 or silently ignored. Compare an existing file with the shipped `config.yml`
@@ -113,26 +115,49 @@ For another MCP host, configure it to launch the source build:
 
 The current tool surface contains `ping_server`, `get_server_status`,
 `count_region_block_states`, `get_region_blocks`, `scan_orthographic_view`,
-`replace_region_blocks`, `fill_region`, `set_blocks`, `undo_last_dirt_edit`, and
-`run_minecraft_commands`. See the [v1 behavior guide](docs/v1-design.md) for
-selection and execution semantics, and the
+`replace_region_blocks`, `fill_region`, `set_blocks`, `get_edit_history`,
+and `undo_edit`. See the
+[v1 behavior guide](docs/v1-design.md) for selection and execution semantics, and the
 [OpenAPI contract](protocol/openapi.yaml) for exact bridge schemas.
 
 `set_blocks` takes one absolute `origin`, one or more weighted `palettes`, and
 compact `[paletteIndex, x, y, z]` placements whose coordinates are signed
 origin-relative offsets. Each palette uses the same optional-weight and seed
 rules as the cuboid edit tools. Dirt validates every position before one FAWE
-edit, rejects duplicates, and records a non-empty batch as one undo entry. The
-shipped 256 KiB request limit bounds request memory. Placement does not request
-Minecraft neighbor physics.
+edit, rejects duplicates, and retains a committed non-empty batch as one history
+record. The shipped 256 KiB request limit bounds request memory. Placement does
+not request Minecraft neighbor physics.
 
-`run_minecraft_commands` accepts a non-empty command array and dispatches it in
-order with console-equivalent permissions. Its Paper sender is not a player, so
-player-only commands, `@s`, and relative-position behavior differ from a real
-operator. Command effects are immediate and are not covered by Dirt edit limits
-or `undo_last_dirt_edit`. Each result retains synchronous command `feedback`;
-dispatch failures also return an actionable underlying `message` and Paper's
-original wrapper text as `rawMessage`.
+Every block-edit response has an `outcome` and an `edit` field. A `committed`
+result contains an `EditRecord` with its generated `editId`, creating `callId`,
+operation, world name and UUID, normalized bounds, positive changed-block count,
+completion timestamp, and status. A `preview` or `no_change` result returns
+`edit: null` because there is no mutation to undo.
+
+`get_edit_history` returns the retained records for one loaded world, newest
+first. `undo_edit` requires both the world and the exact `editId` of the newest
+record; it rejects a retained older ID instead of undoing a different edit.
+Direct bridge callers must supply a canonical UUIDv4 `X-Dirt-Call-Id` header for
+each block edit and undo; the MCP server generates it automatically. Successful
+undo returns the original record plus `undoCallId` and `undoneAt`.
+
+History is bounded by positive per-world, global-entry, and aggregate
+changed-block limits. The shipped defaults are 20 entries per world, 100 total,
+and 1,310,720 retained changed blocks. Immediately before a non-empty edit first
+mutates the world, Dirt reserves worst-case space under all three limits,
+evicting old committed records if needed. If protected history leaves no room,
+the request fails with `history_capacity_exceeded` before changing the world.
+Recovery-required records therefore remain visible and retryable without making
+the limits soft. History and its FAWE change data are discarded on world unload
+or Paper restart. An undo may asynchronously reload its previously existing
+chunks without generating terrain and holds plugin chunk tickets only while it
+runs.
+
+Every MCP failure includes its generated `error.callId`. A bridge or MCP error
+also includes `error.editId` when the request leaves a committed or
+recovery-required history record, or rollback cannot be confirmed after the
+world becomes unavailable. Callers can reconcile that transaction through
+`get_edit_history`; an absent record means no retryable history remains.
 
 ## Local development
 
@@ -206,9 +231,9 @@ Node, MCP, contract, configuration, package, and formatting checks, validates
 the built Paper JAR, restarts the managed server, runs live bridge, Paper, and
 FAWE coverage, and rejects serious lifecycle log failures. The live suite
 temporarily force-loads chunk `0,0`, verifies status and inspection paths,
-mutates a bounded fixture through fill, replacement, palette-based setting, and command
-dispatch, checks result caps, exact states, no-ops, and undo, then restores the
-prior world state. Run it without concurrent Dirt MCP edits.
+mutates a bounded fixture through fill, replacement, and palette-based setting,
+checks result caps, exact states, no-ops, history metadata, and ID-checked undo,
+then restores the prior world state. Run it without concurrent Dirt MCP edits.
 
 The offline Java suite publishes a complete JaCoCo report at
 `paper-plugin/build/reports/jacoco/test/html/index.html` and enforces 70% line

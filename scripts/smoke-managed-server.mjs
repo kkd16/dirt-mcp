@@ -2,6 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
@@ -23,11 +24,14 @@ const max = { x: 1, y: 1, z: 1 };
 const stairMin = { x: 2, y: 0, z: 0 };
 const stairMiddle = { x: 3, y: 0, z: 0 };
 const stairMax = { x: 4, y: 0, z: 0 };
-const commandPosition = { x: 5, y: 0, z: 0 };
-const setPosition = { x: 6, y: 0, z: 0 };
+const setMin = { x: 5, y: 0, z: 0 };
+const setMax = { x: 6, y: 0, z: 0 };
 const northStairs = 'minecraft:dark_oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]';
 const southStairs = 'minecraft:dark_oak_stairs[facing=south,half=bottom,shape=straight,waterlogged=false]';
 const baseUrl = `http://127.0.0.1:${bridgePort}`;
+const uuidV4Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const editIdsToUndo = [];
+const editMutationPaths = new Set(['/v1/replace-region-blocks', '/v1/fill-region', '/v1/set-blocks']);
 
 async function bridgeGet(path) {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -38,23 +42,39 @@ async function bridgeGet(path) {
 }
 
 async function bridgeResponse(path, body) {
+  const callId = randomUUID();
   const response = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
+      'X-Dirt-Call-Id': callId,
     },
     body: JSON.stringify(body),
   });
   const text = await response.text();
   const document = JSON.parse(text);
-  return { status: response.status, ok: response.ok, body: document };
+  if (response.ok && editMutationPaths.has(path) && document.outcome === 'committed') {
+    const editId = document.edit?.editId;
+    if (typeof editId === 'string' && uuidV4Pattern.test(editId)) {
+      editIdsToUndo.push(editId);
+    }
+  }
+  if (response.ok && path === '/v1/undo-edit' && editIdsToUndo.at(-1) === body.editId) {
+    editIdsToUndo.pop();
+  }
+  return { status: response.status, ok: response.ok, body: document, callId };
 }
 
 async function bridgeRequest(path, body) {
   const response = await bridgeResponse(path, body);
   if (!response.ok) {
     throw new Error(`${path} returned ${response.status}: ${JSON.stringify(response.body)}`);
+  }
+  if (response.body.undoCallId !== undefined) {
+    assert.equal(response.body.undoCallId, response.callId);
+  } else if (response.body.edit?.callId !== undefined) {
+    assert.equal(response.body.edit.callId, response.callId);
   }
   return response.body;
 }
@@ -76,12 +96,11 @@ async function paperCommand(command) {
 }
 
 async function restoreBlocks(blocks) {
-  const result = await bridgeRequest('/v1/run-minecraft-commands', {
-    commands: blocks.map(
-      ({ position, blockState }) => `setblock ${position.x} ${position.y} ${position.z} ${blockState} replace`,
-    ),
-  });
-  assert.ok(result.results.every(({ outcome }) => outcome === 'dispatched'));
+  for (const { position, blockState } of blocks) {
+    // Fixture restoration is deliberately serial through the managed Paper console.
+    // oxlint-disable-next-line eslint/no-await-in-loop
+    await paperCommand(`setblock ${position.x} ${position.y} ${position.z} ${blockState} replace`);
+  }
 }
 
 async function waitForRegion(region) {
@@ -157,10 +176,32 @@ function assertExactBlocks(inspection, blockState) {
 
 const region = { world, min, max };
 const stairRegion = { world, min: stairMin, max: stairMax };
-let editsToUndo = 0;
+
+function retainEdit(result, operation) {
+  assert.equal(result.outcome, 'committed');
+  assert.ok(result.edit);
+  assert.match(result.edit.editId, uuidV4Pattern);
+  assert.match(result.edit.callId, uuidV4Pattern);
+  assert.equal(result.edit.operation, operation);
+  assert.equal(result.edit.world, world);
+  assert.deepEqual(result.edit.bounds, result.bounds);
+  assert.equal(result.edit.changedBlockCount, result.changedBlockCount);
+  assert.equal(result.edit.status, 'committed');
+  assert.ok(!Number.isNaN(Date.parse(result.edit.completedAt)));
+}
+
+async function undoRetained(result) {
+  const editId = editIdsToUndo.at(-1);
+  assert.equal(editId, result.edit.editId);
+  const undone = await bridgeRequest('/v1/undo-edit', { world, editId });
+  assert.equal(undone.edit.editId, editId);
+  assert.equal(undone.edit.changedBlockCount, result.changedBlockCount);
+  assert.match(undone.undoCallId, uuidV4Pattern);
+  assert.ok(!Number.isNaN(Date.parse(undone.undoneAt)));
+  return undone;
+}
 let fixtureIsForceLoaded = false;
 let originalStairFixture;
-let originalCommandFixture;
 let originalSetFixture;
 try {
   const unauthenticated = await fetch(`${baseUrl}/v1/ping`);
@@ -185,27 +226,9 @@ try {
   assert.ok(serverStatus.limits.maxRegionVolume > 0);
   assert.ok(serverStatus.limits.maxTouchedChunks > 0);
   assert.ok(serverStatus.limits.defaultInspectionResultLimit <= serverStatus.limits.maxInspectionResultLimit);
-  assert.ok(serverStatus.limits.maxCommandsPerRequest > 0);
-  assert.ok(serverStatus.limits.maxCommandFeedbackCharacters > 0);
-
-  const adminCommandRun = await bridgeRequest('/v1/run-minecraft-commands', {
-    commands: ['dirt', 'dirt version', 'dirt status', 'dirt config'],
-  });
-  assert.equal(adminCommandRun.feedbackTruncated, false);
-  assert.deepEqual(
-    adminCommandRun.results.map(({ outcome }) => outcome),
-    ['dispatched', 'dispatched', 'dispatched', 'dispatched'],
-  );
-  const [helpFeedback, versionFeedback, statusFeedback, configFeedback] = adminCommandRun.results.map(({ feedback }) =>
-    feedback.join('\n'),
-  );
-  assert.ok(helpFeedback.includes('DIRT MCP  /  Command Center'));
-  assert.ok(helpFeedback.includes('/dirt status'));
-  assert.ok(versionFeedback.includes(`Version  ${serverStatus.builds.dirtMcp}`));
-  assert.ok(statusFeedback.includes('● Running'));
-  assert.ok(statusFeedback.includes(`Bridge  127.0.0.1:${bridgePort}`));
-  assert.ok(configFeedback.includes('DIRT MCP  /  Active Configuration'));
-  assert.ok(configFeedback.includes(`port  ${bridgePort}`));
+  assert.ok(serverStatus.editHistory.maxEntriesPerWorld > 0);
+  assert.ok(serverStatus.editHistory.maxEntriesTotal >= serverStatus.editHistory.maxEntriesPerWorld);
+  assert.ok(serverStatus.editHistory.maxRetainedChangedBlocks >= serverStatus.limits.maxChangedBlocks);
 
   const chunkHeavyRegion = await bridgeResponse('/v1/count-region-block-states', {
     world,
@@ -219,94 +242,10 @@ try {
   fixtureIsForceLoaded = true;
   const original = await waitForRegion(region);
 
-  originalCommandFixture = await bridgeRequest('/v1/get-region-blocks', {
-    world,
-    min: commandPosition,
-    max: commandPosition,
-    includeAir: true,
-  });
-  assert.equal(originalCommandFixture.matchedBlockCount, 1);
-  const commandRun = await bridgeRequest('/v1/run-minecraft-commands', {
-    commands: [
-      `/setblock ${commandPosition.x} ${commandPosition.y} ${commandPosition.z} minecraft:stone replace`,
-      `setblock ${commandPosition.x} ${commandPosition.y} ${commandPosition.z} minecraft:gold_block replace`,
-    ],
-  });
-  assert.deepEqual(commandRun.sender, {
-    name: 'FeedbackForwardingSender',
-    isOperator: true,
-    isPlayer: false,
-  });
-  assert.equal(commandRun.feedbackTruncated, false);
-  assert.deepEqual(
-    commandRun.results.map(({ outcome }) => outcome),
-    ['dispatched', 'dispatched'],
-  );
-  assert.ok(commandRun.results.every(({ feedback }) => feedback.length > 0));
-  const afterCommandRun = await bridgeRequest('/v1/get-region-blocks', {
-    world,
-    min: commandPosition,
-    max: commandPosition,
-  });
-  assert.equal(afterCommandRun.blocks[0].blockState, 'minecraft:gold_block');
-
-  const continuedCommandRun = await bridgeRequest('/v1/run-minecraft-commands', {
-    commands: [
-      'dirt_command_that_does_not_exist',
-      `setblock ${commandPosition.x} ${commandPosition.y} ${commandPosition.z} minecraft:diamond_block replace`,
-    ],
-  });
-  assert.deepEqual(
-    continuedCommandRun.results.map(({ outcome }) => outcome),
-    ['not_found', 'dispatched'],
-  );
-  const afterContinuedCommandRun = await bridgeRequest('/v1/get-region-blocks', {
-    world,
-    min: commandPosition,
-    max: commandPosition,
-  });
-  assert.equal(afterContinuedCommandRun.blocks[0].blockState, 'minecraft:diamond_block');
-
-  const vanillaCommandRun = await bridgeRequest('/v1/run-minecraft-commands', {
-    commands: [
-      'time query gametime',
-      `execute if block ${commandPosition.x} ${commandPosition.y} ${commandPosition.z} minecraft:diamond_block run time query gametime`,
-    ],
-  });
-  assert.deepEqual(
-    vanillaCommandRun.results.map(({ outcome }) => outcome),
-    ['dispatched', 'dispatched'],
-  );
-  assert.ok(vanillaCommandRun.results.every(({ feedback }) => feedback.length > 0));
-  assert.ok(vanillaCommandRun.results.every(({ message }) => message === null));
-  assert.ok(vanillaCommandRun.results.every(({ rawMessage }) => rawMessage === null));
-
-  const invalidSyntaxRun = await bridgeRequest('/v1/run-minecraft-commands', {
-    commands: [
-      'time query daytime',
-      `setblock ${commandPosition.x} ${commandPosition.y} ${commandPosition.z} minecraft:diamond_block replace`,
-    ],
-  });
-  assert.deepEqual(
-    invalidSyntaxRun.results.map(({ outcome }) => outcome),
-    ['dispatch_failed', 'dispatched'],
-  );
-  assert.ok(invalidSyntaxRun.results[0].message.length > 0);
-  assert.ok(invalidSyntaxRun.results[0].rawMessage.length > 0);
-  assert.notEqual(invalidSyntaxRun.results[0].message, invalidSyntaxRun.results[0].rawMessage);
-
-  await restoreBlocks([
-    {
-      position: commandPosition,
-      blockState: originalCommandFixture.blocks[0].blockState,
-    },
-  ]);
-  originalCommandFixture = undefined;
-
   originalSetFixture = await bridgeRequest('/v1/get-region-blocks', {
     world,
-    min: commandPosition,
-    max: setPosition,
+    min: setMin,
+    max: setMax,
     includeAir: true,
   });
   assert.equal(originalSetFixture.matchedBlockCount, 2);
@@ -335,7 +274,7 @@ try {
 
   const setPreview = await bridgeRequest('/v1/set-blocks', {
     world,
-    origin: commandPosition,
+    origin: setMin,
     palettes: setPalettes,
     placements: [
       [0, 0, 0, 0],
@@ -347,14 +286,15 @@ try {
   assert.equal(setPreview.world, world);
   assert.deepEqual(setPreview.palettes, setPalettes);
   assert.equal(setPreview.seed, setSeed);
-  assert.equal(setPreview.dryRun, true);
+  assert.equal(setPreview.outcome, 'preview');
+  assert.equal(setPreview.edit, null);
   assert.equal(setPreview.blockCount, 2);
   assert.ok(setPreview.changedBlockCount === 1 || setPreview.changedBlockCount === 2);
   assert.equal(setPreview.unchangedBlockCount, 2 - setPreview.changedBlockCount);
 
   const duplicateSet = await bridgeResponse('/v1/set-blocks', {
     world,
-    origin: commandPosition,
+    origin: setMin,
     palettes: [[{ blockState: firstSetState }], [{ blockState: secondSetState }]],
     placements: [
       [0, 0, 0, 0],
@@ -366,7 +306,7 @@ try {
 
   const invalidSet = await bridgeResponse('/v1/set-blocks', {
     world,
-    origin: commandPosition,
+    origin: setMin,
     palettes: [[{ blockState: firstSetState }], [{ blockState: 'minecraft:not_a_block' }]],
     placements: [
       [0, 0, 0, 0],
@@ -377,15 +317,15 @@ try {
   assert.equal(invalidSet.body.error.code, 'invalid_request');
   const afterInvalidSet = await bridgeRequest('/v1/get-region-blocks', {
     world,
-    min: commandPosition,
-    max: setPosition,
+    min: setMin,
+    max: setMax,
     includeAir: true,
   });
   assert.deepEqual(sortedBlockKeys(afterInvalidSet.blocks), sortedBlockKeys(originalSetFixture.blocks));
 
-  const setResult = await bridgeRequest('/v1/set-blocks', {
+  const setResponse = await bridgeResponse('/v1/set-blocks', {
     world,
-    origin: commandPosition,
+    origin: setMin,
     palettes: setPalettes,
     placements: [
       [0, 0, 0, 0],
@@ -393,33 +333,35 @@ try {
     ],
     seed: setSeed,
   });
-  editsToUndo += setResult.changedBlockCount > 0 ? 1 : 0;
-  assert.deepEqual(setResult, {
-    world,
-    palettes: setPalettes,
-    seed: setSeed,
-    dryRun: false,
-    blockCount: 2,
-    changedBlockCount: setPreview.changedBlockCount,
-    unchangedBlockCount: setPreview.unchangedBlockCount,
-  });
+  assert.equal(setResponse.status, 200);
+  const setResult = setResponse.body;
+  retainEdit(setResult, 'set_blocks');
+  assert.equal(setResult.edit.callId, setResponse.callId);
+  assert.equal(setResult.world, world);
+  assert.deepEqual(setResult.bounds, { min: setMin, max: setMax });
+  assert.deepEqual(setResult.palettes, setPalettes);
+  assert.equal(setResult.seed, setSeed);
+  assert.equal(setResult.blockCount, 2);
+  assert.equal(setResult.changedBlockCount, setPreview.changedBlockCount);
+  assert.equal(setResult.unchangedBlockCount, setPreview.unchangedBlockCount);
+  const setHistory = await bridgeRequest('/v1/get-edit-history', { world });
+  assert.equal(setHistory.world, world);
+  assert.deepEqual(setHistory.edits[0], setResult.edit);
   const afterSet = await bridgeRequest('/v1/get-region-blocks', {
     world,
-    min: commandPosition,
-    max: setPosition,
+    min: setMin,
+    max: setMax,
   });
   const afterSetStates = new Map(
     afterSet.blocks.map((block) => [`${block.position.x},${block.position.y},${block.position.z}`, block.blockState]),
   );
   assert.ok([firstOriginalState, firstSetState].includes(afterSetStates.get('5,0,0')));
   assert.equal(afterSetStates.get('6,0,0'), secondSetState);
-  const setUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
-  editsToUndo -= 1;
-  assert.equal(setUndone.changedBlockCount, setResult.changedBlockCount);
+  await undoRetained(setResult);
   const afterSetUndo = await bridgeRequest('/v1/get-region-blocks', {
     world,
-    min: commandPosition,
-    max: setPosition,
+    min: setMin,
+    max: setMax,
     includeAir: true,
   });
   assert.deepEqual(sortedBlockKeys(afterSetUndo.blocks), sortedBlockKeys(originalSetFixture.blocks));
@@ -438,7 +380,8 @@ try {
   });
   const previewState = preview.destinationPalette[0].blockState;
   const alreadyMatching = original.blockStateCounts[previewState] ?? 0;
-  assert.equal(preview.dryRun, true);
+  assert.equal(preview.outcome, 'preview');
+  assert.equal(preview.edit, null);
   assert.equal(preview.volume, original.volume);
   assert.equal(preview.changedBlockCount, original.volume - alreadyMatching);
   assert.ok(preview.changedBlockCount > 0, 'Smoke destination must change at least one block');
@@ -448,9 +391,8 @@ try {
     destinationPalette: [{ blockState: fillBlockState }],
     seed: preview.seed,
   });
-  editsToUndo += filled.changedBlockCount > 0 ? 1 : 0;
+  retainEdit(filled, 'fill_region');
   const filledState = filled.destinationPalette[0].blockState;
-  assert.equal(filled.dryRun, false);
   assert.equal(filled.seed, preview.seed);
   assert.deepEqual(filled.destinationPalette, preview.destinationPalette);
   assert.equal(filled.changedBlockCount, preview.changedBlockCount);
@@ -563,7 +505,8 @@ try {
     destinationPalette: [{ blockState: replacementDestination }],
     dryRun: true,
   });
-  assert.equal(replacePreview.dryRun, true);
+  assert.equal(replacePreview.outcome, 'preview');
+  assert.equal(replacePreview.edit, null);
   assert.equal(replacePreview.matchedBlockCount, 8);
   assert.equal(replacePreview.changedBlockCount, 8);
 
@@ -573,15 +516,16 @@ try {
     destinationPalette: [{ blockState: replacementDestination }],
     seed: replacePreview.seed,
   });
-  editsToUndo += replaced.changedBlockCount > 0 ? 1 : 0;
-  assert.equal(replaced.dryRun, false);
+  retainEdit(replaced, 'replace_region_blocks');
   assert.equal(replaced.matchedBlockCount, replacePreview.matchedBlockCount);
   assert.equal(replaced.changedBlockCount, replacePreview.changedBlockCount);
   assertExactBlocks(await bridgeRequest('/v1/get-region-blocks', region), replaced.destinationPalette[0].blockState);
 
-  const replacementUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
-  editsToUndo -= 1;
-  assert.equal(replacementUndone.changedBlockCount, replaced.changedBlockCount);
+  const nonLatestUndo = await bridgeResponse('/v1/undo-edit', { world, editId: filled.edit.editId });
+  assert.equal(nonLatestUndo.status, 409);
+  assert.equal(nonLatestUndo.body.error.code, 'edit_not_latest');
+
+  await undoRetained(replaced);
   assertExactBlocks(await bridgeRequest('/v1/get-region-blocks', region), filledState);
 
   const noOp = await bridgeRequest('/v1/fill-region', {
@@ -589,10 +533,10 @@ try {
     destinationPalette: [{ blockState: filledState }],
   });
   assert.equal(noOp.changedBlockCount, 0);
+  assert.equal(noOp.outcome, 'no_change');
+  assert.equal(noOp.edit, null);
 
-  const undone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
-  editsToUndo -= 1;
-  assert.equal(undone.changedBlockCount, filled.changedBlockCount);
+  await undoRetained(filled);
 
   const restored = await bridgeRequest('/v1/count-region-block-states', region);
   assert.deepEqual(normalizedJson(restored), normalizedJson(original));
@@ -629,7 +573,7 @@ try {
     ],
     seed: exactStatePreview.seed,
   });
-  editsToUndo += exactStateReplacement.changedBlockCount > 0 ? 1 : 0;
+  retainEdit(exactStateReplacement, 'replace_region_blocks');
   assert.equal(exactStateReplacement.matchedBlockCount, 3);
   assert.equal(exactStateReplacement.changedBlockCount, 3);
   const exactStateBlocks = await bridgeRequest('/v1/get-region-blocks', {
@@ -644,9 +588,7 @@ try {
   );
   const firstSeededLayout = sortedBlockKeys(exactStateBlocks.blocks);
 
-  const exactStateReplacementUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
-  editsToUndo -= 1;
-  assert.equal(exactStateReplacementUndone.changedBlockCount, 3);
+  await undoRetained(exactStateReplacement);
 
   const replayedReplacement = await bridgeRequest('/v1/replace-region-blocks', {
     ...stairRegion,
@@ -657,16 +599,14 @@ try {
     ],
     seed: exactStatePreview.seed,
   });
-  editsToUndo += replayedReplacement.changedBlockCount > 0 ? 1 : 0;
+  retainEdit(replayedReplacement, 'replace_region_blocks');
   assert.equal(replayedReplacement.changedBlockCount, exactStateReplacement.changedBlockCount);
   const replayedBlocks = await bridgeRequest('/v1/get-region-blocks', {
     ...stairRegion,
     includeBlockStatePatterns: ['minecraft:gold_block', 'minecraft:diamond_block'],
   });
   assert.deepEqual(sortedBlockKeys(replayedBlocks.blocks), firstSeededLayout);
-  const replayedReplacementUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
-  editsToUndo -= 1;
-  assert.equal(replayedReplacementUndone.changedBlockCount, 3);
+  await undoRetained(replayedReplacement);
 
   const propertyFillPreview = await bridgeRequest('/v1/fill-region', {
     world,
@@ -684,7 +624,7 @@ try {
     destinationPalette: [{ blockState: southStairs }],
     seed: propertyFillPreview.seed,
   });
-  editsToUndo += propertyFill.changedBlockCount > 0 ? 1 : 0;
+  retainEdit(propertyFill, 'fill_region');
   assert.equal(propertyFill.changedBlockCount, 1);
   const propertyFillBlocks = await bridgeRequest('/v1/get-region-blocks', {
     world,
@@ -695,24 +635,30 @@ try {
     `${stairMin.x},${stairMin.y},${stairMin.z}:${southStairs}`,
   ]);
 
-  const propertyFillUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
-  editsToUndo -= 1;
-  assert.equal(propertyFillUndone.changedBlockCount, 1);
+  await undoRetained(propertyFill);
 
   await restoreBlocks(originalStairFixture.blocks);
   originalStairFixture = undefined;
   process.stdout.write(`managed server smoke test passed in ${world}\n`);
 } finally {
-  if (editsToUndo > 0) {
+  while (editIdsToUndo.length > 0) {
+    const editId = editIdsToUndo.at(-1);
     try {
-      while (editsToUndo > 0) {
-        // Undo is deliberately serial because every request consumes the previous history entry.
-        // oxlint-disable-next-line eslint/no-await-in-loop
-        await bridgeRequest('/v1/undo-last-dirt-edit', { world });
-        editsToUndo -= 1;
+      // Undo is deliberately serial because every request consumes the previous history entry.
+      // oxlint-disable-next-line eslint/no-await-in-loop
+      const cleanup = await bridgeResponse('/v1/undo-edit', { world, editId });
+      if (!cleanup.ok && cleanup.body.error?.code === 'edit_not_found') {
+        editIdsToUndo.pop();
+      }
+      if (!cleanup.ok && cleanup.body.error?.code !== 'edit_not_found') {
+        process.stderr.write(
+          `Could not restore smoke-test edit: undo returned ${cleanup.status}: ${JSON.stringify(cleanup.body)}\n`,
+        );
+        break;
       }
     } catch (error) {
       process.stderr.write(`Could not restore smoke-test edit: ${error.message}\n`);
+      break;
     }
   }
   if (originalStairFixture) {
@@ -720,18 +666,6 @@ try {
       await restoreBlocks(originalStairFixture.blocks);
     } catch (error) {
       process.stderr.write(`Could not restore stair fixture: ${error.message}\n`);
-    }
-  }
-  if (originalCommandFixture) {
-    try {
-      await restoreBlocks([
-        {
-          position: commandPosition,
-          blockState: originalCommandFixture.blocks[0].blockState,
-        },
-      ]);
-    } catch (error) {
-      process.stderr.write(`Could not restore command fixture: ${error.message}\n`);
     }
   }
   if (originalSetFixture) {

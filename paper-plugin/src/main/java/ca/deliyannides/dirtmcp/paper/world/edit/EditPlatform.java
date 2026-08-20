@@ -19,12 +19,16 @@ interface EditPlatform extends AutoCloseable {
             WorldHandle world, SetBlocks.Request request, List<ChunkPosition> touchedChunks)
             throws OperationException;
 
-    EditResult replace(PreparedReplace prepared, Cuboid region, boolean dryRun)
+    EditResult replace(
+            PreparedReplace prepared, Cuboid region, boolean dryRun, MutationAdmission admission)
             throws OperationException;
 
-    EditResult fill(PreparedFill prepared, Cuboid region, boolean dryRun) throws OperationException;
+    EditResult fill(
+            PreparedFill prepared, Cuboid region, boolean dryRun, MutationAdmission admission)
+            throws OperationException;
 
-    EditResult set(PreparedSet prepared, boolean dryRun) throws OperationException;
+    EditResult set(PreparedSet prepared, boolean dryRun, MutationAdmission admission)
+            throws OperationException;
 
     void undo(WorldHandle world, UndoToken undo) throws OperationException;
 
@@ -61,9 +65,19 @@ interface EditPlatform extends AutoCloseable {
         int blockCount();
     }
 
-    @FunctionalInterface
-    interface UndoToken {
+    interface UndoToken extends AutoCloseable {
         long changedBlockCount();
+
+        /**
+         * Releases the retained undo data. Implementations must be idempotent and must not throw.
+         */
+        @Override
+        void close();
+    }
+
+    @FunctionalInterface
+    interface MutationAdmission {
+        void beforeMutation() throws OperationException;
     }
 
     record EditResult(long matchedBlockCount, long changedBlockCount, UndoToken undo) {

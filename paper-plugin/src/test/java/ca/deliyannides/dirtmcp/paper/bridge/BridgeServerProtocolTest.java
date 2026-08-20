@@ -25,6 +25,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -160,6 +161,37 @@ final class BridgeServerProtocolTest {
                             "{\"error\":{\"code\":\""
                                     + expectedCode
                                     + "\",\"message\":\"safe message\"}}"),
+                    json(response.body()));
+        }
+    }
+
+    @Test
+    void includesEditIdInTypedOperationFailureResponses() throws Exception {
+        UUID editId = BridgeTestFixture.EDIT_ID;
+        BridgeTestFixture.TestOperations operations =
+                new BridgeTestFixture.TestOperations() {
+                    @Override
+                    public PingServer.Result ping() throws OperationException {
+                        throw new OperationException(
+                                OperationFailure.INTERNAL_ERROR, "edit failed", null, editId);
+                    }
+                };
+        try (BridgeServer bridge = server(config(availablePort(), 4), operations);
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+
+            HttpResponse<String> response =
+                    client.send(
+                            authorized(bridge, "/v1/ping").GET().build(),
+                            HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(500, response.statusCode());
+            assertEquals(
+                    json(
+                            "{\"error\":{\"code\":\"internal_error\",\"message\":\"edit failed\","
+                                    + "\"editId\":\""
+                                    + editId
+                                    + "\"}}"),
                     json(response.body()));
         }
     }
@@ -320,7 +352,7 @@ final class BridgeServerProtocolTest {
     @Test
     void keepsAuditMetadataRequestLocalAndNeverLogsRequestBodies() throws Exception {
         List<String> messages = new CopyOnWriteArrayList<>();
-        CountDownLatch audited = new CountDownLatch(2);
+        CountDownLatch audited = new CountDownLatch(1);
         Logger logger = Logger.getAnonymousLogger();
         logger.setUseParentHandlers(false);
         logger.addHandler(
@@ -364,37 +396,32 @@ final class BridgeServerProtocolTest {
                                                     """))
                                     .build(),
                             HttpResponse.BodyHandlers.ofString());
-            HttpResponse<String> command =
-                    client.send(
-                            BridgeTestFixture.post(
-                                    bridge,
-                                    "/v1/run-minecraft-commands",
-                                    "{\"commands\":[\"say private payload\"]}"),
-                            HttpResponse.BodyHandlers.ofString());
             assertEquals(200, edit.statusCode());
-            assertEquals(200, command.statusCode());
             assertTrue(audited.await(2, TimeUnit.SECONDS));
 
             List<String> calls =
                     messages.stream().filter(message -> message.contains("bridge_call")).toList();
-            assertEquals(2, calls.size());
+            assertEquals(1, calls.size());
             assertTrue(calls.get(0).contains("world=\"audit-world\""));
             assertTrue(calls.get(0).contains("call=123e4567-e89b-42d3-a456-426614174000"));
-            assertFalse(calls.get(1).contains(" world="));
             assertFalse(String.join("\n", messages).contains("secret_gold_block"));
-            assertFalse(String.join("\n", messages).contains("private payload"));
         }
     }
 
     private static Stream<Arguments> operationFailures() {
         return Stream.of(
                 Arguments.of(OperationFailure.INVALID_REQUEST, 400, "invalid_request"),
+                Arguments.of(OperationFailure.EDIT_NOT_FOUND, 404, "edit_not_found"),
                 Arguments.of(OperationFailure.WORLD_NOT_FOUND, 404, "world_not_found"),
-                Arguments.of(OperationFailure.NOTHING_TO_UNDO, 409, "nothing_to_undo"),
+                Arguments.of(OperationFailure.EDIT_NOT_LATEST, 409, "edit_not_latest"),
                 Arguments.of(OperationFailure.WORLD_BUSY, 409, "world_busy"),
                 Arguments.of(OperationFailure.CHANGE_LIMIT_EXCEEDED, 413, "change_limit_exceeded"),
                 Arguments.of(OperationFailure.REGION_TOO_LARGE, 413, "region_too_large"),
                 Arguments.of(OperationFailure.RESULT_TOO_LARGE, 413, "result_too_large"),
+                Arguments.of(
+                        OperationFailure.HISTORY_CAPACITY_EXCEEDED,
+                        503,
+                        "history_capacity_exceeded"),
                 Arguments.of(OperationFailure.SERVER_UNAVAILABLE, 503, "server_unavailable"),
                 Arguments.of(OperationFailure.UNHEALTHY, 503, "unhealthy"),
                 Arguments.of(OperationFailure.WORLD_UNAVAILABLE, 503, "world_unavailable"));

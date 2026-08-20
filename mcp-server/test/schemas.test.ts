@@ -3,6 +3,8 @@ import test from 'node:test';
 import { BlockPositionSchema, NonBlankStringSchema } from '../dist/tools/common.js';
 import {
   DestinationPaletteSchema,
+  EditRecordSchema,
+  ReplaceRegionBlocksOutputSchema,
   SetBlocksInputSchema,
   SourceBlockStatePatternsSchema,
 } from '../dist/tools/editing.js';
@@ -181,5 +183,53 @@ test('validates weighted set-block palettes and compact placements', () => {
       ],
     }).success,
     false,
+  );
+});
+
+test('validates retained edit metadata and edit-result outcome invariants', () => {
+  const edit = {
+    editId: '11111111-1111-4111-8111-111111111111',
+    callId: '22222222-2222-4222-8222-222222222222',
+    operation: 'replace_region_blocks',
+    world: 'world',
+    worldId: '33333333-3333-4333-8333-333333333333',
+    bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 1, y: 1, z: 1 } },
+    changedBlockCount: 1,
+    completedAt: '2026-08-19T12:34:56Z',
+    status: 'committed',
+  };
+  assert.equal(EditRecordSchema.safeParse(edit).success, true);
+  assert.equal(EditRecordSchema.safeParse({ ...edit, callId: 'not-a-uuid' }).success, false);
+  assert.equal(EditRecordSchema.safeParse({ ...edit, changedBlockCount: 0 }).success, false);
+  assert.equal(EditRecordSchema.safeParse({ ...edit, completedAt: 'yesterday' }).success, false);
+
+  const result = {
+    world: 'world',
+    bounds: edit.bounds,
+    sourceBlockStatePatterns: ['minecraft:stone'],
+    destinationPalette: [{ blockState: 'minecraft:dirt' }],
+    seed: 42,
+    matchedBlockCount: 1,
+    changedBlockCount: 1,
+  };
+  assert.equal(ReplaceRegionBlocksOutputSchema.safeParse({ ...result, outcome: 'preview', edit: null }).success, true);
+  assert.equal(ReplaceRegionBlocksOutputSchema.safeParse({ ...result, outcome: 'committed', edit }).success, true);
+  assert.equal(
+    ReplaceRegionBlocksOutputSchema.safeParse({ ...result, outcome: 'committed', edit: null }).success,
+    false,
+  );
+  assert.equal(ReplaceRegionBlocksOutputSchema.safeParse({ ...result, outcome: 'preview', edit }).success, false);
+  assert.equal(
+    ReplaceRegionBlocksOutputSchema.safeParse({ ...result, outcome: 'no_change', edit: null }).success,
+    false,
+  );
+  assert.equal(
+    ReplaceRegionBlocksOutputSchema.safeParse({
+      ...result,
+      outcome: 'no_change',
+      edit: null,
+      changedBlockCount: 0,
+    }).success,
+    true,
   );
 });

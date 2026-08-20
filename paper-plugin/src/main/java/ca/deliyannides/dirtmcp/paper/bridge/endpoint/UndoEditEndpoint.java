@@ -4,23 +4,23 @@ import ca.deliyannides.dirtmcp.paper.bridge.BridgeEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
 import ca.deliyannides.dirtmcp.paper.bridge.InvalidRequestException;
 import ca.deliyannides.dirtmcp.paper.bridge.RequestDecoder;
-import ca.deliyannides.dirtmcp.paper.command.RunMinecraftCommands;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
+import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
 import java.io.IOException;
 import java.util.Objects;
 
-public final class RunMinecraftCommandsEndpoint implements BridgeEndpoint {
-    private final RunMinecraftCommands operation;
-    private final RequestDecoder<RunMinecraftCommands.Request> decoder;
+public final class UndoEditEndpoint implements BridgeEndpoint {
+    private final UndoEdit operation;
+    private final RequestDecoder<UndoEdit.Request> decoder;
 
-    public RunMinecraftCommandsEndpoint(RunMinecraftCommands operation) {
+    public UndoEditEndpoint(UndoEdit operation) {
         this.operation = Objects.requireNonNull(operation, "operation");
-        this.decoder = RunMinecraftCommandsRequestDecoder::decode;
+        this.decoder = UndoEditRequestDecoder::decode;
     }
 
     @Override
     public String operation() {
-        return "run_minecraft_commands";
+        return "undo_edit";
     }
 
     @Override
@@ -30,17 +30,19 @@ public final class RunMinecraftCommandsEndpoint implements BridgeEndpoint {
 
     @Override
     public String path() {
-        return "/v1/run-minecraft-commands";
+        return "/v1/undo-edit";
     }
 
     @Override
     public void handle(BridgeExchange exchange)
             throws IOException, InvalidRequestException, OperationException {
-        exchange.ok(this.operation.runCommands(this.decoder.decode(exchange)));
+        UndoEdit.Request request = this.decoder.decode(exchange);
+        exchange.world(request.world());
+        exchange.ok(this.operation.undoEdit(request, exchange.requiredCallId()));
     }
 
     @Override
     public String internalErrorMessage() {
-        return "The commands could not be run";
+        return "The edit could not be undone";
     }
 }

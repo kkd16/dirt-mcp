@@ -10,10 +10,12 @@ type ToolFailureCode =
 
 export class ToolFailure extends Error {
   readonly code: ToolFailureCode;
+  readonly editId?: string;
 
-  constructor(code: ToolFailureCode, message: string) {
+  constructor(code: ToolFailureCode, message: string, editId?: string) {
     super(message);
     this.code = code;
+    if (editId !== undefined) this.editId = editId;
     this.name = 'ToolFailure';
   }
 }

@@ -3,13 +3,18 @@ package ca.deliyannides.dirtmcp.paper.config;
 import java.util.Locale;
 import java.util.Set;
 
-public record DirtConfig(Bridge bridge, Limits limits, Defaults defaults) {
+public record DirtConfig(Bridge bridge, Limits limits, EditHistory editHistory, Defaults defaults) {
     private static final Set<String> REGION_BLOCKS_FORMATS = Set.of("blocks", "runs");
 
     public DirtConfig {
-        if (bridge == null || limits == null || defaults == null) {
+        if (bridge == null || limits == null || editHistory == null || defaults == null) {
             throw new IllegalArgumentException("Configuration sections are required");
         }
+        requireAtMost(
+                "limits.max-changed-blocks",
+                limits.maxChangedBlocks(),
+                "edit-history.max-retained-changed-blocks",
+                editHistory.maxRetainedChangedBlocks());
     }
 
     public record Bridge(
@@ -59,10 +64,7 @@ public record DirtConfig(Bridge bridge, Limits limits, Defaults defaults) {
             int maxChangedBlocks,
             int maxInspectionVolume,
             int defaultInspectionResultLimit,
-            int maxInspectionResultLimit,
-            int maxCommandsPerRequest,
-            int maxCommandFeedbackCharacters,
-            int undoHistoryPerWorld) {
+            int maxInspectionResultLimit) {
         public Limits {
             if (maxRequestBytes < 1 || maxRequestBytes == Integer.MAX_VALUE) {
                 throw new IllegalArgumentException(
@@ -77,12 +79,6 @@ public record DirtConfig(Bridge bridge, Limits limits, Defaults defaults) {
             requirePositive("limits.max-inspection-volume", maxInspectionVolume);
             requirePositive("limits.default-inspection-results", defaultInspectionResultLimit);
             requirePositive("limits.max-inspection-results", maxInspectionResultLimit);
-            requirePositive("limits.max-commands-per-request", maxCommandsPerRequest);
-            requirePositive("limits.max-command-feedback-characters", maxCommandFeedbackCharacters);
-            if (undoHistoryPerWorld < 0) {
-                throw new IllegalArgumentException(
-                        "limits.undo-history-per-world must be non-negative");
-            }
             requireAtMost(
                     "limits.max-inspection-touched-chunks",
                     maxInspectionTouchedChunks,
@@ -113,6 +109,20 @@ public record DirtConfig(Bridge bridge, Limits limits, Defaults defaults) {
                     maxInspectionResultLimit,
                     "limits.max-inspection-volume",
                     maxInspectionVolume);
+        }
+    }
+
+    public record EditHistory(
+            int maxEntriesPerWorld, int maxEntriesTotal, int maxRetainedChangedBlocks) {
+        public EditHistory {
+            requirePositive("edit-history.max-entries-per-world", maxEntriesPerWorld);
+            requirePositive("edit-history.max-entries-total", maxEntriesTotal);
+            requirePositive("edit-history.max-retained-changed-blocks", maxRetainedChangedBlocks);
+            requireAtMost(
+                    "edit-history.max-entries-per-world",
+                    maxEntriesPerWorld,
+                    "edit-history.max-entries-total",
+                    maxEntriesTotal);
         }
     }
 

@@ -39,7 +39,7 @@ public final class FillRegionEndpoint implements BridgeEndpoint {
             throws IOException, InvalidRequestException, OperationException {
         FillRegion.Request request = this.decoder.decode(exchange);
         exchange.world(request.world());
-        exchange.ok(this.operation.fillRegion(request));
+        exchange.ok(this.operation.fillRegion(request, exchange.requiredCallId()));
     }
 
     @Override

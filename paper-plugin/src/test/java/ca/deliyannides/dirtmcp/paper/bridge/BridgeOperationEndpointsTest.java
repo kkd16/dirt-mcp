@@ -10,14 +10,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ca.deliyannides.dirtmcp.paper.command.RunMinecraftCommands;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.edit.DestinationPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.edit.FillRegion;
+import ca.deliyannides.dirtmcp.paper.world.edit.GetEditHistory;
 import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
-import ca.deliyannides.dirtmcp.paper.world.edit.UndoLastEdit;
+import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView;
@@ -26,6 +26,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
@@ -152,47 +153,48 @@ final class BridgeOperationEndpointsTest {
     }
 
     @Test
-    void parsesAndDispatchesEditingAndCommandOperations() throws Exception {
+    void parsesAndDispatchesEditingOperations() throws Exception {
         AtomicReference<ReplaceRegionBlocks.Request> replaceRequest = new AtomicReference<>();
         AtomicReference<FillRegion.Request> fillRequest = new AtomicReference<>();
         AtomicReference<SetBlocks.Request> setRequest = new AtomicReference<>();
-        AtomicReference<UndoLastEdit.Request> undoRequest = new AtomicReference<>();
-        AtomicReference<RunMinecraftCommands.Request> commandRequest = new AtomicReference<>();
+        AtomicReference<GetEditHistory.Request> historyRequest = new AtomicReference<>();
+        AtomicReference<UndoEdit.Request> undoRequest = new AtomicReference<>();
         BridgeTestFixture.TestOperations operations =
                 new BridgeTestFixture.TestOperations() {
                     @Override
                     public ReplaceRegionBlocks.Result replaceRegionBlocks(
-                            ReplaceRegionBlocks.Request request) throws OperationException {
+                            ReplaceRegionBlocks.Request request, UUID callId)
+                            throws OperationException {
                         replaceRequest.set(request);
-                        return super.replaceRegionBlocks(request);
+                        return super.replaceRegionBlocks(request, callId);
                     }
 
                     @Override
-                    public FillRegion.Result fillRegion(FillRegion.Request request)
+                    public FillRegion.Result fillRegion(FillRegion.Request request, UUID callId)
                             throws OperationException {
                         fillRequest.set(request);
-                        return super.fillRegion(request);
+                        return super.fillRegion(request, callId);
                     }
 
                     @Override
-                    public SetBlocks.Result setBlocks(SetBlocks.Request request)
+                    public SetBlocks.Result setBlocks(SetBlocks.Request request, UUID callId)
                             throws OperationException {
                         setRequest.set(request);
-                        return super.setBlocks(request);
+                        return super.setBlocks(request, callId);
                     }
 
                     @Override
-                    public UndoLastEdit.Result undoLastEdit(UndoLastEdit.Request request)
+                    public GetEditHistory.Result getEditHistory(GetEditHistory.Request request)
+                            throws OperationException {
+                        historyRequest.set(request);
+                        return super.getEditHistory(request);
+                    }
+
+                    @Override
+                    public UndoEdit.Result undoEdit(UndoEdit.Request request, UUID callId)
                             throws OperationException {
                         undoRequest.set(request);
-                        return super.undoLastEdit(request);
-                    }
-
-                    @Override
-                    public RunMinecraftCommands.Result runCommands(
-                            RunMinecraftCommands.Request request) throws OperationException {
-                        commandRequest.set(request);
-                        return super.runCommands(request);
+                        return super.undoEdit(request, callId);
                     }
                 };
         try (BridgeServer bridge = server(config(availablePort(), 4), operations);
@@ -237,16 +239,17 @@ final class BridgeOperationEndpointsTest {
                                      {"blockState":"minecraft:iron_block","weight":75}]],
                                      "placements":[[0,0,0,0]],"seed":23,"dryRun":true}
                                     """));
+            HttpResponse<String> history =
+                    send(client, post(bridge, "/v1/get-edit-history", "{\"world\":\"world\"}"));
             HttpResponse<String> undo =
-                    send(client, post(bridge, "/v1/undo-last-dirt-edit", "{\"world\":\"world\"}"));
-            HttpResponse<String> commands =
                     send(
                             client,
                             post(
                                     bridge,
-                                    "/v1/run-minecraft-commands",
-                                    "{\"commands\":[\"say hello\"]}"));
-
+                                    "/v1/undo-edit",
+                                    "{\"world\":\"world\",\"editId\":\""
+                                            + BridgeTestFixture.EDIT_ID
+                                            + "\"}"));
             assertEquals(200, replace.statusCode());
             assertEquals(17, replaceRequest.get().seed());
             assertTrue(replaceRequest.get().dryRun());
@@ -266,19 +269,11 @@ final class BridgeOperationEndpointsTest {
             assertEquals(0, setRequest.get().placements().getFirst().paletteIndex());
             assertEquals(
                     new SetBlocks.Placement(0, 0, 0, 0), setRequest.get().placements().getFirst());
-            assertEquals(new UndoLastEdit.Request("world"), undoRequest.get());
-            assertEquals(200, undo.statusCode());
-            assertEquals(List.of("say hello"), commandRequest.get().commands());
-            assertEquals(200, commands.statusCode());
+            assertEquals(new GetEditHistory.Request("world"), historyRequest.get());
+            assertEquals(200, history.statusCode());
             assertEquals(
-                    "dispatched",
-                    json(commands.body())
-                            .getAsJsonObject()
-                            .getAsJsonArray("results")
-                            .get(0)
-                            .getAsJsonObject()
-                            .get("outcome")
-                            .getAsString());
+                    new UndoEdit.Request("world", BridgeTestFixture.EDIT_ID), undoRequest.get());
+            assertEquals(200, undo.statusCode());
         }
     }
 
@@ -290,6 +285,7 @@ final class BridgeOperationEndpointsTest {
                 new DirtConfig(
                         standard.bridge(),
                         standard.limits(),
+                        standard.editHistory(),
                         new DirtConfig.Defaults(true, "runs", true));
         AtomicReference<GetRegionBlocks.Request> blocksRequest = new AtomicReference<>();
         AtomicReference<FillRegion.Request> firstFill = new AtomicReference<>();
@@ -311,17 +307,17 @@ final class BridgeOperationEndpointsTest {
                     }
 
                     @Override
-                    public FillRegion.Result fillRegion(FillRegion.Request request)
+                    public FillRegion.Result fillRegion(FillRegion.Request request, UUID callId)
                             throws OperationException {
                         firstFill.set(request);
-                        return super.fillRegion(request);
+                        return super.fillRegion(request, callId);
                     }
 
                     @Override
-                    public SetBlocks.Result setBlocks(SetBlocks.Request request)
+                    public SetBlocks.Result setBlocks(SetBlocks.Request request, UUID callId)
                             throws OperationException {
                         setRequest.set(request);
-                        return super.setBlocks(request);
+                        return super.setBlocks(request, callId);
                     }
                 };
         try (BridgeServer bridge = server(configured, operations);
@@ -386,10 +382,8 @@ final class BridgeOperationEndpointsTest {
                                 limits.maxChangedBlocks(),
                                 limits.maxInspectionVolume(),
                                 limits.defaultInspectionResultLimit(),
-                                limits.maxInspectionResultLimit(),
-                                limits.maxCommandsPerRequest(),
-                                limits.maxCommandFeedbackCharacters(),
-                                limits.undoHistoryPerWorld()),
+                                limits.maxInspectionResultLimit()),
+                        standard.editHistory(),
                         standard.defaults());
         try (BridgeServer bridge = server(small, operations);
                 HttpClient client = HttpClient.newHttpClient()) {
@@ -448,6 +442,56 @@ final class BridgeOperationEndpointsTest {
                                      "paletteIndex":0,"offsets":[[0,0,0]]}]}
                                     """)),
                     "Request contains missing or unknown fields");
+        }
+    }
+
+    @Test
+    void requiresCanonicalVersionFourIdsForMutationsAndUndo() throws Exception {
+        try (BridgeServer bridge =
+                        server(config(availablePort(), 4), new BridgeTestFixture.TestOperations());
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+            String fill =
+                    """
+                    {"world":"world","min":{"x":0,"y":0,"z":0},
+                     "max":{"x":0,"y":0,"z":0},
+                     "destinationPalette":[{"blockState":"minecraft:stone"}]}
+                    """;
+            HttpResponse<String> missingCallId =
+                    send(
+                            client,
+                            authorized(bridge, "/v1/fill-region")
+                                    .header("Content-Type", "application/json")
+                                    .POST(HttpRequest.BodyPublishers.ofString(fill))
+                                    .build());
+            HttpResponse<String> invalidCallId =
+                    send(
+                            client,
+                            authorized(bridge, "/v1/fill-region")
+                                    .header("Content-Type", "application/json")
+                                    .header("X-Dirt-Call-Id", "not-a-uuid")
+                                    .POST(HttpRequest.BodyPublishers.ofString(fill))
+                                    .build());
+            HttpResponse<String> invalidEditId =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/undo-edit",
+                                    "{\"world\":\"world\",\"editId\":\"not-a-uuid\"}"));
+            HttpResponse<String> valid = send(client, post(bridge, "/v1/fill-region", fill));
+
+            assertError(missingCallId, "X-Dirt-Call-Id must be a UUID version 4");
+            assertError(invalidCallId, "X-Dirt-Call-Id must be a UUID version 4");
+            assertError(invalidEditId, "editId must be a UUID version 4");
+            assertEquals(200, valid.statusCode());
+            assertEquals(
+                    BridgeTestFixture.CALL_ID,
+                    json(valid.body())
+                            .getAsJsonObject()
+                            .getAsJsonObject("edit")
+                            .get("callId")
+                            .getAsString());
         }
     }
 

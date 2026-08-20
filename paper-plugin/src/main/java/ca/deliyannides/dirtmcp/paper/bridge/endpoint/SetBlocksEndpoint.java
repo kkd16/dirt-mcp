@@ -39,7 +39,7 @@ public final class SetBlocksEndpoint implements BridgeEndpoint {
             throws IOException, InvalidRequestException, OperationException {
         SetBlocks.Request request = this.decoder.decode(exchange);
         exchange.world(request.world());
-        exchange.ok(this.operation.setBlocks(request));
+        exchange.ok(this.operation.setBlocks(request, exchange.requiredCallId()));
     }
 
     @Override
