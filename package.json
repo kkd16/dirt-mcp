@@ -14,7 +14,7 @@
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
     "lint": "pnpm run lint:code && pnpm run lint:shell && pnpm run lint:workflows && pnpm run lint:markdown",
-    "lint:code": "oxlint mcp-server/src --type-aware --deny-warnings --report-unused-disable-directives && oxlint mcp-server/test scripts/*.mjs --deny-warnings --report-unused-disable-directives",
+    "lint:code": "oxlint mcp-server/src --type-aware && oxlint mcp-server/test scripts/*.mjs",
     "lint:markdown": "markdownlint-cli2",
     "lint:shell": "shellcheck scripts/dev-paper scripts/run-dirt-mcp scripts/run-paper-dev scripts/validate-paper-jar scripts/validate-paper-log",
     "lint:workflows": "actionlint",
@@ -26,8 +26,8 @@
   "devDependencies": {
     "@redocly/cli": "2.46.1",
     "markdownlint-cli2": "0.23.2",
-    "oxfmt": "0.63.0",
-    "oxlint": "1.78.0",
+    "oxfmt": "0.64.0",
+    "oxlint": "1.79.0",
     "oxlint-tsgolint": "7.0.2001",
     "publint": "0.3.23"
   },

@@ -8,7 +8,8 @@
   },
   "rules": {},
   "options": {
-    "maxWarnings": 0
+    "denyWarnings": true,
+    "reportUnusedDisableDirectives": "error"
   },
   "env": {
     "builtin": true,

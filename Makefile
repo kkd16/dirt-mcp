@@ -76,7 +76,7 @@ verify: ## Run the complete incremental local gate, including managed Paper smok
 	@$(MAKE) --no-print-directory smoke
 
 ci: doctor ## Run the clean complete gate used by continuous integration.
-	pnpm ci
+	pnpm clean
 	@$(MAKE) --no-print-directory clean
 	@$(MAKE) --no-print-directory verify
 
