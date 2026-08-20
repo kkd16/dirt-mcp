@@ -57,7 +57,7 @@ public final class FaweWorldEditor
             throw invalid("min and max are required");
         }
         validateBlockStateList(request.sourceBlockStatePatterns(), "sourceBlockStatePatterns");
-        validatePalette(request.destinationPalette());
+        validatePalette(request.destinationPalette(), "destinationPalette");
         Cuboid region = boundedRegion(request.min(), request.max());
         EditPlatform.WorldHandle world = resolveWorld(request.world());
         try (EditCoordinator.Lease lease = this.coordinator.enter(world.id(), world.name())) {
@@ -95,7 +95,7 @@ public final class FaweWorldEditor
         if (request == null || request.min() == null || request.max() == null) {
             throw invalid("min and max are required");
         }
-        validatePalette(request.destinationPalette());
+        validatePalette(request.destinationPalette(), "destinationPalette");
         Cuboid region = boundedRegion(request.min(), request.max());
         EditPlatform.WorldHandle world = resolveWorld(request.world());
         try (EditCoordinator.Lease lease = this.coordinator.enter(world.id(), world.name())) {
@@ -132,6 +132,7 @@ public final class FaweWorldEditor
         try (EditCoordinator.Lease lease = this.coordinator.enter(world.id(), world.name())) {
             EditPlatform.EditResult execution;
             int blockCount;
+            List<List<DestinationPaletteEntry>> palettes;
             try (EditPlatform.PreparedSet prepared =
                     this.platform.prepareSet(world, request, chunks)) {
                 try {
@@ -141,6 +142,7 @@ public final class FaweWorldEditor
                     throw failure;
                 }
                 blockCount = prepared.blockCount();
+                palettes = prepared.palettes();
                 if (!request.dryRun()) {
                     lease.remember(execution.undo());
                 }
@@ -150,6 +152,8 @@ public final class FaweWorldEditor
             }
             return new SetBlocks.Result(
                     world.name(),
+                    palettes,
+                    request.seed(),
                     request.dryRun(),
                     blockCount,
                     execution.changedBlockCount(),
@@ -213,14 +217,20 @@ public final class FaweWorldEditor
         if (request == null || request.origin() == null) {
             throw invalid("origin is required");
         }
-        validateSetPalette(request.palette());
+        validateSetPalettes(request.palettes());
         if (request.placements() == null || request.placements().isEmpty()) {
             throw invalid("placements must contain at least one entry");
         }
 
         Set<ChunkPosition> chunks = new LinkedHashSet<>();
         Set<BlockPosition> positions = new LinkedHashSet<>();
-        long blockCount = 0;
+        if (request.placements().size() > this.maxRegionVolume) {
+            throw new OperationException(
+                    OperationFailure.REGION_TOO_LARGE,
+                    "Set-blocks edit contains more than the maximum of "
+                            + this.maxRegionVolume
+                            + " blocks");
+        }
         for (int placementIndex = 0;
                 placementIndex < request.placements().size();
                 placementIndex++) {
@@ -230,69 +240,52 @@ public final class FaweWorldEditor
                 throw invalid(placementName + " is required");
             }
             if (placement.paletteIndex() < 0
-                    || placement.paletteIndex() >= request.palette().size()) {
-                throw invalid(placementName + ".paletteIndex must reference an entry in palette");
+                    || placement.paletteIndex() >= request.palettes().size()) {
+                throw invalid(placementName + "[0] must reference an entry in palettes");
             }
-            if (placement.offsets() == null || placement.offsets().isEmpty()) {
-                throw invalid(placementName + ".offsets must contain at least one offset");
+            BlockPosition position = resolvePosition(request.origin(), placement, placementName);
+            if (!positions.add(position)) {
+                throw invalid(placementName + " resolves to a duplicate block position");
             }
-            for (int offsetIndex = 0; offsetIndex < placement.offsets().size(); offsetIndex++) {
-                SetBlocks.Offset offset = placement.offsets().get(offsetIndex);
-                String offsetName = placementName + ".offsets[" + offsetIndex + "]";
-                if (offset == null) {
-                    throw invalid(offsetName + " is required");
-                }
-                blockCount++;
-                if (blockCount > this.maxRegionVolume) {
-                    throw new OperationException(
-                            OperationFailure.REGION_TOO_LARGE,
-                            "Set-blocks edit contains more than the maximum of "
-                                    + this.maxRegionVolume
-                                    + " blocks");
-                }
-                BlockPosition position = resolvePosition(request.origin(), offset, offsetName);
-                if (!positions.add(position)) {
-                    throw invalid(offsetName + " resolves to a duplicate block position");
-                }
-                chunks.add(ChunkPosition.containing(position.x(), position.z()));
-                if (chunks.size() > this.maxTouchedChunks) {
-                    throw new OperationException(
-                            OperationFailure.REGION_TOO_LARGE,
-                            "Operation touches more than the maximum of "
-                                    + this.maxTouchedChunks
-                                    + " chunks");
-                }
+            chunks.add(ChunkPosition.containing(position.x(), position.z()));
+            if (chunks.size() > this.maxTouchedChunks) {
+                throw new OperationException(
+                        OperationFailure.REGION_TOO_LARGE,
+                        "Operation touches more than the maximum of "
+                                + this.maxTouchedChunks
+                                + " chunks");
             }
         }
         return List.copyOf(chunks);
     }
 
-    private void validateSetPalette(List<String> palette) throws OperationException {
-        if (palette == null || palette.isEmpty()) {
-            throw invalid("palette must contain at least one block state");
+    private void validateSetPalettes(List<List<DestinationPaletteEntry>> palettes)
+            throws OperationException {
+        if (palettes == null || palettes.isEmpty()) {
+            throw invalid("palettes must contain at least one palette");
         }
-        if (palette.size() > this.maxBlockStatePatterns) {
-            throw invalid("palette may contain at most " + this.maxBlockStatePatterns + " entries");
-        }
-        Set<String> distinct = new LinkedHashSet<>();
-        for (int index = 0; index < palette.size(); index++) {
-            String blockState = palette.get(index);
-            if (blockState == null || blockState.isBlank()) {
-                throw invalid("palette[" + index + "] must be a non-empty block state");
-            }
-            if (!distinct.add(blockState)) {
-                throw invalid("palette contains a duplicate block state: " + blockState);
+        int entryCount = 0;
+        for (int index = 0; index < palettes.size(); index++) {
+            List<DestinationPaletteEntry> palette = palettes.get(index);
+            validatePalette(palette, "palettes[" + index + "]");
+            entryCount += palette.size();
+            if (entryCount > this.maxBlockStatePatterns) {
+                throw invalid(
+                        "palettes may contain at most "
+                                + this.maxBlockStatePatterns
+                                + " entries in total");
             }
         }
     }
 
     private static BlockPosition resolvePosition(
-            BlockPosition origin, SetBlocks.Offset offset, String field) throws OperationException {
+            BlockPosition origin, SetBlocks.Placement placement, String field)
+            throws OperationException {
         try {
             return new BlockPosition(
-                    Math.addExact(origin.x(), offset.x()),
-                    Math.addExact(origin.y(), offset.y()),
-                    Math.addExact(origin.z(), offset.z()));
+                    Math.addExact(origin.x(), placement.x()),
+                    Math.addExact(origin.y(), placement.y()),
+                    Math.addExact(origin.z(), placement.z()));
         } catch (ArithmeticException exception) {
             throw invalid(field + " resolves outside the signed 32-bit coordinate range");
         }
@@ -305,15 +298,14 @@ public final class FaweWorldEditor
         return this.platform.resolveWorld(worldName);
     }
 
-    private void validatePalette(List<DestinationPaletteEntry> palette) throws OperationException {
+    private void validatePalette(List<DestinationPaletteEntry> palette, String field)
+            throws OperationException {
         if (palette == null || palette.isEmpty()) {
-            throw invalid("destinationPalette must contain at least one entry");
+            throw invalid(field + " must contain at least one entry");
         }
         if (palette.size() > this.maxBlockStatePatterns) {
             throw invalid(
-                    "destinationPalette may contain at most "
-                            + this.maxBlockStatePatterns
-                            + " entries");
+                    field + " may contain at most " + this.maxBlockStatePatterns + " entries");
         }
         boolean weighted = false;
         boolean unweighted = false;
@@ -321,16 +313,14 @@ public final class FaweWorldEditor
         for (int index = 0; index < palette.size(); index++) {
             DestinationPaletteEntry entry = palette.get(index);
             if (entry == null || entry.blockState() == null || entry.blockState().isBlank()) {
-                throw invalid(
-                        "destinationPalette[" + index + "].blockState must be a non-empty string");
+                throw invalid(field + "[" + index + "].blockState must be a non-empty string");
             }
             Integer weight = entry.weight();
             if (weight == null) {
                 unweighted = true;
             } else {
                 if (weight < 1 || weight > 100) {
-                    throw invalid(
-                            "destinationPalette[" + index + "].weight must be between 1 and 100");
+                    throw invalid(field + "[" + index + "].weight must be between 1 and 100");
                 }
                 weighted = true;
                 totalWeight += weight;
@@ -338,10 +328,11 @@ public final class FaweWorldEditor
         }
         if (weighted && unweighted) {
             throw invalid(
-                    "destinationPalette weights must be provided for every entry or omitted from every entry");
+                    field
+                            + " weights must be provided for every entry or omitted from every entry");
         }
         if (weighted && totalWeight != 100) {
-            throw invalid("destinationPalette weights must total 100");
+            throw invalid(field + " weights must total 100");
         }
     }
 

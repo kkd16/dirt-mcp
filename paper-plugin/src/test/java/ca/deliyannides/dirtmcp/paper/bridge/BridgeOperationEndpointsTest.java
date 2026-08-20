@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ca.deliyannides.dirtmcp.paper.command.RunMinecraftCommands;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
+import ca.deliyannides.dirtmcp.paper.world.edit.DestinationPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.edit.FillRegion;
 import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
@@ -231,9 +232,9 @@ final class BridgeOperationEndpointsTest {
                                     "/v1/set-blocks",
                                     """
                                     {"world":"world","origin":{"x":7,"y":8,"z":9},
-                                     "palette":["minecraft:gold_block"],
-                                     "placements":[{"paletteIndex":0,"offsets":[[0,0,0]]}],
-                                     "dryRun":true}
+                                     "palettes":[[{"blockState":"minecraft:gold_block","weight":25},
+                                     {"blockState":"minecraft:iron_block","weight":75}]],
+                                     "placements":[[0,0,0,0]],"seed":23,"dryRun":true}
                                     """));
             HttpResponse<String> undo =
                     send(client, post(bridge, "/v1/undo-last-dirt-edit", "{\"world\":\"world\"}"));
@@ -255,11 +256,15 @@ final class BridgeOperationEndpointsTest {
             assertFalse(json(fill.body()).toString().contains("weight"));
             assertEquals(200, set.statusCode());
             assertEquals(new BlockPosition(7, 8, 9), setRequest.get().origin());
-            assertEquals(List.of("minecraft:gold_block"), setRequest.get().palette());
+            assertEquals(23, setRequest.get().seed());
+            assertEquals(
+                    List.of(
+                            new DestinationPaletteEntry("minecraft:gold_block", 25),
+                            new DestinationPaletteEntry("minecraft:iron_block", 75)),
+                    setRequest.get().palettes().getFirst());
             assertEquals(0, setRequest.get().placements().getFirst().paletteIndex());
             assertEquals(
-                    new SetBlocks.Offset(0, 0, 0),
-                    setRequest.get().placements().getFirst().offsets().getFirst());
+                    new SetBlocks.Placement(0, 0, 0, 0), setRequest.get().placements().getFirst());
             assertEquals(new UndoLastEdit.Request("world"), undoRequest.get());
             assertEquals(200, undo.statusCode());
             assertEquals(List.of("say hello"), commandRequest.get().commands());
@@ -287,6 +292,7 @@ final class BridgeOperationEndpointsTest {
                         new DirtConfig.Defaults(true, "runs", true));
         AtomicReference<GetRegionBlocks.Request> blocksRequest = new AtomicReference<>();
         AtomicReference<FillRegion.Request> firstFill = new AtomicReference<>();
+        AtomicReference<SetBlocks.Request> setRequest = new AtomicReference<>();
         BridgeTestFixture.TestOperations operations =
                 new BridgeTestFixture.TestOperations() {
                     @Override
@@ -309,6 +315,13 @@ final class BridgeOperationEndpointsTest {
                         firstFill.set(request);
                         return super.fillRegion(request);
                     }
+
+                    @Override
+                    public SetBlocks.Result setBlocks(SetBlocks.Request request)
+                            throws OperationException {
+                        setRequest.set(request);
+                        return super.setBlocks(request);
+                    }
                 };
         try (BridgeServer bridge = server(configured, operations);
                 HttpClient client = HttpClient.newHttpClient()) {
@@ -323,11 +336,26 @@ final class BridgeOperationEndpointsTest {
             String fillBody =
                     "{" + bounds + ",\"destinationPalette\":[{\"blockState\":\"minecraft:dirt\"}]}";
             assertEquals(200, send(client, post(bridge, "/v1/fill-region", fillBody)).statusCode());
+            HttpResponse<String> set =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/set-blocks",
+                                    """
+                                    {"world":"world","origin":{"x":0,"y":0,"z":0},
+                                     "palettes":[[{"blockState":"minecraft:stone"}]],
+                                     "placements":[[0,0,0,0]]}
+                                    """));
 
             assertTrue(blocksRequest.get().includeAir());
             assertEquals(GetRegionBlocks.Format.RUNS, blocksRequest.get().format());
             assertEquals(321, blocksRequest.get().maxResults());
             assertTrue(firstFill.get().dryRun());
+            assertTrue(setRequest.get().dryRun());
+            assertEquals(
+                    setRequest.get().seed(),
+                    json(set.body()).getAsJsonObject().get("seed").getAsInt());
         }
     }
 
@@ -403,10 +431,10 @@ final class BridgeOperationEndpointsTest {
                                     "/v1/set-blocks",
                                     """
                                     {"world":"world","origin":{"x":0,"y":0,"z":0},
-                                     "palette":["minecraft:stone"],"placements":[{
-                                     "paletteIndex":0,"offsets":[[1e2147483648,0,0]]}]}
+                                     "palettes":[[{"blockState":"minecraft:stone"}]],
+                                     "placements":[[0,1e2147483648,0,0]]}
                                     """)),
-                    "placements[0].offsets[0][0] must be a signed 32-bit integer");
+                    "placements[0][1] must be a signed 32-bit integer");
             assertError(
                     send(
                             client,
@@ -414,8 +442,9 @@ final class BridgeOperationEndpointsTest {
                                     bridge,
                                     "/v1/set-blocks",
                                     """
-                                    {"world":"world","changes":[{"position":
-                                     {"x":0,"y":0,"z":0},"blockState":"minecraft:stone"}]}
+                                    {"world":"world","origin":{"x":0,"y":0,"z":0},
+                                     "palette":["minecraft:stone"],"placements":[{
+                                     "paletteIndex":0,"offsets":[[0,0,0]]}]}
                                     """)),
                     "Request contains missing or unknown fields");
         }

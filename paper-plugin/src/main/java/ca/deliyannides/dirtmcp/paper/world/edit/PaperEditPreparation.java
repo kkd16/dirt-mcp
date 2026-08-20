@@ -65,7 +65,10 @@ final class PaperEditPreparation implements AutoCloseable {
                     requireValidHeight(world.bukkitWorld(), region);
                     PreparedSources sources = prepareSources(request.sourceBlockStatePatterns());
                     PreparedPalette palette =
-                            preparePalette(request.destinationPalette(), request.seed());
+                            preparePalette(
+                                    request.destinationPalette(),
+                                    request.seed(),
+                                    "destinationPalette");
                     List<ChunkPosition> chunks = chunks(region);
                     ChunkTicketManager.Lease lease = this.tickets.acquire(world, chunks, "Region");
                     return new PreparedReplace(world, sources, palette, chunks, lease);
@@ -79,7 +82,10 @@ final class PaperEditPreparation implements AutoCloseable {
                     requireAvailable(world);
                     requireValidHeight(world.bukkitWorld(), region);
                     PreparedPalette palette =
-                            preparePalette(request.destinationPalette(), request.seed());
+                            preparePalette(
+                                    request.destinationPalette(),
+                                    request.seed(),
+                                    "destinationPalette");
                     List<ChunkPosition> chunks = chunks(region);
                     ChunkTicketManager.Lease lease = this.tickets.acquire(world, chunks, "Region");
                     return new PreparedFill(world, palette, chunks, lease);
@@ -92,10 +98,12 @@ final class PaperEditPreparation implements AutoCloseable {
         return onMainThread(
                 () -> {
                     requireAvailable(world);
-                    List<PreparedBlockChange> changes = prepareChanges(world, request);
+                    List<PreparedPalette> palettes = prepareSetPalettes(request);
+                    List<PreparedBlockChange> changes = prepareChanges(world, request, palettes);
                     ChunkTicketManager.Lease lease =
                             this.tickets.acquire(world, touchedChunks, "Set-blocks edit");
-                    return new PreparedSet(world, changes, List.copyOf(touchedChunks), lease);
+                    return new PreparedSet(
+                            world, palettes, changes, List.copyOf(touchedChunks), lease);
                 });
     }
 
@@ -113,55 +121,47 @@ final class PaperEditPreparation implements AutoCloseable {
         this.tickets.close();
     }
 
-    private List<PreparedBlockChange> prepareChanges(PaperWorld world, SetBlocks.Request request)
+    private List<PreparedBlockChange> prepareChanges(
+            PaperWorld world, SetBlocks.Request request, List<PreparedPalette> palettes)
             throws OperationException {
-        List<BlockState> palette = prepareSetPalette(request.palette());
         List<PreparedBlockChange> changes = new ArrayList<>();
         for (int placementIndex = 0;
                 placementIndex < request.placements().size();
                 placementIndex++) {
             SetBlocks.Placement placement = request.placements().get(placementIndex);
-            BlockState state = palette.get(placement.paletteIndex());
-            for (int offsetIndex = 0; offsetIndex < placement.offsets().size(); offsetIndex++) {
-                SetBlocks.Offset offset = placement.offsets().get(offsetIndex);
-                BlockPosition position =
-                        new BlockPosition(
-                                Math.addExact(request.origin().x(), offset.x()),
-                                Math.addExact(request.origin().y(), offset.y()),
-                                Math.addExact(request.origin().z(), offset.z()));
-                if (position.y() < world.bukkitWorld().getMinHeight()
-                        || position.y() >= world.bukkitWorld().getMaxHeight()) {
-                    throw invalid(
-                            "placements["
-                                    + placementIndex
-                                    + "].offsets["
-                                    + offsetIndex
-                                    + "] resolves to a Y coordinate outside "
-                                    + world.bukkitWorld().getMinHeight()
-                                    + " through "
-                                    + (world.bukkitWorld().getMaxHeight() - 1));
-                }
-                changes.add(
-                        new PreparedBlockChange(
-                                BlockVector3.at(position.x(), position.y(), position.z()), state));
+            Pattern pattern = palettes.get(placement.paletteIndex()).pattern();
+            BlockPosition position =
+                    new BlockPosition(
+                            Math.addExact(request.origin().x(), placement.x()),
+                            Math.addExact(request.origin().y(), placement.y()),
+                            Math.addExact(request.origin().z(), placement.z()));
+            if (position.y() < world.bukkitWorld().getMinHeight()
+                    || position.y() >= world.bukkitWorld().getMaxHeight()) {
+                throw invalid(
+                        "placements["
+                                + placementIndex
+                                + "] resolves to a Y coordinate outside "
+                                + world.bukkitWorld().getMinHeight()
+                                + " through "
+                                + (world.bukkitWorld().getMaxHeight() - 1));
             }
+            BlockVector3 vector = BlockVector3.at(position.x(), position.y(), position.z());
+            changes.add(new PreparedBlockChange(vector, pattern));
         }
         return List.copyOf(changes);
     }
 
-    private static List<BlockState> prepareSetPalette(List<String> inputs)
+    private static List<PreparedPalette> prepareSetPalettes(SetBlocks.Request request)
             throws OperationException {
-        Set<String> statesSeen = new LinkedHashSet<>();
-        List<BlockState> states = new ArrayList<>(inputs.size());
-        for (int index = 0; index < inputs.size(); index++) {
-            BlockData data = parseBlockData(inputs.get(index), "palette[" + index + "]");
-            String canonicalState = data.getAsString();
-            if (!statesSeen.add(canonicalState)) {
-                throw invalid("palette contains a duplicate block state: " + canonicalState);
-            }
-            states.add(BukkitAdapter.adapt(data));
+        List<PreparedPalette> palettes = new ArrayList<>(request.palettes().size());
+        for (int index = 0; index < request.palettes().size(); index++) {
+            palettes.add(
+                    preparePalette(
+                            request.palettes().get(index),
+                            request.seed(),
+                            "palettes[" + index + "]"));
         }
-        return List.copyOf(states);
+        return List.copyOf(palettes);
     }
 
     private static PreparedSources prepareSources(List<String> inputs) throws OperationException {
@@ -185,7 +185,8 @@ final class PaperEditPreparation implements AutoCloseable {
         return new PreparedSources(List.copyOf(canonicalPatterns), List.copyOf(matchingStates));
     }
 
-    private static PreparedPalette preparePalette(List<DestinationPaletteEntry> inputs, int seed)
+    private static PreparedPalette preparePalette(
+            List<DestinationPaletteEntry> inputs, int seed, String field)
             throws OperationException {
         List<DestinationPaletteEntry> canonical = new ArrayList<>(inputs.size());
         Set<String> statesSeen = new LinkedHashSet<>();
@@ -193,12 +194,10 @@ final class PaperEditPreparation implements AutoCloseable {
         for (int index = 0; index < inputs.size(); index++) {
             DestinationPaletteEntry entry = inputs.get(index);
             BlockData data =
-                    parseBlockData(
-                            entry.blockState(), "destinationPalette[" + index + "].blockState");
+                    parseBlockData(entry.blockState(), field + "[" + index + "].blockState");
             String canonicalState = data.getAsString();
             if (!statesSeen.add(canonicalState)) {
-                throw invalid(
-                        "destinationPalette contains a duplicate block state: " + canonicalState);
+                throw invalid(field + " contains a duplicate block state: " + canonicalState);
             }
             Integer weight = entry.weight();
             canonical.add(new DestinationPaletteEntry(canonicalState, weight));
@@ -300,7 +299,7 @@ final class PaperEditPreparation implements AutoCloseable {
 
     record PreparedPalette(List<DestinationPaletteEntry> entries, Pattern pattern) {}
 
-    record PreparedBlockChange(BlockVector3 position, BlockState blockState) {}
+    record PreparedBlockChange(BlockVector3 position, Pattern pattern) {}
 
     record PreparedReplace(
             PaperWorld paperWorld,
@@ -344,10 +343,16 @@ final class PaperEditPreparation implements AutoCloseable {
 
     record PreparedSet(
             PaperWorld paperWorld,
+            List<PreparedPalette> preparedPalettes,
             List<PreparedBlockChange> changes,
             List<ChunkPosition> chunks,
             ChunkTicketManager.Lease lease)
             implements EditPlatform.PreparedSet {
+        @Override
+        public List<List<DestinationPaletteEntry>> palettes() {
+            return this.preparedPalettes.stream().map(PreparedPalette::entries).toList();
+        }
+
         @Override
         public int blockCount() {
             return this.changes.size();

@@ -10,24 +10,19 @@ import java.util.List;
 public interface SetBlocks {
     Result setBlocks(Request request) throws OperationException;
 
-    record Offset(int x, int y, int z) {}
-
-    record Placement(int paletteIndex, List<Offset> offsets) {
-        public Placement {
-            offsets =
-                    offsets == null ? null : Collections.unmodifiableList(new ArrayList<>(offsets));
-        }
-    }
+    record Placement(int paletteIndex, int x, int y, int z) {}
 
     record Request(
             String world,
             BlockPosition origin,
-            List<String> palette,
+            List<List<DestinationPaletteEntry>> palettes,
             List<Placement> placements,
+            int seed,
             boolean dryRun) {
         public Request {
-            palette =
-                    palette == null ? null : Collections.unmodifiableList(new ArrayList<>(palette));
+            if (palettes != null) {
+                palettes = immutablePalettes(palettes);
+            }
             placements =
                     placements == null
                             ? null
@@ -37,8 +32,28 @@ public interface SetBlocks {
 
     record Result(
             String world,
+            List<List<DestinationPaletteEntry>> palettes,
+            int seed,
             boolean dryRun,
             long blockCount,
             long changedBlockCount,
-            long unchangedBlockCount) {}
+            long unchangedBlockCount) {
+        public Result {
+            if (palettes != null) {
+                palettes = immutablePalettes(palettes);
+            }
+        }
+    }
+
+    private static List<List<DestinationPaletteEntry>> immutablePalettes(
+            List<List<DestinationPaletteEntry>> palettes) {
+        List<List<DestinationPaletteEntry>> copy = new ArrayList<>(palettes.size());
+        for (List<DestinationPaletteEntry> palette : palettes) {
+            copy.add(
+                    palette == null
+                            ? null
+                            : Collections.unmodifiableList(new ArrayList<>(palette)));
+        }
+        return Collections.unmodifiableList(copy);
+    }
 }

@@ -86,43 +86,53 @@ test('keeps common Minecraft wire values strict and bounded', () => {
   assert.equal(BlockPositionSchema.safeParse({ x: -2_147_483_648, y: 0, z: 2_147_483_647 }).success, true);
 });
 
-test('validates palette-based set-block placements and rejects the replaced contract', () => {
+test('validates weighted set-block palettes and compact placements', () => {
   const input = {
     world: 'world',
     origin: { x: 10, y: 20, z: 30 },
-    palette: ['minecraft:stone', 'minecraft:snow_block'],
-    placements: [
-      { paletteIndex: 0, offsets: [[0, 0, 0] as const, [1, 0, 0] as const] },
-      { paletteIndex: 1, offsets: [[0, 1, 0] as const] },
+    palettes: [
+      [
+        { blockState: 'minecraft:stone', weight: 75 },
+        { blockState: 'minecraft:andesite', weight: 25 },
+      ],
+      [{ blockState: 'minecraft:snow_block' }],
     ],
+    placements: [
+      [0, 0, 0, 0],
+      [0, 1, 0, 0],
+      [1, 0, 1, 0],
+    ],
+    seed: 42,
   };
 
   assert.equal(SetBlocksInputSchema.safeParse(input).success, true);
   assert.equal(
     SetBlocksInputSchema.safeParse({
       ...input,
-      placements: [{ paletteIndex: 0, offsets: [['0', '0', '0']] }],
+      placements: [['0', '0', '0', '0']],
     }).success,
     false,
   );
   assert.equal(
     SetBlocksInputSchema.safeParse({
       ...input,
-      placements: [{ paletteIndex: 0, offsets: [[0, 0]] }],
+      placements: [[0, 0, 0]],
     }).success,
     false,
   );
   assert.equal(
     SetBlocksInputSchema.safeParse({
       world: 'world',
-      changes: [{ position: { x: 10, y: 20, z: 30 }, blockState: 'minecraft:stone' }],
+      origin: input.origin,
+      palette: ['minecraft:stone'],
+      placements: [{ paletteIndex: 0, offsets: [[0, 0, 0]] }],
     }).success,
     false,
   );
   assert.equal(
     SetBlocksInputSchema.safeParse({
       ...input,
-      placements: [{ paletteIndex: 2, offsets: [[0, 0, 0]] }],
+      placements: [[2, 0, 0, 0]],
     }).success,
     false,
   );
@@ -130,13 +140,8 @@ test('validates palette-based set-block placements and rejects the replaced cont
     SetBlocksInputSchema.safeParse({
       ...input,
       placements: [
-        {
-          paletteIndex: 0,
-          offsets: [
-            [0, 0, 0],
-            [0, 0, 0],
-          ],
-        },
+        [0, 0, 0, 0],
+        [1, 0, 0, 0],
       ],
     }).success,
     false,
@@ -145,7 +150,26 @@ test('validates palette-based set-block placements and rejects the replaced cont
     SetBlocksInputSchema.safeParse({
       ...input,
       origin: { x: 2_147_483_647, y: 20, z: 30 },
-      placements: [{ paletteIndex: 0, offsets: [[1, 0, 0]] }],
+      placements: [[0, 1, 0, 0]],
+    }).success,
+    false,
+  );
+  assert.equal(
+    SetBlocksInputSchema.safeParse({
+      ...input,
+      palettes: [[{ blockState: 'minecraft:stone', weight: 60 }, { blockState: 'minecraft:dirt' }]],
+    }).success,
+    false,
+  );
+  assert.equal(
+    SetBlocksInputSchema.safeParse({
+      ...input,
+      palettes: [
+        [
+          { blockState: 'minecraft:stone', weight: 60 },
+          { blockState: 'minecraft:dirt', weight: 30 },
+        ],
+      ],
     }).success,
     false,
   );

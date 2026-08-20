@@ -34,7 +34,7 @@ V1 provides these world capabilities:
   views;
 - replace matching blocks;
 - fill a bounded region;
-- set mixed block states at origin-relative offsets as one edit;
+- set weighted-palette block states at origin-relative offsets as one edit;
 - undo the most recent Dirt MCP edit in a world; and
 - run an ordered batch of registered Minecraft commands with operator-level
   permissions through a non-player Paper sender.

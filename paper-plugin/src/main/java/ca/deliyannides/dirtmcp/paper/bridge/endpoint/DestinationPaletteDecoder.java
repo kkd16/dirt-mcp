@@ -15,31 +15,28 @@ final class DestinationPaletteDecoder {
 
     private DestinationPaletteDecoder() {}
 
-    static List<DestinationPaletteEntry> decode(JsonElement element)
+    static List<DestinationPaletteEntry> decode(JsonElement element, String field)
             throws InvalidRequestException {
         if (element == null || !element.isJsonArray() || element.getAsJsonArray().isEmpty()) {
-            throw new InvalidRequestException("destinationPalette must be a non-empty array");
+            throw new InvalidRequestException(field + " must be a non-empty array");
         }
         List<DestinationPaletteEntry> entries = new ArrayList<>(element.getAsJsonArray().size());
         for (int index = 0; index < element.getAsJsonArray().size(); index++) {
             JsonElement value = element.getAsJsonArray().get(index);
             if (!value.isJsonObject()) {
-                throw new InvalidRequestException(
-                        "destinationPalette[" + index + "] must be an object");
+                throw new InvalidRequestException(field + "[" + index + "] must be an object");
             }
             JsonObject object = value.getAsJsonObject();
             RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS);
             Integer weight = null;
             if (object.has("weight")) {
                 weight =
-                        RequestJson.integer(
-                                object.get("weight"), "destinationPalette[" + index + "].weight");
+                        RequestJson.integer(object.get("weight"), field + "[" + index + "].weight");
             }
             entries.add(
                     new DestinationPaletteEntry(
                             RequestJson.string(
-                                    object.get("blockState"),
-                                    "destinationPalette[" + index + "].blockState"),
+                                    object.get("blockState"), field + "[" + index + "].blockState"),
                             weight));
         }
         return List.copyOf(entries);

@@ -21,7 +21,7 @@ bridge:
 limits:
   # Maximum JSON request body. Oversized requests fail before parsing or mutation.
   max-request-bytes: 262144
-  # Maximum inclusive cuboid volume or resolved set-blocks offsets in one operation.
+  # Maximum inclusive cuboid volume or set-blocks placements in one operation.
   max-region-volume: 262144
   # Maximum distinct loaded chunks one edit may touch.
   max-touched-chunks: 256

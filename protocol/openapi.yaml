@@ -328,7 +328,7 @@ paths:
   /v1/set-blocks:
     post:
       operationId: setBlocks
-      summary: Place palette states at origin-relative offsets in one edit
+      summary: Place weighted-palette states at origin-relative offsets in one edit
       requestBody:
         required: true
         content:
@@ -343,7 +343,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/SetBlocksResponse'
         '400':
-          description: Invalid JSON, fields, palette, offsets, resolved coordinates, world height, block state, or duplicate position
+          description: Invalid JSON, fields, palettes, placements, resolved coordinates, world height, block state, or duplicate position
           content:
             application/json:
               schema:
@@ -1146,39 +1146,21 @@ components:
           type: integer
           format: int64
           minimum: 0
-    BlockOffset:
+    PalettePlacement:
       type: array
-      minItems: 3
-      maxItems: 3
-      description: Signed [x, y, z] offset from the request origin.
+      minItems: 4
+      maxItems: 4
+      description: Exact [paletteIndex, x, y, z] integer tuple; the index is non-negative and x, y, z are signed offsets from origin.
       items:
         type: integer
         format: int32
-    PalettePlacement:
-      type: object
-      additionalProperties: false
-      required:
-        - paletteIndex
-        - offsets
-      properties:
-        paletteIndex:
-          type: integer
-          format: int32
-          minimum: 0
-          description: Zero-based index into the request palette.
-        offsets:
-          type: array
-          minItems: 1
-          description: Origin-relative block positions that receive this palette state.
-          items:
-            $ref: '#/components/schemas/BlockOffset'
     SetBlocksRequest:
       type: object
       additionalProperties: false
       required:
         - world
         - origin
-        - palette
+        - palettes
         - placements
       properties:
         world:
@@ -1187,22 +1169,28 @@ components:
           pattern: '.*\S.*'
         origin:
           $ref: '#/components/schemas/BlockPosition'
-        palette:
+        palettes:
           type: array
           minItems: 1
           maxItems: 64
-          uniqueItems: true
-          description: Exact block states referenced by zero-based index from placements.
+          description: Weighted palettes referenced by zero-based index; at most 64 entries are allowed across all palettes.
           items:
-            type: string
-            minLength: 1
-            pattern: '.*\S.*'
+            type: array
+            minItems: 1
+            maxItems: 64
+            description: Exact states; weights are all omitted for equal probability or all supplied as whole percentages totaling 100.
+            items:
+              $ref: '#/components/schemas/DestinationPaletteEntry'
         placements:
           type: array
           minItems: 1
-          description: Palette-indexed groups of origin-relative offsets; resolved positions must be distinct.
+          description: Palette-indexed origin-relative positions; resolved positions must be distinct.
           items:
             $ref: '#/components/schemas/PalettePlacement'
+        seed:
+          type: integer
+          format: int32
+          description: Omission generates a fresh seed returned in the response.
         dryRun:
           type: boolean
           description: Omission uses the configured set-blocks default.
@@ -1211,6 +1199,8 @@ components:
       additionalProperties: false
       required:
         - world
+        - palettes
+        - seed
         - dryRun
         - blockCount
         - changedBlockCount
@@ -1219,6 +1209,20 @@ components:
         world:
           type: string
           minLength: 1
+        palettes:
+          type: array
+          minItems: 1
+          maxItems: 64
+          description: Canonical palettes used by the edit.
+          items:
+            type: array
+            minItems: 1
+            maxItems: 64
+            items:
+              $ref: '#/components/schemas/DestinationPaletteEntry'
+        seed:
+          type: integer
+          format: int32
         dryRun:
           type: boolean
         blockCount:
@@ -1366,7 +1370,7 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum cuboid mutation/count volume or resolved offsets in set_blocks.
+          description: Maximum cuboid mutation/count volume or placements in set_blocks.
         maxTouchedChunks:
           type: integer
           format: int32

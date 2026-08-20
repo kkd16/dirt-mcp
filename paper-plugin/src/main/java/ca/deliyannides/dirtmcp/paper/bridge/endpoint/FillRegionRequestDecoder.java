@@ -26,7 +26,8 @@ final class FillRegionRequestDecoder {
                 RequestJson.string(object.get("world"), "world"),
                 RequestJson.position(object.get("min"), "min"),
                 RequestJson.position(object.get("max"), "max"),
-                DestinationPaletteDecoder.decode(object.get("destinationPalette")),
+                DestinationPaletteDecoder.decode(
+                        object.get("destinationPalette"), "destinationPalette"),
                 object.has("seed")
                         ? RequestJson.integer(object.get("seed"), "seed")
                         : ThreadLocalRandom.current().nextInt(),

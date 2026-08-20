@@ -114,20 +114,22 @@ final class FaweEditExecutor {
     EditPlatform.EditResult set(PaperEditPreparation.PreparedSet edit, boolean dryRun)
             throws OperationException {
         EditSession session = newEditSession(edit.paperWorld().worldEditWorld(), !dryRun);
-        List<PaperEditPreparation.PreparedBlockChange> pending = new ArrayList<>();
+        List<SetBlockChange> pending = new ArrayList<>();
         long expectedChanges;
         try (session) {
             for (PaperEditPreparation.PreparedBlockChange change : edit.changes()) {
                 requireNotInterrupted();
-                if (!session.getBlock(change.position()).equals(change.blockState())) {
-                    pending.add(change);
+                BlockState blockState =
+                        change.pattern().applyBlock(change.position()).toBlockState();
+                if (!session.getBlock(change.position()).equals(blockState)) {
+                    pending.add(new SetBlockChange(change.position(), blockState));
                 }
             }
             expectedChanges = pending.size();
             enforceChangeLimit(expectedChanges);
             if (!dryRun) {
                 requireNotInterrupted();
-                for (PaperEditPreparation.PreparedBlockChange change : pending) {
+                for (SetBlockChange change : pending) {
                     requireNotInterrupted();
                     session.setBlock(
                             change.position().x(),
@@ -240,4 +242,6 @@ final class FaweEditExecutor {
 
     record StoredUndo(EditSession session, long changedBlockCount, List<ChunkPosition> chunks)
             implements EditPlatform.UndoToken {}
+
+    private record SetBlockChange(BlockVector3 position, BlockState blockState) {}
 }

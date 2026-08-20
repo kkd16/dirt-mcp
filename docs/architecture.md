@@ -133,12 +133,13 @@ only the chunks containing those positions. All three canonicalize Bukkit
 block-state strings at the Paper boundary and record only successful non-empty
 edits. Replacement expands its
 property-aware source patterns to a concrete FAWE mask on Paper's main thread.
-Cuboid destinations become a FAWE random pattern backed by a stateless
+Edit palettes become FAWE random patterns backed by a stateless
 seed-and-coordinate selector, making results independent of traversal order.
 The same selector pre-counts exact changes before mutation so dry runs are
 replayable and the changed-block limit is checked before execution. Set-blocks
-edits reject duplicate resolved positions and validate every palette reference,
-position, state, and chunk before opening their single FAWE edit session. Dirt
+edits resolve compact `[paletteIndex, x, y, z]` placements, reject duplicate
+positions, and validate every palette reference, state, and chunk before opening
+their single FAWE edit session. Dirt
 explicitly uses FAWE's API
 side-effect profile for edits, which omits neighbor updates while retaining
 API-appropriate heightmap and lighting work.

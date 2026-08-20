@@ -118,11 +118,12 @@ The current tool surface contains `ping_server`, `get_server_status`,
 selection and execution semantics, and the
 [OpenAPI contract](protocol/openapi.yaml) for exact bridge schemas.
 
-`set_blocks` takes one absolute `origin`, a block-state `palette`, and
-`placements` that assign a zero-based `paletteIndex` to `[x, y, z]` offset
-tuples. It resolves and validates every position before one FAWE edit, rejects
-duplicates, and records a non-empty batch as one Dirt undo entry. The shipped
-256 KiB request limit bounds request memory. Placement does not request
+`set_blocks` takes one absolute `origin`, one or more weighted `palettes`, and
+compact `[paletteIndex, x, y, z]` placements whose coordinates are signed
+origin-relative offsets. Each palette uses the same optional-weight and seed
+rules as the cuboid edit tools. Dirt validates every position before one FAWE
+edit, rejects duplicates, and records a non-empty batch as one undo entry. The
+shipped 256 KiB request limit bounds request memory. Placement does not request
 Minecraft neighbor physics.
 
 `run_minecraft_commands` accepts a non-empty command array and dispatches it in

@@ -7,7 +7,6 @@ import {
   BoundsSchema,
   INT32_MAX,
   INT32_MIN,
-  MUTATION_ANNOTATIONS,
   NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
   NonBlankStringSchema,
 } from './common.ts';
@@ -147,49 +146,32 @@ const FillRegionOutputSchema = z
   .strict()
   .describe('Completed or previewed region fill.');
 
-const BlockOffsetSchema = z
+const SetBlocksPlacementSchema = z
   .array(z.number().int().min(INT32_MIN).max(INT32_MAX))
-  .length(3)
-  .describe('Signed [x, y, z] offset from the origin.');
+  .length(4)
+  .describe('Exact [paletteIndex, x, y, z] tuple; x, y, and z are signed offsets from the origin.');
 
-const SetBlocksPaletteSchema = z
-  .array(NonBlankStringSchema)
+const SetBlocksPalettesSchema = z
+  .array(DestinationPaletteSchema)
   .min(1)
   .max(64)
-  .superRefine((palette, context) => {
-    const seen = new Set<string>();
-    palette.forEach((blockState, index) => {
-      if (seen.has(blockState)) {
-        context.addIssue({
-          code: 'custom',
-          path: [index],
-          message: 'Palette block states must be distinct.',
-        });
-      }
-      seen.add(blockState);
-    });
+  .superRefine((palettes, context) => {
+    const entryCount = palettes.reduce((sum, palette) => sum + palette.length, 0);
+    if (entryCount > 64) {
+      context.addIssue({ code: 'custom', message: 'Palettes may contain at most 64 entries in total.' });
+    }
   })
-  .describe('One or more distinct exact block states referenced by zero-based index.');
+  .describe('One or more weighted block-state palettes referenced by zero-based index; at most 64 entries total.');
 
 export const SetBlocksInputSchema = z
   .object({
     world: NonBlankStringSchema.describe('Exact name of an already loaded Paper world.'),
     origin: BlockPositionSchema.describe('Absolute anchor added to every placement offset.'),
-    palette: SetBlocksPaletteSchema,
-    placements: z
-      .array(
-        z
-          .object({
-            paletteIndex: z.number().int().min(0).max(INT32_MAX).describe('Zero-based index into palette.'),
-            offsets: z
-              .array(BlockOffsetSchema)
-              .min(1)
-              .describe('Origin-relative positions that receive this palette state.'),
-          })
-          .strict(),
-      )
-      .min(1)
-      .describe('Palette-indexed groups of origin-relative block offsets.'),
+    palettes: SetBlocksPalettesSchema,
+    placements: z.array(SetBlocksPlacementSchema).min(1).describe('Palette-indexed origin-relative block placements.'),
+    seed: SeedSchema.optional().describe(
+      'Optional reproducibility seed. Omission generates a fresh seed returned in the result.',
+    ),
     dryRun: z
       .boolean()
       .optional()
@@ -199,40 +181,41 @@ export const SetBlocksInputSchema = z
   .superRefine((input, context) => {
     const positions = new Set<string>();
     input.placements.forEach((placement, placementIndex) => {
-      if (placement.paletteIndex >= input.palette.length) {
+      const paletteIndex = placement[0]!;
+      if (paletteIndex < 0 || paletteIndex >= input.palettes.length) {
         context.addIssue({
           code: 'custom',
-          path: ['placements', placementIndex, 'paletteIndex'],
-          message: 'Palette index must reference an entry in palette.',
+          path: ['placements', placementIndex, 0],
+          message: 'Palette index must reference an entry in palettes.',
         });
       }
-      placement.offsets.forEach((offset, offsetIndex) => {
-        const resolved = [input.origin.x + offset[0]!, input.origin.y + offset[1]!, input.origin.z + offset[2]!];
-        if (resolved.some((coordinate) => coordinate < INT32_MIN || coordinate > INT32_MAX)) {
-          context.addIssue({
-            code: 'custom',
-            path: ['placements', placementIndex, 'offsets', offsetIndex],
-            message: 'Resolved position must use signed 32-bit coordinates.',
-          });
-          return;
-        }
-        const key = resolved.join(',');
-        if (positions.has(key)) {
-          context.addIssue({
-            code: 'custom',
-            path: ['placements', placementIndex, 'offsets', offsetIndex],
-            message: 'Resolved block positions must be distinct.',
-          });
-        }
-        positions.add(key);
-      });
+      const resolved = [input.origin.x + placement[1]!, input.origin.y + placement[2]!, input.origin.z + placement[3]!];
+      if (resolved.some((coordinate) => coordinate < INT32_MIN || coordinate > INT32_MAX)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['placements', placementIndex],
+          message: 'Resolved position must use signed 32-bit coordinates.',
+        });
+        return;
+      }
+      const key = resolved.join(',');
+      if (positions.has(key)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['placements', placementIndex],
+          message: 'Resolved block positions must be distinct.',
+        });
+      }
+      positions.add(key);
     });
   })
-  .describe('One undoable palette-based block edit at origin-relative offsets.');
+  .describe('One undoable weighted-palette block edit at origin-relative offsets.');
 
 const SetBlocksOutputSchema = z
   .object({
     world: z.string().min(1).describe('Edited world name.'),
+    palettes: SetBlocksPalettesSchema.describe('Canonical palettes used by the edit.'),
+    seed: SeedSchema.describe('Resolved seed used for per-coordinate palette choices.'),
     dryRun: z.boolean().describe('Whether the world was left unchanged.'),
     blockCount: z.number().int().positive().describe('Distinct positions in the request.'),
     changedBlockCount: z.number().int().nonnegative().describe('Blocks changed, or that would change in a dry run.'),
@@ -320,10 +303,10 @@ export function registerEditingTools(server: McpServer, bridge: BridgeClient): v
     {
       title: 'Set blocks',
       description:
-        'Place exact block states from a palette at distinct [x, y, z] offsets from one origin, using one FAWE edit and one Dirt undo entry. paletteIndex is zero-based. All states and resolved positions are validated before mutation. Keep the encoded request within get_server_status.limits.maxRequestBytes. Placement does not trigger Minecraft neighbor physics. Set dryRun=true to preview exact counts.',
+        'Place blocks from weighted palettes at distinct origin-relative positions, using one FAWE edit and one Dirt undo entry. Each placement is [paletteIndex, x, y, z], where paletteIndex is zero-based. Omit every weight in a palette for equal probability, or provide whole percentages totaling 100. Reuse the returned seed to replay a preview. All states and resolved positions are validated before mutation. Keep palettes within get_server_status.limits.maxBlockStatePatterns and the encoded request within maxRequestBytes. Placement does not trigger Minecraft neighbor physics. Set dryRun=true to preview exact counts.',
       inputSchema: SetBlocksInputSchema,
       outputSchema: SetBlocksOutputSchema,
-      annotations: MUTATION_ANNOTATIONS,
+      annotations: NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
     },
     async (input, context) =>
       executeToolCall(
@@ -333,7 +316,7 @@ export function registerEditingTools(server: McpServer, bridge: BridgeClient): v
           const verb = result.dryRun ? 'Would change' : 'Changed';
           return successResult(
             result,
-            `${verb} ${result.changedBlockCount} of ${result.blockCount} requested blocks in ${result.world}.`,
+            `${verb} ${result.changedBlockCount} of ${result.blockCount} requested blocks in ${result.world} using seed ${result.seed}.`,
           );
         },
       ),

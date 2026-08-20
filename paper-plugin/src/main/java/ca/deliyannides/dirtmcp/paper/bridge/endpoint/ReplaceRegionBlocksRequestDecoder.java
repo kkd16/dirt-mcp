@@ -35,7 +35,8 @@ final class ReplaceRegionBlocksRequestDecoder {
                 RequestJson.position(object.get("max"), "max"),
                 RequestJson.nonEmptyStringList(
                         object.get("sourceBlockStatePatterns"), "sourceBlockStatePatterns"),
-                DestinationPaletteDecoder.decode(object.get("destinationPalette")),
+                DestinationPaletteDecoder.decode(
+                        object.get("destinationPalette"), "destinationPalette"),
                 object.has("seed")
                         ? RequestJson.integer(object.get("seed"), "seed")
                         : ThreadLocalRandom.current().nextInt(),

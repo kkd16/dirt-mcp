@@ -215,6 +215,13 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   };
   const setBlocks = {
     world: 'world',
+    palettes: [
+      [
+        { blockState: 'minecraft:stone', weight: 75 },
+        { blockState: 'minecraft:glass', weight: 25 },
+      ],
+    ],
+    seed: 123,
     dryRun: false,
     blockCount: 2,
     changedBlockCount: 1,
@@ -323,7 +330,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { name: 'scan_orthographic_view', annotations: readAnnotations() },
       { name: 'replace_region_blocks', annotations: mutationAnnotations(false) },
       { name: 'fill_region', annotations: mutationAnnotations(false) },
-      { name: 'set_blocks', annotations: mutationAnnotations(true) },
+      { name: 'set_blocks', annotations: mutationAnnotations(false) },
       { name: 'undo_last_dirt_edit', annotations: mutationAnnotations(false) },
       { name: 'run_minecraft_commands', annotations: mutationAnnotations(false) },
     ],
@@ -332,23 +339,19 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.ok(listedSetBlocks);
   const setBlocksInputSchema = listedSetBlocks.inputSchema as {
     readonly properties: {
-      readonly placements: {
-        readonly items: {
-          readonly properties: { readonly offsets: { readonly items: unknown } };
-        };
-      };
+      readonly placements: { readonly items: unknown };
     };
   };
-  assert.deepEqual(setBlocksInputSchema.properties.placements.items.properties.offsets.items, {
+  assert.deepEqual(setBlocksInputSchema.properties.placements.items, {
     type: 'array',
     items: {
       type: 'integer',
       minimum: -2_147_483_648,
       maximum: 2_147_483_647,
     },
-    minItems: 3,
-    maxItems: 3,
-    description: 'Signed [x, y, z] offset from the origin.',
+    minItems: 4,
+    maxItems: 4,
+    description: 'Exact [paletteIndex, x, y, z] tuple; x, y, and z are signed offsets from the origin.',
   });
 
   send(child, {
@@ -485,11 +488,17 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   const setBlocksInput = {
     world: 'world',
     origin: { x: 1, y: 2, z: 3 },
-    palette: ['minecraft:stone', 'minecraft:glass'],
-    placements: [
-      { paletteIndex: 0, offsets: [[0, 0, 0]] },
-      { paletteIndex: 1, offsets: [[4, 0, 0]] },
+    palettes: [
+      [
+        { blockState: 'minecraft:stone', weight: 75 },
+        { blockState: 'minecraft:glass', weight: 25 },
+      ],
     ],
+    placements: [
+      [0, 0, 0, 0],
+      [0, 4, 0, 0],
+    ],
+    seed: 123,
   };
   send(child, {
     jsonrpc: '2.0',
@@ -507,7 +516,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       content: [
         {
           type: 'text',
-          text: 'Changed 1 of 2 requested blocks in world.',
+          text: 'Changed 1 of 2 requested blocks in world using seed 123.',
         },
       ],
       structuredContent: setBlocks,

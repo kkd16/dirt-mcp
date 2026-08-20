@@ -358,9 +358,9 @@ final class BridgeServerProtocolTest {
                                                     """
                                                     {"world":"audit-world",
                                                      "origin":{"x":1,"y":2,"z":3},
-                                                     "palette":["minecraft:secret_gold_block"],
-                                                     "placements":[{"paletteIndex":0,
-                                                     "offsets":[[0,0,0]]}]}
+                                                     "palettes":[[{"blockState":
+                                                     "minecraft:secret_gold_block"}]],
+                                                     "placements":[[0,0,0,0]]}
                                                     """))
                                     .build(),
                             HttpResponse.BodyHandlers.ofString());

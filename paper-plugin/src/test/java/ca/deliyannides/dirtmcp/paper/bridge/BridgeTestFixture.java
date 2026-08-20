@@ -208,12 +208,15 @@ final class BridgeTestFixture {
 
         @Override
         public SetBlocks.Result setBlocks(SetBlocks.Request request) throws OperationException {
-            long blockCount =
-                    request.placements().stream()
-                            .mapToLong(placement -> placement.offsets().size())
-                            .sum();
+            long blockCount = request.placements().size();
             return new SetBlocks.Result(
-                    request.world(), request.dryRun(), blockCount, 1, blockCount - 1);
+                    request.world(),
+                    request.palettes(),
+                    request.seed(),
+                    request.dryRun(),
+                    blockCount,
+                    1,
+                    blockCount - 1);
         }
 
         @Override

@@ -324,32 +324,41 @@ try {
     firstOriginalState === 'minecraft:diamond_block' ? 'minecraft:gold_block' : 'minecraft:diamond_block';
   const secondSetState =
     secondOriginalState === 'minecraft:emerald_block' ? 'minecraft:redstone_block' : 'minecraft:emerald_block';
+  const setPalettes = [
+    [
+      { blockState: firstOriginalState, weight: 50 },
+      { blockState: firstSetState, weight: 50 },
+    ],
+    [{ blockState: secondSetState }],
+  ];
+  const setSeed = 1_234_567;
 
   const setPreview = await bridgeRequest('/v1/set-blocks', {
     world,
     origin: commandPosition,
-    palette: [firstOriginalState, secondSetState],
+    palettes: setPalettes,
     placements: [
-      { paletteIndex: 0, offsets: [[0, 0, 0]] },
-      { paletteIndex: 1, offsets: [[1, 0, 0]] },
+      [0, 0, 0, 0],
+      [1, 1, 0, 0],
     ],
+    seed: setSeed,
     dryRun: true,
   });
-  assert.deepEqual(setPreview, {
-    world,
-    dryRun: true,
-    blockCount: 2,
-    changedBlockCount: 1,
-    unchangedBlockCount: 1,
-  });
+  assert.equal(setPreview.world, world);
+  assert.deepEqual(setPreview.palettes, setPalettes);
+  assert.equal(setPreview.seed, setSeed);
+  assert.equal(setPreview.dryRun, true);
+  assert.equal(setPreview.blockCount, 2);
+  assert.ok(setPreview.changedBlockCount === 1 || setPreview.changedBlockCount === 2);
+  assert.equal(setPreview.unchangedBlockCount, 2 - setPreview.changedBlockCount);
 
   const duplicateSet = await bridgeResponse('/v1/set-blocks', {
     world,
     origin: commandPosition,
-    palette: [firstSetState, secondSetState],
+    palettes: [[{ blockState: firstSetState }], [{ blockState: secondSetState }]],
     placements: [
-      { paletteIndex: 0, offsets: [[0, 0, 0]] },
-      { paletteIndex: 1, offsets: [[0, 0, 0]] },
+      [0, 0, 0, 0],
+      [1, 0, 0, 0],
     ],
   });
   assert.equal(duplicateSet.status, 400);
@@ -358,10 +367,10 @@ try {
   const invalidSet = await bridgeResponse('/v1/set-blocks', {
     world,
     origin: commandPosition,
-    palette: [firstSetState, 'minecraft:not_a_block'],
+    palettes: [[{ blockState: firstSetState }], [{ blockState: 'minecraft:not_a_block' }]],
     placements: [
-      { paletteIndex: 0, offsets: [[0, 0, 0]] },
-      { paletteIndex: 1, offsets: [[1, 0, 0]] },
+      [0, 0, 0, 0],
+      [1, 1, 0, 0],
     ],
   });
   assert.equal(invalidSet.status, 400);
@@ -377,29 +386,36 @@ try {
   const setResult = await bridgeRequest('/v1/set-blocks', {
     world,
     origin: commandPosition,
-    palette: [firstSetState, secondSetState],
+    palettes: setPalettes,
     placements: [
-      { paletteIndex: 0, offsets: [[0, 0, 0]] },
-      { paletteIndex: 1, offsets: [[1, 0, 0]] },
+      [0, 0, 0, 0],
+      [1, 1, 0, 0],
     ],
+    seed: setSeed,
   });
   editsToUndo += setResult.changedBlockCount > 0 ? 1 : 0;
   assert.deepEqual(setResult, {
     world,
+    palettes: setPalettes,
+    seed: setSeed,
     dryRun: false,
     blockCount: 2,
-    changedBlockCount: 2,
-    unchangedBlockCount: 0,
+    changedBlockCount: setPreview.changedBlockCount,
+    unchangedBlockCount: setPreview.unchangedBlockCount,
   });
   const afterSet = await bridgeRequest('/v1/get-region-blocks', {
     world,
     min: commandPosition,
     max: setPosition,
   });
-  assert.deepEqual(sortedBlockKeys(afterSet.blocks), [`5,0,0:${firstSetState}`, `6,0,0:${secondSetState}`]);
+  const afterSetStates = new Map(
+    afterSet.blocks.map((block) => [`${block.position.x},${block.position.y},${block.position.z}`, block.blockState]),
+  );
+  assert.ok([firstOriginalState, firstSetState].includes(afterSetStates.get('5,0,0')));
+  assert.equal(afterSetStates.get('6,0,0'), secondSetState);
   const setUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
   editsToUndo -= 1;
-  assert.equal(setUndone.changedBlockCount, 2);
+  assert.equal(setUndone.changedBlockCount, setResult.changedBlockCount);
   const afterSetUndo = await bridgeRequest('/v1/get-region-blocks', {
     world,
     min: commandPosition,

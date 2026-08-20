@@ -66,7 +66,7 @@ final class FaweWorldEditorTest {
                 editor.setBlocks(
                         setRequest(
                                 "world",
-                                List.of(offset(0, 0, 0), offset(1, 0, 0), offset(2, 0, 0)),
+                                List.of(placement(0, 0, 0), placement(1, 0, 0), placement(2, 0, 0)),
                                 false));
 
         assertEquals(8, fill.volume());
@@ -74,6 +74,10 @@ final class FaweWorldEditorTest {
         assertEquals(3, set.blockCount());
         assertEquals(2, set.changedBlockCount());
         assertEquals(1, set.unchangedBlockCount());
+        assertEquals(
+                List.of(List.of(new DestinationPaletteEntry("canonical:destination", null))),
+                set.palettes());
+        assertEquals(13, set.seed());
     }
 
     @Test
@@ -112,7 +116,7 @@ final class FaweWorldEditorTest {
                                 editor.setBlocks(
                                         setRequest(
                                                 "world",
-                                                List.of(offset(0, 0, 0), offset(16, 0, 0)),
+                                                List.of(placement(0, 0, 0), placement(16, 0, 0)),
                                                 false)));
 
         assertEquals(OperationFailure.REGION_TOO_LARGE, exception.failure());
@@ -139,8 +143,9 @@ final class FaweWorldEditorTest {
                                 new SetBlocks.Request(
                                         "world",
                                         position(0, 0, 0),
-                                        List.of("minecraft:stone"),
+                                        palettes(),
                                         List.of(),
+                                        0,
                                         false)));
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
@@ -149,10 +154,9 @@ final class FaweWorldEditorTest {
                                 new SetBlocks.Request(
                                         "world",
                                         position(0, 0, 0),
-                                        List.of("minecraft:stone"),
-                                        List.of(
-                                                new SetBlocks.Placement(
-                                                        1, List.of(offset(0, 0, 0)))),
+                                        palettes(),
+                                        List.of(new SetBlocks.Placement(1, 0, 0, 0)),
+                                        0,
                                         false)));
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
@@ -160,7 +164,7 @@ final class FaweWorldEditorTest {
                         editor.setBlocks(
                                 setRequest(
                                         "world",
-                                        List.of(offset(0, 0, 0), offset(0, 0, 0)),
+                                        List.of(placement(0, 0, 0), placement(0, 0, 0)),
                                         false)));
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
@@ -169,10 +173,9 @@ final class FaweWorldEditorTest {
                                 new SetBlocks.Request(
                                         "world",
                                         position(Integer.MAX_VALUE, 0, 0),
-                                        List.of("minecraft:stone"),
-                                        List.of(
-                                                new SetBlocks.Placement(
-                                                        0, List.of(offset(1, 0, 0)))),
+                                        palettes(),
+                                        List.of(new SetBlocks.Placement(0, 1, 0, 0)),
+                                        0,
                                         false)));
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
@@ -186,10 +189,10 @@ final class FaweWorldEditorTest {
                                 setRequest(
                                         "world",
                                         List.of(
-                                                offset(0, 0, 0),
-                                                offset(1, 0, 0),
-                                                offset(2, 0, 0),
-                                                offset(3, 0, 0)),
+                                                placement(0, 0, 0),
+                                                placement(1, 0, 0),
+                                                placement(2, 0, 0),
+                                                placement(3, 0, 0)),
                                         false)));
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
@@ -235,7 +238,6 @@ final class FaweWorldEditorTest {
     void rejectsMalformedSetBlockPaletteAndPlacements() {
         FaweWorldEditor editor = editor(new FakePlatform(), 3);
         BlockPosition origin = position(0, 0, 0);
-        List<String> palette = List.of("minecraft:stone");
 
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
@@ -244,10 +246,9 @@ final class FaweWorldEditorTest {
                                 new SetBlocks.Request(
                                         "world",
                                         null,
-                                        palette,
-                                        List.of(
-                                                new SetBlocks.Placement(
-                                                        0, List.of(offset(0, 0, 0)))),
+                                        palettes(),
+                                        List.of(placement(0, 0, 0)),
+                                        0,
                                         false)));
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
@@ -257,9 +258,8 @@ final class FaweWorldEditorTest {
                                         "world",
                                         origin,
                                         null,
-                                        List.of(
-                                                new SetBlocks.Placement(
-                                                        0, List.of(offset(0, 0, 0)))),
+                                        List.of(placement(0, 0, 0)),
+                                        0,
                                         false)));
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
@@ -268,10 +268,9 @@ final class FaweWorldEditorTest {
                                 new SetBlocks.Request(
                                         "world",
                                         origin,
-                                        List.of(" "),
-                                        List.of(
-                                                new SetBlocks.Placement(
-                                                        0, List.of(offset(0, 0, 0)))),
+                                        List.of(List.of(new DestinationPaletteEntry(" ", null))),
+                                        List.of(placement(0, 0, 0)),
+                                        0,
                                         false)));
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
@@ -280,10 +279,14 @@ final class FaweWorldEditorTest {
                                 new SetBlocks.Request(
                                         "world",
                                         origin,
-                                        List.of("minecraft:stone", "minecraft:stone"),
                                         List.of(
-                                                new SetBlocks.Placement(
-                                                        0, List.of(offset(0, 0, 0)))),
+                                                List.of(
+                                                        new DestinationPaletteEntry(
+                                                                "minecraft:stone", 50),
+                                                        new DestinationPaletteEntry(
+                                                                "minecraft:dirt", null))),
+                                        List.of(placement(0, 0, 0)),
+                                        0,
                                         false)));
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
@@ -292,11 +295,17 @@ final class FaweWorldEditorTest {
                                 new SetBlocks.Request(
                                         "world",
                                         origin,
-                                        java.util.Collections.nCopies(
-                                                MAX_BLOCK_STATE_PATTERNS + 1, "minecraft:stone"),
                                         List.of(
-                                                new SetBlocks.Placement(
-                                                        0, List.of(offset(0, 0, 0)))),
+                                                java.util.Collections.nCopies(
+                                                        33,
+                                                        new DestinationPaletteEntry(
+                                                                "minecraft:stone", null)),
+                                                java.util.Collections.nCopies(
+                                                        32,
+                                                        new DestinationPaletteEntry(
+                                                                "minecraft:dirt", null))),
+                                        List.of(placement(0, 0, 0)),
+                                        0,
                                         false)));
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
@@ -305,8 +314,9 @@ final class FaweWorldEditorTest {
                                 new SetBlocks.Request(
                                         "world",
                                         origin,
-                                        palette,
+                                        palettes(),
                                         java.util.Collections.singletonList(null),
+                                        0,
                                         false)));
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
@@ -315,10 +325,9 @@ final class FaweWorldEditorTest {
                                 new SetBlocks.Request(
                                         "world",
                                         origin,
-                                        palette,
-                                        List.of(
-                                                new SetBlocks.Placement(
-                                                        -1, List.of(offset(0, 0, 0)))),
+                                        palettes(),
+                                        List.of(new SetBlocks.Placement(-1, 0, 0, 0)),
+                                        0,
                                         false)));
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
@@ -327,31 +336,9 @@ final class FaweWorldEditorTest {
                                 new SetBlocks.Request(
                                         "world",
                                         origin,
-                                        palette,
-                                        List.of(new SetBlocks.Placement(0, null)),
-                                        false)));
-        assertFailure(
-                OperationFailure.INVALID_REQUEST,
-                () ->
-                        editor.setBlocks(
-                                new SetBlocks.Request(
-                                        "world",
-                                        origin,
-                                        palette,
-                                        List.of(new SetBlocks.Placement(0, List.of())),
-                                        false)));
-        assertFailure(
-                OperationFailure.INVALID_REQUEST,
-                () ->
-                        editor.setBlocks(
-                                new SetBlocks.Request(
-                                        "world",
-                                        origin,
-                                        palette,
-                                        List.of(
-                                                new SetBlocks.Placement(
-                                                        0,
-                                                        java.util.Collections.singletonList(null))),
+                                        List.of(java.util.Collections.emptyList()),
+                                        List.of(placement(0, 0, 0)),
+                                        0,
                                         false)));
     }
 
@@ -566,25 +553,23 @@ final class FaweWorldEditorTest {
 
     @Test
     void requestListsAreDefensiveCopies() {
-        List<String> palette = new ArrayList<>(List.of("minecraft:stone"));
-        List<SetBlocks.Offset> offsets = new ArrayList<>(List.of(offset(0, 0, 0)));
-        SetBlocks.Placement placement = new SetBlocks.Placement(0, offsets);
-        List<SetBlocks.Placement> placements = new ArrayList<>(List.of(placement));
+        List<DestinationPaletteEntry> palette = new ArrayList<>(palette());
+        List<List<DestinationPaletteEntry>> palettes = new ArrayList<>(List.of(palette));
+        List<SetBlocks.Placement> placements = new ArrayList<>(List.of(placement(0, 0, 0)));
         SetBlocks.Request request =
-                new SetBlocks.Request("world", position(0, 0, 0), palette, placements, false);
+                new SetBlocks.Request("world", position(0, 0, 0), palettes, placements, 13, false);
 
         palette.clear();
-        offsets.clear();
+        palettes.clear();
         placements.clear();
 
-        assertEquals(1, request.palette().size());
+        assertEquals(1, request.palettes().size());
+        assertEquals(1, request.palettes().getFirst().size());
         assertEquals(1, request.placements().size());
-        assertEquals(1, request.placements().getFirst().offsets().size());
-        assertThrows(UnsupportedOperationException.class, () -> request.palette().clear());
-        assertThrows(UnsupportedOperationException.class, () -> request.placements().clear());
+        assertThrows(UnsupportedOperationException.class, () -> request.palettes().clear());
         assertThrows(
-                UnsupportedOperationException.class,
-                () -> request.placements().getFirst().offsets().clear());
+                UnsupportedOperationException.class, () -> request.palettes().getFirst().clear());
+        assertThrows(UnsupportedOperationException.class, () -> request.placements().clear());
     }
 
     private static FaweWorldEditor editor(FakePlatform platform, int history) {
@@ -600,18 +585,17 @@ final class FaweWorldEditorTest {
         return List.of(new DestinationPaletteEntry("minecraft:stone", null));
     }
 
-    private static SetBlocks.Request setRequest(
-            String world, List<SetBlocks.Offset> offsets, boolean dryRun) {
-        return new SetBlocks.Request(
-                world,
-                position(0, 0, 0),
-                List.of("minecraft:stone"),
-                List.of(new SetBlocks.Placement(0, offsets)),
-                dryRun);
+    private static List<List<DestinationPaletteEntry>> palettes() {
+        return List.of(palette());
     }
 
-    private static SetBlocks.Offset offset(int x, int y, int z) {
-        return new SetBlocks.Offset(x, y, z);
+    private static SetBlocks.Request setRequest(
+            String world, List<SetBlocks.Placement> placements, boolean dryRun) {
+        return new SetBlocks.Request(world, position(0, 0, 0), palettes(), placements, 13, dryRun);
+    }
+
+    private static SetBlocks.Placement placement(int x, int y, int z) {
+        return new SetBlocks.Placement(0, x, y, z);
     }
 
     private static BlockPosition position(int x, int y, int z) {
@@ -679,11 +663,7 @@ final class FaweWorldEditorTest {
         @Override
         public PreparedSet prepareSet(
                 WorldHandle world, SetBlocks.Request request, List<ChunkPosition> touchedChunks) {
-            int blockCount =
-                    request.placements().stream()
-                            .mapToInt(placement -> placement.offsets().size())
-                            .sum();
-            return prepared(world, List.of(), blockCount);
+            return prepared(world, List.of(), request.placements().size());
         }
 
         private FakePrepared prepared(
@@ -779,6 +759,11 @@ final class FaweWorldEditorTest {
             @Override
             public List<DestinationPaletteEntry> destinationPalette() {
                 return List.of(new DestinationPaletteEntry("canonical:destination", null));
+            }
+
+            @Override
+            public List<List<DestinationPaletteEntry>> palettes() {
+                return List.of(destinationPalette());
             }
 
             @Override

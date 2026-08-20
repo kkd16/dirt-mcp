@@ -19,7 +19,7 @@ const LimitConfigurationSchema = z
       .number()
       .int()
       .positive()
-      .describe('Maximum cuboid mutation/count volume or resolved offsets in set_blocks.'),
+      .describe('Maximum cuboid mutation/count volume or placements in set_blocks.'),
     maxTouchedChunks: z.number().int().positive().describe('Maximum distinct loaded chunks one mutation may touch.'),
     maxInspectionTouchedChunks: z
       .number()

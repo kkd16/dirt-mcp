@@ -56,6 +56,8 @@ interface EditPlatform extends AutoCloseable {
     }
 
     interface PreparedSet extends PreparedOperation {
+        List<List<DestinationPaletteEntry>> palettes();
+
         int blockCount();
     }
 
