@@ -12,7 +12,6 @@ fi
 
 DIRT_MCP_BRIDGE_TOKEN="$(<"${token_file}")"
 export DIRT_MCP_BRIDGE_TOKEN
-export DIRT_MCP_DEV_RELOAD=1
 
 if [[ -z "${DIRT_MCP_BRIDGE_URL:-}" && -f "${state_file}" ]]; then
   bridge_port="$(awk -F= '$1 == "BRIDGE_PORT" { print $2 }' "${state_file}")"

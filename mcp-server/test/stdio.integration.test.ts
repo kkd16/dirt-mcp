@@ -1,83 +1,52 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { createServer } from 'node:http';
-import { createInterface } from 'node:readline';
+import { createServer, type IncomingHttpHeaders } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import {
-  CLIENT_CAPABILITIES_META_KEY,
-  CLIENT_INFO_META_KEY,
-  PROTOCOL_VERSION_META_KEY,
-  SERVER_INFO_META_KEY,
-} from '@modelcontextprotocol/server';
+  collectLines,
+  modernParams,
+  modernResult,
+  send,
+  waitFor,
+  waitForValue,
+  type JsonRpcResponse,
+} from './support/mcp-process.ts';
 
 const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 
-function collectLines(stream, parse) {
-  const collected = { values: [], waiters: [] };
-  createInterface({ input: stream }).on('line', (line) => {
-    const value = parse(line);
-    collected.values.push(value);
-    collected.waiters = collected.waiters.filter((waiter) => !waiter(value));
-  });
-  return collected;
+interface BridgeRequestRecord {
+  readonly body: unknown;
+  readonly headers: IncomingHttpHeaders;
+  readonly method: string | undefined;
+  readonly path: string | undefined;
 }
 
-function waitForValue(collected, predicate, timeoutMilliseconds = 5_000) {
-  const existing = collected.values.find(predicate);
-  if (existing !== undefined) {
-    return Promise.resolve(existing);
-  }
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      collected.waiters = collected.waiters.filter((waiter) => waiter !== receive);
-      reject(new Error('Timed out waiting for MCP process output'));
-    }, timeoutMilliseconds);
-    const receive = (value) => {
-      if (!predicate(value)) {
-        return false;
-      }
-      clearTimeout(timer);
-      resolve(value);
-      return true;
-    };
-    collected.waiters.push(receive);
-  });
+function serverAddressPort(address: string | AddressInfo | null): number {
+  assert.notEqual(address, null);
+  assert.notEqual(typeof address, 'string');
+  return (address as AddressInfo).port;
 }
 
-function waitFor(messages, id) {
-  return waitForValue(messages, (message) => message.id === id);
+function requestAt(requests: readonly BridgeRequestRecord[], index: number): BridgeRequestRecord {
+  const request = requests[index];
+  assert.ok(request);
+  return request;
 }
 
-function send(child, message) {
-  child.stdin.write(`${JSON.stringify(message)}\n`);
+function readAnnotations(): Record<string, boolean> {
+  return { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
 }
 
-function modernParams(params) {
-  return {
-    ...params,
-    _meta: {
-      [PROTOCOL_VERSION_META_KEY]: '2026-07-28',
-      [CLIENT_INFO_META_KEY]: { name: 'bridge-test', version: '1' },
-      [CLIENT_CAPABILITIES_META_KEY]: {},
-    },
-  };
-}
-
-function modernResult(result) {
-  return {
-    ...result,
-    resultType: 'complete',
-    _meta: {
-      [SERVER_INFO_META_KEY]: { name: 'dirt-mcp', version: '0.1.0' },
-    },
-  };
+function mutationAnnotations(idempotentHint: boolean): Record<string, boolean> {
+  return { readOnlyHint: false, destructiveHint: true, idempotentHint, openWorldHint: true };
 }
 
 test('forwards MCP tools to the authenticated bridge and preserves contract errors', async (context) => {
-  const requests = [];
+  const requests: BridgeRequestRecord[] = [];
   const ping = { status: 'ok' };
   const serverStatus = {
     builds: {
@@ -297,7 +266,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   await once(bridge, 'listening');
   context.after(
     () =>
-      new Promise((resolve, reject) => {
+      new Promise<void>((resolve, reject) => {
         bridge.close((error) => (error === undefined ? resolve() : reject(error)));
       }),
   );
@@ -307,7 +276,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     env: {
       ...process.env,
       DIRT_MCP_BRIDGE_TOKEN: 'bridge-test-token',
-      DIRT_MCP_BRIDGE_URL: `http://127.0.0.1:${address.port}`,
+      DIRT_MCP_BRIDGE_URL: `http://127.0.0.1:${serverAddressPort(address)}`,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -316,8 +285,48 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       child.kill();
     }
   });
-  const messages = collectLines(child.stdout, (line) => JSON.parse(line));
+  const messages = collectLines(child.stdout, (line) => JSON.parse(line) as JsonRpcResponse);
   const errors = collectLines(child.stderr, (line) => line);
+
+  send(child, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/list',
+    params: modernParams({}),
+  });
+  const catalog = await waitFor(messages, 1);
+  const listedTools = catalog.result.tools;
+  assert.ok(listedTools);
+  assert.deepEqual(
+    listedTools.map((tool) => tool.name),
+    [
+      'ping_server',
+      'get_server_status',
+      'count_region_block_states',
+      'get_region_blocks',
+      'scan_orthographic_view',
+      'replace_region_blocks',
+      'fill_region',
+      'set_blocks',
+      'undo_last_dirt_edit',
+      'run_minecraft_commands',
+    ],
+  );
+  assert.deepEqual(
+    listedTools.map((tool) => ({ name: tool.name, annotations: tool.annotations })),
+    [
+      { name: 'ping_server', annotations: readAnnotations() },
+      { name: 'get_server_status', annotations: readAnnotations() },
+      { name: 'count_region_block_states', annotations: readAnnotations() },
+      { name: 'get_region_blocks', annotations: readAnnotations() },
+      { name: 'scan_orthographic_view', annotations: readAnnotations() },
+      { name: 'replace_region_blocks', annotations: mutationAnnotations(false) },
+      { name: 'fill_region', annotations: mutationAnnotations(false) },
+      { name: 'set_blocks', annotations: mutationAnnotations(true) },
+      { name: 'undo_last_dirt_edit', annotations: mutationAnnotations(false) },
+      { name: 'run_minecraft_commands', annotations: mutationAnnotations(false) },
+    ],
+  );
 
   send(child, {
     jsonrpc: '2.0',
@@ -579,46 +588,49 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   for (const request of requests) {
     assert.equal(request.headers.authorization, 'Bearer bridge-test-token');
     assert.equal(request.headers.accept, 'application/json');
-    assert.match(
-      request.headers['x-dirt-call-id'],
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-    );
+    const callId = request.headers['x-dirt-call-id'];
+    assert.equal(typeof callId, 'string');
+    assert.match(callId as string, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   }
-  const callIds = requests.map((request) => request.headers['x-dirt-call-id']);
+  const callIds = requests.map((request) => {
+    const callId = request.headers['x-dirt-call-id'];
+    assert.equal(typeof callId, 'string');
+    return callId;
+  });
   assert.equal(new Set(callIds).size, 11);
-  assert.deepEqual(requests[1].body, {
+  assert.deepEqual(requestAt(requests, 1).body, {
     ...region,
     includeBlockStatePatterns: [],
     excludeBlockStatePatterns: [],
   });
-  assert.equal(requests[1].headers['content-type'], 'application/json');
-  assert.deepEqual(requests[2].body, viewInput);
-  assert.equal(requests[2].headers['content-type'], 'application/json');
-  assert.deepEqual(requests[3].body, viewInput);
-  assert.equal(requests[3].headers['content-type'], 'application/json');
-  assert.deepEqual(requests[4].body, {
+  assert.equal(requestAt(requests, 1).headers['content-type'], 'application/json');
+  assert.deepEqual(requestAt(requests, 2).body, viewInput);
+  assert.equal(requestAt(requests, 2).headers['content-type'], 'application/json');
+  assert.deepEqual(requestAt(requests, 3).body, viewInput);
+  assert.equal(requestAt(requests, 3).headers['content-type'], 'application/json');
+  assert.deepEqual(requestAt(requests, 4).body, {
     ...region,
     destinationPalette: [{ blockState: 'minecraft:dirt' }],
   });
-  assert.equal(requests[4].headers['content-type'], 'application/json');
-  assert.deepEqual(requests[6].body, { world: 'world', changes: sparseChanges });
-  assert.equal(requests[6].headers['content-type'], 'application/json');
-  assert.deepEqual(requests[7].body, {
+  assert.equal(requestAt(requests, 4).headers['content-type'], 'application/json');
+  assert.deepEqual(requestAt(requests, 6).body, { world: 'world', changes: sparseChanges });
+  assert.equal(requestAt(requests, 6).headers['content-type'], 'application/json');
+  assert.deepEqual(requestAt(requests, 7).body, {
     commands: ['/say hello', 'missing', 'time query daytime'],
   });
-  assert.equal(requests[7].headers['content-type'], 'application/json');
-  assert.deepEqual(requests[8].body, region);
-  assert.deepEqual(requests[9].body, {
+  assert.equal(requestAt(requests, 7).headers['content-type'], 'application/json');
+  assert.deepEqual(requestAt(requests, 8).body, region);
+  assert.deepEqual(requestAt(requests, 9).body, {
     ...region,
     sourceBlockStatePatterns: ['minecraft:stone'],
     destinationPalette: [{ blockState: 'minecraft:dirt', weight: 100 }],
     seed: 123,
     dryRun: true,
   });
-  assert.deepEqual(requests[10].body, { world: 'world' });
+  assert.deepEqual(requestAt(requests, 10).body, { world: 'world' });
 
   const auditLines = errors.values.filter((line) => line.startsWith('Dirt MCP tool_call '));
-  const expectedAudits = [
+  const expectedAudits: readonly (readonly [string, number, boolean, string])[] = [
     ['ping_server', 2, false, 'ok'],
     ['get_region_blocks', 3, true, 'ok'],
     ['scan_orthographic_view', 4, true, 'ok'],
@@ -634,10 +646,14 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.equal(auditLines.length, expectedAudits.length);
   expectedAudits.forEach(([tool, requestId, includesWorld, outcome], index) => {
     const world = includesWorld ? ' world="world"' : '';
+    const auditLine = auditLines[index];
+    const callId = callIds[index];
+    assert.ok(auditLine);
+    assert.ok(callId);
     assert.match(
-      auditLines[index],
+      auditLine,
       new RegExp(
-        `^Dirt MCP tool_call tool=${tool} call=${callIds[index]} request=${requestId} ` +
+        `^Dirt MCP tool_call tool=${tool} call=${callId} request=${requestId} ` +
           `client="bridge-test/1"${world} outcome=${outcome} duration_ms=\\d+$`,
       ),
     );
@@ -676,21 +692,21 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
     env: {
       ...process.env,
       DIRT_MCP_BRIDGE_TOKEN: 'bridge-test-token',
-      DIRT_MCP_BRIDGE_URL: `http://127.0.0.1:${address.port}`,
+      DIRT_MCP_BRIDGE_URL: `http://127.0.0.1:${serverAddressPort(address)}`,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   context.after(async () => {
     if (child.exitCode === null) child.kill();
     if (bridge.listening) {
-      await new Promise((resolve, reject) => {
+      await new Promise<void>((resolve, reject) => {
         bridge.close((error) => (error === undefined ? resolve() : reject(error)));
       });
     }
   });
-  const messages = collectLines(child.stdout, (line) => JSON.parse(line));
+  const messages = collectLines(child.stdout, (line) => JSON.parse(line) as JsonRpcResponse);
 
-  async function callPing(id) {
+  async function callPing(id: number): Promise<JsonRpcResponse> {
     send(child, {
       jsonrpc: '2.0',
       id,
@@ -739,12 +755,12 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
     },
   });
 
-  await new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     bridge.close((error) => (error === undefined ? resolve() : reject(error)));
   });
   const unavailable = await callPing(14);
   assert.equal(unavailable.result.isError, true);
-  assert.equal(unavailable.result.structuredContent.error.code, 'bridge_unavailable');
+  assert.equal(unavailable.result.structuredContent?.error?.code, 'bridge_unavailable');
 
   const exited = once(child, 'exit');
   child.stdin.end();

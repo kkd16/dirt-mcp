@@ -15,7 +15,7 @@ help: ## Show the available development commands.
 doctor: ## Verify the required Java, Node.js, pnpm, Gradle, curl, tmux, and lint tools.
 	@command -v java >/dev/null || { printf 'Java 25 is required.\n' >&2; exit 1; }
 	@command -v jar >/dev/null || { printf 'The Java 25 JDK jar tool is required.\n' >&2; exit 1; }
-	@command -v node >/dev/null || { printf 'Node.js 26 or newer is required.\n' >&2; exit 1; }
+	@command -v node >/dev/null || { printf 'Node.js 26.7.0 or newer is required.\n' >&2; exit 1; }
 	@command -v pnpm >/dev/null || { printf 'pnpm 11.22.0 or newer is required.\n' >&2; exit 1; }
 	@command -v curl >/dev/null || { printf 'curl is required.\n' >&2; exit 1; }
 	@command -v tmux >/dev/null || { printf 'tmux is required for the managed development server.\n' >&2; exit 1; }
@@ -23,8 +23,9 @@ doctor: ## Verify the required Java, Node.js, pnpm, Gradle, curl, tmux, and lint
 	@command -v actionlint >/dev/null || { printf 'actionlint 1.7.12 or newer is required.\n' >&2; exit 1; }
 	@if ! ./gradlew -q javaToolchains | grep -Eq 'Language Version:[[:space:]]+25'; then \
 	  printf 'Gradle could not resolve the Java 25 toolchain required by Paper 26.2.\n' >&2; exit 1; fi
-	@node_major="$$(node -p "process.versions.node.split('.')[0]")"; \
-	  if (( node_major < 26 )); then printf 'Expected Node.js 26 or newer, found Node.js %s.\n' "$$(node --version)" >&2; exit 1; fi
+	@node_version="$$(node -p 'process.versions.node')"; \
+	  if [[ "$$(printf '%s\n%s\n' 26.7.0 "$$node_version" | sort -V | head -n 1)" != 26.7.0 ]]; then \
+	    printf 'Expected Node.js 26.7.0 or newer, found Node.js %s.\n' "$$(node --version)" >&2; exit 1; fi
 	@pnpm_version="$$(pnpm --version)"; \
 	  if [[ "$$(printf '%s\n%s\n' 11.22.0 "$$pnpm_version" | sort -V | head -n 1)" != 11.22.0 ]]; then \
 	    printf 'Expected pnpm 11.22.0 or newer, found pnpm %s.\n' "$$pnpm_version" >&2; exit 1; fi

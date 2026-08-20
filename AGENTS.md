@@ -31,6 +31,11 @@ implemented bridge behavior; `docs/v1-design.md` documents the product design.
   after the edit and undo history are complete.
 - Prefer small concrete implementations. Preserve standard project metadata,
   wrappers, configuration, and scripts unless they are obsolete or harmful.
+- Never edit generated lockfiles manually; update them only through their
+  owning package-manager or build command. Prefer official CLI commands for
+  project initialization and configuration changes when they can preserve the
+  established configuration; edit configuration directly only when no suitable
+  command exists.
 - MCP stdio stdout is protocol-only; diagnostics go to stderr.
 - Preserve user changes. Commit only when asked.
 

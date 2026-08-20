@@ -18,7 +18,7 @@ Dirt MCP tracks the latest stable Paper release only. The current baseline is:
 - Paper 26.2;
 - FAWE 2.15.4;
 - Java 25;
-- Node.js 26 or newer;
+- Node.js 26.7.0 or newer;
 - pnpm 11.22.0 or newer.
 
 Older Paper or Minecraft versions are not supported.
@@ -79,9 +79,8 @@ after upgrading.
 The repository includes a project-scoped Codex configuration in
 `.codex/config.toml`. Run `make up` at least once to build the project and create
 its ignored development token, then start Codex from this trusted repository.
-Codex launches the MCP process when it connects. The source-development MCP
-process hot-reloads rebuilt tool definitions; changes to its small bootstrap
-still require restarting Codex.
+Codex launches the MCP process when it connects. Rebuild MCP changes and restart
+Codex so it launches the new process and tool catalog.
 
 For another MCP host, configure it to launch the source build:
 
@@ -150,8 +149,8 @@ make reload
 Paper does not safely support plugin hot reloads, so this performs an
 incremental build, clean `stop`, restart of the same development world, and
 health check. Connected players receive a clear restart message before they are
-disconnected. The MCP tool catalog reloads in place when its compiled module
-changes.
+disconnected. MCP server changes require rebuilding and restarting the MCP host
+or process separately.
 
 Override local ports when needed:
 
@@ -204,6 +203,8 @@ and 75% branch coverage on the independently testable core; only explicitly
 listed Paper/FAWE runtime adapters are omitted from that stricter calculation.
 Those adapters remain visible in the complete report and are exercised by the
 managed live smoke suite, whose separate JVM is not counted as JaCoCo coverage.
+The MCP suite uses Node's native coverage and enforces 90% line, 80% branch, and
+90% function coverage across the complete emitted server.
 
 ## Contributing
 
