@@ -597,6 +597,7 @@ try {
     world,
     min: setMin,
     max: setMax,
+    includeAir: true,
   });
   const afterSetStates = new Map(
     afterSet.blocks.map((block) => [`${block.position.x},${block.position.y},${block.position.z}`, block.blockState]),
