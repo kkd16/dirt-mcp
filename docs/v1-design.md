@@ -196,16 +196,12 @@ or complete block payloads.
 
 ## Limits and security
 
-The shipped defaults allow regions of 262,144 blocks, at most 256 touched edit
-chunks, at most 32 snapshotted inspection chunks, 65,536 changed blocks per edit,
-detailed scans of 16,384 blocks, 512 results by default and at most 2,048, and 20
-history entries per world, 100 entries across all worlds, and 1,310,720 changed
-blocks across retained entries. JSON request bodies are capped at 262,144 bytes
-with a five-second upload deadline. At most 32 authenticated bridge requests and
-two inspection scans execute concurrently. Active operation limits, the
-separate `editHistory` object, `logging` configuration, and every resolved
-per-tool boolean in `tools` are available through `get_server_status`; the
-history fields are
+Startup-validated limits bound region volume, touched and snapshotted chunks,
+changed blocks, detailed scans, result sizes, request bodies and uploads,
+concurrent bridge and inspection work, and retained history. Active operation
+limits, the separate `editHistory` object, `logging` configuration, and every
+resolved per-tool boolean in `tools` are available through `get_server_status`;
+the history fields are
 `maxEntriesPerWorld`, `maxEntriesTotal`, and `maxRetainedChangedBlocks`. The YAML
 settings live in
 `plugins/DirtMCP/config.yml`; every shipped setting and default is documented in

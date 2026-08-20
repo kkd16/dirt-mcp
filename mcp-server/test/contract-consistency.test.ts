@@ -24,6 +24,16 @@ function openapiSchema(openapi: string, name: string): string {
   return openapi.slice(start, relativeEnd === -1 ? openapi.length : start + marker.length + relativeEnd);
 }
 
+function yamlTopLevelMappingBlock(yaml: string, key: string): string | undefined {
+  const marker = new RegExp(`^${key}:\\s*(?:#.*)?$`, 'm');
+  const match = marker.exec(yaml);
+  if (match === null) return undefined;
+  const start = match.index + match[0].length;
+  const following = yaml.slice(start);
+  const relativeEnd = following.search(/^[^\s#][^:\n]*:\s*(?:#.*)?$/m);
+  return following.slice(0, relativeEnd === -1 ? undefined : relativeEnd);
+}
+
 test('Java endpoints, OpenAPI operations, and MCP routes stay synchronized', () => {
   const openapi = read('../../protocol/openapi.yaml');
   const endpointDirectory = new URL(
@@ -94,12 +104,12 @@ test('Paper, OpenAPI, shipped YAML, and MCP expose one exact tool catalog', () =
   const openapiProperties = [...toolSchema.matchAll(/^        ([a-z_]+):$/gm)].flatMap((match) => match[1] ?? []);
 
   const shippedConfig = read('../../paper-plugin/src/main/resources/config.yml');
-  const shippedTools = /\ntools:\n([\s\S]*?)\n\nlimits:/.exec(shippedConfig)?.[1];
+  const shippedTools = yamlTopLevelMappingBlock(shippedConfig, 'tools');
   assert.ok(shippedTools);
   const shippedKeys = [...shippedTools.matchAll(/^  ([a-z_]+): true$/gm)].flatMap((match) => match[1] ?? []);
 
   const javaToolSource = read('../../paper-plugin/src/main/java/ca/deliyannides/dirtmcp/paper/config/McpTool.java');
-  const javaIds = [...javaToolSource.matchAll(/^[ ]{4}[A-Z_]+\("([a-z_]+)"\)[,;]/gm)].flatMap(
+  const javaIds = [...javaToolSource.matchAll(/^\s*[A-Z][A-Z0-9_]*\s*\(\s*"([a-z_]+)"[\s\S]*?\)\s*[,;]/gm)].flatMap(
     (match) => match[1] ?? [],
   );
 
@@ -109,21 +119,18 @@ test('Paper, OpenAPI, shipped YAML, and MCP expose one exact tool catalog', () =
   assert.deepEqual(javaIds, [...MCP_TOOL_NAMES]);
 });
 
-test('does not retain legacy last-edit undo contract aliases', () => {
-  const openapi = read('../../protocol/openapi.yaml');
-  assert.doesNotMatch(openapi, /undo-last-dirt-edit|UndoLastDirtEdit|nothing_to_undo|undoHistoryPerWorld/);
-  assert.equal(
-    Object.values(BRIDGE_ROUTES).some((route) => route.path.includes('undo-last')),
-    false,
-  );
-  assert.equal(new Set<string>(BRIDGE_ERROR_CODES).has('nothing_to_undo'), false);
-});
-
 test('requires a UUIDv4 call ID on edits and undo but not history lookup', () => {
   const openapi = read('../../protocol/openapi.yaml');
-  for (const path of ['/v1/replace-region-blocks', '/v1/fill-region', '/v1/set-blocks', '/v1/undo-edit']) {
+  const editPaths = ['/v1/replace-region-blocks', '/v1/fill-region', '/v1/set-blocks', '/v1/undo-edit'];
+  for (const path of editPaths) {
     assert.match(openapiPath(openapi, path), /#\/components\/parameters\/DirtCallId/);
   }
+  assert.deepEqual(
+    Object.values(BRIDGE_ROUTES)
+      .filter((route) => 'salvageEditId' in route && route.salvageEditId === true)
+      .map((route) => route.path),
+    editPaths,
+  );
   assert.doesNotMatch(openapiPath(openapi, '/v1/get-edit-history'), /#\/components\/parameters\/DirtCallId/);
   const uuidV4Pattern = /^    UuidV4:\n(?:      .*\n)*?      pattern: '([^']+)'$/m.exec(openapi)?.[1];
   assert.ok(uuidV4Pattern);

@@ -4,6 +4,7 @@ export interface BridgeRoute {
   readonly method: 'GET' | 'POST';
   readonly path: `/v1/${string}`;
   readonly timeoutMilliseconds: number;
+  readonly salvageEditId?: true;
 }
 
 export const BRIDGE_ROUTES = {
@@ -24,9 +25,10 @@ export const BRIDGE_ROUTES = {
     method: 'POST',
     path: '/v1/replace-region-blocks',
     timeoutMilliseconds: 120_000,
+    salvageEditId: true,
   },
-  fillRegion: { method: 'POST', path: '/v1/fill-region', timeoutMilliseconds: 120_000 },
-  setBlocks: { method: 'POST', path: '/v1/set-blocks', timeoutMilliseconds: 120_000 },
+  fillRegion: { method: 'POST', path: '/v1/fill-region', timeoutMilliseconds: 120_000, salvageEditId: true },
+  setBlocks: { method: 'POST', path: '/v1/set-blocks', timeoutMilliseconds: 120_000, salvageEditId: true },
   getEditHistory: {
     method: 'POST',
     path: '/v1/get-edit-history',
@@ -36,6 +38,7 @@ export const BRIDGE_ROUTES = {
     method: 'POST',
     path: '/v1/undo-edit',
     timeoutMilliseconds: 120_000,
+    salvageEditId: true,
   },
 } as const satisfies Record<string, BridgeRoute>;
 

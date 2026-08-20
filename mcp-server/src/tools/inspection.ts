@@ -1,6 +1,6 @@
-import { McpServer } from '@modelcontextprotocol/server';
+import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
-import { BridgeClient } from '../bridge/client.ts';
+import type { BridgeClient } from '../bridge/client.ts';
 import { BRIDGE_ROUTES } from '../bridge/contract.ts';
 import type { DirtLogger } from '../logging.ts';
 import {
@@ -9,11 +9,21 @@ import {
   DimensionsSchema,
   INT32_MAX,
   INT32_MIN,
+  MAX_BLOCK_STATE_ENTRIES,
   NonBlankStringSchema,
   READ_WORLD_ANNOTATIONS,
 } from './common.ts';
 import { executeToolCall, successResult } from './execution.ts';
 import type { McpToolConfiguration } from './configuration.ts';
+import {
+  containsPosition,
+  inclusiveBlockVolume,
+  invalidBridgeResponse,
+  normalizedBounds,
+  requireMatchingWorld,
+  sameBounds,
+  sameCoordinates,
+} from './response-validation.ts';
 import { compactView } from './view-grid.ts';
 
 const CountRegionBlockStatesInputSchema = z
@@ -45,7 +55,7 @@ export const GetRegionBlocksInputSchema = z
     max: BlockPositionSchema.describe('The other inclusive corner; ordering relative to min does not matter.'),
     includeBlockStatePatterns: z
       .array(NonBlankStringSchema)
-      .max(64)
+      .max(MAX_BLOCK_STATE_ENTRIES)
       .optional()
       .default([])
       .describe(
@@ -53,7 +63,7 @@ export const GetRegionBlocksInputSchema = z
       ),
     excludeBlockStatePatterns: z
       .array(NonBlankStringSchema)
-      .max(64)
+      .max(MAX_BLOCK_STATE_ENTRIES)
       .optional()
       .default([])
       .describe('Block-state patterns rejected after include filtering. Omitted properties match any value.'),
@@ -79,10 +89,10 @@ export const GetRegionBlocksInputSchema = z
   })
   .strict()
   .superRefine((input, context) => {
-    if (input.includeBlockStatePatterns.length + input.excludeBlockStatePatterns.length > 64) {
+    if (input.includeBlockStatePatterns.length + input.excludeBlockStatePatterns.length > MAX_BLOCK_STATE_ENTRIES) {
       context.addIssue({
         code: 'custom',
-        message: 'include and exclude block-state patterns may contain at most 64 entries combined',
+        message: `include and exclude block-state patterns may contain at most ${MAX_BLOCK_STATE_ENTRIES} entries combined`,
       });
     }
   })
@@ -289,6 +299,222 @@ const ScanOrthographicViewOutputSchema = z
 export type ScanOrthographicViewBlocksOutput = z.infer<typeof ScanOrthographicViewBlocksOutputSchema>;
 export type ScanOrthographicViewGridOutput = z.infer<typeof ScanOrthographicViewGridOutputSchema>;
 
+type CountRegionBlockStatesInput = z.infer<typeof CountRegionBlockStatesInputSchema>;
+type CountRegionBlockStatesOutput = z.infer<typeof CountRegionBlockStatesOutputSchema>;
+type GetRegionBlocksInput = z.infer<typeof GetRegionBlocksInputSchema>;
+type GetRegionBlocksOutput = z.infer<typeof GetRegionBlocksOutputSchema>;
+type ScanOrthographicViewInput = z.infer<typeof ScanOrthographicViewInputSchema>;
+
+const VIEW_BASIS = {
+  north: {
+    forward: { x: 0, y: 0, z: -1 },
+    horizontal: { x: 1, y: 0, z: 0 },
+    vertical: { x: 0, y: 1, z: 0 },
+  },
+  east: {
+    forward: { x: 1, y: 0, z: 0 },
+    horizontal: { x: 0, y: 0, z: 1 },
+    vertical: { x: 0, y: 1, z: 0 },
+  },
+  south: {
+    forward: { x: 0, y: 0, z: 1 },
+    horizontal: { x: -1, y: 0, z: 0 },
+    vertical: { x: 0, y: 1, z: 0 },
+  },
+  west: {
+    forward: { x: -1, y: 0, z: 0 },
+    horizontal: { x: 0, y: 0, z: -1 },
+    vertical: { x: 0, y: 1, z: 0 },
+  },
+  up: {
+    forward: { x: 0, y: 1, z: 0 },
+    horizontal: { x: 1, y: 0, z: 0 },
+    vertical: { x: 0, y: 0, z: -1 },
+  },
+  down: {
+    forward: { x: 0, y: -1, z: 0 },
+    horizontal: { x: 1, y: 0, z: 0 },
+    vertical: { x: 0, y: 0, z: -1 },
+  },
+} as const;
+
+export function requireMatchingCountRegionResponse(
+  expected: CountRegionBlockStatesInput,
+  actual: CountRegionBlockStatesOutput,
+): void {
+  requireMatchingWorld(expected.world, actual.world);
+  const bounds = normalizedBounds(expected.min, expected.max);
+  if (!sameBounds(bounds, actual.bounds)) {
+    invalidBridgeResponse('Paper bridge count bounds did not match the requested region.');
+  }
+
+  const dimensions = {
+    x: bounds.max.x - bounds.min.x + 1,
+    y: bounds.max.y - bounds.min.y + 1,
+    z: bounds.max.z - bounds.min.z + 1,
+  };
+  const volume = inclusiveBlockVolume(bounds);
+  const histogramTotal = Object.values(actual.blockStateCounts).reduce((sum, count) => sum + BigInt(count), 0n);
+  if (
+    !sameCoordinates(dimensions, actual.dimensions) ||
+    BigInt(actual.volume) !== volume ||
+    histogramTotal !== volume
+  ) {
+    invalidBridgeResponse('Paper bridge returned inconsistent region count totals.');
+  }
+}
+
+export function requireMatchingGetRegionResponse(expected: GetRegionBlocksInput, actual: GetRegionBlocksOutput): void {
+  requireMatchingWorld(expected.world, actual.world);
+  const bounds = normalizedBounds(expected.min, expected.max);
+  const volume = inclusiveBlockVolume(bounds);
+  if (!sameBounds(bounds, actual.bounds) || BigInt(actual.volume) !== volume) {
+    invalidBridgeResponse('Paper bridge region result did not match the requested bounds and volume.');
+  }
+  if (expected.format !== undefined && actual.format !== expected.format) {
+    invalidBridgeResponse('Paper bridge region result format did not match the explicit request.');
+  }
+  if (BigInt(actual.matchedBlockCount) > volume) {
+    invalidBridgeResponse('Paper bridge matchedBlockCount exceeded the requested region volume.');
+  }
+
+  const entries = actual.format === 'blocks' ? actual.blocks : actual.runs;
+  if (expected.maxResults !== undefined && entries.length > expected.maxResults) {
+    invalidBridgeResponse('Paper bridge region result exceeded the requested maxResults.');
+  }
+
+  if (actual.format === 'blocks') {
+    if (actual.blocks.length !== actual.matchedBlockCount) {
+      invalidBridgeResponse('Paper bridge block entries did not match matchedBlockCount.');
+    }
+    const positions = new Set<string>();
+    for (const block of actual.blocks) {
+      if (!containsPosition(bounds, block.position)) {
+        invalidBridgeResponse('Paper bridge returned a block outside the requested region.');
+      }
+      const positionKey = `${block.position.x},${block.position.y},${block.position.z}`;
+      if (positions.has(positionKey)) {
+        invalidBridgeResponse('Paper bridge returned a duplicate block position.');
+      }
+      positions.add(positionKey);
+    }
+    return;
+  }
+
+  let representedBlocks = 0n;
+  for (const run of actual.runs) {
+    if (!containsPosition(bounds, run.from) || !containsPosition(bounds, run.to)) {
+      invalidBridgeResponse('Paper bridge returned a block run outside the requested region.');
+    }
+    const varyingAxes = (['x', 'y', 'z'] as const).filter((axis) => run.from[axis] !== run.to[axis]);
+    if (varyingAxes.length > 1 || run.from.x > run.to.x || run.from.y > run.to.y || run.from.z > run.to.z) {
+      invalidBridgeResponse('Paper bridge returned an invalid axis-aligned block run.');
+    }
+    representedBlocks += inclusiveBlockVolume({ min: run.from, max: run.to });
+    if (representedBlocks > BigInt(actual.matchedBlockCount)) {
+      invalidBridgeResponse('Paper bridge block runs represented more blocks than matchedBlockCount.');
+    }
+  }
+  if (representedBlocks !== BigInt(actual.matchedBlockCount)) {
+    invalidBridgeResponse('Paper bridge block runs did not represent matchedBlockCount exactly.');
+  }
+}
+
+export function requireMatchingScanResponse(
+  expected: ScanOrthographicViewInput,
+  actual: ScanOrthographicViewBlocksOutput,
+): void {
+  requireMatchingWorld(expected.world, actual.world);
+  const basis = VIEW_BASIS[expected.direction];
+  if (
+    !sameCoordinates(expected.origin, actual.origin) ||
+    actual.direction !== expected.direction ||
+    !sameCoordinates(basis.forward, actual.basis.forward) ||
+    !sameCoordinates(basis.horizontal, actual.basis.horizontal) ||
+    !sameCoordinates(basis.vertical, actual.basis.vertical)
+  ) {
+    invalidBridgeResponse('Paper bridge view origin, direction, or basis did not match the request.');
+  }
+  if (
+    actual.viewport.horizontalRadius !== expected.horizontalRadius ||
+    actual.viewport.verticalRadius !== expected.verticalRadius ||
+    actual.viewport.maxDistance !== expected.maxDistance ||
+    actual.viewport.depth !== expected.depth
+  ) {
+    invalidBridgeResponse('Paper bridge returned a viewport different from the requested view.');
+  }
+
+  const width = BigInt(expected.horizontalRadius) * 2n + 1n;
+  const height = BigInt(expected.verticalRadius) * 2n + 1n;
+  const scannedVolume = width * height * BigInt(expected.maxDistance);
+  const bounds = viewBounds(expected, basis);
+  if (BigInt(actual.scannedVolume) !== scannedVolume || !sameBounds(bounds, actual.bounds)) {
+    invalidBridgeResponse('Paper bridge returned invalid orthographic scan bounds or volume.');
+  }
+  if (actual.visibleBlockCount !== actual.blocks.length) {
+    invalidBridgeResponse('Paper bridge returned an inconsistent visible block count.');
+  }
+  if (expected.maxResults !== undefined && actual.blocks.length > expected.maxResults) {
+    invalidBridgeResponse('Paper bridge view result exceeded the requested maxResults.');
+  }
+
+  let previousCell = -1n;
+  for (const block of actual.blocks) {
+    const { horizontal, vertical, distance } = block.offset;
+    if (
+      Math.abs(horizontal) > expected.horizontalRadius ||
+      Math.abs(vertical) > expected.verticalRadius ||
+      distance > expected.maxDistance
+    ) {
+      invalidBridgeResponse('Paper bridge returned a view block outside its viewport.');
+    }
+    const position = viewPosition(expected.origin, basis, horizontal, vertical, distance);
+    if (!sameCoordinates(position, block.position)) {
+      invalidBridgeResponse('Paper bridge view block position did not match its offset and basis.');
+    }
+    const cell = BigInt(expected.verticalRadius - vertical) * width + BigInt(horizontal + expected.horizontalRadius);
+    if (cell <= previousCell) {
+      invalidBridgeResponse('Paper bridge view blocks were not in distinct deterministic viewport order.');
+    }
+    previousCell = cell;
+  }
+}
+
+function viewPosition(
+  origin: z.infer<typeof BlockPositionSchema>,
+  basis: (typeof VIEW_BASIS)[keyof typeof VIEW_BASIS],
+  horizontal: number,
+  vertical: number,
+  distance: number,
+): z.infer<typeof BlockPositionSchema> {
+  return {
+    x: origin.x + basis.horizontal.x * horizontal + basis.vertical.x * vertical + basis.forward.x * distance,
+    y: origin.y + basis.horizontal.y * horizontal + basis.vertical.y * vertical + basis.forward.y * distance,
+    z: origin.z + basis.horizontal.z * horizontal + basis.vertical.z * vertical + basis.forward.z * distance,
+  };
+}
+
+function viewBounds(
+  input: ScanOrthographicViewInput,
+  basis: (typeof VIEW_BASIS)[keyof typeof VIEW_BASIS],
+): z.infer<typeof BoundsSchema> {
+  const corners = [-input.horizontalRadius, input.horizontalRadius].flatMap((horizontal) =>
+    [-input.verticalRadius, input.verticalRadius].flatMap((vertical) =>
+      [1, input.maxDistance].map((distance) => viewPosition(input.origin, basis, horizontal, vertical, distance)),
+    ),
+  );
+  return corners.slice(1).reduce(
+    (bounds, corner) => {
+      for (const axis of ['x', 'y', 'z'] as const) {
+        bounds.min[axis] = Math.min(bounds.min[axis], corner[axis]);
+        bounds.max[axis] = Math.max(bounds.max[axis], corner[axis]);
+      }
+      return bounds;
+    },
+    normalizedBounds(corners[0]!, corners[0]!),
+  );
+}
+
 export function registerInspectionTools(
   server: McpServer,
   bridge: BridgeClient,
@@ -321,6 +547,7 @@ export function registerInspectionTools(
             CountRegionBlockStatesOutputSchema,
             input,
           );
+          requireMatchingCountRegionResponse(input, result);
           return successResult(
             result,
             `Counted ${result.volume} blocks across ${Object.keys(result.blockStateCounts).length} block states in ${result.world}.`,
@@ -357,6 +584,7 @@ export function registerInspectionTools(
             GetRegionBlocksOutputSchema,
             input,
           );
+          requireMatchingGetRegionResponse(input, result);
           const entries = result.format === 'blocks' ? result.blocks.length : result.runs.length;
           const entryKind = result.format === 'blocks' ? 'block' : 'run';
           return successResult(
@@ -398,6 +626,7 @@ export function registerInspectionTools(
             ScanOrthographicViewBlocksOutputSchema,
             bridgeInput,
           );
+          requireMatchingScanResponse(input, sparseView);
           if (format === 'grid') {
             const result = compactView(sparseView, input);
             const width = result.viewport.horizontalRadius * 2 + 1;

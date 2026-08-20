@@ -1,7 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import packageMetadata from '../package.json' with { type: 'json' };
-import { BridgeClient } from './bridge/client.ts';
-import type { BridgeConfig } from './config.ts';
+import type { BridgeClient } from './bridge/client.ts';
 import type { DirtLogger } from './logging.ts';
 import { registerToolCatalog } from './tools/catalog.ts';
 import { MCP_TOOL_NAMES, type McpToolConfiguration, type McpToolName } from './tools/configuration.ts';
@@ -73,7 +72,7 @@ function serverInstructions(configuration: McpToolConfiguration): string {
 }
 
 export function createDirtServer(
-  config: BridgeConfig,
+  bridge: BridgeClient,
   toolConfiguration: McpToolConfiguration,
   logger: DirtLogger,
 ): McpServer {
@@ -84,6 +83,6 @@ export function createDirtServer(
       capabilities: { tools: { listChanged: false } },
     },
   );
-  registerToolCatalog(server, new BridgeClient(config), toolConfiguration, logger);
+  registerToolCatalog(server, bridge, toolConfiguration, logger);
   return server;
 }

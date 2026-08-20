@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import java.time.Clock;
@@ -98,6 +99,30 @@ final class FaweWorldEditorTest {
                 List.of(List.of(new DestinationPaletteEntry("canonical:destination", null))),
                 set.palettes());
         assertEquals(13, set.seed());
+    }
+
+    @Test
+    void passesResolvedSetGeometryToThePlatformInPlacementOrder() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        FaweWorldEditor editor = editor(platform, 3);
+
+        set(
+                editor,
+                new SetBlocks.Request(
+                        "world",
+                        position(15, 64, -17),
+                        palettes(),
+                        List.of(placement(-1, 2, 3), placement(2, -3, 20)),
+                        13,
+                        true));
+
+        assertEquals(
+                List.of(position(14, 66, -14), position(17, 61, 3)), platform.lastSetPositions);
+        assertEquals(
+                new BlockBounds(position(14, 61, -14), position(17, 66, 3)),
+                platform.lastSetBounds);
+        assertEquals(
+                List.of(new ChunkPosition(0, -1), new ChunkPosition(1, 0)), platform.lastSetChunks);
     }
 
     @Test
@@ -960,6 +985,9 @@ final class FaweWorldEditorTest {
         private int preparedBlockCountDelta;
         private int preparedRollbackCalls;
         private int undoCountDelta;
+        private List<BlockPosition> lastSetPositions;
+        private BlockBounds lastSetBounds;
+        private List<ChunkPosition> lastSetChunks;
         private FakePrepared lastPrepared;
         private FakeUndo lastUndo;
 
@@ -1001,7 +1029,14 @@ final class FaweWorldEditorTest {
 
         @Override
         public PreparedSet prepareSet(
-                WorldHandle world, SetBlocks.Request request, List<ChunkPosition> touchedChunks) {
+                WorldHandle world,
+                SetBlocks.Request request,
+                List<BlockPosition> resolvedPositions,
+                BlockBounds bounds,
+                List<ChunkPosition> touchedChunks) {
+            this.lastSetPositions = List.copyOf(resolvedPositions);
+            this.lastSetBounds = bounds;
+            this.lastSetChunks = List.copyOf(touchedChunks);
             return prepared(world, List.of(), request.placements().size());
         }
 

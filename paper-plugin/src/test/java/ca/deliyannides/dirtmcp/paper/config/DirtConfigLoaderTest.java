@@ -21,7 +21,7 @@ final class DirtConfigLoaderTest {
     void loadsTheCompleteShippedConfiguration() {
         DirtConfig config = DirtConfigLoader.load(defaultConfiguration(), null);
 
-        assertEquals(new DirtConfig.Bridge(8_765, 0, 5, 5, 32, 32, 2), config.bridge());
+        assertEquals(new DirtConfig.Bridge(8_765, 5, 5, 32, 2), config.bridge());
         assertEquals(EnumSet.allOf(McpTool.class), config.tools().enabled());
         assertEquals(McpTool.values().length, config.tools().flags().size());
         assertTrue(config.tools().flags().values().stream().allMatch(Boolean::booleanValue));
@@ -136,12 +136,10 @@ final class DirtConfigLoaderTest {
                 Arguments.of("logging.detail-file-retained-files", 1),
                 Arguments.of("logging.detail-file-retained-files", 101),
                 Arguments.of("bridge.port", 0),
-                Arguments.of("bridge.backlog", -1),
                 Arguments.of("bridge.shutdown-delay-seconds", -1),
                 Arguments.of("bridge.shutdown-delay-seconds", 0),
                 Arguments.of("bridge.shutdown-delay-seconds", 31),
                 Arguments.of("bridge.request-body-timeout-seconds", 0),
-                Arguments.of("bridge.minimum-token-bytes", 0),
                 Arguments.of("bridge.max-concurrent-requests", 0),
                 Arguments.of("bridge.max-concurrent-inspections", 0),
                 Arguments.of("bridge.max-concurrent-inspections", 33),
@@ -163,7 +161,7 @@ final class DirtConfigLoaderTest {
                 Arguments.of("edit-history.max-entries-total", 19),
                 Arguments.of("edit-history.max-retained-changed-blocks", 0),
                 Arguments.of("edit-history.max-retained-changed-blocks", 65_535),
-                Arguments.of("limits.undo-history-per-world", 20),
+                Arguments.of("limits.not-a-limit", 20),
                 Arguments.of("defaults.region-blocks-format", "summary"),
                 Arguments.of("defaults.region-blocks-format", " "),
                 Arguments.of("defaults.region-blocks-include-air", "false"),

@@ -9,8 +9,12 @@ if [[ $# -ne 2 ]]; then
   printf 'Usage: %s MC_PORT BRIDGE_PORT\n' "$0" >&2
   exit 2
 fi
-if [[ ! -s "${token_file}" ]]; then
-  printf 'Dirt MCP token not found. Run make dev-token first.\n' >&2
+DIRT_MCP_BRIDGE_TOKEN=''
+if [[ -f "${token_file}" ]]; then
+  DIRT_MCP_BRIDGE_TOKEN="$(<"${token_file}")"
+fi
+if [[ ! "${DIRT_MCP_BRIDGE_TOKEN}" =~ ^[0-9a-f]{64}$ ]]; then
+  printf 'Dirt MCP token not found or invalid. Run make reload to create one and restart Paper with it.\n' >&2
   exit 1
 fi
 
@@ -18,7 +22,6 @@ export PAPER_EULA=true
 export DIRT_MCP_DEV_PORT="$1"
 export DIRT_MCP_BRIDGE_PORT="$2"
 export DIRT_MCP_BRIDGE_TOKEN
-DIRT_MCP_BRIDGE_TOKEN="$(<"${token_file}")"
 
 # The managed server is disposable and always runs against this checkout's
 # complete strict configuration schema.

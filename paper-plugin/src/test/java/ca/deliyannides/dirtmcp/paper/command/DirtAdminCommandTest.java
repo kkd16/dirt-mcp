@@ -134,10 +134,8 @@ final class DirtAdminCommandTest {
         assertTrue(plain.contains("DIRT MCP  /  Active Configuration"));
         assertTrue(plain.contains("restart Paper after file changes"));
         assertTrue(plain.contains("port  8765"));
-        assertTrue(plain.contains("backlog  0"));
         assertTrue(plain.contains("shutdown-delay-seconds  5"));
         assertTrue(plain.contains("request-body-timeout-seconds  6"));
-        assertTrue(plain.contains("minimum-token-bytes  32"));
         assertTrue(plain.contains("max-concurrent-requests  30"));
         assertTrue(plain.contains("max-concurrent-inspections  2"));
         assertTrue(plain.contains("TOOLS"));
@@ -352,7 +350,7 @@ final class DirtAdminCommandTest {
 
     private static DirtConfig config() {
         return new DirtConfig(
-                new DirtConfig.Bridge(8_765, 0, 5, 6, 32, 30, 2),
+                new DirtConfig.Bridge(8_765, 5, 6, 30, 2),
                 new DirtConfig.Tools(
                         Set.of(
                                 McpTool.PING_SERVER,

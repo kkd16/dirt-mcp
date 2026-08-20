@@ -5,14 +5,10 @@
 bridge:
   # HTTP port on 127.0.0.1. DIRT_MCP_BRIDGE_PORT overrides this value.
   port: 8765
-  # Zero asks the operating system to choose its normal HTTP connection backlog.
-  backlog: 0
   # Seconds to wait for interrupted bridge request workers during shutdown.
   shutdown-delay-seconds: 5
   # Maximum seconds an authenticated request may take to upload its JSON body.
   request-body-timeout-seconds: 5
-  # Lowering this below 32 weakens bearer-token security.
-  minimum-token-bytes: 32
   # Maximum authenticated requests allowed to execute concurrently.
   max-concurrent-requests: 32
   # Maximum inspection operations allowed to capture and scan concurrently.

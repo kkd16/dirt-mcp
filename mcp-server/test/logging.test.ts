@@ -61,14 +61,13 @@ test('writes one structured JSON line with inherited and sanitized context', () 
 test('emits canonical levels and does not expose unexpected error messages', () => {
   const lines: string[] = [];
   const logger = createLogger('test', (line) => lines.push(line));
-  logger.debug('test.debug', 'debug');
   logger.info('test.info', 'info');
   logger.warning('test.warning', 'warning');
   logger.error('test.error', 'error');
 
   assert.deepEqual(
     lines.map((line) => parseRecord(line).level),
-    ['debug', 'info', 'warning', 'error'],
+    ['info', 'warning', 'error'],
   );
 
   const fields = safeErrorFields(new Error('sensitive implementation detail'));

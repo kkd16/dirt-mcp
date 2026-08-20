@@ -9,8 +9,8 @@ import test from 'node:test';
 import { MCP_TOOL_NAMES } from '../dist/tools/configuration.js';
 import {
   collectLines,
-  modernParams,
-  modernResult,
+  requestParams,
+  completeResult,
   send,
   waitFor,
   waitForValue,
@@ -19,6 +19,7 @@ import {
 
 const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 const uuidV4Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const bridgeToken = '0123456789abcdef0123456789abcdef';
 const allToolsEnabled = Object.fromEntries(MCP_TOOL_NAMES.map((name) => [name, true]));
 
 function emptyServerStatus(tools: Readonly<Record<string, boolean>> = allToolsEnabled): Record<string, unknown> {
@@ -321,7 +322,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   const child = spawn(process.execPath, [join(packageDirectory, 'dist/index.js')], {
     env: {
       ...process.env,
-      DIRT_MCP_BRIDGE_TOKEN: 'bridge-test-token',
+      DIRT_MCP_BRIDGE_TOKEN: bridgeToken,
       DIRT_MCP_BRIDGE_URL: `http://127.0.0.1:${serverAddressPort(address)}`,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -338,7 +339,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 1,
     method: 'tools/list',
-    params: modernParams({}),
+    params: requestParams({}),
   });
   const catalog = await waitFor(messages, 1);
   assert.ok(catalog.result);
@@ -404,12 +405,12 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 2,
     method: 'tools/call',
-    params: modernParams({ name: 'ping_server', arguments: {} }),
+    params: requestParams({ name: 'ping_server', arguments: {} }),
   });
   const pinged = await waitFor(messages, 2);
   assert.deepEqual(
     pinged.result,
-    modernResult({
+    completeResult({
       content: [{ type: 'text', text: 'ok' }],
       structuredContent: ping,
     }),
@@ -424,12 +425,12 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 3,
     method: 'tools/call',
-    params: modernParams({ name: 'get_region_blocks', arguments: region }),
+    params: requestParams({ name: 'get_region_blocks', arguments: region }),
   });
   const inspected = await waitFor(messages, 3);
   assert.deepEqual(
     inspected.result,
-    modernResult({
+    completeResult({
       content: [{ type: 'text', text: 'Matching blocks: 1; block entries: 1; world: world.' }],
       structuredContent: regionBlocks,
     }),
@@ -448,12 +449,12 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 4,
     method: 'tools/call',
-    params: modernParams({ name: 'scan_orthographic_view', arguments: viewInput }),
+    params: requestParams({ name: 'scan_orthographic_view', arguments: viewInput }),
   });
   const viewed = await waitFor(messages, 4);
   assert.deepEqual(
     viewed.result,
-    modernResult({
+    completeResult({
       content: [{ type: 'text', text: 'Scanned view in world: 3 visible blocks returned explicitly.' }],
       structuredContent: view,
     }),
@@ -463,7 +464,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 5,
     method: 'tools/call',
-    params: modernParams({
+    params: requestParams({
       name: 'scan_orthographic_view',
       arguments: { ...viewInput, format: 'grid' },
     }),
@@ -471,7 +472,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   const gridViewed = await waitFor(messages, 5);
   assert.deepEqual(
     gridViewed.result,
-    modernResult({
+    completeResult({
       content: [
         {
           type: 'text',
@@ -486,7 +487,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 6,
     method: 'tools/call',
-    params: modernParams({
+    params: requestParams({
       name: 'fill_region',
       arguments: {
         ...region,
@@ -501,7 +502,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.match(failedFillCallId, uuidV4Pattern);
   assert.deepEqual(
     failedFill.result,
-    modernResult({
+    completeResult({
       isError: true,
       content: [
         {
@@ -520,12 +521,12 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 7,
     method: 'tools/call',
-    params: modernParams({ name: 'get_server_status', arguments: {} }),
+    params: requestParams({ name: 'get_server_status', arguments: {} }),
   });
   const status = await waitFor(messages, 7);
   assert.deepEqual(
     status.result,
-    modernResult({
+    completeResult({
       content: [
         {
           type: 'text',
@@ -555,7 +556,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 8,
     method: 'tools/call',
-    params: modernParams({
+    params: requestParams({
       name: 'set_blocks',
       arguments: setBlocksInput,
     }),
@@ -563,7 +564,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   const blocksSet = await waitFor(messages, 8);
   assert.deepEqual(
     blocksSet.result,
-    modernResult({
+    completeResult({
       content: [
         {
           type: 'text',
@@ -579,7 +580,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 9,
     method: 'tools/call',
-    params: modernParams({ name: 'undo_edit', arguments: { world: 'world', editId: 'not-a-uuid' } }),
+    params: requestParams({ name: 'undo_edit', arguments: { world: 'world', editId: 'not-a-uuid' } }),
   });
   const invalidUndo = await waitFor(messages, 9);
   assert.ok(invalidUndo.result);
@@ -595,12 +596,12 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 10,
     method: 'tools/call',
-    params: modernParams({ name: 'count_region_block_states', arguments: region }),
+    params: requestParams({ name: 'count_region_block_states', arguments: region }),
   });
   const counted = await waitFor(messages, 10);
   assert.deepEqual(
     counted.result,
-    modernResult({
+    completeResult({
       content: [{ type: 'text', text: 'Counted 2 blocks across 2 block states in world.' }],
       structuredContent: blockStateCount,
     }),
@@ -610,7 +611,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 11,
     method: 'tools/call',
-    params: modernParams({
+    params: requestParams({
       name: 'replace_region_blocks',
       arguments: {
         ...region,
@@ -624,7 +625,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   const replaced = await waitFor(messages, 11);
   assert.deepEqual(
     replaced.result,
-    modernResult({
+    completeResult({
       content: [
         {
           type: 'text',
@@ -639,12 +640,12 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 12,
     method: 'tools/call',
-    params: modernParams({ name: 'get_edit_history', arguments: { world: 'world' } }),
+    params: requestParams({ name: 'get_edit_history', arguments: { world: 'world' } }),
   });
   const history = await waitFor(messages, 12);
   assert.deepEqual(
     history.result,
-    modernResult({
+    completeResult({
       content: [{ type: 'text', text: 'Found 1 retained undoable edit in world.' }],
       structuredContent: editHistory,
     }),
@@ -654,7 +655,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 13,
     method: 'tools/call',
-    params: modernParams({
+    params: requestParams({
       name: 'undo_edit',
       arguments: { world: 'world', editId: setBlocks.edit.editId },
     }),
@@ -662,7 +663,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   const undo = await waitFor(messages, 13);
   assert.deepEqual(
     undo.result,
-    modernResult({
+    completeResult({
       content: [
         {
           type: 'text',
@@ -691,7 +692,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     ],
   );
   for (const request of requests) {
-    assert.equal(request.headers.authorization, 'Bearer bridge-test-token');
+    assert.equal(request.headers.authorization, `Bearer ${bridgeToken}`);
     assert.equal(request.headers.accept, 'application/json');
     const callId = request.headers['x-dirt-call-id'];
     assert.equal(typeof callId, 'string');
@@ -780,7 +781,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.equal(undoAudit?.edit_id, setBlocks.edit.editId);
   assert.equal(undoAudit?.outcome, 'undone');
   assert.equal(undoAudit?.changed_block_count, 1);
-  assert.equal(JSON.stringify(logs.values).includes('bridge-test-token'), false);
+  assert.equal(JSON.stringify(logs.values).includes(bridgeToken), false);
 
   const exited = once(child, 'exit');
   child.stdin.end();
@@ -818,7 +819,7 @@ test('exposes only the configured tool snapshot and rejects disabled calls befor
   const child = spawn(process.execPath, [join(packageDirectory, 'dist/index.js')], {
     env: {
       ...process.env,
-      DIRT_MCP_BRIDGE_TOKEN: 'bridge-test-token',
+      DIRT_MCP_BRIDGE_TOKEN: bridgeToken,
       DIRT_MCP_BRIDGE_URL: `http://127.0.0.1:${serverAddressPort(bridge.address())}`,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -828,7 +829,7 @@ test('exposes only the configured tool snapshot and rejects disabled calls befor
   });
   const messages = collectLines(child.stdout, (line) => JSON.parse(line) as JsonRpcResponse);
 
-  send(child, { jsonrpc: '2.0', id: 20, method: 'server/discover', params: modernParams({}) });
+  send(child, { jsonrpc: '2.0', id: 20, method: 'server/discover', params: requestParams({}) });
   const discovered = await waitFor(messages, 20);
   assert.ok(discovered.result);
   const instructions = discovered.result.instructions;
@@ -838,7 +839,7 @@ test('exposes only the configured tool snapshot and rejects disabled calls befor
     assert.doesNotMatch(instructions as string, new RegExp(`\\b${disabledName}\\b`));
   }
 
-  send(child, { jsonrpc: '2.0', id: 21, method: 'tools/list', params: modernParams({}) });
+  send(child, { jsonrpc: '2.0', id: 21, method: 'tools/list', params: requestParams({}) });
   const catalog = await waitFor(messages, 21);
   assert.ok(catalog.result);
   assert.deepEqual(
@@ -853,7 +854,7 @@ test('exposes only the configured tool snapshot and rejects disabled calls befor
     jsonrpc: '2.0',
     id: 22,
     method: 'tools/call',
-    params: modernParams({ name: 'ping_server', arguments: {} }),
+    params: requestParams({ name: 'ping_server', arguments: {} }),
   });
   const disabled = await waitFor(messages, 22);
   assert.equal(disabled.error?.code, -32_602);
@@ -931,7 +932,7 @@ for (const bootstrapFailure of ['unauthorized', 'malformed', 'unavailable', 'dom
     const child = spawn(process.execPath, [join(packageDirectory, 'dist/index.js')], {
       env: {
         ...process.env,
-        DIRT_MCP_BRIDGE_TOKEN: 'bridge-test-token',
+        DIRT_MCP_BRIDGE_TOKEN: bridgeToken,
         DIRT_MCP_BRIDGE_URL: bridgeUrl,
       },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -942,7 +943,7 @@ for (const bootstrapFailure of ['unauthorized', 'malformed', 'unavailable', 'dom
     const messages = collectLines(child.stdout, (line) => JSON.parse(line) as JsonRpcResponse);
     const logs = collectLines(child.stderr, parseLogRecord);
 
-    send(child, { jsonrpc: '2.0', id: 30, method: 'tools/list', params: modernParams({}) });
+    send(child, { jsonrpc: '2.0', id: 30, method: 'tools/list', params: requestParams({}) });
     const failure = await waitFor(messages, 30);
     assert.equal(failure.error?.code, -32_603);
     assert.equal(failure.error?.message, 'Internal server error');
@@ -987,7 +988,7 @@ test('retries a failed bootstrap and fixes the first successful snapshot for the
   const child = spawn(process.execPath, [join(packageDirectory, 'dist/index.js')], {
     env: {
       ...process.env,
-      DIRT_MCP_BRIDGE_TOKEN: 'bridge-test-token',
+      DIRT_MCP_BRIDGE_TOKEN: bridgeToken,
       DIRT_MCP_BRIDGE_URL: `http://127.0.0.1:${serverAddressPort(bridge.address())}`,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -997,13 +998,13 @@ test('retries a failed bootstrap and fixes the first successful snapshot for the
   });
   const messages = collectLines(child.stdout, (line) => JSON.parse(line) as JsonRpcResponse);
 
-  send(child, { jsonrpc: '2.0', id: 40, method: 'tools/list', params: modernParams({}) });
+  send(child, { jsonrpc: '2.0', id: 40, method: 'tools/list', params: requestParams({}) });
   const failed = await waitFor(messages, 40);
   assert.equal(failed.error?.code, -32_603);
   assert.equal(failed.result, undefined);
   assert.equal(bootstrapAttempts, 1);
 
-  send(child, { jsonrpc: '2.0', id: 41, method: 'tools/list', params: modernParams({}) });
+  send(child, { jsonrpc: '2.0', id: 41, method: 'tools/list', params: requestParams({}) });
   const recovered = await waitFor(messages, 41);
   assert.ok(recovered.result);
   assert.deepEqual(
@@ -1013,7 +1014,7 @@ test('retries a failed bootstrap and fixes the first successful snapshot for the
   assert.equal(bootstrapAttempts, 2);
 
   configuredTools.get_server_status = true;
-  send(child, { jsonrpc: '2.0', id: 42, method: 'tools/list', params: modernParams({}) });
+  send(child, { jsonrpc: '2.0', id: 42, method: 'tools/list', params: requestParams({}) });
   const fixedSnapshot = await waitFor(messages, 42);
   assert.ok(fixedSnapshot.result);
   assert.deepEqual(
@@ -1059,7 +1060,7 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
   const child = spawn(process.execPath, [join(packageDirectory, 'dist/index.js')], {
     env: {
       ...process.env,
-      DIRT_MCP_BRIDGE_TOKEN: 'bridge-test-token',
+      DIRT_MCP_BRIDGE_TOKEN: bridgeToken,
       DIRT_MCP_BRIDGE_URL: `http://127.0.0.1:${serverAddressPort(address)}`,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -1079,7 +1080,7 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
       jsonrpc: '2.0',
       id,
       method: 'tools/call',
-      params: modernParams({ name: 'ping_server', arguments: {} }),
+      params: requestParams({ name: 'ping_server', arguments: {} }),
     });
     return waitFor(messages, id);
   }

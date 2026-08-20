@@ -7,6 +7,11 @@ import {
   PROTOCOL_VERSION_META_KEY,
   SERVER_INFO_META_KEY,
 } from '@modelcontextprotocol/server';
+import packageMetadata from '../../package.json' with { type: 'json' };
+
+// Keep this explicit alongside the exact-pinned SDK so dependency upgrades must
+// deliberately select the protocol revision exercised by the process tests.
+const MCP_PROTOCOL_VERSION = '2026-07-28';
 
 export type JsonRpcId = number | string;
 
@@ -81,25 +86,25 @@ export function send(child: ChildProcessWithoutNullStreams, message: unknown): v
   child.stdin.write(`${JSON.stringify(message)}\n`);
 }
 
-export function modernParams<T extends Record<string, unknown>>(params: T): T & { readonly _meta: object } {
+export function requestParams<T extends Record<string, unknown>>(params: T): T & { readonly _meta: object } {
   return {
     ...params,
     _meta: {
-      [PROTOCOL_VERSION_META_KEY]: '2026-07-28',
+      [PROTOCOL_VERSION_META_KEY]: MCP_PROTOCOL_VERSION,
       [CLIENT_INFO_META_KEY]: { name: 'bridge-test', version: '1' },
       [CLIENT_CAPABILITIES_META_KEY]: {},
     },
   };
 }
 
-export function modernResult<T extends Record<string, unknown>>(
+export function completeResult<T extends Record<string, unknown>>(
   result: T,
 ): T & { readonly resultType: 'complete'; readonly _meta: object } {
   return {
     ...result,
     resultType: 'complete',
     _meta: {
-      [SERVER_INFO_META_KEY]: { name: 'dirt-mcp', version: '0.1.0' },
+      [SERVER_INFO_META_KEY]: { name: 'dirt-mcp', version: packageMetadata.version },
     },
   };
 }

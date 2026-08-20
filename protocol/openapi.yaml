@@ -1536,7 +1536,8 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum JSON request-body size accepted by the bridge.
+          maximum: 2147483646
+          description: Maximum JSON request-body size accepted by the bridge; capped below the signed 32-bit maximum so over-limit detection cannot overflow.
         maxRegionVolume:
           type: integer
           format: int32
@@ -1551,32 +1552,33 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum distinct loaded chunks one inspection may snapshot.
+          description: Maximum distinct loaded chunks one inspection may snapshot; cannot exceed maxTouchedChunks.
         maxBlockStatePatterns:
           type: integer
           format: int32
           minimum: 1
+          maximum: 64
           description: Maximum block-state patterns or palette entries in one operation; inspection include and exclude lists share this cap.
         maxChangedBlocks:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum blocks one mutation may change.
+          description: Maximum blocks one mutation may change; cannot exceed maxRegionVolume.
         maxInspectionVolume:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum blocks scanned by exact block retrieval or an orthographic view.
+          description: Maximum blocks scanned by exact block retrieval or an orthographic view; cannot exceed maxRegionVolume.
         defaultInspectionResultLimit:
           type: integer
           format: int32
           minimum: 1
-          description: Default exact-block, run, or visible-block result limit.
+          description: Default exact-block, run, or visible-block result limit; cannot exceed maxInspectionResultLimit.
         maxInspectionResultLimit:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum caller-selectable exact-block, run, or visible-block result limit.
+          description: Maximum caller-selectable exact-block, run, or visible-block result limit; cannot exceed maxInspectionVolume.
     EditHistoryConfiguration:
       type: object
       additionalProperties: false

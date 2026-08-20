@@ -1,5 +1,5 @@
-import { McpServer } from '@modelcontextprotocol/server';
-import { BridgeClient } from '../bridge/client.ts';
+import type { McpServer } from '@modelcontextprotocol/server';
+import type { BridgeClient } from '../bridge/client.ts';
 import type { DirtLogger } from '../logging.ts';
 import { registerEditingTools } from './editing.ts';
 import { registerInspectionTools } from './inspection.ts';

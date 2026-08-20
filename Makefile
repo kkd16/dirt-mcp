@@ -5,6 +5,7 @@ SHELL := /bin/bash
 MC_PORT ?= 25566
 BRIDGE_PORT ?= 8765
 DEV_TOKEN_FILE := paper-plugin/run/.dirt-mcp-token
+NODE_MODULES_STAMP := node_modules/.modules.yaml
 
 .PHONY: help doctor install node-deps build build-java build-mcp dev-build paper-runtime check verify ci format dev-token up reload down status logs console command smoke mcp health clean
 
@@ -16,7 +17,7 @@ doctor: ## Verify the required Java, Node.js, pnpm, Gradle, curl, tmux, and lint
 	@command -v java >/dev/null || { printf 'Java 25 is required.\n' >&2; exit 1; }
 	@command -v jar >/dev/null || { printf 'The Java 25 JDK jar tool is required.\n' >&2; exit 1; }
 	@command -v node >/dev/null || { printf 'Node.js 26 or newer is required.\n' >&2; exit 1; }
-	@command -v pnpm >/dev/null || { printf 'pnpm 11.22.0 or newer is required.\n' >&2; exit 1; }
+	@command -v pnpm >/dev/null || { printf 'pnpm 11.22.0 or a newer 11.x release is required.\n' >&2; exit 1; }
 	@command -v curl >/dev/null || { printf 'curl is required.\n' >&2; exit 1; }
 	@command -v tmux >/dev/null || { printf 'tmux is required for the managed development server.\n' >&2; exit 1; }
 	@command -v shellcheck >/dev/null || { printf 'ShellCheck 0.9.0 or newer is required.\n' >&2; exit 1; }
@@ -26,8 +27,13 @@ doctor: ## Verify the required Java, Node.js, pnpm, Gradle, curl, tmux, and lint
 	@node_major="$$(node -p "process.versions.node.split('.')[0]")"; \
 	  if (( node_major < 26 )); then printf 'Expected Node.js 26 or newer, found Node.js %s.\n' "$$(node --version)" >&2; exit 1; fi
 	@pnpm_version="$$(pnpm --version)"; \
-	  if [[ "$$(printf '%s\n%s\n' 11.22.0 "$$pnpm_version" | sort -V | head -n 1)" != 11.22.0 ]]; then \
-	    printf 'Expected pnpm 11.22.0 or newer, found pnpm %s.\n' "$$pnpm_version" >&2; exit 1; fi
+	  if [[ "$$pnpm_version" =~ ^11\.([0-9]+)\.([0-9]+)$$ ]]; then \
+	    pnpm_minor="$${BASH_REMATCH[1]}"; \
+	  else \
+	    pnpm_minor=-1; \
+	  fi; \
+	  if (( pnpm_minor < 22 )); then \
+	    printf 'Expected pnpm 11.22.0 or a newer 11.x release, found pnpm %s.\n' "$$pnpm_version" >&2; exit 1; fi
 	@shellcheck_version="$$(shellcheck --version | awk '/^version:/ { print $$2 }')"; \
 	  if [[ "$$(printf '%s\n%s\n' 0.9.0 "$$shellcheck_version" | sort -V | head -n 1)" != 0.9.0 ]]; then \
 	    printf 'Expected ShellCheck 0.9.0 or newer, found %s.\n' "$$shellcheck_version" >&2; exit 1; fi
@@ -42,10 +48,12 @@ doctor: ## Verify the required Java, Node.js, pnpm, Gradle, curl, tmux, and lint
 	@printf 'ShellCheck: %s\n' "$$(shellcheck --version | awk '/^version:/ { print $$2 }')"
 	@printf 'actionlint: %s\n' "$$(actionlint -version | awk 'NR == 1 { print $$1 }')"
 
-install: doctor ## Install the locked Node.js dependencies.
+install: ## Install the locked Node.js dependencies.
 	pnpm install --frozen-lockfile
 
-node-deps: pnpm-lock.yaml pnpm-workspace.yaml package.json mcp-server/package.json
+node-deps: $(NODE_MODULES_STAMP)
+
+$(NODE_MODULES_STAMP): pnpm-lock.yaml pnpm-workspace.yaml package.json mcp-server/package.json
 	pnpm install --frozen-lockfile
 
 build: build-java build-mcp ## Build the Paper plugin and MCP server.
@@ -57,9 +65,7 @@ build-java: ## Compile and test the Paper plugin.
 build-mcp: node-deps ## Compile the MCP server.
 	pnpm run build
 
-dev-build: node-deps ## Incrementally compile the Paper plugin and MCP server without tests.
-	./gradlew :paper-plugin:jar
-	@scripts/validate-paper-jar
+dev-build: node-deps paper-runtime ## Incrementally compile the Paper plugin and MCP server without tests.
 	pnpm run build
 
 paper-runtime:
@@ -86,7 +92,9 @@ format: node-deps ## Apply the repository's Java, TypeScript, and configuration 
 
 dev-token: ## Create the ignored bearer token used by local development.
 	@mkdir -p "$(dir $(DEV_TOKEN_FILE))"
-	@if [[ ! -s "$(DEV_TOKEN_FILE)" ]]; then \
+	@token=''; \
+	  if [[ -f "$(DEV_TOKEN_FILE)" ]]; then token="$$(<"$(DEV_TOKEN_FILE)")"; fi; \
+	  if [[ ! "$$token" =~ ^[0-9a-f]{64}$$ ]]; then \
 	  umask 077; \
 	  node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))" > "$(DEV_TOKEN_FILE)"; \
 	  printf 'Generated local Dirt MCP token at %s.\n' "$(DEV_TOKEN_FILE)" >&2; \
@@ -110,17 +118,17 @@ reload: ## Rebuild and gracefully restart the managed development server.
 down: ## Stop the managed development server cleanly.
 	@scripts/dev-paper down
 
-status: dev-token ## Report managed Paper process and bridge health.
+status: ## Report managed Paper process and bridge health.
 	@scripts/dev-paper status
 
 logs: ## Print recent managed Paper console output (override with LINES=...).
 	@scripts/dev-paper logs "$(or $(LINES),100)"
 
-console: dev-token ## Attach to the managed Paper console; detach with Ctrl-b d.
+console: ## Attach to the managed Paper console; detach with Ctrl-b d.
 	@scripts/dev-paper console
 
 command: export DIRT_MCP_DEV_COMMAND := $(value CMD)
-command: dev-token ## Send one Paper console command with CMD='...'.
+command: ## Send one Paper console command with CMD='...'.
 	@test -n "$$DIRT_MCP_DEV_COMMAND" || { printf 'Usage: make command CMD='\''version'\''\n' >&2; exit 2; }
 	@scripts/dev-paper command "$$DIRT_MCP_DEV_COMMAND"
 
@@ -134,10 +142,10 @@ smoke: ## Restart Paper and run the complete managed-server integration gate.
 	}
 	@scripts/validate-paper-log running
 
-mcp: build-mcp dev-token ## Run the MCP stdio server for an MCP host.
+mcp: build-mcp ## Run the MCP stdio server for an MCP host.
 	@scripts/run-dirt-mcp
 
-health: dev-token ## Run the authenticated end-to-end Dirt/Paper/FAWE ping.
+health: ## Run the authenticated end-to-end Dirt/Paper/FAWE ping.
 	@scripts/dev-paper health
 
 clean: ## Remove generated build outputs; preserve the local Paper world.

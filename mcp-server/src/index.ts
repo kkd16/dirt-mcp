@@ -12,7 +12,7 @@ import type { McpToolConfiguration } from './tools/configuration.ts';
 import { ServerStatusSchema } from './tools/status.ts';
 
 function createToolConfigurationReader(
-  config: BridgeConfig,
+  bridge: BridgeClient,
   logger: DirtLogger,
   reportedErrors: WeakSet<Error>,
 ): () => Promise<McpToolConfiguration> {
@@ -28,7 +28,7 @@ function createToolConfigurationReader(
       operation: 'get_server_status',
       call_id: callId,
     });
-    const pending = new BridgeClient(config)
+    const pending = bridge
       .request(BRIDGE_ROUTES.serverStatus, callId, ServerStatusSchema)
       .then((status) => {
         const enabledTools = Object.entries(status.tools).flatMap(([name, enabled]) => (enabled ? [name] : []));
@@ -69,9 +69,10 @@ function main(): void {
     return;
   }
 
+  const bridge = new BridgeClient(config);
   const reportedErrors = new WeakSet<Error>();
-  const readToolConfiguration = createToolConfigurationReader(config, logger, reportedErrors);
-  serveStdio(async () => createDirtServer(config, await readToolConfiguration(), logger), {
+  const readToolConfiguration = createToolConfigurationReader(bridge, logger, reportedErrors);
+  serveStdio(async () => createDirtServer(bridge, await readToolConfiguration(), logger), {
     onerror(error) {
       if (reportedErrors.has(error)) return;
       logger

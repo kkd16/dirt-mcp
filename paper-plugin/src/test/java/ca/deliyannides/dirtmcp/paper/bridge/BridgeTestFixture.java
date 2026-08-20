@@ -54,7 +54,7 @@ final class BridgeTestFixture {
 
     static DirtConfig config(int port, int maximumConcurrentRequests) {
         return new DirtConfig(
-                new DirtConfig.Bridge(port, 0, 1, 1, 32, maximumConcurrentRequests, 1),
+                new DirtConfig.Bridge(port, 1, 1, maximumConcurrentRequests, 1),
                 allTools(),
                 new DirtConfig.Logging(DirtConfig.ConsoleLogLevel.INFO, 10_485_760, 5),
                 new DirtConfig.Limits(262_144, 1_000_000, 256, 32, 64, 250_000, 32_768, 321, 654),

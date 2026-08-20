@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 
 public final class BridgeServer implements AutoCloseable {
     private static final String LOOPBACK_ADDRESS = "127.0.0.1";
+    private static final int HTTP_BACKLOG = 0;
 
     private final DirtConfig config;
     private final BridgeDispatcher dispatcher;
@@ -28,9 +29,7 @@ public final class BridgeServer implements AutoCloseable {
         this.config = Objects.requireNonNull(config, "config");
         this.log = Objects.requireNonNull(log, "log");
         BearerAuthenticator authenticator =
-                new BearerAuthenticator(
-                        Objects.requireNonNull(bearerToken, "bearerToken"),
-                        config.bridge().minimumTokenBytes());
+                new BearerAuthenticator(Objects.requireNonNull(bearerToken, "bearerToken"));
         this.dispatcher =
                 new BridgeDispatcher(
                         Objects.requireNonNull(endpoints, "endpoints"),
@@ -55,7 +54,7 @@ public final class BridgeServer implements AutoCloseable {
             newServer =
                     HttpServer.create(
                             new InetSocketAddress(LOOPBACK_ADDRESS, this.config.bridge().port()),
-                            this.config.bridge().backlog());
+                            HTTP_BACKLOG);
             newServer.createContext("/v1/", this.dispatcher::handle);
             newServer.createContext(
                     "/v1",
@@ -69,22 +68,27 @@ public final class BridgeServer implements AutoCloseable {
                     });
             newServer.setExecutor(newExecutor);
             newServer.start();
-        } catch (IOException | RuntimeException exception) {
+        } catch (IOException | RuntimeException | Error failure) {
             if (newServer != null) {
-                newServer.stop(0);
+                try {
+                    newServer.stop(0);
+                } catch (RuntimeException | Error cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
             }
-            newExecutor.shutdownNow();
-            throw exception;
+            try {
+                newExecutor.shutdownNow();
+            } catch (RuntimeException | Error cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            throw failure;
         }
 
         this.executor = newExecutor;
         this.server = newServer;
         int port = boundPort();
         String message = "Dirt MCP bridge listening on http://" + LOOPBACK_ADDRESS + ':' + port;
-        LogContext context =
-                LogContext.of("host", LOOPBACK_ADDRESS)
-                        .with("port", port)
-                        .with("backlog", this.config.bridge().backlog());
+        LogContext context = LogContext.of("host", LOOPBACK_ADDRESS).with("port", port);
         this.log.debug("bridge", "bridge.started", message, context);
     }
 

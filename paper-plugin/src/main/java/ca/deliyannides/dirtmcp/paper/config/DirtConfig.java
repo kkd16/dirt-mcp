@@ -103,18 +103,13 @@ public record DirtConfig(
 
     public record Bridge(
             int port,
-            int backlog,
             int shutdownDelaySeconds,
             int requestBodyTimeoutSeconds,
-            int minimumTokenBytes,
             int maxConcurrentRequests,
             int maxConcurrentInspections) {
         public Bridge {
             if (port < 1 || port > 65_535) {
                 throw new IllegalArgumentException("bridge.port must be between 1 and 65535");
-            }
-            if (backlog < 0) {
-                throw new IllegalArgumentException("bridge.backlog must be non-negative");
             }
             if (shutdownDelaySeconds < 1 || shutdownDelaySeconds > 30) {
                 throw new IllegalArgumentException(
@@ -123,9 +118,6 @@ public record DirtConfig(
             if (requestBodyTimeoutSeconds < 1 || requestBodyTimeoutSeconds > 30) {
                 throw new IllegalArgumentException(
                         "bridge.request-body-timeout-seconds must be between 1 and 30");
-            }
-            if (minimumTokenBytes < 1) {
-                throw new IllegalArgumentException("bridge.minimum-token-bytes must be positive");
             }
             if (maxConcurrentRequests < 1) {
                 throw new IllegalArgumentException(

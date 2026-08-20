@@ -204,8 +204,7 @@ public final class BridgeExchange {
         this.exchange.getResponseHeaders().set("Cache-Control", "no-store");
         this.exchange.sendResponseHeaders(status, bytes.length);
 
-        try (this.exchange;
-                var output = this.exchange.getResponseBody()) {
+        try (var output = this.exchange.getResponseBody()) {
             output.write(bytes);
         }
     }

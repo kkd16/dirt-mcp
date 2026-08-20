@@ -3,6 +3,8 @@ package ca.deliyannides.dirtmcp.paper.world.edit;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.platform.MainThread;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import java.util.List;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -40,9 +42,14 @@ final class PaperFaweEditPlatform implements EditPlatform {
 
     @Override
     public PreparedSet prepareSet(
-            WorldHandle world, SetBlocks.Request request, List<ChunkPosition> touchedChunks)
+            WorldHandle world,
+            SetBlocks.Request request,
+            List<BlockPosition> resolvedPositions,
+            BlockBounds bounds,
+            List<ChunkPosition> touchedChunks)
             throws OperationException {
-        return this.preparation.prepareSet(requireWorld(world), request, touchedChunks);
+        return this.preparation.prepareSet(
+                requireWorld(world), request, resolvedPositions, bounds, touchedChunks);
     }
 
     @Override

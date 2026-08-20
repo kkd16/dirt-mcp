@@ -162,10 +162,8 @@ public final class DirtAdminCommand {
         DirtConfig.Bridge bridge = this.config.bridge();
         appendSection(message, "Bridge");
         appendValue(message, "port", bridge.port());
-        appendValue(message, "backlog", bridge.backlog());
         appendValue(message, "shutdown-delay-seconds", bridge.shutdownDelaySeconds());
         appendValue(message, "request-body-timeout-seconds", bridge.requestBodyTimeoutSeconds());
-        appendValue(message, "minimum-token-bytes", bridge.minimumTokenBytes());
         appendValue(message, "max-concurrent-requests", bridge.maxConcurrentRequests());
         appendValue(message, "max-concurrent-inspections", bridge.maxConcurrentInspections());
 

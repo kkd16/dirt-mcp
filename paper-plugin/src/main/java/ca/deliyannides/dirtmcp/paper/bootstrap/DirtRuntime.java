@@ -115,31 +115,31 @@ public final class DirtRuntime implements AutoCloseable {
                             .with("detail_file_available", log.hasDetailFile());
             log.info("runtime", "runtime.started", message, context);
             return new DirtRuntime(mainThread, worldEditor, worldLifecycle, bridge, log);
-        } catch (IOException | RuntimeException failure) {
+        } catch (IOException | RuntimeException | Error failure) {
             if (bridge != null) {
                 try {
                     bridge.close();
-                } catch (RuntimeException cleanupFailure) {
+                } catch (RuntimeException | Error cleanupFailure) {
                     failure.addSuppressed(cleanupFailure);
                 }
             }
             if (worldLifecycle != null) {
                 try {
                     HandlerList.unregisterAll(worldLifecycle);
-                } catch (RuntimeException cleanupFailure) {
+                } catch (RuntimeException | Error cleanupFailure) {
                     failure.addSuppressed(cleanupFailure);
                 }
             }
             if (worldEditor != null) {
                 try {
                     worldEditor.close();
-                } catch (RuntimeException cleanupFailure) {
+                } catch (RuntimeException | Error cleanupFailure) {
                     failure.addSuppressed(cleanupFailure);
                 }
             }
             try {
                 mainThread.close();
-            } catch (RuntimeException cleanupFailure) {
+            } catch (RuntimeException | Error cleanupFailure) {
                 failure.addSuppressed(cleanupFailure);
             }
             throw failure;

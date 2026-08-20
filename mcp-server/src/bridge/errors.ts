@@ -8,7 +8,7 @@ export type ToolFailureCode =
   | 'bridge_invalid_response'
   | 'dirt_internal_error';
 
-export type ToolFailureLogLevel = 'info' | 'warning' | 'error';
+type ToolFailureLogLevel = 'info' | 'warning' | 'error';
 
 const ERROR_FAILURE_CODES: ReadonlySet<ToolFailureCode> = new Set([
   'bridge_http_error',

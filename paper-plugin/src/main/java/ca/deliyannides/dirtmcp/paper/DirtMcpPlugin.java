@@ -23,28 +23,35 @@ public final class DirtMcpPlugin extends JavaPlugin {
             this.runtime = DirtRuntime.start(this, config, bridgeToken(), log);
         } catch (IOException exception) {
             this.runtime = null;
-            LogContext context = LogContext.of("port", config.bridge().port());
-            log.error(
-                    "runtime",
-                    "runtime.start_failed",
-                    "Dirt MCP could not start its loopback bridge",
-                    context,
-                    exception);
-            log.close();
+            reportStartupFailure(
+                    log, config, "Dirt MCP could not start its loopback bridge", exception);
+            closeAfterStartupFailure(log, exception);
             throw new IllegalStateException(
                     "Could not start the Dirt MCP bridge on 127.0.0.1:" + config.bridge().port(),
                     exception);
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | Error failure) {
             this.runtime = null;
+            reportStartupFailure(log, config, "Dirt MCP could not start", failure);
+            closeAfterStartupFailure(log, failure);
+            throw failure;
+        }
+    }
+
+    private static void reportStartupFailure(
+            DirtLog log, DirtConfig config, String message, Throwable failure) {
+        try {
             LogContext context = LogContext.of("port", config.bridge().port());
-            log.error(
-                    "runtime",
-                    "runtime.start_failed",
-                    "Dirt MCP could not start",
-                    context,
-                    exception);
+            log.error("runtime", "runtime.start_failed", message, context, failure);
+        } catch (RuntimeException | Error loggingFailure) {
+            failure.addSuppressed(loggingFailure);
+        }
+    }
+
+    private static void closeAfterStartupFailure(DirtLog log, Throwable failure) {
+        try {
             log.close();
-            throw exception;
+        } catch (RuntimeException | Error cleanupFailure) {
+            failure.addSuppressed(cleanupFailure);
         }
     }
 
@@ -53,16 +60,22 @@ public final class DirtMcpPlugin extends JavaPlugin {
                 DirtLog.consoleOnly(getSLF4JLogger(), DirtConfig.ConsoleLogLevel.ERROR);
         try {
             saveDefaultConfig();
-            return DirtConfigLoader.load(getConfig(), System.getenv(PORT_ENVIRONMENT_VARIABLE));
-        } catch (RuntimeException failure) {
-            String detail = failure.getMessage() == null ? "" : ": " + failure.getMessage();
-            String message = "Dirt MCP configuration could not be loaded" + detail;
-            LogContext context = LogContext.empty();
-            bootstrapLog.error(
-                    "runtime", "runtime.configuration_failed", message, context, failure);
-            throw failure;
-        } finally {
+            DirtConfig config =
+                    DirtConfigLoader.load(getConfig(), System.getenv(PORT_ENVIRONMENT_VARIABLE));
             bootstrapLog.close();
+            return config;
+        } catch (RuntimeException | Error failure) {
+            try {
+                String detail = failure.getMessage() == null ? "" : ": " + failure.getMessage();
+                String message = "Dirt MCP configuration could not be loaded" + detail;
+                LogContext context = LogContext.empty();
+                bootstrapLog.error(
+                        "runtime", "runtime.configuration_failed", message, context, failure);
+            } catch (RuntimeException | Error loggingFailure) {
+                failure.addSuppressed(loggingFailure);
+            }
+            closeAfterStartupFailure(bootstrapLog, failure);
+            throw failure;
         }
     }
 

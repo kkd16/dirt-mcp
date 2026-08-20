@@ -3,20 +3,16 @@ package ca.deliyannides.dirtmcp.paper.bridge;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
+import ca.deliyannides.dirtmcp.paper.validation.UuidV4;
 import com.sun.net.httpserver.HttpExchange;
 import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
-import java.util.regex.Pattern;
 
 final class BridgeDispatcher implements AutoCloseable {
     private static final String CALL_ID_HEADER = "X-Dirt-Call-Id";
-    private static final Pattern CALL_ID_PATTERN =
-            Pattern.compile(
-                    "[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-4[0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}");
 
     private final Map<String, Map<String, BridgeEndpoint>> routes;
     private final BearerAuthenticator authenticator;
@@ -155,10 +151,7 @@ final class BridgeDispatcher implements AutoCloseable {
                 status != null && status == 500 && "internal_error".equals(exchange.errorCode());
         boolean recoveryAmbiguity = recoveryRisk || transportFailure && exchange.editId() != null;
         String callId = rawExchange.getRequestHeaders().getFirst(CALL_ID_HEADER);
-        String canonicalCallId =
-                callId != null && CALL_ID_PATTERN.matcher(callId).matches()
-                        ? callId.toLowerCase(Locale.ROOT)
-                        : null;
+        String canonicalCallId = canonicalCallId(callId);
         LogContext context =
                 LogContext.of("operation", operation)
                         .with("method", rawExchange.getRequestMethod())
@@ -214,6 +207,14 @@ final class BridgeDispatcher implements AutoCloseable {
 
     private static LogContext optional(LogContext context, String key, Object value) {
         return value == null ? context : context.with(key, value);
+    }
+
+    private static String canonicalCallId(String value) {
+        try {
+            return UuidV4.parseCanonical(value, CALL_ID_HEADER).toString();
+        } catch (IllegalArgumentException exception) {
+            return null;
+        }
     }
 
     private static String summary(

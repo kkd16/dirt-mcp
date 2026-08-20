@@ -4,6 +4,7 @@ import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.platform.MainThread;
 import ca.deliyannides.dirtmcp.paper.platform.PaperMainThreadException;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import com.fastasyncworldedit.core.math.random.SimpleRandom;
@@ -96,18 +97,29 @@ final class PaperEditPreparation implements AutoCloseable {
     }
 
     PreparedSet prepareSet(
-            PaperWorld world, SetBlocks.Request request, List<ChunkPosition> touchedChunks)
+            PaperWorld world,
+            SetBlocks.Request request,
+            List<BlockPosition> resolvedPositions,
+            BlockBounds bounds,
+            List<ChunkPosition> touchedChunks)
             throws OperationException {
-        return onMainThread(
-                () -> {
-                    requireAvailable(world);
-                    List<PreparedPalette> palettes = prepareSetPalettes(request);
-                    List<PreparedBlockChange> changes = prepareChanges(world, request, palettes);
-                    ChunkTicketManager.Lease lease =
-                            this.tickets.acquire(world, touchedChunks, "Set-blocks edit");
-                    return new PreparedSet(
-                            world, palettes, changes, List.copyOf(touchedChunks), lease);
-                });
+        List<ChunkPosition> chunks = List.copyOf(touchedChunks);
+        PreparedSetResources resources =
+                onMainThread(
+                        () -> {
+                            requireAvailable(world);
+                            List<PreparedPalette> palettes = prepareSetPalettes(request);
+                            requireValidHeight(world.bukkitWorld(), bounds);
+                            ChunkTicketManager.Lease lease =
+                                    this.tickets.acquire(world, chunks, "Set-blocks edit");
+                            try {
+                                return new PreparedSetResources(palettes, chunks, lease);
+                            } catch (RuntimeException | Error failure) {
+                                releaseAfterFailure(lease, failure);
+                                throw failure;
+                            }
+                        });
+        return finishPreparedSet(world, request, resolvedPositions, resources);
     }
 
     ChunkTicketManager.Lease prepareUndo(PaperWorld world, List<ChunkPosition> chunks)
@@ -120,34 +132,57 @@ final class PaperEditPreparation implements AutoCloseable {
         this.tickets.close();
     }
 
-    private List<PreparedBlockChange> prepareChanges(
-            PaperWorld world, SetBlocks.Request request, List<PreparedPalette> palettes)
+    static PreparedSet finishPreparedSet(
+            PaperWorld world,
+            SetBlocks.Request request,
+            List<BlockPosition> resolvedPositions,
+            PreparedSetResources resources)
             throws OperationException {
-        List<PreparedBlockChange> changes = new ArrayList<>();
+        try {
+            List<PreparedBlockChange> changes =
+                    prepareChanges(request, resolvedPositions, resources.palettes());
+            return new PreparedSet(
+                    world, resources.palettes(), changes, resources.chunks(), resources.lease());
+        } catch (OperationException | RuntimeException | Error failure) {
+            releaseAfterFailure(resources.lease(), failure);
+            throw failure;
+        }
+    }
+
+    private static List<PreparedBlockChange> prepareChanges(
+            SetBlocks.Request request,
+            List<BlockPosition> resolvedPositions,
+            List<PreparedPalette> palettes)
+            throws OperationException {
+        if (resolvedPositions.size() != request.placements().size()) {
+            throw new IllegalStateException(
+                    "Resolved set-blocks positions do not match the validated request");
+        }
+        List<PreparedBlockChange> changes = new ArrayList<>(request.placements().size());
         for (int placementIndex = 0;
                 placementIndex < request.placements().size();
                 placementIndex++) {
+            FaweEditExecutor.requireNotInterrupted();
             SetBlocks.Placement placement = request.placements().get(placementIndex);
             Pattern pattern = palettes.get(placement.paletteIndex()).pattern();
-            BlockPosition position =
-                    new BlockPosition(
-                            Math.addExact(request.origin().x(), placement.x()),
-                            Math.addExact(request.origin().y(), placement.y()),
-                            Math.addExact(request.origin().z(), placement.z()));
-            if (position.y() < world.bukkitWorld().getMinHeight()
-                    || position.y() >= world.bukkitWorld().getMaxHeight()) {
-                throw invalid(
-                        "placements["
-                                + placementIndex
-                                + "] resolves to a Y coordinate outside "
-                                + world.bukkitWorld().getMinHeight()
-                                + " through "
-                                + (world.bukkitWorld().getMaxHeight() - 1));
-            }
+            BlockPosition position = resolvedPositions.get(placementIndex);
             BlockVector3 vector = BlockVector3.at(position.x(), position.y(), position.z());
             changes.add(new PreparedBlockChange(vector, pattern));
         }
         return List.copyOf(changes);
+    }
+
+    private static void releaseAfterFailure(ChunkTicketManager.Lease lease, Throwable failure) {
+        boolean interrupted = Thread.interrupted();
+        try {
+            lease.close();
+        } catch (RuntimeException | Error cleanupFailure) {
+            failure.addSuppressed(cleanupFailure);
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     private static List<PreparedPalette> prepareSetPalettes(SetBlocks.Request request)
@@ -244,7 +279,17 @@ final class PaperEditPreparation implements AutoCloseable {
     }
 
     private static void requireValidHeight(World world, Cuboid region) throws OperationException {
-        if (region.min().y() < world.getMinHeight() || region.max().y() >= world.getMaxHeight()) {
+        requireValidHeight(world, region.min(), region.max());
+    }
+
+    private static void requireValidHeight(World world, BlockBounds bounds)
+            throws OperationException {
+        requireValidHeight(world, bounds.min(), bounds.max());
+    }
+
+    private static void requireValidHeight(
+            World world, BlockPosition minimum, BlockPosition maximum) throws OperationException {
+        if (minimum.y() < world.getMinHeight() || maximum.y() >= world.getMaxHeight()) {
             throw invalid(
                     "Y bounds must be between "
                             + world.getMinHeight()
@@ -311,6 +356,17 @@ final class PaperEditPreparation implements AutoCloseable {
     record PreparedPalette(List<DestinationPaletteEntry> entries, Pattern pattern) {}
 
     record PreparedBlockChange(BlockVector3 position, Pattern pattern) {}
+
+    record PreparedSetResources(
+            List<PreparedPalette> palettes,
+            List<ChunkPosition> chunks,
+            ChunkTicketManager.Lease lease) {
+        PreparedSetResources {
+            Objects.requireNonNull(palettes, "palettes");
+            Objects.requireNonNull(chunks, "chunks");
+            Objects.requireNonNull(lease, "lease");
+        }
+    }
 
     record PreparedReplace(
             PaperWorld paperWorld,

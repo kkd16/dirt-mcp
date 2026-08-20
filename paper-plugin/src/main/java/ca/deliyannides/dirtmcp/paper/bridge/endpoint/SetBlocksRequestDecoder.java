@@ -76,6 +76,6 @@ final class SetBlocksRequestDecoder {
                             RequestJson.integer(tuple.get(2), name + "[2]"),
                             RequestJson.integer(tuple.get(3), name + "[3]")));
         }
-        return List.copyOf(placements);
+        return placements;
     }
 }

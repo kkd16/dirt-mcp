@@ -12,10 +12,8 @@ public final class DirtConfigLoader {
     private static final Set<String> REQUIRED_PATHS =
             Set.of(
                     "bridge.port",
-                    "bridge.backlog",
                     "bridge.shutdown-delay-seconds",
                     "bridge.request-body-timeout-seconds",
-                    "bridge.minimum-token-bytes",
                     "bridge.max-concurrent-requests",
                     "bridge.max-concurrent-inspections",
                     "logging.console-level",
@@ -51,10 +49,8 @@ public final class DirtConfigLoader {
         return new DirtConfig(
                 new DirtConfig.Bridge(
                         port,
-                        requiredInteger(config, "bridge.backlog"),
                         requiredInteger(config, "bridge.shutdown-delay-seconds"),
                         requiredInteger(config, "bridge.request-body-timeout-seconds"),
-                        requiredInteger(config, "bridge.minimum-token-bytes"),
                         requiredInteger(config, "bridge.max-concurrent-requests"),
                         requiredInteger(config, "bridge.max-concurrent-inspections")),
                 loadTools(config),

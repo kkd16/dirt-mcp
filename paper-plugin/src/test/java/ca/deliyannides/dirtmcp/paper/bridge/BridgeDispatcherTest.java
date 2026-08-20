@@ -51,7 +51,7 @@ final class BridgeDispatcherTest {
                 () ->
                         new BridgeDispatcher(
                                 List.of(first, duplicate),
-                                new BearerAuthenticator(BridgeTestFixture.TOKEN, 32),
+                                new BearerAuthenticator(BridgeTestFixture.TOKEN),
                                 1,
                                 1024,
                                 1,
@@ -65,7 +65,7 @@ final class BridgeDispatcherTest {
                 () ->
                         new BridgeDispatcher(
                                 List.of(endpoint("bad", "GET", "/ping")),
-                                new BearerAuthenticator(BridgeTestFixture.TOKEN, 32),
+                                new BearerAuthenticator(BridgeTestFixture.TOKEN),
                                 1,
                                 1024,
                                 1,
@@ -106,7 +106,7 @@ final class BridgeDispatcherTest {
         BridgeDispatcher dispatcher =
                 new BridgeDispatcher(
                         List.of(endpoint),
-                        new BearerAuthenticator(BridgeTestFixture.TOKEN, 32),
+                        new BearerAuthenticator(BridgeTestFixture.TOKEN),
                         1,
                         1_024,
                         1,
@@ -164,7 +164,7 @@ final class BridgeDispatcherTest {
         BridgeDispatcher dispatcher =
                 new BridgeDispatcher(
                         List.of(endpoint),
-                        new BearerAuthenticator(BridgeTestFixture.TOKEN, 32),
+                        new BearerAuthenticator(BridgeTestFixture.TOKEN),
                         1,
                         1_024,
                         1,
@@ -187,6 +187,26 @@ final class BridgeDispatcherTest {
         }
     }
 
+    @Test
+    void dispatcherOwnsAndClosesTheExchangeOnce() throws IOException {
+        BridgeEndpoint endpoint = endpoint("ping_server", "GET", "/v1/ping");
+        BridgeDispatcher dispatcher =
+                new BridgeDispatcher(
+                        List.of(endpoint),
+                        new BearerAuthenticator(BridgeTestFixture.TOKEN),
+                        1,
+                        1_024,
+                        1,
+                        log());
+        FailingExchange exchange = new FailingExchange(DeliveryFailure.NONE);
+
+        try (dispatcher) {
+            dispatcher.handle(exchange);
+        }
+
+        assertEquals(1, exchange.closeCalls());
+    }
+
     private static BridgeEndpoint endpoint(String operation, String method, String path) {
         return new BridgeEndpoint() {
             @Override
@@ -205,7 +225,9 @@ final class BridgeDispatcherTest {
             }
 
             @Override
-            public void handle(BridgeExchange exchange) {}
+            public void handle(BridgeExchange exchange) throws IOException {
+                exchange.ok(Map.of("status", "ok"));
+            }
 
             @Override
             public String internalErrorMessage() {
@@ -271,6 +293,7 @@ final class BridgeDispatcherTest {
         private ByteArrayOutputStream capturedResponse = new ByteArrayOutputStream();
         private int responseCode = -1;
         private int responseAttempts;
+        private int closeCalls;
 
         private FailingExchange() {
             this(DeliveryFailure.ALWAYS_IO);
@@ -307,7 +330,9 @@ final class BridgeDispatcherTest {
         }
 
         @Override
-        public void close() {}
+        public void close() {
+            this.closeCalls++;
+        }
 
         @Override
         public InputStream getRequestBody() {
@@ -378,9 +403,14 @@ final class BridgeDispatcherTest {
         private String responseBody() {
             return this.capturedResponse.toString(StandardCharsets.UTF_8);
         }
+
+        private int closeCalls() {
+            return this.closeCalls;
+        }
     }
 
     private enum DeliveryFailure {
+        NONE,
         ALWAYS_IO,
         FIRST_RUNTIME
     }

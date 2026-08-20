@@ -1,6 +1,8 @@
 package ca.deliyannides.dirtmcp.paper.world.edit;
 
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import java.util.List;
 import java.util.UUID;
@@ -15,8 +17,16 @@ interface EditPlatform extends AutoCloseable {
     PreparedFill prepareFill(WorldHandle world, FillRegion.Request request, Cuboid region)
             throws OperationException;
 
+    /**
+     * Prepares a validated set request. Resolved positions are absolute and retain placement order;
+     * bounds and touched chunks cover those same positions.
+     */
     PreparedSet prepareSet(
-            WorldHandle world, SetBlocks.Request request, List<ChunkPosition> touchedChunks)
+            WorldHandle world,
+            SetBlocks.Request request,
+            List<BlockPosition> resolvedPositions,
+            BlockBounds bounds,
+            List<ChunkPosition> touchedChunks)
             throws OperationException;
 
     EditResult replace(

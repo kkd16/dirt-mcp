@@ -17,7 +17,7 @@ final class UndoEditRequestDecoder {
     static UndoEdit.Request decode(BridgeExchange exchange)
             throws IOException, InvalidRequestException {
         JsonObject object = exchange.readJsonObject();
-        RequestJson.requireFields(object, FIELDS, FIELDS);
+        RequestJson.requireExactFields(object, FIELDS, "Request");
         String editId = RequestJson.string(object.get("editId"), "editId");
         try {
             return new UndoEdit.Request(

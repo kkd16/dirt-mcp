@@ -20,7 +20,7 @@ Dirt MCP tracks the latest stable Paper release only. The current baseline is:
 - FAWE 2.15.4;
 - [Java 25](https://docs.papermc.io/paper/getting-started/#requirements);
 - Node.js 26 or newer;
-- pnpm 11.22.0 or newer.
+- pnpm 11.22.0 or a newer 11.x release.
 
 Older Paper or Minecraft versions are not supported.
 Source development also requires GNU Make, curl, tmux, ShellCheck 0.9 or newer,
@@ -48,7 +48,7 @@ Copy the Paper plugin into an existing server:
 cp paper-plugin/build/libs/dirt-mcp-paper-*.jar /path/to/paper/plugins/
 ```
 
-Install the matching current Paper build from the
+Install the matching current FAWE build from the
 [official FAWE download page](https://intellectualsites.github.io/download/fawe.html).
 FAWE is a required runtime dependency; Dirt MCP will not load without it.
 
@@ -68,9 +68,8 @@ The port may instead be set in `plugins/DirtMCP/config.yml`. The
 every setting and default.
 
 The bridge always binds to `127.0.0.1`; do not proxy or expose it publicly. Give
-the same `DIRT_MCP_BRIDGE_TOKEN` to the MCP process. Tokens must satisfy the
-configured byte minimum, which defaults to 32; lowering it weakens
-authentication. Never commit or log tokens. All settings are validated at
+the same `DIRT_MCP_BRIDGE_TOKEN` to the MCP process. Tokens must contain at
+least 32 bytes. Never commit or log tokens. All settings are validated at
 startup; active tool limits, edit-history configuration, defaults, logging
 configuration, and the resolved MCP tool allowlist are reported by
 `get_server_status`. The shipped
@@ -102,21 +101,17 @@ default and may be assigned explicitly through a permission plugin.
 
 ### Logs
 
-Paper's server console receives concise lifecycle, completed mutation and undo,
-actionable warning, and unexpected-failure events at the configured
-`logging.console-level`. Detailed structured events are written as JSON Lines to
-`plugins/DirtMCP/logs/dirt-detail.%g.jsonl`. The positive
-`logging.detail-file-max-bytes` and `logging.detail-file-retained-files` settings
-bound size-based rotation; retained-file count must be between two and 100. The
-shipped values are 10,485,760 bytes and five files. If the detail sink cannot be opened
-or later fails, Dirt continues and reports the logging degradation as a
-prominent Paper console error.
+Paper's server console receives concise lifecycle, mutation, undo, warning, and
+failure events. More detailed structured events are written as rotating JSON
+Lines under `plugins/DirtMCP/logs/`; the shipped configuration documents the
+console threshold and file bounds. A detail-sink failure does not stop world
+operations and is reported prominently in the console.
 
-The MCP process writes one structured JSON object per diagnostic line to
-stderr. Stdout remains reserved for MCP protocol messages. Paper and MCP records
-carry applicable call, edit, operation, world, outcome, and duration fields so
-the two sides can be correlated. Neither sink records bearer tokens, raw request
-bodies, or complete block payloads.
+The MCP process writes structured diagnostics to stderr while stdout remains
+reserved for MCP protocol messages. Paper and MCP records carry correlation
+fields without recording bearer tokens, raw request bodies, or complete block
+payloads. See the [v1 behavior guide](docs/v1-design.md#logging) for the precise
+logging contract.
 
 The repository includes a project-scoped Codex configuration in
 `.codex/config.toml`. Run `make up` at least once to build the project and create
@@ -143,60 +138,12 @@ For another MCP host, configure it to launch the source build:
 
 The implemented tool surface contains `ping_server`, `get_server_status`,
 `count_region_block_states`, `get_region_blocks`, `scan_orthographic_view`,
-`replace_region_blocks`, `fill_region`, `set_blocks`, `get_edit_history`,
-and `undo_edit`. Fresh configurations enable all ten. The MCP process advertises
+`replace_region_blocks`, `fill_region`, `set_blocks`, `get_edit_history`, and
+`undo_edit`. Fresh configurations enable all ten. The MCP process advertises
 only tools enabled in the Paper startup snapshot; a disabled tool is absent from
-`tools/list` and cannot be called. See the
-[v1 behavior guide](docs/v1-design.md) for selection and execution semantics, and the
+`tools/list` and cannot be called. See the [v1 behavior guide](docs/v1-design.md)
+for tool selection and edit, history, recovery, and undo semantics, and the
 [OpenAPI contract](protocol/openapi.yaml) for exact bridge schemas.
-
-`set_blocks` takes one absolute `origin`, one or more weighted `palettes`, and
-compact `[paletteIndex, x, y, z]` placements whose coordinates are signed
-origin-relative offsets. Each palette uses the same optional-weight and seed
-rules as the cuboid edit tools. Dirt validates every position before one FAWE
-edit, rejects duplicates, and retains a committed non-empty batch as one history
-record. The shipped 256 KiB request limit bounds request memory. Placement does
-not request Minecraft neighbor physics.
-
-Every block-edit response has an `outcome` and an `edit` field. A `committed`
-result contains an `EditRecord` with its generated `editId`, creating `callId`,
-operation, world name and UUID, normalized bounds, positive changed-block count,
-original edit completion or recovery timestamp, and last retained status. A
-successful undo preserves the status immediately before it consumed the record.
-A `preview` or `no_change` result returns `edit: null` because there is no
-mutation to undo.
-
-`get_edit_history` returns the retained records for one loaded world, newest
-first. `undo_edit` requires both the world and the exact `editId` of the newest
-record; it rejects a retained older ID instead of undoing a different edit.
-Direct bridge callers must supply a canonical UUIDv4 `X-Dirt-Call-Id` header for
-each block edit and undo; the MCP server generates it automatically. Successful
-undo returns the original record plus `undoCallId` and `undoneAt`.
-
-History is bounded by positive per-world, global-entry, and aggregate
-changed-block limits. The shipped defaults are 20 entries per world, 100 total,
-and 1,310,720 retained changed blocks. Immediately before a non-empty edit first
-mutates the world, Dirt reserves worst-case space under all three limits,
-evicting old committed records if needed. If protected history leaves no room,
-the request fails with `history_capacity_exceeded` before changing the world.
-Recovery-required records therefore remain visible and retryable without making
-the limits soft. History and its FAWE change data are discarded on world unload
-or Paper restart. An undo may asynchronously reload its previously existing
-chunks without generating terrain and holds plugin chunk tickets only while it
-runs.
-
-Every failure mapped by a Dirt tool handler includes its generated
-`error.callId`. Invalid tool names or arguments are rejected before Dirt creates
-a call ID; MCP SDK output-validation failures occur outside Dirt error mapping
-and do not carry a structured Dirt `error.callId`. A structured bridge edit
-error includes `error.editId` when the request leaves a committed or
-recovery-required record, or rollback cannot be confirmed after the world
-becomes unavailable. Transaction-finalization errors may also include the
-generated ID after a confirmed rollback. The MCP server preserves any received
-edit ID and salvages a valid nested ID from malformed success or non-2xx
-responses on edit and undo routes when possible. Callers can reconcile records
-returned by `get_edit_history` using `editId` or `callId`; an absent record means
-no retryable undo remains.
 
 ## Local development
 
@@ -208,14 +155,16 @@ make doctor
 make up
 ```
 
-`make up` installs locked dependencies when needed, incrementally builds both
-components, downloads the pinned FAWE development dependency, creates an ignored
-local bearer token when needed, and accepts Mojang's EULA on the command line. It
-starts one persistent Paper process in a detached tmux session, waits for the
-authenticated bridge to become healthy, and returns. Paper listens on port
-`25566` with an IPv4 listener suitable for Windows and WSL. Connect at
-`127.0.0.1:25566`. The authenticated MCP bridge is available to local MCP
-clients at `127.0.0.1:8765`. Only run it if you agree to the
+When no healthy managed server is running, `make up` installs locked
+dependencies when needed, incrementally builds both components, downloads the
+pinned Paper and FAWE runtime artifacts when absent, creates an ignored local
+bearer token, and accepts Mojang's EULA on the command line. It starts one
+persistent Paper process in a detached tmux session, waits for the authenticated
+bridge to become healthy, and returns. A healthy existing server is reused
+without rebuilding; use `make reload` after source or configuration changes.
+Paper listens on port `25566` with an IPv4 listener suitable for Windows and WSL.
+Connect at `127.0.0.1:25566`. The authenticated MCP bridge is available to local
+MCP clients at `127.0.0.1:8765`. Only run it if you agree to the
 [Minecraft EULA](https://aka.ms/MinecraftEULA).
 
 During development, rebuild and safely cycle Paper with:
@@ -227,8 +176,8 @@ make reload
 Paper does not safely support plugin hot reloads, so this performs an
 incremental build, clean `stop`, restart of the same development world, and
 health check. Connected players receive a clear restart message before they are
-disconnected. MCP server changes require rebuilding and restarting the MCP host
-or process separately.
+disconnected. `make reload` also rebuilds the MCP server, but its host or process
+must be restarted separately to load that build.
 
 Override local ports when needed:
 
@@ -275,14 +224,14 @@ checks result caps, exact states, no-ops, history metadata, and ID-checked undo,
 then restores the prior world state. Run it without concurrent Dirt MCP edits.
 
 The offline Java suite publishes a complete JaCoCo report at
-`paper-plugin/build/reports/jacoco/test/html/index.html` and enforces 70% line
-and 58% branch coverage across the whole plugin. A second gate enforces 90% line
-and 75% branch coverage on the independently testable core; only explicitly
-listed Paper/FAWE runtime adapters are omitted from that stricter calculation.
-Those adapters remain visible in the complete report and are exercised by the
-managed live smoke suite, whose separate JVM is not counted as JaCoCo coverage.
-The MCP suite uses Node's native coverage and enforces 90% line, 80% branch, and
-90% function coverage across the complete emitted server.
+`paper-plugin/build/reports/jacoco/test/html/index.html` and enforces separate
+whole-plugin and independently testable-core gates. Their thresholds and the
+narrow Paper/FAWE adapter exclusion list live in
+[the plugin build](paper-plugin/build.gradle.kts). Excluded adapters remain in
+the complete report and are exercised by the managed smoke suite, whose separate
+JVM is not counted by JaCoCo. The MCP suite uses Node's native coverage across
+the complete emitted server; its gate is owned by
+[the server package](mcp-server/package.json).
 
 ## Contributing
 

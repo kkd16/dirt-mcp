@@ -1,20 +1,13 @@
 import type { BridgeConfig } from '../config.ts';
 import * as z from 'zod/v4';
-import { BRIDGE_ROUTES, BridgeErrorResponseSchema, type BridgeRoute } from './contract.ts';
+import { BridgeErrorResponseSchema, type BridgeRoute } from './contract.ts';
 import { ToolFailure } from './errors.ts';
-
-const EDIT_RESPONSE_PATHS = new Set<BridgeRoute['path']>([
-  BRIDGE_ROUTES.replaceRegionBlocks.path,
-  BRIDGE_ROUTES.fillRegion.path,
-  BRIDGE_ROUTES.setBlocks.path,
-  BRIDGE_ROUTES.undoEdit.path,
-]);
 
 const EditIdContainerSchema = z.object({ editId: z.uuidv4() }).passthrough();
 const EditIdEnvelopeSchema = z.object({ edit: z.unknown().optional(), error: z.unknown().optional() }).passthrough();
 
 function salvageEditId(route: BridgeRoute, body: unknown): string | undefined {
-  if (!EDIT_RESPONSE_PATHS.has(route.path)) return undefined;
+  if (route.salvageEditId !== true) return undefined;
 
   const envelope = EditIdEnvelopeSchema.safeParse(body);
   if (!envelope.success) return undefined;

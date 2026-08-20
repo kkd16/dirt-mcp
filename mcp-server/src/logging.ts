@@ -5,14 +5,13 @@ const REDACTED = '[redacted]';
 const SENSITIVE_FIELD = /(api_?key|access_?key|authorization|bearer|credential|password|secret|token)/i;
 const RESERVED_FIELDS = new Set(['timestamp', 'level', 'service', 'event', 'message', 'pid']);
 
-export type LogLevel = 'debug' | 'info' | 'warning' | 'error';
-export type LogValue = string | number | boolean | null;
+type LogLevel = 'info' | 'warning' | 'error';
+type LogValue = string | number | boolean | null;
 export type LogFields = Readonly<Record<string, LogValue | undefined>>;
-export type LogSink = (line: string) => void;
+type LogSink = (line: string) => void;
 
 export interface DirtLogger {
   child(context: LogFields): DirtLogger;
-  debug(event: string, message: string, fields?: LogFields): void;
   info(event: string, message: string, fields?: LogFields): void;
   warning(event: string, message: string, fields?: LogFields): void;
   error(event: string, message: string, fields?: LogFields): void;
@@ -52,9 +51,6 @@ function loggerWithContext(sink: LogSink, context: LogFields): DirtLogger {
   return {
     child(additionalContext) {
       return loggerWithContext(sink, { ...context, ...additionalContext });
-    },
-    debug(event, message, fields) {
-      emit('debug', event, message, fields);
     },
     info(event, message, fields) {
       emit('info', event, message, fields);

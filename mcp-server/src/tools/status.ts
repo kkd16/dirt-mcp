@@ -1,9 +1,15 @@
-import { McpServer } from '@modelcontextprotocol/server';
+import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
-import { BridgeClient } from '../bridge/client.ts';
+import type { BridgeClient } from '../bridge/client.ts';
 import { BRIDGE_ROUTES } from '../bridge/contract.ts';
 import type { DirtLogger } from '../logging.ts';
-import { BlockPositionSchema, EmptyInputSchema, INT32_MAX, READ_WORLD_ANNOTATIONS } from './common.ts';
+import {
+  BlockPositionSchema,
+  EmptyInputSchema,
+  INT32_MAX,
+  MAX_BLOCK_STATE_ENTRIES,
+  READ_WORLD_ANNOTATIONS,
+} from './common.ts';
 import { McpToolConfigurationSchema, type McpToolConfiguration } from './configuration.ts';
 import { executeToolCall, successResult } from './execution.ts';
 
@@ -18,39 +24,47 @@ const PingServerOutputSchema = z
 
 const LimitConfigurationSchema = z
   .object({
-    maxRequestBytes: z.number().int().positive().describe('Maximum JSON request-body size accepted by the bridge.'),
-    maxRegionVolume: z
-      .number()
-      .int()
-      .positive()
-      .describe('Maximum cuboid mutation/count volume or explicit block placements.'),
-    maxTouchedChunks: z.number().int().positive().describe('Maximum distinct loaded chunks one mutation may touch.'),
-    maxInspectionTouchedChunks: z
-      .number()
-      .int()
-      .positive()
-      .describe('Maximum distinct loaded chunks one inspection may snapshot.'),
-    maxBlockStatePatterns: z
-      .number()
-      .int()
-      .positive()
-      .describe(
-        'Maximum block-state patterns or palette entries in one operation; inspection include and exclude lists share this cap.',
-      ),
-    maxChangedBlocks: z.number().int().positive().describe('Maximum blocks one edit may change.'),
-    maxInspectionVolume: z.number().int().positive().describe('Maximum blocks scanned by a detailed inspection.'),
-    defaultInspectionResultLimit: z
-      .number()
-      .int()
-      .positive()
-      .describe('Default block, run, or visible-block result limit for detailed inspections.'),
-    maxInspectionResultLimit: z
-      .number()
-      .int()
-      .positive()
-      .describe('Maximum caller-selectable result limit for detailed inspections.'),
+    maxRequestBytes: PositiveInt32Schema.max(INT32_MAX - 1).describe(
+      'Maximum JSON request-body size accepted by the bridge.',
+    ),
+    maxRegionVolume: PositiveInt32Schema.describe('Maximum cuboid mutation/count volume or explicit block placements.'),
+    maxTouchedChunks: PositiveInt32Schema.describe('Maximum distinct loaded chunks one mutation may touch.'),
+    maxInspectionTouchedChunks: PositiveInt32Schema.describe(
+      'Maximum distinct loaded chunks one inspection may snapshot.',
+    ),
+    maxBlockStatePatterns: PositiveInt32Schema.max(MAX_BLOCK_STATE_ENTRIES).describe(
+      'Maximum block-state patterns or palette entries in one operation; inspection include and exclude lists share this cap.',
+    ),
+    maxChangedBlocks: PositiveInt32Schema.describe('Maximum blocks one edit may change.'),
+    maxInspectionVolume: PositiveInt32Schema.describe('Maximum blocks scanned by a detailed inspection.'),
+    defaultInspectionResultLimit: PositiveInt32Schema.describe(
+      'Default block, run, or visible-block result limit for detailed inspections.',
+    ),
+    maxInspectionResultLimit: PositiveInt32Schema.describe(
+      'Maximum caller-selectable result limit for detailed inspections.',
+    ),
   })
   .strict()
+  .refine((limits) => limits.maxInspectionTouchedChunks <= limits.maxTouchedChunks, {
+    message: 'maxInspectionTouchedChunks must not exceed maxTouchedChunks.',
+    path: ['maxInspectionTouchedChunks'],
+  })
+  .refine((limits) => limits.maxChangedBlocks <= limits.maxRegionVolume, {
+    message: 'maxChangedBlocks must not exceed maxRegionVolume.',
+    path: ['maxChangedBlocks'],
+  })
+  .refine((limits) => limits.maxInspectionVolume <= limits.maxRegionVolume, {
+    message: 'maxInspectionVolume must not exceed maxRegionVolume.',
+    path: ['maxInspectionVolume'],
+  })
+  .refine((limits) => limits.defaultInspectionResultLimit <= limits.maxInspectionResultLimit, {
+    message: 'defaultInspectionResultLimit must not exceed maxInspectionResultLimit.',
+    path: ['defaultInspectionResultLimit'],
+  })
+  .refine((limits) => limits.maxInspectionResultLimit <= limits.maxInspectionVolume, {
+    message: 'maxInspectionResultLimit must not exceed maxInspectionVolume.',
+    path: ['maxInspectionResultLimit'],
+  })
   .describe('Active limits that constrain Dirt inspection and mutation tools.');
 
 export const EditHistoryConfigurationSchema = z

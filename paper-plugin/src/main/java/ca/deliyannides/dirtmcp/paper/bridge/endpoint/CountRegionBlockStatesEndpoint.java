@@ -3,7 +3,6 @@ package ca.deliyannides.dirtmcp.paper.bridge.endpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
 import ca.deliyannides.dirtmcp.paper.bridge.InvalidRequestException;
-import ca.deliyannides.dirtmcp.paper.bridge.RequestDecoder;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
 import java.io.IOException;
@@ -11,11 +10,9 @@ import java.util.Objects;
 
 public final class CountRegionBlockStatesEndpoint implements BridgeEndpoint {
     private final CountRegionBlockStates operation;
-    private final RequestDecoder<CountRegionBlockStates.Request> decoder;
 
     public CountRegionBlockStatesEndpoint(CountRegionBlockStates operation) {
         this.operation = Objects.requireNonNull(operation, "operation");
-        this.decoder = CountRegionBlockStatesRequestDecoder::decode;
     }
 
     @Override
@@ -36,7 +33,8 @@ public final class CountRegionBlockStatesEndpoint implements BridgeEndpoint {
     @Override
     public void handle(BridgeExchange exchange)
             throws IOException, InvalidRequestException, OperationException {
-        CountRegionBlockStates.Request request = this.decoder.decode(exchange);
+        CountRegionBlockStates.Request request =
+                CountRegionBlockStatesRequestDecoder.decode(exchange);
         exchange.world(request.world());
         exchange.ok(this.operation.countRegionBlockStates(request));
     }

@@ -16,7 +16,7 @@ final class GetEditHistoryRequestDecoder {
     static GetEditHistory.Request decode(BridgeExchange exchange)
             throws IOException, InvalidRequestException {
         JsonObject object = exchange.readJsonObject();
-        RequestJson.requireFields(object, FIELDS, FIELDS);
+        RequestJson.requireExactFields(object, FIELDS, "Request");
         return new GetEditHistory.Request(RequestJson.string(object.get("world"), "world"));
     }
 }

@@ -18,7 +18,7 @@ function viewFixture(): ScanOrthographicViewBlocksOutput {
     },
     viewport: requested,
     bounds: { min: { x: -1, y: -1, z: -3 }, max: { x: 1, y: 1, z: -1 } },
-    scannedVolume: 20,
+    scannedVolume: 27,
     visibleBlockCount: 3,
     format: 'blocks',
     blocks: [
@@ -69,7 +69,6 @@ test('represents an empty view with zero-filled rows', () => {
   const view = viewFixture();
   view.blocks = [];
   view.visibleBlockCount = 0;
-  view.scannedVolume = 27;
   const result = compactView(view, requested);
   assert.deepEqual(result.blockStatePalette, []);
   assert.deepEqual(result.blockStateIndexRows, [

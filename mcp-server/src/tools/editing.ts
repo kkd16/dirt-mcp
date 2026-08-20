@@ -1,6 +1,6 @@
-import { McpServer } from '@modelcontextprotocol/server';
+import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
-import { BridgeClient } from '../bridge/client.ts';
+import type { BridgeClient } from '../bridge/client.ts';
 import { BRIDGE_ROUTES } from '../bridge/contract.ts';
 import type { DirtLogger } from '../logging.ts';
 import { ToolFailure } from '../bridge/errors.ts';
@@ -9,17 +9,19 @@ import {
   BoundsSchema,
   INT32_MAX,
   INT32_MIN,
+  MAX_BLOCK_STATE_ENTRIES,
   NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
   NonBlankStringSchema,
   READ_WORLD_ANNOTATIONS,
 } from './common.ts';
 import { executeToolCall, successResult } from './execution.ts';
 import type { McpToolConfiguration } from './configuration.ts';
+import { inclusiveBlockVolume, normalizedBounds, requireMatchingWorld, sameBounds } from './response-validation.ts';
 
 export const SourceBlockStatePatternsSchema = z
   .array(NonBlankStringSchema)
   .min(1)
-  .max(64)
+  .max(MAX_BLOCK_STATE_ENTRIES)
   .superRefine((patterns, context) => {
     const seen = new Set<string>();
     patterns.forEach((pattern, index) => {
@@ -52,7 +54,7 @@ const DestinationPaletteEntrySchema = z
 export const DestinationPaletteSchema = z
   .array(DestinationPaletteEntrySchema)
   .min(1)
-  .max(64)
+  .max(MAX_BLOCK_STATE_ENTRIES)
   .superRefine((entries, context) => {
     const weightedCount = entries.filter((entry) => entry.weight !== undefined).length;
     if (weightedCount !== 0 && weightedCount !== entries.length) {
@@ -145,17 +147,6 @@ function hasConsistentEditResult(
   return result.edit === null;
 }
 
-function sameBounds(left: z.infer<typeof BoundsSchema>, right: z.infer<typeof BoundsSchema>): boolean {
-  return (
-    left.min.x === right.min.x &&
-    left.min.y === right.min.y &&
-    left.min.z === right.min.z &&
-    left.max.x === right.max.x &&
-    left.max.y === right.max.y &&
-    left.max.z === right.max.z
-  );
-}
-
 const EditResultMessage =
   'Committed outcomes require matching committed edit metadata and a positive changedBlockCount; preview and no_change outcomes require a null edit.';
 
@@ -184,12 +175,6 @@ export function requireMatchingEditIdentity(
     );
   }
   if (actual.edit !== null) requireMatchingCallId(expectedCallId, actual.edit.callId, actual.edit.editId);
-}
-
-export function requireMatchingWorld(expected: string, actual: string): void {
-  if (actual !== expected) {
-    throw new ToolFailure('bridge_invalid_response', 'Paper bridge response world did not match the request.');
-  }
 }
 
 export function requireMatchingUndoIdentity(
@@ -289,14 +274,19 @@ const SetBlocksPlacementSchema = z
 const SetBlocksPalettesSchema = z
   .array(DestinationPaletteSchema)
   .min(1)
-  .max(64)
+  .max(MAX_BLOCK_STATE_ENTRIES)
   .superRefine((palettes, context) => {
     const entryCount = palettes.reduce((sum, palette) => sum + palette.length, 0);
-    if (entryCount > 64) {
-      context.addIssue({ code: 'custom', message: 'Palettes may contain at most 64 entries in total.' });
+    if (entryCount > MAX_BLOCK_STATE_ENTRIES) {
+      context.addIssue({
+        code: 'custom',
+        message: `Palettes may contain at most ${MAX_BLOCK_STATE_ENTRIES} entries in total.`,
+      });
     }
   })
-  .describe('One or more weighted block-state palettes referenced by zero-based index; at most 64 entries total.');
+  .describe(
+    `One or more weighted block-state palettes referenced by zero-based index; at most ${MAX_BLOCK_STATE_ENTRIES} entries total.`,
+  );
 
 export const SetBlocksInputSchema = z
   .object({
@@ -404,33 +394,8 @@ export const GetEditHistoryOutputSchema = GetEditHistoryOutputShapeSchema.refine
   'History records must belong to one loaded world and have distinct editIds.',
 ).describe('Current bounded undoable edit history for one loaded world.');
 
-function normalizedBounds(
-  first: z.infer<typeof BlockPositionSchema>,
-  second: z.infer<typeof BlockPositionSchema>,
-): z.infer<typeof BoundsSchema> {
-  return {
-    min: {
-      x: Math.min(first.x, second.x),
-      y: Math.min(first.y, second.y),
-      z: Math.min(first.z, second.z),
-    },
-    max: {
-      x: Math.max(first.x, second.x),
-      y: Math.max(first.y, second.y),
-      z: Math.max(first.z, second.z),
-    },
-  };
-}
-
 function invalidEditResult(actual: EditResultMetadata, message: string): never {
   throw new ToolFailure('bridge_invalid_response', message, actual.edit?.editId);
-}
-
-function inclusiveBlockVolume(bounds: z.infer<typeof BoundsSchema>): bigint {
-  const xSize = BigInt(bounds.max.x) - BigInt(bounds.min.x) + 1n;
-  const ySize = BigInt(bounds.max.y) - BigInt(bounds.min.y) + 1n;
-  const zSize = BigInt(bounds.max.z) - BigInt(bounds.min.z) + 1n;
-  return xSize * ySize * zSize;
 }
 
 export function requireMatchingEditOptions(

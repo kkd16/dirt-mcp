@@ -29,14 +29,13 @@ export function compactView(
   const width = 2 * requested.horizontalRadius + 1;
   const height = 2 * requested.verticalRadius + 1;
   const sightlineCount = width * height;
-  const maximumScannedVolume = sightlineCount * requested.maxDistance;
+  const expectedScannedVolume = sightlineCount * requested.maxDistance;
   if (
     !Number.isSafeInteger(sightlineCount) ||
-    !Number.isSafeInteger(maximumScannedVolume) ||
+    !Number.isSafeInteger(expectedScannedVolume) ||
     width > MAX_ARRAY_LENGTH ||
     height > MAX_ARRAY_LENGTH ||
-    view.scannedVolume < sightlineCount ||
-    view.scannedVolume > maximumScannedVolume
+    view.scannedVolume !== expectedScannedVolume
   ) {
     throw invalidView('Bridge returned invalid orthographic scan dimensions.');
   }

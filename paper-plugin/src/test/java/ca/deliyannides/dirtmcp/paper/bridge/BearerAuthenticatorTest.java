@@ -9,21 +9,23 @@ import org.junit.jupiter.api.Test;
 final class BearerAuthenticatorTest {
     @Test
     void acceptsOnlyTheConfiguredBearerToken() {
-        BearerAuthenticator authenticator = new BearerAuthenticator("secret-token", 12);
+        BearerAuthenticator authenticator =
+                new BearerAuthenticator("test-token-with-at-least-thirty-two-bytes");
 
-        assertTrue(authenticator.accepts("Bearer secret-token"));
-        assertTrue(authenticator.accepts("bearer secret-token"));
+        assertTrue(authenticator.accepts("Bearer test-token-with-at-least-thirty-two-bytes"));
+        assertTrue(authenticator.accepts("bearer test-token-with-at-least-thirty-two-bytes"));
         assertFalse(authenticator.accepts(null));
-        assertFalse(authenticator.accepts("secret-token"));
-        assertFalse(authenticator.accepts("Basic secret-token"));
+        assertFalse(authenticator.accepts("test-token-with-at-least-thirty-two-bytes"));
+        assertFalse(authenticator.accepts("Basic test-token-with-at-least-thirty-two-bytes"));
         assertFalse(authenticator.accepts("Bearer wrong"));
-        assertFalse(authenticator.accepts("Bearer  secret-token"));
+        assertFalse(authenticator.accepts("Bearer  test-token-with-at-least-thirty-two-bytes"));
     }
 
     @Test
-    void validatesMinimumTokenBytes() {
-        assertThrows(IllegalArgumentException.class, () -> new BearerAuthenticator("token", 0));
-        assertThrows(IllegalArgumentException.class, () -> new BearerAuthenticator("é", 3));
-        assertTrue(new BearerAuthenticator("é", 2).accepts("Bearer é"));
+    void requiresAtLeastThirtyTwoUtf8Bytes() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new BearerAuthenticator("1234567890123456789012345678901"));
+        assertTrue(new BearerAuthenticator("éééééééééééééééé").accepts("Bearer éééééééééééééééé"));
     }
 }

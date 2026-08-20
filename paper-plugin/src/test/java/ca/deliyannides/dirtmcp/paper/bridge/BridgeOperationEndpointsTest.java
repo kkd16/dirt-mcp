@@ -568,8 +568,8 @@ final class BridgeOperationEndpointsTest {
                                     "/v1/set-blocks",
                                     """
                                     {"world":"world","origin":{"x":0,"y":0,"z":0},
-                                     "palette":["minecraft:stone"],"placements":[{
-                                     "paletteIndex":0,"offsets":[[0,0,0]]}]}
+                                     "palettes":[[{"blockState":"minecraft:stone"}]],
+                                     "placements":[[0,0,0,0]],"unexpected":true}
                                     """)),
                     "Request contains missing or unknown fields");
         }

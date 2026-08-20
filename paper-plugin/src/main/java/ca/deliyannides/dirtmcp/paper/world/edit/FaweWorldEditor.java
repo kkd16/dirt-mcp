@@ -282,7 +282,12 @@ public final class FaweWorldEditor
             int blockCount;
             List<List<DestinationPaletteEntry>> palettes;
             try (EditPlatform.PreparedSet prepared =
-                    this.platform.prepareSet(world, request, geometry.chunks())) {
+                    this.platform.prepareSet(
+                            world,
+                            request,
+                            geometry.positions(),
+                            geometry.bounds(),
+                            geometry.chunks())) {
                 blockCount = prepared.blockCount();
                 if (blockCount != request.placements().size()) {
                     throw new IllegalStateException(
@@ -795,6 +800,7 @@ public final class FaweWorldEditor
             }
         }
         return new SetRequestGeometry(
+                List.copyOf(positions),
                 List.copyOf(chunks),
                 new BlockBounds(
                         Objects.requireNonNull(min, "minimum position"),
@@ -915,9 +921,11 @@ public final class FaweWorldEditor
         return new OperationException(OperationFailure.INVALID_REQUEST, message);
     }
 
-    private record SetRequestGeometry(List<ChunkPosition> chunks, BlockBounds bounds) {
+    private record SetRequestGeometry(
+            List<BlockPosition> positions, List<ChunkPosition> chunks, BlockBounds bounds) {
         private SetRequestGeometry {
-            chunks = List.copyOf(chunks);
+            Objects.requireNonNull(positions, "positions");
+            Objects.requireNonNull(chunks, "chunks");
             Objects.requireNonNull(bounds, "bounds");
         }
     }

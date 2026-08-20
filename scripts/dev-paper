@@ -21,22 +21,41 @@ require_tmux() {
   }
 }
 
-require_bridge_runtime() {
-  require_tmux
+require_curl() {
   command -v curl >/dev/null || {
     printf 'curl is required for development server health checks.\n' >&2
     exit 1
   }
-  [[ -s "${token_file}" ]] || {
-    printf 'Dirt MCP token not found. Run make dev-token first.\n' >&2
+}
+
+require_token() {
+  local token=''
+  if [[ -f "${token_file}" ]]; then
+    token="$(<"${token_file}")"
+  fi
+  [[ "${token}" =~ ^[0-9a-f]{64}$ ]] || {
+    printf 'Dirt MCP token not found or invalid. Run make reload to create one and restart Paper with it.\n' >&2
     exit 1
   }
+}
+
+require_bridge_runtime() {
+  require_tmux
+  require_curl
+  require_token
+}
+
+invalid_state() {
+  printf 'Invalid development server state in %s. Run make down, then make up to recreate it.\n' \
+    "${state_file}" >&2
+  exit 1
 }
 
 validate_port() {
   local name="$1"
   local value="$2"
-  if [[ ! "${value}" =~ ^[0-9]+$ ]] || (( value < 1 || value > 65535 )); then
+  if [[ ! "${value}" =~ ^[0-9]+$ ]] \
+    || (( 10#${value} < 1 || 10#${value} > 65535 )); then
     printf '%s must be an integer between 1 and 65535.\n' "${name}" >&2
     exit 1
   fi
@@ -51,6 +70,9 @@ write_state() {
 }
 
 read_state() {
+  local mc_port_seen=false
+  local bridge_port_seen=false
+
   [[ -f "${state_file}" ]] || {
     printf 'Development server state not found. Run make up first.\n' >&2
     exit 1
@@ -58,14 +80,19 @@ read_state() {
 
   state_mc_port=''
   state_bridge_port=''
-  while IFS='=' read -r key value; do
+  while IFS='=' read -r key value || [[ -n "${key}" || -n "${value}" ]]; do
     case "${key}" in
-      MC_PORT) state_mc_port="${value}" ;;
-      BRIDGE_PORT) state_bridge_port="${value}" ;;
-      *)
-        printf 'Invalid development server state in %s.\n' "${state_file}" >&2
-        exit 1
+      MC_PORT)
+        [[ "${mc_port_seen}" == false ]] || invalid_state
+        mc_port_seen=true
+        state_mc_port="${value}"
         ;;
+      BRIDGE_PORT)
+        [[ "${bridge_port_seen}" == false ]] || invalid_state
+        bridge_port_seen=true
+        state_bridge_port="${value}"
+        ;;
+      *) invalid_state ;;
     esac
   done < "${state_file}"
 
@@ -222,12 +249,22 @@ restart_server() {
 }
 
 status_server() {
+  if [[ ! -f "${state_file}" ]]; then
+    if session_exists; then
+      printf 'The managed tmux session exists but its development state is missing. Run make down, then make up.\n' >&2
+      return 1
+    fi
+    printf 'Dirt MCP development server is stopped (no saved ports).\n'
+    return 1
+  fi
   read_state
   if ! session_exists; then
     printf 'Dirt MCP development server is stopped (Minecraft %s, bridge %s).\n' \
       "${state_mc_port}" "${state_bridge_port}"
     return 1
   fi
+  require_curl
+  require_token
   if ! bridge_healthy "${state_bridge_port}"; then
     printf 'Dirt MCP development server is running but unhealthy (Minecraft %s, bridge %s).\n' \
       "${state_mc_port}" "${state_bridge_port}"
@@ -267,7 +304,7 @@ case "${1:-}" in
     ;;
   status)
     [[ $# -eq 1 ]] || usage
-    require_bridge_runtime
+    require_tmux
     status_server
     ;;
   health)

@@ -281,7 +281,7 @@ final class FaweEditExecutor {
         }
     }
 
-    private static void requireNotInterrupted() throws OperationException {
+    static void requireNotInterrupted() throws OperationException {
         if (Thread.currentThread().isInterrupted()) {
             throw new OperationException(
                     OperationFailure.WORLD_UNAVAILABLE, "World editing was interrupted");

@@ -3,6 +3,7 @@ import * as z from 'zod/v4';
 
 export const INT32_MIN = -2_147_483_648;
 export const INT32_MAX = 2_147_483_647;
+export const MAX_BLOCK_STATE_ENTRIES = 64;
 
 export const NonBlankStringSchema = z
   .string()

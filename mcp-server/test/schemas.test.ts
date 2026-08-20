@@ -14,7 +14,6 @@ import {
   requireMatchingFillVolume,
   requireMatchingSetBlockCount,
   requireMatchingUndoIdentity,
-  requireMatchingWorld,
   requireReplaceCountsWithinBounds,
   SetBlocksInputSchema,
   SetBlocksOutputSchema,
@@ -27,6 +26,7 @@ import {
   ServerStatusSchema,
 } from '../dist/tools/status.js';
 import { MCP_TOOL_NAMES, McpToolConfigurationSchema } from '../dist/tools/configuration.js';
+import { requireMatchingWorld } from '../dist/tools/response-validation.js';
 
 const region = {
   world: 'world',
@@ -139,7 +139,7 @@ test('validates bounded edit-history configuration relationships', () => {
   }
 });
 
-test('requires server history capacity to hold one maximum-sized edit', () => {
+test('validates bounded server limits and their relationships', () => {
   const tools = Object.fromEntries(MCP_TOOL_NAMES.map((name) => [name, true]));
   const status = {
     builds: { minecraft: '26.2', paper: '26.2-112', dirtMcp: 'test', fawe: '2.15.4' },
@@ -147,17 +147,17 @@ test('requires server history capacity to hold one maximum-sized edit', () => {
     players: { online: 0, maximum: 20, entries: [] },
     worlds: [],
     limits: {
-      maxRequestBytes: 1,
-      maxRegionVolume: 1,
-      maxTouchedChunks: 1,
-      maxInspectionTouchedChunks: 1,
-      maxBlockStatePatterns: 1,
-      maxChangedBlocks: 1,
-      maxInspectionVolume: 1,
-      defaultInspectionResultLimit: 1,
-      maxInspectionResultLimit: 1,
+      maxRequestBytes: 1_048_576,
+      maxRegionVolume: 100,
+      maxTouchedChunks: 10,
+      maxInspectionTouchedChunks: 5,
+      maxBlockStatePatterns: 64,
+      maxChangedBlocks: 50,
+      maxInspectionVolume: 80,
+      defaultInspectionResultLimit: 10,
+      maxInspectionResultLimit: 20,
     },
-    editHistory: { maxEntriesPerWorld: 1, maxEntriesTotal: 1, maxRetainedChangedBlocks: 1 },
+    editHistory: { maxEntriesPerWorld: 1, maxEntriesTotal: 1, maxRetainedChangedBlocks: 50 },
     defaults: { regionBlocksIncludeAir: false, regionBlocksFormat: 'blocks', editDryRun: false },
     logging: { consoleLevel: 'info', detailFileMaxBytes: 1, detailFileRetainedFiles: 2 },
     tools,
@@ -166,7 +166,33 @@ test('requires server history capacity to hold one maximum-sized edit', () => {
   assert.equal(
     ServerStatusSchema.safeParse({
       ...status,
-      limits: { ...status.limits, maxRegionVolume: 2, maxChangedBlocks: 2 },
+      limits: { ...status.limits, maxRequestBytes: INT32_MAX - 1 },
+    }).success,
+    true,
+  );
+  for (const field of Object.keys(status.limits) as (keyof typeof status.limits)[]) {
+    assert.equal(ServerStatusSchema.safeParse({ ...status, limits: { ...status.limits, [field]: 0 } }).success, false);
+    assert.equal(
+      ServerStatusSchema.safeParse({ ...status, limits: { ...status.limits, [field]: INT32_MAX + 1 } }).success,
+      false,
+    );
+  }
+  const invalidLimits = [
+    { maxRequestBytes: INT32_MAX },
+    { maxInspectionTouchedChunks: 11 },
+    { maxBlockStatePatterns: 65 },
+    { maxChangedBlocks: 101 },
+    { maxInspectionVolume: 101 },
+    { defaultInspectionResultLimit: 21 },
+    { maxInspectionResultLimit: 81 },
+  ];
+  for (const limits of invalidLimits) {
+    assert.equal(ServerStatusSchema.safeParse({ ...status, limits: { ...status.limits, ...limits } }).success, false);
+  }
+  assert.equal(
+    ServerStatusSchema.safeParse({
+      ...status,
+      editHistory: { ...status.editHistory, maxRetainedChangedBlocks: 49 },
     }).success,
     false,
   );
@@ -220,15 +246,7 @@ test('validates weighted set-block palettes and compact placements', () => {
     }).success,
     false,
   );
-  assert.equal(
-    SetBlocksInputSchema.safeParse({
-      world: 'world',
-      origin: input.origin,
-      palette: ['minecraft:stone'],
-      placements: [{ paletteIndex: 0, offsets: [[0, 0, 0]] }],
-    }).success,
-    false,
-  );
+  assert.equal(SetBlocksInputSchema.safeParse({ ...input, unknownProperty: true }).success, false);
   assert.equal(
     SetBlocksInputSchema.safeParse({
       ...input,
