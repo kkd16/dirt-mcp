@@ -177,6 +177,24 @@ test('reloads tools without replacing the stdio process', async (context) => {
   const retained = await waitFor(messages, (message) => message.id === 4);
   assert.equal(retained.result.tools[0].title, 'Reloaded Dirt server ping');
 
+  const partiallyRegisteredSource = changedSource.replace(
+    'Reloaded Dirt server ping',
+    'Partially registered Dirt server ping',
+  );
+  const firstRegistration = partiallyRegisteredSource.indexOf('registrations.push(');
+  const secondRegistration = partiallyRegisteredSource.indexOf('registrations.push(', firstRegistration + 1);
+  assert.ok(firstRegistration >= 0 && secondRegistration > firstRegistration);
+  const partialFailureSource =
+    partiallyRegisteredSource.slice(0, secondRegistration) +
+    "throw new Error('syntactically valid partial registration failure');\n  " +
+    partiallyRegisteredSource.slice(secondRegistration);
+  await writeFile(toolsPath, partialFailureSource);
+
+  await waitFor(errors, (line) => line.includes('syntactically valid partial registration failure'));
+  send({ jsonrpc: '2.0', id: 5, method: 'tools/list', params: modernParams({}) });
+  const rolledBack = await waitFor(messages, (message) => message.id === 5);
+  assert.deepEqual(rolledBack.result.tools, reloaded.result.tools);
+
   child.stdin.end();
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('MCP process did not exit after stdin closed')), 2_000);

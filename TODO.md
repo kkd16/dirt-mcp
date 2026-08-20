@@ -16,8 +16,6 @@ ordered by priority.
 
 - Add a deterministic request-timeout test without materially slowing the
   offline suite.
-- Cover tool hot-reload rollback when a syntactically valid replacement module
-  fails partway through registration.
 
 ## 3. Enforce contract consistency
 
