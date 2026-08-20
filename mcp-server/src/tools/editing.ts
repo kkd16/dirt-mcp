@@ -148,11 +148,8 @@ const FillRegionOutputSchema = z
   .describe('Completed or previewed region fill.');
 
 const BlockOffsetSchema = z
-  .tuple([
-    z.number().int().min(INT32_MIN).max(INT32_MAX),
-    z.number().int().min(INT32_MIN).max(INT32_MAX),
-    z.number().int().min(INT32_MIN).max(INT32_MAX),
-  ])
+  .array(z.number().int().min(INT32_MIN).max(INT32_MAX))
+  .length(3)
   .describe('Signed [x, y, z] offset from the origin.');
 
 const SetBlocksPaletteSchema = z
@@ -210,7 +207,7 @@ export const SetBlocksInputSchema = z
         });
       }
       placement.offsets.forEach((offset, offsetIndex) => {
-        const resolved = [input.origin.x + offset[0], input.origin.y + offset[1], input.origin.z + offset[2]];
+        const resolved = [input.origin.x + offset[0]!, input.origin.y + offset[1]!, input.origin.z + offset[2]!];
         if (resolved.some((coordinate) => coordinate < INT32_MIN || coordinate > INT32_MAX)) {
           context.addIssue({
             code: 'custom',

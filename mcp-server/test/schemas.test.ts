@@ -100,6 +100,20 @@ test('validates palette-based set-block placements and rejects the replaced cont
   assert.equal(SetBlocksInputSchema.safeParse(input).success, true);
   assert.equal(
     SetBlocksInputSchema.safeParse({
+      ...input,
+      placements: [{ paletteIndex: 0, offsets: [['0', '0', '0']] }],
+    }).success,
+    false,
+  );
+  assert.equal(
+    SetBlocksInputSchema.safeParse({
+      ...input,
+      placements: [{ paletteIndex: 0, offsets: [[0, 0]] }],
+    }).success,
+    false,
+  );
+  assert.equal(
+    SetBlocksInputSchema.safeParse({
       world: 'world',
       changes: [{ position: { x: 10, y: 20, z: 30 }, blockState: 'minecraft:stone' }],
     }).success,

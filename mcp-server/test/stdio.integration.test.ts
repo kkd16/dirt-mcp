@@ -328,6 +328,28 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { name: 'run_minecraft_commands', annotations: mutationAnnotations(false) },
     ],
   );
+  const listedSetBlocks = listedTools.find((tool) => tool.name === 'set_blocks');
+  assert.ok(listedSetBlocks);
+  const setBlocksInputSchema = listedSetBlocks.inputSchema as {
+    readonly properties: {
+      readonly placements: {
+        readonly items: {
+          readonly properties: { readonly offsets: { readonly items: unknown } };
+        };
+      };
+    };
+  };
+  assert.deepEqual(setBlocksInputSchema.properties.placements.items.properties.offsets.items, {
+    type: 'array',
+    items: {
+      type: 'integer',
+      minimum: -2_147_483_648,
+      maximum: 2_147_483_647,
+    },
+    minItems: 3,
+    maxItems: 3,
+    description: 'Signed [x, y, z] offset from the origin.',
+  });
 
   send(child, {
     jsonrpc: '2.0',
