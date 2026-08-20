@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.config.McpTool;
+import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
+import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus;
@@ -22,6 +24,9 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Location;
@@ -30,6 +35,7 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.junit.jupiter.api.Test;
+import org.slf4j.helpers.NOPLogger;
 
 final class DirtAdminCommandTest {
     private static final PlainTextComponentSerializer PLAIN =
@@ -90,19 +96,30 @@ final class DirtAdminCommandTest {
         OperationException expected =
                 new OperationException(
                         OperationFailure.SERVER_UNAVAILABLE, "FAWE is not available");
+        List<LogRecord> records = new ArrayList<>();
+        DirtLog log = recordingLog(records);
         var fixture =
                 fixture(
                         true,
                         command(
                                 () -> {
                                     throw expected;
-                                }));
+                                },
+                                log));
 
         assertEquals(0, fixture.execute("dirt status"));
 
         String plain = PLAIN.serialize(fixture.messages.getFirst());
         assertTrue(plain.contains("● Unavailable"));
         assertTrue(plain.contains("FAWE is not available"));
+        assertEquals(1, records.size());
+        LogRecord record = records.getFirst();
+        assertEquals(Level.FINE, record.getLevel());
+        assertEquals("admin.status_failed", record.getLoggerName());
+        assertEquals(expected, record.getThrown());
+        LogContext context = (LogContext) record.getParameters()[0];
+        assertEquals("server_unavailable", context.values().get("error_code"));
+        log.close();
     }
 
     @Test
@@ -132,6 +149,11 @@ final class DirtAdminCommandTest {
         assertTrue(plain.contains("set_blocks  false"));
         assertTrue(plain.contains("get_edit_history  true"));
         assertTrue(plain.contains("undo_edit  false"));
+        assertTrue(plain.contains("LOGGING"));
+        assertTrue(plain.contains("console-level  warning"));
+        assertTrue(plain.contains("detail-file  logs/dirt-detail.%g.jsonl"));
+        assertTrue(plain.contains("detail-file-max-bytes  2000000"));
+        assertTrue(plain.contains("detail-file-retained-files  7"));
         assertTrue(plain.contains("max-request-bytes  262144"));
         assertTrue(plain.contains("max-region-volume  131072"));
         assertTrue(plain.contains("max-touched-chunks  128"));
@@ -180,7 +202,31 @@ final class DirtAdminCommandTest {
     }
 
     private static DirtAdminCommand command(GetServerStatus status) {
-        return new DirtAdminCommand("DirtMCP", "0.1.0-SNAPSHOT", config(), status);
+        return command(
+                status,
+                DirtLog.consoleOnly(NOPLogger.NOP_LOGGER, DirtConfig.ConsoleLogLevel.ERROR));
+    }
+
+    private static DirtAdminCommand command(GetServerStatus status, DirtLog log) {
+        return new DirtAdminCommand("DirtMCP", "0.1.0-SNAPSHOT", config(), status, log);
+    }
+
+    private static DirtLog recordingLog(List<LogRecord> records) {
+        Handler handler =
+                new Handler() {
+                    @Override
+                    public void publish(LogRecord record) {
+                        records.add(record);
+                    }
+
+                    @Override
+                    public void flush() {}
+
+                    @Override
+                    public void close() {}
+                };
+        return DirtLog.withDetailHandler(
+                NOPLogger.NOP_LOGGER, DirtConfig.ConsoleLogLevel.ERROR, handler);
     }
 
     private static DirtConfig config() {
@@ -193,6 +239,7 @@ final class DirtAdminCommandTest {
                                 McpTool.SCAN_ORTHOGRAPHIC_VIEW,
                                 McpTool.FILL_REGION,
                                 McpTool.GET_EDIT_HISTORY)),
+                new DirtConfig.Logging(DirtConfig.ConsoleLogLevel.WARNING, 2_000_000, 7),
                 new DirtConfig.Limits(262_144, 131_072, 128, 16, 32, 65_536, 8_192, 256, 1_024),
                 new DirtConfig.EditHistory(10, 50, 655_360),
                 new DirtConfig.Defaults(true, "runs", true));
@@ -226,6 +273,7 @@ final class DirtAdminCommandTest {
                                         false,
                                         1)),
                         config().tools().flags(),
+                        new GetServerStatus.EffectiveLogging("warning", 2_000_000, 7),
                         new GetServerStatus.EffectiveLimits(1, 1, 1, 1, 1, 1, 1, 1, 1),
                         new GetServerStatus.EffectiveEditHistory(2, 3, 4),
                         new GetServerStatus.EffectiveDefaults(false, "blocks", false));

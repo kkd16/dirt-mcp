@@ -8,7 +8,7 @@ import org.bukkit.configuration.file.FileConfiguration;
 
 public final class DirtConfigLoader {
     private static final Set<String> SECTIONS =
-            Set.of("bridge", "tools", "limits", "edit-history", "defaults");
+            Set.of("bridge", "tools", "logging", "limits", "edit-history", "defaults");
     private static final Set<String> REQUIRED_PATHS =
             Set.of(
                     "bridge.port",
@@ -18,6 +18,9 @@ public final class DirtConfigLoader {
                     "bridge.minimum-token-bytes",
                     "bridge.max-concurrent-requests",
                     "bridge.max-concurrent-inspections",
+                    "logging.console-level",
+                    "logging.detail-file-max-bytes",
+                    "logging.detail-file-retained-files",
                     "limits.max-request-bytes",
                     "limits.max-region-volume",
                     "limits.max-touched-chunks",
@@ -55,6 +58,12 @@ public final class DirtConfigLoader {
                         requiredInteger(config, "bridge.max-concurrent-requests"),
                         requiredInteger(config, "bridge.max-concurrent-inspections")),
                 loadTools(config),
+                new DirtConfig.Logging(
+                        DirtConfig.ConsoleLogLevel.parse(
+                                requiredString(config, "logging.console-level")
+                                        .toLowerCase(java.util.Locale.ROOT)),
+                        requiredInteger(config, "logging.detail-file-max-bytes"),
+                        requiredInteger(config, "logging.detail-file-retained-files")),
                 new DirtConfig.Limits(
                         requiredInteger(config, "limits.max-request-bytes"),
                         requiredInteger(config, "limits.max-region-volume"),

@@ -6,6 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
+import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import com.sk89q.worldedit.history.changeset.ChangeSet;
 import java.lang.reflect.Proxy;
 import java.util.List;
@@ -14,9 +17,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.helpers.NOPLogger;
 
 final class FaweEditExecutorTest {
     @AfterEach
@@ -55,7 +58,8 @@ final class FaweEditExecutorTest {
                         changeSet,
                         2,
                         List.of(new ChunkPosition(1, 2)),
-                        Logger.getLogger("stored-undo-test"));
+                        DirtLog.consoleOnly(
+                                NOPLogger.NOP_LOGGER, DirtConfig.ConsoleLogLevel.ERROR));
 
         assertEquals(2, undo.changedBlockCount());
         assertEquals(List.of(new ChunkPosition(1, 2)), undo.chunks());
@@ -72,9 +76,7 @@ final class FaweEditExecutorTest {
     void storedUndoContainsDisposalFailuresAndRemainsClosed() {
         AtomicInteger deletes = new AtomicInteger();
         AtomicReference<LogRecord> warning = new AtomicReference<>();
-        Logger logger = Logger.getAnonymousLogger();
-        logger.setUseParentHandlers(false);
-        logger.addHandler(
+        Handler handler =
                 new Handler() {
                     @Override
                     public void publish(LogRecord record) {
@@ -86,16 +88,22 @@ final class FaweEditExecutorTest {
 
                     @Override
                     public void close() {}
-                });
+                };
+        DirtLog log =
+                DirtLog.withDetailHandler(
+                        NOPLogger.NOP_LOGGER, DirtConfig.ConsoleLogLevel.ERROR, handler);
         FaweEditExecutor.StoredUndo undo =
                 new FaweEditExecutor.StoredUndo(
-                        changeSet(deletes, true), 1, List.of(new ChunkPosition(0, 0)), logger);
+                        changeSet(deletes, true), 1, List.of(new ChunkPosition(0, 0)), log);
 
         undo.close();
         undo.close();
 
         assertEquals(1, deletes.get());
         assertEquals(Level.WARNING, warning.get().getLevel());
+        assertEquals("edit.undo_data_disposal_failed", warning.get().getLoggerName());
+        LogContext context = (LogContext) warning.get().getParameters()[0];
+        assertEquals(1L, context.values().get("changed_block_count"));
         assertThrows(IllegalStateException.class, undo::changeSet);
     }
 

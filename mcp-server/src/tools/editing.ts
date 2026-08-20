@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { BridgeClient } from '../bridge/client.ts';
 import { BRIDGE_ROUTES } from '../bridge/contract.ts';
+import type { DirtLogger } from '../logging.ts';
 import { ToolFailure } from '../bridge/errors.ts';
 import {
   BlockPositionSchema,
@@ -520,6 +521,7 @@ export function registerEditingTools(
   server: McpServer,
   bridge: BridgeClient,
   toolConfiguration: McpToolConfiguration,
+  logger: DirtLogger,
 ): void {
   const replaceRegionBlocks = server.registerTool(
     'replace_region_blocks',
@@ -533,8 +535,9 @@ export function registerEditingTools(
     },
     async (input, context) =>
       executeToolCall(
+        logger,
         {
-          tool: 'replace_region_blocks',
+          operation: 'replace_region_blocks',
           world: input.world,
           context,
           failureContext: 'Could not replace region blocks',
@@ -573,7 +576,8 @@ export function registerEditingTools(
     },
     async (input, context) =>
       executeToolCall(
-        { tool: 'fill_region', world: input.world, context, failureContext: 'Could not fill the region' },
+        logger,
+        { operation: 'fill_region', world: input.world, context, failureContext: 'Could not fill the region' },
         async (callId) => {
           const result = await bridge.request(BRIDGE_ROUTES.fillRegion, callId, FillRegionOutputSchema, input);
           const bounds = normalizedBounds(input.min, input.max);
@@ -605,7 +609,8 @@ export function registerEditingTools(
     },
     async (input, context) =>
       executeToolCall(
-        { tool: 'set_blocks', world: input.world, context, failureContext: 'Could not set blocks' },
+        logger,
+        { operation: 'set_blocks', world: input.world, context, failureContext: 'Could not set blocks' },
         async (callId) => {
           const result = await bridge.request(BRIDGE_ROUTES.setBlocks, callId, SetBlocksOutputSchema, input);
           requireMatchingEditIdentity(input.world, setBlocksBounds(input), callId, result);
@@ -634,8 +639,9 @@ export function registerEditingTools(
     },
     async (input, context) =>
       executeToolCall(
+        logger,
         {
-          tool: 'get_edit_history',
+          operation: 'get_edit_history',
           world: input.world,
           context,
           failureContext: 'Could not get edit history',
@@ -663,8 +669,9 @@ export function registerEditingTools(
     },
     async (input, context) =>
       executeToolCall(
+        logger,
         {
-          tool: 'undo_edit',
+          operation: 'undo_edit',
           world: input.world,
           context,
           failureContext: 'Could not undo the edit',

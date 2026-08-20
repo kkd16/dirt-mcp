@@ -1,5 +1,7 @@
 package ca.deliyannides.dirtmcp.paper.world.edit;
 
+import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
+import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
@@ -18,19 +20,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 final class FaweEditExecutor {
     private final int maxChangedBlocks;
-    private final Logger logger;
+    private final DirtLog log;
 
-    FaweEditExecutor(int maxChangedBlocks, Logger logger) {
+    FaweEditExecutor(int maxChangedBlocks, DirtLog log) {
         if (maxChangedBlocks < 1) {
             throw new IllegalArgumentException("Maximum changed blocks must be positive");
         }
         this.maxChangedBlocks = maxChangedBlocks;
-        this.logger = Objects.requireNonNull(logger, "logger");
+        this.log = Objects.requireNonNull(log, "log");
     }
 
     EditPlatform.EditResult replace(
@@ -309,27 +309,27 @@ final class FaweEditExecutor {
             throw new IllegalStateException(
                     "FAWE undo data does not match the reported change count");
         }
-        return new StoredUndo(changeSet, changedBlockCount, chunks, this.logger);
+        return new StoredUndo(changeSet, changedBlockCount, chunks, this.log);
     }
 
     static final class StoredUndo implements EditPlatform.UndoToken {
         private final AtomicReference<ChangeSet> changeSet;
         private final long changedBlockCount;
         private final List<ChunkPosition> chunks;
-        private final Logger logger;
+        private final DirtLog log;
 
         StoredUndo(
                 ChangeSet changeSet,
                 long changedBlockCount,
                 List<ChunkPosition> chunks,
-                Logger logger) {
+                DirtLog log) {
             if (changedBlockCount < 1) {
                 throw new IllegalArgumentException("Retained undo change count must be positive");
             }
             this.changeSet = new AtomicReference<>(Objects.requireNonNull(changeSet, "changeSet"));
             this.changedBlockCount = changedBlockCount;
             this.chunks = List.copyOf(chunks);
-            this.logger = Objects.requireNonNull(logger, "logger");
+            this.log = Objects.requireNonNull(log, "log");
         }
 
         ChangeSet changeSet() {
@@ -356,8 +356,15 @@ final class FaweEditExecutor {
                 try {
                     retained.delete();
                 } catch (RuntimeException failure) {
-                    this.logger.log(
-                            Level.WARNING, "Could not dispose retained FAWE undo data", failure);
+                    LogContext context =
+                            LogContext.of("changed_block_count", this.changedBlockCount)
+                                    .with("chunk_count", this.chunks.size());
+                    this.log.warning(
+                            "edit",
+                            "edit.undo_data_disposal_failed",
+                            "Dirt MCP could not dispose retained FAWE undo data",
+                            context,
+                            failure);
                 }
             }
         }

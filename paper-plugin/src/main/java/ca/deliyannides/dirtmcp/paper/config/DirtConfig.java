@@ -7,12 +7,18 @@ import java.util.Map;
 import java.util.Set;
 
 public record DirtConfig(
-        Bridge bridge, Tools tools, Limits limits, EditHistory editHistory, Defaults defaults) {
+        Bridge bridge,
+        Tools tools,
+        Logging logging,
+        Limits limits,
+        EditHistory editHistory,
+        Defaults defaults) {
     private static final Set<String> REGION_BLOCKS_FORMATS = Set.of("blocks", "runs");
 
     public DirtConfig {
         if (bridge == null
                 || tools == null
+                || logging == null
                 || limits == null
                 || editHistory == null
                 || defaults == null) {
@@ -23,6 +29,55 @@ public record DirtConfig(
                 limits.maxChangedBlocks(),
                 "edit-history.max-retained-changed-blocks",
                 editHistory.maxRetainedChangedBlocks());
+    }
+
+    public enum ConsoleLogLevel {
+        INFO("info", 0),
+        WARNING("warning", 1),
+        ERROR("error", 2);
+
+        private final String configName;
+        private final int severity;
+
+        ConsoleLogLevel(String configName, int severity) {
+            this.configName = configName;
+            this.severity = severity;
+        }
+
+        public String configName() {
+            return this.configName;
+        }
+
+        public boolean allows(ConsoleLogLevel eventLevel) {
+            return eventLevel.severity >= this.severity;
+        }
+
+        public static ConsoleLogLevel parse(String value) {
+            for (ConsoleLogLevel level : values()) {
+                if (level.configName.equals(value)) {
+                    return level;
+                }
+            }
+            throw new IllegalArgumentException(
+                    "logging.console-level must be info, warning, or error");
+        }
+    }
+
+    public record Logging(
+            ConsoleLogLevel consoleLevel, int detailFileMaxBytes, int detailFileRetainedFiles) {
+        public Logging {
+            if (consoleLevel == null) {
+                throw new IllegalArgumentException("logging.console-level is required");
+            }
+            if (detailFileMaxBytes < 1) {
+                throw new IllegalArgumentException(
+                        "logging.detail-file-max-bytes must be positive");
+            }
+            if (detailFileRetainedFiles < 2 || detailFileRetainedFiles > 100) {
+                throw new IllegalArgumentException(
+                        "logging.detail-file-retained-files must be between 2 and 100");
+            }
+        }
     }
 
     public record Tools(Set<McpTool> enabled) {

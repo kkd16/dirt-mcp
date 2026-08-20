@@ -28,24 +28,20 @@ case "${mode}" in
   *) usage ;;
 esac
 
-failure_pattern='\[[^]]+/(ERROR|FATAL)\]:|([[:alnum:]_.]+Exception|[[:alnum:]_.]+Error)(:|$)|Dirt MCP bridge_call .*status=(500|aborted)'
+failure_pattern='\[[^]]+/(ERROR|FATAL)\]:|([[:alnum:]_.]+Exception|[[:alnum:]_.]+Error)(:|$)'
 if matches="$(grep -En "${failure_pattern}" <<<"${log_content}" || true)" && [[ -n "${matches}" ]]; then
   printf 'Managed Paper log contains serious failures:\n%s\n' "${matches}" >&2
   exit 1
 fi
 
 if [[ "${mode}" == 'running' ]]; then
-  if ! grep -Fq '[DirtMCP] Dirt MCP bridge listening on http://127.0.0.1:' <<<"${log_content}"; then
-    printf 'Managed Paper log does not contain the Dirt MCP bridge startup marker.\n' >&2
-    exit 1
-  fi
-  if ! grep -Eq 'Dirt MCP bridge_call operation=ping_server method=GET status=200' <<<"${log_content}"; then
-    printf 'Managed Paper log does not contain a successful end-to-end ping.\n' >&2
+  if ! grep -Fq '[DirtMCP] Dirt MCP is ready on 127.0.0.1:' <<<"${log_content}"; then
+    printf 'Managed Paper log does not contain the Dirt MCP runtime startup marker.\n' >&2
     exit 1
   fi
 else
-  if ! grep -Fq '[DirtMCP] Dirt MCP bridge stopped.' <<<"${log_content}"; then
-    printf 'Managed Paper log does not contain the Dirt MCP shutdown marker.\n' >&2
+  if ! grep -Fq '[DirtMCP] Dirt MCP stopped' <<<"${log_content}"; then
+    printf 'Managed Paper log does not contain the Dirt MCP runtime shutdown marker.\n' >&2
     exit 1
   fi
 fi

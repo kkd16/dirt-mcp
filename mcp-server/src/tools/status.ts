@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { BridgeClient } from '../bridge/client.ts';
 import { BRIDGE_ROUTES } from '../bridge/contract.ts';
+import type { DirtLogger } from '../logging.ts';
 import { BlockPositionSchema, EmptyInputSchema, INT32_MAX, READ_WORLD_ANNOTATIONS } from './common.ts';
 import { McpToolConfigurationSchema, type McpToolConfiguration } from './configuration.ts';
 import { executeToolCall, successResult } from './execution.ts';
@@ -76,6 +77,19 @@ const DefaultConfigurationSchema = z
   .strict()
   .describe('Active optional-argument defaults for Dirt tools.');
 
+export const LoggingConfigurationSchema = z
+  .object({
+    consoleLevel: z.enum(['info', 'warning', 'error']).describe('Minimum severity shown in the Paper console.'),
+    detailFileMaxBytes: PositiveInt32Schema.describe(
+      'Approximate maximum bytes in each Paper JSONL detail-log generation before rotation.',
+    ),
+    detailFileRetainedFiles: PositiveInt32Schema.min(2)
+      .max(100)
+      .describe('Rotating Paper JSONL detail-log generations retained, including the active generation.'),
+  })
+  .strict()
+  .describe('Active Paper console threshold and rotating detail-log limits.');
+
 export const ServerStatusSchema = z
   .object({
     builds: z
@@ -136,6 +150,7 @@ export const ServerStatusSchema = z
     limits: LimitConfigurationSchema,
     editHistory: EditHistoryConfigurationSchema,
     defaults: DefaultConfigurationSchema,
+    logging: LoggingConfigurationSchema,
     tools: McpToolConfigurationSchema,
   })
   .strict()
@@ -144,13 +159,14 @@ export const ServerStatusSchema = z
     path: ['editHistory', 'maxRetainedChangedBlocks'],
   })
   .describe(
-    'Current lightweight Paper context, limits, edit-history retention, defaults, and MCP tool availability for grounding subsequent Dirt calls.',
+    'Current lightweight Paper context, limits, edit-history retention, defaults, logging, and MCP tool availability for grounding subsequent Dirt calls.',
   );
 
 export function registerStatusTools(
   server: McpServer,
   bridge: BridgeClient,
   toolConfiguration: McpToolConfiguration,
+  logger: DirtLogger,
 ): void {
   const pingServer = server.registerTool(
     'ping_server',
@@ -164,8 +180,9 @@ export function registerStatusTools(
     },
     async (_input, context) =>
       executeToolCall(
+        logger,
         {
-          tool: 'ping_server',
+          operation: 'ping_server',
           context,
           failureContext: `Dirt server health check failed at ${bridge.origin}`,
         },
@@ -182,15 +199,16 @@ export function registerStatusTools(
     {
       title: 'Get Dirt server status',
       description:
-        'Return current Minecraft, Paper, Dirt MCP, and FAWE builds; TPS; online players, block positions, and cardinal facing directions; loaded worlds; and active Dirt limits, edit-history retention, defaults, and MCP tool availability. Use this to ground later world operations.',
+        'Return current Minecraft, Paper, Dirt MCP, and FAWE builds; TPS; online players, block positions, and cardinal facing directions; loaded worlds; and active Dirt limits, edit-history retention, defaults, logging, and MCP tool availability. Use this to ground later world operations.',
       inputSchema: EmptyInputSchema,
       outputSchema: ServerStatusSchema,
       annotations: READ_WORLD_ANNOTATIONS,
     },
     async (_input, context) =>
       executeToolCall(
+        logger,
         {
-          tool: 'get_server_status',
+          operation: 'get_server_status',
           context,
           failureContext: `Could not get Dirt server status from ${bridge.origin}`,
         },

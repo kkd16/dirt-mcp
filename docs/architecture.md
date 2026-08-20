@@ -24,7 +24,8 @@ The Java plugin owns everything that touches the Minecraft server:
 - world lookup, bounds, and configured limits;
 - coordination of reads and edits;
 - FAWE edit sessions and bounded, retryable in-memory edit history; and
-- the loopback HTTP API and concise request audit records in the server console.
+- the loopback HTTP API, concise operator-console events, and rotating JSONL
+  detail logs.
 
 Paper and FAWE classes stop at this boundary. The plugin never hosts a model or
 parses MCP messages.
@@ -39,6 +40,16 @@ Paper scheduler access is centralized, while Dirt-owned models and inspection
 algorithms remain independent of HTTP, Bukkit, and FAWE. Adding an operation is
 a vertical slice rather than another branch in a central server class.
 
+One runtime-owned logging facade is injected across plugin components. It keeps
+severity mapping, field encoding, throwable handling, and sensitive-field
+rejection in one place while callers add explicit immutable context such as
+call ID, edit ID, operation, and world. Paper's console receives only meaningful lifecycle,
+mutation, undo, degraded-state, and failure events at the configured threshold.
+Every bridge completion and other diagnostic detail goes to rotating JSON Lines
+at `plugins/DirtMCP/logs/dirt-detail.%g.jsonl`; size and retained-file count are
+bounded by configuration. Failure of that detail sink does not stop world
+operations, but produces a prominent console error.
+
 ### MCP server
 
 The TypeScript process owns the agent-facing interface:
@@ -51,7 +62,7 @@ The TypeScript process owns the agent-facing interface:
 - actionable error messages.
 
 It does not read world files or reproduce Minecraft editing logic. Stdout is
-reserved for MCP; process diagnostics go to stderr.
+reserved for MCP; process diagnostics are structured JSON Lines on stderr.
 
 The process entry point validates its environment and starts the current MCP
 stdio transport. During startup, a composition root reads the authenticated
@@ -64,13 +75,14 @@ authenticated HTTP and response validation; one execution helper owns call IDs,
 error mapping, and auditing. The design uses functions and concrete modules
 rather than a tool class hierarchy or dependency-injection framework.
 
-Each accepted tool call writes one completion record to stderr with a generated
-call ID, MCP request ID, client label when available, world, outcome, and elapsed
-time. The call ID is forwarded to the Paper bridge so its matching console record
-can be correlated. Block-edit and undo routes require that canonical UUIDv4 as
-`X-Dirt-Call-Id`; committed edit metadata keeps the creating ID, while undo
-returns its separate `undoCallId`. Neither audit record includes bearer tokens or
-complete tool inputs.
+Each accepted tool call writes one completion object to stderr with a generated
+call ID, MCP request ID, client label when available, operation, world, outcome,
+and elapsed time. The call ID is forwarded to Paper so its matching detail-log
+object can be correlated. Block-edit and undo routes require that canonical
+UUIDv4 as `X-Dirt-Call-Id`; committed edit metadata keeps the creating ID, while
+undo returns its separate `undoCallId`. Logging uses explicit context across
+asynchronous boundaries and never includes bearer tokens, raw request bodies,
+or complete tool inputs.
 
 ### Protocol
 

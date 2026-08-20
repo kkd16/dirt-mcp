@@ -1,6 +1,8 @@
 package ca.deliyannides.dirtmcp.paper.bridge;
 
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
+import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -9,24 +11,22 @@ import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 public final class BridgeServer implements AutoCloseable {
     private static final String LOOPBACK_ADDRESS = "127.0.0.1";
 
     private final DirtConfig config;
     private final BridgeDispatcher dispatcher;
-    private final Logger logger;
+    private final DirtLog log;
 
     private HttpServer server;
     private ExecutorService executor;
     private boolean closed;
 
     public BridgeServer(
-            DirtConfig config, String bearerToken, List<BridgeEndpoint> endpoints, Logger logger) {
+            DirtConfig config, String bearerToken, List<BridgeEndpoint> endpoints, DirtLog log) {
         this.config = Objects.requireNonNull(config, "config");
-        this.logger = Objects.requireNonNull(logger, "logger");
+        this.log = Objects.requireNonNull(log, "log");
         BearerAuthenticator authenticator =
                 new BearerAuthenticator(
                         Objects.requireNonNull(bearerToken, "bearerToken"),
@@ -38,7 +38,7 @@ public final class BridgeServer implements AutoCloseable {
                         config.bridge().maxConcurrentRequests(),
                         config.limits().maxRequestBytes(),
                         config.bridge().requestBodyTimeoutSeconds(),
-                        logger);
+                        log);
     }
 
     public synchronized void start() throws IOException {
@@ -79,10 +79,13 @@ public final class BridgeServer implements AutoCloseable {
 
         this.executor = newExecutor;
         this.server = newServer;
-        if (this.logger.isLoggable(Level.INFO)) {
-            this.logger.info(
-                    "Dirt MCP bridge listening on http://" + LOOPBACK_ADDRESS + ':' + boundPort());
-        }
+        int port = boundPort();
+        String message = "Dirt MCP bridge listening on http://" + LOOPBACK_ADDRESS + ':' + port;
+        LogContext context =
+                LogContext.of("host", LOOPBACK_ADDRESS)
+                        .with("port", port)
+                        .with("backlog", this.config.bridge().backlog());
+        this.log.debug("bridge", "bridge.started", message, context);
     }
 
     public synchronized int boundPort() {
@@ -115,11 +118,18 @@ public final class BridgeServer implements AutoCloseable {
                                 runningExecutor.awaitTermination(
                                         this.config.bridge().shutdownDelaySeconds(),
                                         TimeUnit.SECONDS);
-                        if (!terminated && this.logger.isLoggable(Level.WARNING)) {
-                            this.logger.warning(
+                        if (!terminated) {
+                            LogContext context =
+                                    LogContext.of(
+                                                    "shutdown_delay_seconds",
+                                                    this.config.bridge().shutdownDelaySeconds())
+                                            .with("resources_may_be_retained", true);
+                            this.log.warning(
+                                    "bridge",
+                                    "bridge.shutdown_deadline_exceeded",
                                     "Dirt MCP request workers exceeded the shutdown deadline; "
-                                            + "Paper shutdown will continue without releasing "
-                                            + "resources still owned by active edits.");
+                                            + "Paper shutdown will continue",
+                                    context);
                         }
                     } catch (InterruptedException exception) {
                         Thread.currentThread().interrupt();
@@ -128,9 +138,8 @@ public final class BridgeServer implements AutoCloseable {
             }
         } finally {
             this.dispatcher.close();
-            if (this.logger.isLoggable(Level.INFO)) {
-                this.logger.info("Dirt MCP bridge stopped.");
-            }
+            LogContext context = LogContext.empty();
+            this.log.debug("bridge", "bridge.stopped", "Dirt MCP bridge stopped", context);
         }
     }
 }

@@ -5,20 +5,32 @@ export interface BridgeConfig {
   readonly token: string;
 }
 
+export type BridgeConfigurationErrorCode = 'bridge_token_required' | 'bridge_url_invalid';
+
+export class BridgeConfigurationError extends Error {
+  readonly code: BridgeConfigurationErrorCode;
+
+  constructor(code: BridgeConfigurationErrorCode, message: string) {
+    super(message);
+    this.code = code;
+    this.name = 'BridgeConfigurationError';
+  }
+}
+
 export function readBridgeConfig(environment: Readonly<Record<string, string | undefined>>): BridgeConfig {
   const token = environment.DIRT_MCP_BRIDGE_TOKEN;
   if (token === undefined || token.length === 0) {
-    throw new Error('DIRT_MCP_BRIDGE_TOKEN is required');
+    throw new BridgeConfigurationError('bridge_token_required', 'DIRT_MCP_BRIDGE_TOKEN is required');
   }
 
   const rawUrl = environment.DIRT_MCP_BRIDGE_URL ?? DEFAULT_BRIDGE_URL;
   if (!/^http:\/\/127\.0\.0\.1(?::[1-9]\d{0,4})?\/?$/.test(rawUrl)) {
-    throw new Error('DIRT_MCP_BRIDGE_URL must be an HTTP 127.0.0.1 origin');
+    throw new BridgeConfigurationError('bridge_url_invalid', 'DIRT_MCP_BRIDGE_URL must be an HTTP 127.0.0.1 origin');
   }
 
   try {
     return { origin: new URL(rawUrl).origin, token };
   } catch {
-    throw new Error('DIRT_MCP_BRIDGE_URL must be an HTTP 127.0.0.1 origin');
+    throw new BridgeConfigurationError('bridge_url_invalid', 'DIRT_MCP_BRIDGE_URL must be an HTTP 127.0.0.1 origin');
   }
 }

@@ -107,6 +107,7 @@ final class PaperServerStatusServiceTest {
                 new GetServerStatus.PlayerSummary(0, 20, List.of()),
                 List.of(),
                 tools,
+                new GetServerStatus.EffectiveLogging("info", 10_485_760, 5),
                 new GetServerStatus.EffectiveLimits(1, 1, 1, 1, 1, 1, 1, 1, 1),
                 new GetServerStatus.EffectiveEditHistory(2, 3, 4),
                 new GetServerStatus.EffectiveDefaults(false, "blocks", false));

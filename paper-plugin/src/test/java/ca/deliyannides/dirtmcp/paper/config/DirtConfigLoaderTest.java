@@ -26,6 +26,9 @@ final class DirtConfigLoaderTest {
         assertEquals(McpTool.values().length, config.tools().flags().size());
         assertTrue(config.tools().flags().values().stream().allMatch(Boolean::booleanValue));
         assertEquals(
+                new DirtConfig.Logging(DirtConfig.ConsoleLogLevel.INFO, 10_485_760, 5),
+                config.logging());
+        assertEquals(
                 new DirtConfig.Limits(262_144, 262_144, 256, 32, 64, 65_536, 16_384, 512, 2_048),
                 config.limits());
         assertEquals(new DirtConfig.EditHistory(20, 100, 1_310_720), config.editHistory());
@@ -126,6 +129,12 @@ final class DirtConfigLoaderTest {
                 Arguments.of("tools", true),
                 Arguments.of("tools.fill_region", "true"),
                 Arguments.of("tools.not_a_tool", true),
+                Arguments.of("logging.console-level", null),
+                Arguments.of("logging.console-level", "warn"),
+                Arguments.of("logging.detail-file-max-bytes", 0),
+                Arguments.of("logging.detail-file-retained-files", 0),
+                Arguments.of("logging.detail-file-retained-files", 1),
+                Arguments.of("logging.detail-file-retained-files", 101),
                 Arguments.of("bridge.port", 0),
                 Arguments.of("bridge.backlog", -1),
                 Arguments.of("bridge.shutdown-delay-seconds", -1),

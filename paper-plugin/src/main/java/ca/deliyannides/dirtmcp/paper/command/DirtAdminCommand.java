@@ -2,6 +2,8 @@ package ca.deliyannides.dirtmcp.paper.command;
 
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.config.McpTool;
+import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
+import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus;
 import com.mojang.brigadier.Command;
@@ -31,13 +33,19 @@ public final class DirtAdminCommand {
     private final String pluginVersion;
     private final DirtConfig config;
     private final GetServerStatus status;
+    private final DirtLog log;
 
     public DirtAdminCommand(
-            String pluginName, String pluginVersion, DirtConfig config, GetServerStatus status) {
+            String pluginName,
+            String pluginVersion,
+            DirtConfig config,
+            GetServerStatus status,
+            DirtLog log) {
         this.pluginName = Objects.requireNonNull(pluginName, "pluginName");
         this.pluginVersion = Objects.requireNonNull(pluginVersion, "pluginVersion");
         this.config = Objects.requireNonNull(config, "config");
         this.status = Objects.requireNonNull(status, "status");
+        this.log = Objects.requireNonNull(log, "log");
     }
 
     public LiteralCommandNode<CommandSourceStack> command() {
@@ -85,6 +93,13 @@ public final class DirtAdminCommand {
         try {
             result = this.status.getStatus();
         } catch (OperationException exception) {
+            LogContext context = LogContext.of("error_code", exception.failure());
+            this.log.debug(
+                    "admin",
+                    "admin.status_failed",
+                    "Dirt MCP could not read server status for the admin command",
+                    context,
+                    exception);
             TextComponent.Builder message = panel("Status");
             message.append(Component.newline());
             message.append(
@@ -143,6 +158,13 @@ public final class DirtAdminCommand {
         for (McpTool tool : McpTool.values()) {
             appendValue(message, tool.id(), this.config.tools().isEnabled(tool));
         }
+
+        DirtConfig.Logging logging = this.config.logging();
+        appendSection(message, "Logging");
+        appendValue(message, "console-level", logging.consoleLevel().configName());
+        appendValue(message, "detail-file", DirtLog.DETAIL_FILE_PATTERN);
+        appendValue(message, "detail-file-max-bytes", logging.detailFileMaxBytes());
+        appendValue(message, "detail-file-retained-files", logging.detailFileRetainedFiles());
 
         DirtConfig.Limits limits = this.config.limits();
         appendSection(message, "Limits");

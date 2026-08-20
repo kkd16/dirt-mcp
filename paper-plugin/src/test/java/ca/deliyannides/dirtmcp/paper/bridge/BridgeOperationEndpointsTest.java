@@ -62,6 +62,10 @@ final class BridgeOperationEndpointsTest {
             for (McpTool tool : McpTool.values()) {
                 assertTrue(tools.get(tool.id()).getAsBoolean());
             }
+            var logging = json(response.body()).getAsJsonObject().getAsJsonObject("logging");
+            assertEquals("info", logging.get("consoleLevel").getAsString());
+            assertEquals(10_485_760, logging.get("detailFileMaxBytes").getAsInt());
+            assertEquals(5, logging.get("detailFileRetainedFiles").getAsInt());
         }
     }
 
@@ -407,6 +411,7 @@ final class BridgeOperationEndpointsTest {
                 new DirtConfig(
                         standard.bridge(),
                         standard.tools(),
+                        standard.logging(),
                         standard.limits(),
                         standard.editHistory(),
                         new DirtConfig.Defaults(true, "runs", true));
@@ -497,6 +502,7 @@ final class BridgeOperationEndpointsTest {
                 new DirtConfig(
                         standard.bridge(),
                         standard.tools(),
+                        standard.logging(),
                         new DirtConfig.Limits(
                                 64,
                                 limits.maxRegionVolume(),

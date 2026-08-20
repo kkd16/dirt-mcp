@@ -38,10 +38,10 @@ paths:
   /v1/server-status:
     get:
       operationId: getServerStatus
-      summary: Report current server, player, world, build, limit, and MCP tool context
+      summary: Report current server, player, world, build, limit, logging, and MCP tool context
       responses:
         '200':
-          description: Lightweight current server context
+          description: Lightweight current server and active Dirt configuration context
           content:
             application/json:
               schema:
@@ -1618,6 +1618,33 @@ components:
         editDryRun:
           type: boolean
           description: Default dry-run behavior for every Dirt block-edit tool.
+    LoggingConfiguration:
+      type: object
+      additionalProperties: false
+      description: Active operator-console threshold and rotating Paper detail-log limits.
+      required:
+        - consoleLevel
+        - detailFileMaxBytes
+        - detailFileRetainedFiles
+      properties:
+        consoleLevel:
+          type: string
+          enum:
+            - info
+            - warning
+            - error
+          description: Minimum severity emitted to the Paper server console.
+        detailFileMaxBytes:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Approximate maximum bytes in each Paper JSONL detail-log generation before rotation.
+        detailFileRetainedFiles:
+          type: integer
+          format: int32
+          minimum: 2
+          maximum: 100
+          description: Number of rotating Paper JSONL detail-log generations retained, including the active generation.
     ToolConfiguration:
       type: object
       additionalProperties: false
@@ -1803,6 +1830,7 @@ components:
         - limits
         - editHistory
         - defaults
+        - logging
         - tools
       properties:
         builds:
@@ -1821,5 +1849,7 @@ components:
           $ref: '#/components/schemas/EditHistoryConfiguration'
         defaults:
           $ref: '#/components/schemas/DefaultConfiguration'
+        logging:
+          $ref: '#/components/schemas/LoggingConfiguration'
         tools:
           $ref: '#/components/schemas/ToolConfiguration'

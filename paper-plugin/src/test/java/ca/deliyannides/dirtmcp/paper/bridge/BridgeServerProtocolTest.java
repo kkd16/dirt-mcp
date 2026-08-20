@@ -11,6 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
+import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.status.PingServer;
@@ -31,13 +34,14 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Handler;
+import java.util.logging.Level;
 import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.slf4j.helpers.NOPLogger;
 
 final class BridgeServerProtocolTest {
     @Test
@@ -168,6 +172,8 @@ final class BridgeServerProtocolTest {
     @Test
     void includesEditIdInTypedOperationFailureResponses() throws Exception {
         UUID editId = BridgeTestFixture.EDIT_ID;
+        List<LogRecord> records = new CopyOnWriteArrayList<>();
+        DirtLog log = recordingLog(records, null);
         BridgeTestFixture.TestOperations operations =
                 new BridgeTestFixture.TestOperations() {
                     @Override
@@ -176,7 +182,8 @@ final class BridgeServerProtocolTest {
                                 OperationFailure.INTERNAL_ERROR, "edit failed", null, editId);
                     }
                 };
-        try (BridgeServer bridge = server(config(availablePort(), 4), operations);
+        try (log;
+                BridgeServer bridge = server(config(availablePort(), 4), operations, log);
                 HttpClient client = HttpClient.newHttpClient()) {
             bridge.start();
 
@@ -193,6 +200,97 @@ final class BridgeServerProtocolTest {
                                     + editId
                                     + "\"}}"),
                     json(response.body()));
+            LogRecord audit = requestRecords(records).getFirst();
+            assertEquals(Level.WARNING, audit.getLevel());
+            assertEquals(editId, context(audit).values().get("edit_id"));
+        }
+    }
+
+    @Test
+    void elevatesTypedInternalFailuresWithoutEditIds() throws Exception {
+        List<LogRecord> records = new CopyOnWriteArrayList<>();
+        DirtLog log = recordingLog(records, null);
+        BridgeTestFixture.TestOperations operations =
+                new BridgeTestFixture.TestOperations() {
+                    @Override
+                    public PingServer.Result ping() throws OperationException {
+                        throw new OperationException(
+                                OperationFailure.INTERNAL_ERROR, "internal failure");
+                    }
+                };
+
+        try (log;
+                BridgeServer bridge = server(config(availablePort(), 4), operations, log);
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+            HttpResponse<String> response =
+                    client.send(
+                            authorized(bridge, "/v1/ping").GET().build(),
+                            HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(500, response.statusCode());
+            LogRecord audit = requestRecords(records).getFirst();
+            assertEquals(Level.SEVERE, audit.getLevel());
+            assertEquals("internal_error", context(audit).values().get("error_code"));
+        }
+    }
+
+    @Test
+    void keepsExpectedAvailabilityFailuresDetailOnly() throws Exception {
+        List<LogRecord> records = new CopyOnWriteArrayList<>();
+        DirtLog log = recordingLog(records, null);
+        BridgeTestFixture.TestOperations operations =
+                new BridgeTestFixture.TestOperations() {
+                    @Override
+                    public PingServer.Result ping() throws OperationException {
+                        throw new OperationException(
+                                OperationFailure.SERVER_UNAVAILABLE, "temporarily unavailable");
+                    }
+                };
+
+        try (log;
+                BridgeServer bridge = server(config(availablePort(), 4), operations, log);
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+            HttpResponse<String> response =
+                    client.send(
+                            authorized(bridge, "/v1/ping").GET().build(),
+                            HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(503, response.statusCode());
+            LogRecord audit = requestRecords(records).getFirst();
+            assertEquals(Level.FINE, audit.getLevel());
+            assertEquals("temporarily unavailable", context(audit).values().get("failure_reason"));
+        }
+    }
+
+    @Test
+    void neverRecordsBearerCredentials() throws Exception {
+        String suppliedCredential = "credential-that-must-never-appear-in-logs";
+        List<LogRecord> records = new CopyOnWriteArrayList<>();
+        DirtLog log = recordingLog(records, null);
+
+        try (log;
+                BridgeServer bridge =
+                        server(
+                                config(availablePort(), 4),
+                                new BridgeTestFixture.TestOperations(),
+                                log);
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+            HttpResponse<String> response =
+                    client.send(
+                            HttpRequest.newBuilder(uri(bridge, "/v1/ping"))
+                                    .header("Authorization", "Bearer " + suppliedCredential)
+                                    .GET()
+                                    .build(),
+                            HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(401, response.statusCode());
+            LogRecord audit = requestRecords(records).getFirst();
+            assertFalse(audit.getMessage().contains(suppliedCredential));
+            assertFalse(context(audit).values().toString().contains(suppliedCredential));
+            assertEquals("unauthorized", context(audit).values().get("error_code"));
         }
     }
 
@@ -298,22 +396,8 @@ final class BridgeServerProtocolTest {
 
     @Test
     void sanitizesUnexpectedFailuresAndWritesOneAuditRecord() throws Exception {
-        List<String> messages = new CopyOnWriteArrayList<>();
-        Logger logger = Logger.getAnonymousLogger();
-        logger.setUseParentHandlers(false);
-        logger.addHandler(
-                new Handler() {
-                    @Override
-                    public void publish(LogRecord record) {
-                        messages.add(record.getMessage());
-                    }
-
-                    @Override
-                    public void flush() {}
-
-                    @Override
-                    public void close() {}
-                });
+        List<LogRecord> records = new CopyOnWriteArrayList<>();
+        DirtLog log = recordingLog(records, null);
         BridgeTestFixture.TestOperations operations =
                 new BridgeTestFixture.TestOperations() {
                     @Override
@@ -321,7 +405,8 @@ final class BridgeServerProtocolTest {
                         throw new IllegalStateException("secret detail");
                     }
                 };
-        try (BridgeServer bridge = server(config(availablePort(), 4), operations, logger);
+        try (log;
+                BridgeServer bridge = server(config(availablePort(), 4), operations, log);
                 HttpClient client =
                         HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build()) {
             bridge.start();
@@ -340,42 +425,27 @@ final class BridgeServerProtocolTest {
                             .getAsString());
             assertTrue(response.body().contains("end-to-end health check failed"));
             assertFalse(response.body().contains("secret detail"));
-            assertTrue(
-                    messages.stream()
-                            .anyMatch(
-                                    message ->
-                                            message.matches(
-                                                    "Dirt MCP bridge_call operation=ping_server method=GET status=500 duration_ms=\\d+")));
+            List<LogRecord> audits = requestRecords(records);
+            assertEquals(1, audits.size());
+            LogRecord audit = audits.getFirst();
+            assertEquals(Level.SEVERE, audit.getLevel());
+            assertEquals("secret detail", audit.getThrown().getMessage());
+            assertEquals("ping_server", context(audit).values().get("operation"));
+            assertEquals(500, context(audit).values().get("http_status"));
         }
     }
 
     @Test
     void keepsAuditMetadataRequestLocalAndNeverLogsRequestBodies() throws Exception {
-        List<String> messages = new CopyOnWriteArrayList<>();
+        List<LogRecord> records = new CopyOnWriteArrayList<>();
         CountDownLatch audited = new CountDownLatch(1);
-        Logger logger = Logger.getAnonymousLogger();
-        logger.setUseParentHandlers(false);
-        logger.addHandler(
-                new Handler() {
-                    @Override
-                    public void publish(LogRecord record) {
-                        messages.add(record.getMessage());
-                        if (record.getMessage().contains("bridge_call")) {
-                            audited.countDown();
-                        }
-                    }
-
-                    @Override
-                    public void flush() {}
-
-                    @Override
-                    public void close() {}
-                });
-        try (BridgeServer bridge =
+        DirtLog log = recordingLog(records, audited);
+        try (log;
+                BridgeServer bridge =
                         server(
                                 config(availablePort(), 4),
                                 new BridgeTestFixture.TestOperations(),
-                                logger);
+                                log);
                 HttpClient client = HttpClient.newHttpClient()) {
             bridge.start();
             HttpResponse<String> edit =
@@ -399,13 +469,49 @@ final class BridgeServerProtocolTest {
             assertEquals(200, edit.statusCode());
             assertTrue(audited.await(2, TimeUnit.SECONDS));
 
-            List<String> calls =
-                    messages.stream().filter(message -> message.contains("bridge_call")).toList();
+            List<LogRecord> calls = requestRecords(records);
             assertEquals(1, calls.size());
-            assertTrue(calls.get(0).contains("world=\"audit-world\""));
-            assertTrue(calls.get(0).contains("call=123e4567-e89b-42d3-a456-426614174000"));
-            assertFalse(String.join("\n", messages).contains("secret_gold_block"));
+            assertEquals(Level.INFO, calls.getFirst().getLevel());
+            LogContext context = context(calls.getFirst());
+            assertEquals("audit-world", context.values().get("world"));
+            assertEquals("123e4567-e89b-42d3-a456-426614174000", context.values().get("call_id"));
+            assertEquals("committed", context.values().get("outcome"));
+            assertEquals(1L, context.values().get("changed_block_count"));
+            assertFalse(context.values().toString().contains("secret_gold_block"));
+            assertFalse(calls.getFirst().getMessage().contains("secret_gold_block"));
         }
+    }
+
+    private static DirtLog recordingLog(List<LogRecord> records, CountDownLatch audited) {
+        Handler handler =
+                new Handler() {
+                    @Override
+                    public void publish(LogRecord record) {
+                        records.add(record);
+                        if (audited != null
+                                && "bridge.request_completed".equals(record.getLoggerName())) {
+                            audited.countDown();
+                        }
+                    }
+
+                    @Override
+                    public void flush() {}
+
+                    @Override
+                    public void close() {}
+                };
+        return DirtLog.withDetailHandler(
+                NOPLogger.NOP_LOGGER, DirtConfig.ConsoleLogLevel.ERROR, handler);
+    }
+
+    private static List<LogRecord> requestRecords(List<LogRecord> records) {
+        return records.stream()
+                .filter(record -> "bridge.request_completed".equals(record.getLoggerName()))
+                .toList();
+    }
+
+    private static LogContext context(LogRecord record) {
+        return (LogContext) record.getParameters()[0];
     }
 
     private static Stream<Arguments> operationFailures() {

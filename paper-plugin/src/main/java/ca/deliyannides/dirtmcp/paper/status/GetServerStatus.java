@@ -16,6 +16,7 @@ public interface GetServerStatus {
             PlayerSummary players,
             List<WorldStatus> worlds,
             Map<String, Boolean> tools,
+            EffectiveLogging logging,
             EffectiveLimits limits,
             EffectiveEditHistory editHistory,
             EffectiveDefaults defaults) {
@@ -77,6 +78,9 @@ public interface GetServerStatus {
             int maxInspectionVolume,
             int defaultInspectionResultLimit,
             int maxInspectionResultLimit) {}
+
+    record EffectiveLogging(
+            String consoleLevel, int detailFileMaxBytes, int detailFileRetainedFiles) {}
 
     record EffectiveEditHistory(
             int maxEntriesPerWorld, int maxEntriesTotal, int maxRetainedChangedBlocks) {}

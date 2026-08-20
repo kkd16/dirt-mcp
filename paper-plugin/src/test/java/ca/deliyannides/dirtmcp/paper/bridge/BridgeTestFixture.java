@@ -12,6 +12,7 @@ import ca.deliyannides.dirtmcp.paper.bridge.endpoint.SetBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.UndoEditEndpoint;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.config.McpTool;
+import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus;
 import ca.deliyannides.dirtmcp.paper.status.PingServer;
@@ -41,7 +42,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.logging.Logger;
+import org.slf4j.helpers.NOPLogger;
 
 final class BridgeTestFixture {
     static final String TOKEN = "test-token-with-at-least-thirty-two-bytes";
@@ -55,16 +56,20 @@ final class BridgeTestFixture {
         return new DirtConfig(
                 new DirtConfig.Bridge(port, 0, 1, 1, 32, maximumConcurrentRequests, 1),
                 allTools(),
+                new DirtConfig.Logging(DirtConfig.ConsoleLogLevel.INFO, 10_485_760, 5),
                 new DirtConfig.Limits(262_144, 1_000_000, 256, 32, 64, 250_000, 32_768, 321, 654),
                 new DirtConfig.EditHistory(20, 100, 1_000_000),
                 new DirtConfig.Defaults(false, "blocks", false));
     }
 
     static BridgeServer server(DirtConfig config, TestOperations operations) {
-        return server(config, operations, Logger.getAnonymousLogger());
+        return server(
+                config,
+                operations,
+                DirtLog.consoleOnly(NOPLogger.NOP_LOGGER, DirtConfig.ConsoleLogLevel.ERROR));
     }
 
-    static BridgeServer server(DirtConfig config, TestOperations operations, Logger logger) {
+    static BridgeServer server(DirtConfig config, TestOperations operations, DirtLog log) {
         return new BridgeServer(
                 config,
                 TOKEN,
@@ -79,7 +84,7 @@ final class BridgeTestFixture {
                         new SetBlocksEndpoint(operations, config),
                         new GetEditHistoryEndpoint(operations),
                         new UndoEditEndpoint(operations)),
-                logger);
+                log);
     }
 
     static int availablePort() throws IOException {
@@ -141,6 +146,7 @@ final class BridgeTestFixture {
                                             new BlockPosition(12, 70, -4)))),
                     List.of(),
                     allTools().flags(),
+                    new GetServerStatus.EffectiveLogging("info", 10_485_760, 5),
                     new GetServerStatus.EffectiveLimits(
                             262_144, 1_000_000, 256, 32, 64, 250_000, 32_768, 321, 654),
                     new GetServerStatus.EffectiveEditHistory(20, 100, 1_000_000),

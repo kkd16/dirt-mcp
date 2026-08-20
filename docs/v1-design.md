@@ -11,7 +11,7 @@ behavior that matters when choosing and combining tools.
 | MCP tool                    | Bridge operation                     | Purpose                                                               |
 | --------------------------- | ------------------------------------ | --------------------------------------------------------------------- |
 | `ping_server`               | `GET /v1/ping`                       | Verify the authenticated Dirt, Paper, and FAWE path without mutation. |
-| `get_server_status`         | `GET /v1/server-status`              | Return builds, performance, players with facing, worlds, and config.  |
+| `get_server_status`         | `GET /v1/server-status`              | Return builds, performance, players, worlds, and active config.       |
 | `count_region_block_states` | `POST /v1/count-region-block-states` | Count canonical block states in an inclusive region.                  |
 | `get_region_blocks`         | `POST /v1/get-region-blocks`         | Return filtered exact blocks or lossless axis-aligned runs.           |
 | `scan_orthographic_view`    | `POST /v1/scan-orthographic-view`    | Find a selected non-air depth on each bounded world-axis sightline.   |
@@ -177,6 +177,23 @@ explicit update mechanism.
 `undo_edit` restores only a retained Dirt replacement, fill, or palette-based set.
 It does not undo player actions, WorldEdit actions, or other plugin activity.
 
+## Logging
+
+The Paper console is an operator summary rather than a request trace. At the
+configured `logging.console-level`, it reports lifecycle, completed mutations
+and undos, actionable degraded conditions, and unexpected failures. Detailed
+events are JSON Lines in
+`plugins/DirtMCP/logs/dirt-detail.%g.jsonl`. Positive
+`logging.detail-file-max-bytes` and `logging.detail-file-retained-files` values
+bound size-based rotation, with two to 100 retained files. A detail-file failure
+is reported as a prominent console error and does not stop the bridge.
+
+The MCP process reserves stdout for MCP protocol traffic and writes structured
+JSON Lines to stderr. Applicable `call_id`, `edit_id`, operation, world, outcome,
+status or error code, and duration fields correlate MCP calls with Paper detail
+records. Dirt logs bounded summaries, never bearer tokens, raw request bodies,
+or complete block payloads.
+
 ## Limits and security
 
 The shipped defaults allow regions of 262,144 blocks, at most 256 touched edit
@@ -186,8 +203,9 @@ history entries per world, 100 entries across all worlds, and 1,310,720 changed
 blocks across retained entries. JSON request bodies are capped at 262,144 bytes
 with a five-second upload deadline. At most 32 authenticated bridge requests and
 two inspection scans execute concurrently. Active operation limits, the
-separate `editHistory` object, and every resolved per-tool boolean in `tools` are
-available through `get_server_status`; the history fields are
+separate `editHistory` object, `logging` configuration, and every resolved
+per-tool boolean in `tools` are available through `get_server_status`; the
+history fields are
 `maxEntriesPerWorld`, `maxEntriesTotal`, and `maxRetainedChangedBlocks`. The YAML
 settings live in
 `plugins/DirtMCP/config.yml`; every shipped setting and default is documented in

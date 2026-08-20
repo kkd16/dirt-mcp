@@ -21,7 +21,11 @@ import {
   SourceBlockStatePatternsSchema,
 } from '../dist/tools/editing.js';
 import { GetRegionBlocksInputSchema, ScanOrthographicViewInputSchema } from '../dist/tools/inspection.js';
-import { EditHistoryConfigurationSchema, ServerStatusSchema } from '../dist/tools/status.js';
+import {
+  EditHistoryConfigurationSchema,
+  LoggingConfigurationSchema,
+  ServerStatusSchema,
+} from '../dist/tools/status.js';
 import { MCP_TOOL_NAMES, McpToolConfigurationSchema } from '../dist/tools/configuration.js';
 
 const region = {
@@ -155,6 +159,7 @@ test('requires server history capacity to hold one maximum-sized edit', () => {
     },
     editHistory: { maxEntriesPerWorld: 1, maxEntriesTotal: 1, maxRetainedChangedBlocks: 1 },
     defaults: { regionBlocksIncludeAir: false, regionBlocksFormat: 'blocks', editDryRun: false },
+    logging: { consoleLevel: 'info', detailFileMaxBytes: 1, detailFileRetainedFiles: 2 },
     tools,
   };
   assert.equal(ServerStatusSchema.safeParse(status).success, true);
@@ -168,6 +173,17 @@ test('requires server history capacity to hold one maximum-sized edit', () => {
   assert.equal(McpToolConfigurationSchema.safeParse(tools).success, true);
   assert.equal(McpToolConfigurationSchema.safeParse({ ...tools, undo_edit: undefined }).success, false);
   assert.equal(McpToolConfigurationSchema.safeParse({ ...tools, unknown_tool: false }).success, false);
+});
+
+test('strictly validates active Paper logging configuration', () => {
+  const logging = { consoleLevel: 'info', detailFileMaxBytes: 10_485_760, detailFileRetainedFiles: 5 };
+  assert.equal(LoggingConfigurationSchema.safeParse(logging).success, true);
+  assert.equal(LoggingConfigurationSchema.safeParse({ ...logging, consoleLevel: 'debug' }).success, false);
+  assert.equal(LoggingConfigurationSchema.safeParse({ ...logging, detailFileMaxBytes: 0 }).success, false);
+  assert.equal(LoggingConfigurationSchema.safeParse({ ...logging, detailFileMaxBytes: INT32_MAX + 1 }).success, false);
+  assert.equal(LoggingConfigurationSchema.safeParse({ ...logging, detailFileRetainedFiles: 101 }).success, false);
+  assert.equal(LoggingConfigurationSchema.safeParse({ ...logging, detailFileRetainedFiles: 1 }).success, false);
+  assert.equal(LoggingConfigurationSchema.safeParse({ ...logging, unknown: true }).success, false);
 });
 
 test('validates weighted set-block palettes and compact placements', () => {

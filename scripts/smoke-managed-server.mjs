@@ -3,11 +3,12 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 const runDirectory = `${repositoryRoot}/paper-plugin/run`;
+const detailLogDirectory = `${runDirectory}/plugins/DirtMCP/logs`;
 const token = (await readFile(`${runDirectory}/.dirt-mcp-token`, 'utf8')).trim();
 const runtimeState = Object.fromEntries(
   (await readFile(`${runDirectory}/.dirt-mcp-dev-state`, 'utf8'))
@@ -56,9 +57,11 @@ function trackEditId(editId) {
   if (!editIdsToUndo.some((retained) => sameUuid(retained, editId))) editIdsToUndo.push(editId);
 }
 
-async function bridgeGet(path) {
+async function bridgeGet(path, callId) {
+  const headers = { Authorization: `Bearer ${token}` };
+  if (callId !== undefined) headers['X-Dirt-Call-Id'] = callId;
   const response = await fetch(`${baseUrl}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers,
     signal: AbortSignal.timeout(bridgeTimeoutMilliseconds(path)),
   });
   assert.equal(response.status, 200);
@@ -100,6 +103,90 @@ async function bridgeRequest(path, body) {
     assert.ok(sameUuid(response.body.edit.callId, response.callId));
   }
   return response.body;
+}
+
+async function readDetailedLogRecords() {
+  let fileNames;
+  try {
+    fileNames = (await readdir(detailLogDirectory)).filter((name) => /^dirt-detail\.\d+\.jsonl$/.test(name));
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
+  }
+
+  const records = [];
+  for (const fileName of fileNames) {
+    let content;
+    try {
+      // Rotation can retire a generation between listing and reading it.
+      // oxlint-disable-next-line eslint/no-await-in-loop
+      content = await readFile(`${detailLogDirectory}/${fileName}`, 'utf8');
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue;
+      throw error;
+    }
+    assert.equal(content.includes(token), false, `${fileName} contains the bridge bearer token`);
+
+    const lines = content.split('\n');
+    if (!content.endsWith('\n')) lines.pop();
+    for (const line of lines.filter((entry) => entry.length > 0)) {
+      const record = JSON.parse(line);
+      assert.ok(record !== null && typeof record === 'object' && !Array.isArray(record));
+      records.push(record);
+    }
+  }
+  return records;
+}
+
+async function waitForDetailedLogRecord(predicate, failureMessage) {
+  const deadline = Date.now() + 5_000;
+  do {
+    // The bridge sends its response before the request worker publishes the completion record.
+    // oxlint-disable-next-line eslint/no-await-in-loop
+    const record = (await readDetailedLogRecords()).find(predicate);
+    if (record) return record;
+    // oxlint-disable-next-line eslint/no-await-in-loop
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } while (Date.now() < deadline);
+
+  throw new Error(failureMessage);
+}
+
+function assertDetailedLogEnvelope(record) {
+  assert.ok(!Number.isNaN(Date.parse(record.timestamp)));
+  assert.equal(record.service, 'dirt-mcp-paper');
+  assert.equal(record.component, 'bridge');
+  assert.equal(record.event, 'bridge.request_completed');
+  assert.ok(typeof record.message === 'string' && record.message.length > 0);
+  assert.ok(Number.isSafeInteger(record.pid) && record.pid > 0);
+  assert.ok(typeof record.thread === 'string' && record.thread.length > 0);
+  assert.ok(Number.isSafeInteger(record.thread_id) && record.thread_id > 0);
+}
+
+async function assertDetailedPingLog(callId) {
+  const record = await waitForDetailedLogRecord(
+    (candidate) => sameUuid(candidate.call_id, callId),
+    `Paper detail log did not record ping call ${callId}`,
+  );
+  assertDetailedLogEnvelope(record);
+  assert.equal(record.level, 'debug');
+  assert.equal(record.call_id, callId);
+  assert.equal(record.operation, 'ping_server');
+  assert.equal(record.http_status, 200);
+}
+
+async function assertDetailedMutationLog(result) {
+  const record = await waitForDetailedLogRecord(
+    (candidate) => sameUuid(candidate.call_id, result.edit.callId) && sameUuid(candidate.edit_id, result.edit.editId),
+    `Paper detail log did not record committed edit ${result.edit.editId}`,
+  );
+  assertDetailedLogEnvelope(record);
+  assert.equal(record.level, 'info');
+  assert.equal(record.call_id, result.edit.callId);
+  assert.equal(record.operation, result.edit.operation);
+  assert.equal(record.edit_id, result.edit.editId);
+  assert.equal(record.outcome, 'committed');
+  assert.equal(record.changed_block_count, result.changedBlockCount);
 }
 
 async function paperCommand(command) {
@@ -360,7 +447,9 @@ try {
   assert.equal(unknownRoute.status, 404);
   assert.equal((await unknownRoute.json()).error.code, 'not_found');
 
-  assert.deepEqual(await bridgeGet('/v1/ping'), { status: 'ok' });
+  const pingCallId = randomUUID();
+  assert.deepEqual(await bridgeGet('/v1/ping', pingCallId), { status: 'ok' });
+  await assertDetailedPingLog(pingCallId);
   const serverStatus = await bridgeGet('/v1/server-status');
   assert.ok(serverStatus.builds.minecraft.length > 0);
   assert.ok(serverStatus.builds.paper.length > 0);
@@ -375,6 +464,11 @@ try {
   assert.ok(serverStatus.editHistory.maxEntriesPerWorld > 0);
   assert.ok(serverStatus.editHistory.maxEntriesTotal >= serverStatus.editHistory.maxEntriesPerWorld);
   assert.ok(serverStatus.editHistory.maxRetainedChangedBlocks >= serverStatus.limits.maxChangedBlocks);
+  assert.deepEqual(serverStatus.logging, {
+    consoleLevel: 'info',
+    detailFileMaxBytes: 10_485_760,
+    detailFileRetainedFiles: 5,
+  });
   assert.deepEqual(serverStatus.tools, {
     ping_server: true,
     get_server_status: true,
@@ -810,6 +904,7 @@ try {
   });
   retainEdit(propertyFill, 'fill_region');
   assert.equal(propertyFill.changedBlockCount, 1);
+  await assertDetailedMutationLog(propertyFill);
   const propertyFillBlocks = await bridgeRequest('/v1/get-region-blocks', {
     world,
     min: stairMin,

@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { BridgeClient } from '../bridge/client.ts';
 import { BRIDGE_ROUTES } from '../bridge/contract.ts';
+import type { DirtLogger } from '../logging.ts';
 import {
   BlockPositionSchema,
   BoundsSchema,
@@ -292,6 +293,7 @@ export function registerInspectionTools(
   server: McpServer,
   bridge: BridgeClient,
   toolConfiguration: McpToolConfiguration,
+  logger: DirtLogger,
 ): void {
   const countRegionBlockStates = server.registerTool(
     'count_region_block_states',
@@ -305,8 +307,9 @@ export function registerInspectionTools(
     },
     async (input, context) =>
       executeToolCall(
+        logger,
         {
-          tool: 'count_region_block_states',
+          operation: 'count_region_block_states',
           world: input.world,
           context,
           failureContext: 'Could not count region block states',
@@ -340,7 +343,13 @@ export function registerInspectionTools(
     },
     async (input, context) =>
       executeToolCall(
-        { tool: 'get_region_blocks', world: input.world, context, failureContext: 'Could not get region blocks' },
+        logger,
+        {
+          operation: 'get_region_blocks',
+          world: input.world,
+          context,
+          failureContext: 'Could not get region blocks',
+        },
         async (callId) => {
           const result = await bridge.request(
             BRIDGE_ROUTES.getRegionBlocks,
@@ -374,8 +383,9 @@ export function registerInspectionTools(
     },
     async (input, context) =>
       executeToolCall(
+        logger,
         {
-          tool: 'scan_orthographic_view',
+          operation: 'scan_orthographic_view',
           world: input.world,
           context,
           failureContext: 'Could not scan the orthographic view',

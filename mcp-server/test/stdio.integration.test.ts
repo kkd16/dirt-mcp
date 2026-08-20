@@ -40,6 +40,7 @@ function emptyServerStatus(tools: Readonly<Record<string, boolean>> = allToolsEn
     },
     editHistory: { maxEntriesPerWorld: 1, maxEntriesTotal: 1, maxRetainedChangedBlocks: 1 },
     defaults: { regionBlocksIncludeAir: false, regionBlocksFormat: 'blocks', editDryRun: false },
+    logging: { consoleLevel: 'info', detailFileMaxBytes: 1, detailFileRetainedFiles: 2 },
     tools,
   };
 }
@@ -49,6 +50,18 @@ interface BridgeRequestRecord {
   readonly headers: IncomingHttpHeaders;
   readonly method: string | undefined;
   readonly path: string | undefined;
+}
+
+interface McpLogRecord extends Record<string, unknown> {
+  readonly component: string;
+  readonly event: string;
+  readonly level: string;
+  readonly message: string;
+  readonly service: string;
+}
+
+function parseLogRecord(line: string): McpLogRecord {
+  return JSON.parse(line) as McpLogRecord;
 }
 
 function serverAddressPort(address: string | AddressInfo | null): number {
@@ -128,6 +141,11 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       regionBlocksIncludeAir: false,
       regionBlocksFormat: 'blocks',
       editDryRun: false,
+    },
+    logging: {
+      consoleLevel: 'info',
+      detailFileMaxBytes: 10_485_760,
+      detailFileRetainedFiles: 5,
     },
     tools: allToolsEnabled,
   };
@@ -314,7 +332,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     }
   });
   const messages = collectLines(child.stdout, (line) => JSON.parse(line) as JsonRpcResponse);
-  const errors = collectLines(child.stderr, (line) => line);
+  const logs = collectLines(child.stderr, parseLogRecord);
 
   send(child, {
     jsonrpc: '2.0',
@@ -324,6 +342,12 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   });
   const catalog = await waitFor(messages, 1);
   assert.ok(catalog.result);
+  const catalogLog = await waitForValue(logs, (record) => record.event === 'catalog.loaded');
+  assert.equal(catalogLog.level, 'info');
+  assert.equal(catalogLog.component, 'catalog');
+  assert.equal(catalogLog.call_id, requestAt(requests, 0).headers['x-dirt-call-id']);
+  assert.equal(catalogLog.enabled_tool_count, MCP_TOOL_NAMES.length);
+  assert.equal(catalogLog.enabled_tools, MCP_TOOL_NAMES.join(','));
   const listedTools = catalog.result.tools;
   assert.ok(listedTools);
   assert.deepEqual(
@@ -490,7 +514,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       },
     }),
   );
-  await waitForValue(errors, (line) => line.includes('tool=fill_region'));
+  await waitForValue(logs, (record) => record.event === 'tool.completed' && record.operation === 'fill_region');
 
   send(child, {
     jsonrpc: '2.0',
@@ -714,35 +738,49 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     editId: '11111111-1111-4111-8111-111111111111',
   });
 
-  const auditLines = errors.values.filter((line) => line.startsWith('Dirt MCP tool_call '));
-  const expectedAudits: readonly (readonly [string, number, boolean, string])[] = [
-    ['ping_server', 2, false, 'ok'],
-    ['get_region_blocks', 3, true, 'ok'],
-    ['scan_orthographic_view', 4, true, 'ok'],
-    ['scan_orthographic_view', 5, true, 'ok'],
-    ['fill_region', 6, true, 'error'],
-    ['get_server_status', 7, false, 'ok'],
-    ['set_blocks', 8, true, 'ok'],
-    ['count_region_block_states', 10, true, 'ok'],
-    ['replace_region_blocks', 11, true, 'ok'],
-    ['get_edit_history', 12, true, 'ok'],
-    ['undo_edit', 13, true, 'ok'],
+  const auditRecords = logs.values.filter((record) => record.event === 'tool.completed');
+  const expectedAudits: readonly (readonly [string, number, boolean, boolean])[] = [
+    ['ping_server', 2, false, true],
+    ['get_region_blocks', 3, true, true],
+    ['scan_orthographic_view', 4, true, true],
+    ['scan_orthographic_view', 5, true, true],
+    ['fill_region', 6, true, false],
+    ['get_server_status', 7, false, true],
+    ['set_blocks', 8, true, true],
+    ['count_region_block_states', 10, true, true],
+    ['replace_region_blocks', 11, true, true],
+    ['get_edit_history', 12, true, true],
+    ['undo_edit', 13, true, true],
   ];
-  assert.equal(auditLines.length, expectedAudits.length);
-  expectedAudits.forEach(([tool, requestId, includesWorld, outcome], index) => {
-    const world = includesWorld ? ' world="world"' : '';
-    const auditLine = auditLines[index];
+  assert.equal(auditRecords.length, expectedAudits.length);
+  expectedAudits.forEach(([operation, requestId, includesWorld, success], index) => {
+    const auditRecord = auditRecords[index];
     const callId = toolCallIds[index];
-    assert.ok(auditLine);
+    assert.ok(auditRecord);
     assert.ok(callId);
-    assert.match(
-      auditLine,
-      new RegExp(
-        `^Dirt MCP tool_call tool=${tool} call=${callId} request=${requestId} ` +
-          `client="bridge-test/1"${world} outcome=${outcome} duration_ms=\\d+$`,
-      ),
-    );
+    assert.equal(auditRecord.level, 'info');
+    assert.equal(auditRecord.service, 'dirt-mcp-stdio');
+    assert.equal(auditRecord.component, 'tool');
+    assert.equal(auditRecord.message, 'Tool call completed.');
+    assert.equal(auditRecord.operation, operation);
+    assert.equal(auditRecord.call_id, callId);
+    assert.equal(auditRecord.request_id, requestId);
+    assert.equal(auditRecord.client, 'bridge-test/1');
+    assert.equal(auditRecord.world, includesWorld ? 'world' : undefined);
+    assert.equal(auditRecord.success, success);
+    assert.equal(typeof auditRecord.duration_ms, 'number');
   });
+  const setBlocksAudit = auditRecords.find((record) => record.operation === 'set_blocks');
+  assert.equal(setBlocksAudit?.edit_id, setBlocks.edit.editId);
+  assert.equal(setBlocksAudit?.outcome, 'committed');
+  assert.equal(setBlocksAudit?.changed_block_count, 1);
+  const historyAudit = auditRecords.find((record) => record.operation === 'get_edit_history');
+  assert.equal(historyAudit?.result_count, 1);
+  const undoAudit = auditRecords.find((record) => record.operation === 'undo_edit');
+  assert.equal(undoAudit?.edit_id, setBlocks.edit.editId);
+  assert.equal(undoAudit?.outcome, 'undone');
+  assert.equal(undoAudit?.changed_block_count, 1);
+  assert.equal(JSON.stringify(logs.values).includes('bridge-test-token'), false);
 
   const exited = once(child, 'exit');
   child.stdin.end();
@@ -830,12 +868,33 @@ test('exposes only the configured tool snapshot and rejects disabled calls befor
   assert.equal(exitCode, 0);
 });
 
-for (const bootstrapFailure of ['unauthorized', 'malformed', 'unavailable'] as const) {
+test('reports startup configuration failures as structured stderr without using stdout', async () => {
+  const child = spawn(process.execPath, [join(packageDirectory, 'dist/index.js')], {
+    env: { ...process.env, DIRT_MCP_BRIDGE_TOKEN: '' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const messages = collectLines(child.stdout, (line) => line);
+  const logs = collectLines(child.stderr, parseLogRecord);
+
+  const failure = await waitForValue(logs, (record) => record.event === 'runtime.start_failed');
+  assert.equal(failure.level, 'error');
+  assert.equal(failure.service, 'dirt-mcp-stdio');
+  assert.equal(failure.component, 'runtime');
+  assert.equal(failure.error_code, 'bridge_token_required');
+  assert.equal(JSON.stringify(failure).includes('DIRT_MCP_BRIDGE_TOKEN'), false);
+
+  const [exitCode] = await once(child, 'exit');
+  assert.equal(exitCode, 1);
+  assert.deepEqual(messages.values, []);
+});
+
+for (const bootstrapFailure of ['unauthorized', 'malformed', 'unavailable', 'domain-error'] as const) {
   test(`fails closed when tool-configuration bootstrap is ${bootstrapFailure}`, async (context) => {
     const expectedFailureCode = {
       malformed: 'bridge_invalid_response',
       unauthorized: 'bridge_unauthorized',
       unavailable: 'bridge_unavailable',
+      'domain-error': 'world_not_found',
     }[bootstrapFailure];
     let bridgeRequestCount = 0;
     const bridge = createServer((_request, response) => {
@@ -844,6 +903,10 @@ for (const bootstrapFailure of ['unauthorized', 'malformed', 'unavailable'] as c
         response.statusCode = 401;
         response.setHeader('Content-Type', 'application/json');
         response.end(JSON.stringify({ error: { code: 'unauthorized', message: 'bad token' } }));
+      } else if (bootstrapFailure === 'domain-error') {
+        response.statusCode = 404;
+        response.setHeader('Content-Type', 'application/json');
+        response.end(JSON.stringify({ error: { code: 'world_not_found', message: 'unexpected route result' } }));
       } else {
         response.setHeader('Content-Type', 'application/json');
         response.end('{}');
@@ -877,7 +940,7 @@ for (const bootstrapFailure of ['unauthorized', 'malformed', 'unavailable'] as c
       if (child.exitCode === null) child.kill();
     });
     const messages = collectLines(child.stdout, (line) => JSON.parse(line) as JsonRpcResponse);
-    const errors = collectLines(child.stderr, (line) => line);
+    const logs = collectLines(child.stderr, parseLogRecord);
 
     send(child, { jsonrpc: '2.0', id: 30, method: 'tools/list', params: modernParams({}) });
     const failure = await waitFor(messages, 30);
@@ -885,10 +948,12 @@ for (const bootstrapFailure of ['unauthorized', 'malformed', 'unavailable'] as c
     assert.equal(failure.error?.message, 'Internal server error');
     assert.equal(failure.result, undefined);
     assert.equal(bridgeRequestCount, bootstrapFailure === 'unavailable' ? 0 : 1);
-    await waitForValue(
-      errors,
-      (line) => line === `Dirt MCP stdio error_type="ToolFailure" code="${expectedFailureCode}"`,
+    const catalogFailure = await waitForValue(
+      logs,
+      (record) => record.event === 'catalog.load_failed' && record.error_code === expectedFailureCode,
     );
+    assert.equal(catalogFailure.operation, 'get_server_status');
+    assert.equal(catalogFailure.level, bootstrapFailure === 'malformed' ? 'error' : 'warning');
 
     const exited = once(child, 'exit');
     child.stdin.end();

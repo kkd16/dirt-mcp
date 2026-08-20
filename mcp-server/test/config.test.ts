@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readBridgeConfig } from '../dist/config.js';
+import { BridgeConfigurationError, readBridgeConfig } from '../dist/config.js';
 
 test('reads the default and normalized loopback bridge origins', () => {
   assert.deepEqual(readBridgeConfig({ DIRT_MCP_BRIDGE_TOKEN: 'secret' }), {
@@ -19,6 +19,10 @@ test('reads the default and normalized loopback bridge origins', () => {
 test('requires a nonempty bridge token', () => {
   assert.throws(() => readBridgeConfig({}), /DIRT_MCP_BRIDGE_TOKEN is required/);
   assert.throws(() => readBridgeConfig({ DIRT_MCP_BRIDGE_TOKEN: '' }), /DIRT_MCP_BRIDGE_TOKEN is required/);
+  assert.throws(
+    () => readBridgeConfig({}),
+    (error) => error instanceof BridgeConfigurationError && error.code === 'bridge_token_required',
+  );
 });
 
 test('rejects bridge URLs that are not a bare HTTP IPv4 loopback origin', () => {
@@ -44,4 +48,8 @@ test('rejects bridge URLs that are not a bare HTTP IPv4 loopback origin', () => 
       /DIRT_MCP_BRIDGE_URL must be an HTTP 127\.0\.0\.1 origin/,
     );
   }
+  assert.throws(
+    () => readBridgeConfig({ DIRT_MCP_BRIDGE_TOKEN: 'secret', DIRT_MCP_BRIDGE_URL: invalidUrls[0] }),
+    (error) => error instanceof BridgeConfigurationError && error.code === 'bridge_url_invalid',
+  );
 });

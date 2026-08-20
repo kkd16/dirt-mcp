@@ -32,6 +32,15 @@ tools:
   get_edit_history: true
   undo_edit: true
 
+logging:
+  # Minimum severity shown in the Paper console: info, warning, or error.
+  # Read-only requests and previews remain in the detailed file at every level.
+  console-level: info
+  # Detailed JSON Lines logs rotate under plugins/DirtMCP/logs/.
+  detail-file-max-bytes: 10485760
+  # Keep between 2 and 100 generations so rotation never discards the newest record.
+  detail-file-retained-files: 5
+
 limits:
   # Maximum JSON request body. Oversized requests fail before parsing or mutation.
   max-request-bytes: 262144

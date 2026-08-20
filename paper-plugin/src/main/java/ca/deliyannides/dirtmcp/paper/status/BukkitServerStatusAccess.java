@@ -7,6 +7,7 @@ import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.Builds;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.EffectiveDefaults;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.EffectiveEditHistory;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.EffectiveLimits;
+import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.EffectiveLogging;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.OnlinePlayer;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.Performance;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.PlayerSummary;
@@ -96,6 +97,10 @@ public final class BukkitServerStatusAccess implements PaperServerStatusService.
                 new PlayerSummary(players.size(), server.getMaxPlayers(), players),
                 worlds,
                 this.config.tools().flags(),
+                new EffectiveLogging(
+                        this.config.logging().consoleLevel().configName(),
+                        this.config.logging().detailFileMaxBytes(),
+                        this.config.logging().detailFileRetainedFiles()),
                 new EffectiveLimits(
                         limits.maxRequestBytes(),
                         limits.maxRegionVolume(),

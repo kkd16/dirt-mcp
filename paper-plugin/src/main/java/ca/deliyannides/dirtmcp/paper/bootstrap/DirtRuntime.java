@@ -13,6 +13,8 @@ import ca.deliyannides.dirtmcp.paper.bridge.endpoint.SetBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.UndoEditEndpoint;
 import ca.deliyannides.dirtmcp.paper.command.DirtAdminCommand;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
+import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.platform.PaperMainThread;
 import ca.deliyannides.dirtmcp.paper.status.BukkitServerStatusAccess;
 import ca.deliyannides.dirtmcp.paper.status.PaperServerStatusService;
@@ -26,7 +28,6 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.logging.Logger;
 import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -36,7 +37,7 @@ public final class DirtRuntime implements AutoCloseable {
     private final FaweWorldEditor worldEditor;
     private final WorldEditLifecycleListener worldLifecycle;
     private final BridgeServer bridge;
-    private final Logger logger;
+    private final DirtLog log;
     private final AtomicBoolean closed = new AtomicBoolean();
 
     private DirtRuntime(
@@ -44,19 +45,21 @@ public final class DirtRuntime implements AutoCloseable {
             FaweWorldEditor worldEditor,
             WorldEditLifecycleListener worldLifecycle,
             BridgeServer bridge,
-            Logger logger) {
+            DirtLog log) {
         this.mainThread = mainThread;
         this.worldEditor = worldEditor;
         this.worldLifecycle = worldLifecycle;
         this.bridge = bridge;
-        this.logger = logger;
+        this.log = log;
     }
 
-    public static DirtRuntime start(JavaPlugin plugin, DirtConfig config, String bearerToken)
+    public static DirtRuntime start(
+            JavaPlugin plugin, DirtConfig config, String bearerToken, DirtLog log)
             throws IOException {
         Objects.requireNonNull(plugin, "plugin");
         Objects.requireNonNull(config, "config");
         Objects.requireNonNull(bearerToken, "bearerToken");
+        Objects.requireNonNull(log, "log");
 
         PaperMainThread mainThread = new PaperMainThread(plugin);
         FaweWorldEditor worldEditor = null;
@@ -76,7 +79,8 @@ public final class DirtRuntime implements AutoCloseable {
                             limits.maxInspectionTouchedChunks(),
                             limits.maxBlockStatePatterns(),
                             config.bridge().maxConcurrentInspections());
-            worldEditor = new FaweWorldEditor(plugin, mainThread, limits, config.editHistory());
+            worldEditor =
+                    new FaweWorldEditor(plugin, mainThread, limits, config.editHistory(), log);
             worldLifecycle = new WorldEditLifecycleListener(worldEditor);
             plugin.getServer().getPluginManager().registerEvents(worldLifecycle, plugin);
 
@@ -95,11 +99,22 @@ public final class DirtRuntime implements AutoCloseable {
                                     new SetBlocksEndpoint(worldEditor, config),
                                     new GetEditHistoryEndpoint(worldEditor),
                                     new UndoEditEndpoint(worldEditor)),
-                            plugin.getLogger());
+                            log);
             bridge.start();
-            registerAdminCommand(plugin, config, status);
-            return new DirtRuntime(
-                    mainThread, worldEditor, worldLifecycle, bridge, plugin.getLogger());
+            registerAdminCommand(plugin, config, status, log);
+            String detailSummary =
+                    log.hasDetailFile()
+                            ? "detailed logs: " + plugin.getDataPath().resolve("logs")
+                            : "detailed logging unavailable; see the prior console error";
+            String message =
+                    "Dirt MCP is ready on 127.0.0.1:" + bridge.boundPort() + "; " + detailSummary;
+            LogContext context =
+                    LogContext.of("plugin_version", plugin.getPluginMeta().getVersion())
+                            .with("port", bridge.boundPort())
+                            .with("enabled_tool_count", config.tools().enabled().size())
+                            .with("detail_file_available", log.hasDetailFile());
+            log.info("runtime", "runtime.started", message, context);
+            return new DirtRuntime(mainThread, worldEditor, worldLifecycle, bridge, log);
         } catch (IOException | RuntimeException failure) {
             if (bridge != null) {
                 try {
@@ -122,16 +137,21 @@ public final class DirtRuntime implements AutoCloseable {
                     failure.addSuppressed(cleanupFailure);
                 }
             }
-            mainThread.close();
+            try {
+                mainThread.close();
+            } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
             throw failure;
         }
     }
 
     private static void registerAdminCommand(
-            JavaPlugin plugin, DirtConfig config, PaperServerStatusService status) {
+            JavaPlugin plugin, DirtConfig config, PaperServerStatusService status, DirtLog log) {
         PluginMeta metadata = plugin.getPluginMeta();
         DirtAdminCommand adminCommand =
-                new DirtAdminCommand(metadata.getName(), metadata.getVersion(), config, status);
+                new DirtAdminCommand(
+                        metadata.getName(), metadata.getVersion(), config, status, log);
         plugin.getLifecycleManager()
                 .registerEventHandler(
                         LifecycleEvents.COMMANDS,
@@ -147,20 +167,42 @@ public final class DirtRuntime implements AutoCloseable {
         if (!this.closed.compareAndSet(false, true)) {
             return;
         }
-        HandlerList.unregisterAll(this.worldLifecycle);
-        this.worldEditor.beginStopping();
-        try {
-            this.bridge.close();
-        } finally {
-            try {
-                if (!this.worldEditor.closeIfQuiescent()) {
-                    this.logger.severe(
-                            "Dirt MCP left resources owned by an active edit intact after the "
-                                    + "shutdown deadline; Paper will finish plugin cleanup.");
+        DirtLog ownedLog = this.log;
+        PaperMainThread ownedMainThread = this.mainThread;
+        try (ownedLog) {
+            try (ownedMainThread) {
+                HandlerList.unregisterAll(this.worldLifecycle);
+                this.worldEditor.beginStopping();
+                try {
+                    this.bridge.close();
+                } finally {
+                    if (!this.worldEditor.closeIfQuiescent()) {
+                        LogContext context = LogContext.of("resources_retained", true);
+                        this.log.error(
+                                "runtime",
+                                "runtime.resources_retained",
+                                "Dirt MCP left resources owned by an active edit after the "
+                                        + "shutdown deadline",
+                                context,
+                                null);
+                    }
                 }
-            } finally {
-                this.mainThread.close();
+            } catch (RuntimeException | Error failure) {
+                try {
+                    LogContext context = LogContext.empty();
+                    this.log.error(
+                            "runtime",
+                            "runtime.stop_failed",
+                            "Dirt MCP encountered a failure while stopping",
+                            context,
+                            failure);
+                } catch (RuntimeException | Error loggingFailure) {
+                    failure.addSuppressed(loggingFailure);
+                }
+                throw failure;
             }
+            LogContext context = LogContext.empty();
+            this.log.info("runtime", "runtime.stopped", "Dirt MCP stopped", context);
         }
     }
 }

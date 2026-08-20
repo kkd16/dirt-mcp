@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.world.edit;
 
+import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.platform.MainThread;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
@@ -10,12 +11,13 @@ final class PaperFaweEditPlatform implements EditPlatform {
     private final PaperEditPreparation preparation;
     private final FaweEditExecutor executor;
 
-    PaperFaweEditPlatform(JavaPlugin plugin, MainThread mainThread, int maxChangedBlocks) {
+    PaperFaweEditPlatform(
+            JavaPlugin plugin, MainThread mainThread, int maxChangedBlocks, DirtLog log) {
         if (maxChangedBlocks < 1) {
             throw new IllegalArgumentException("Maximum changed blocks must be positive");
         }
         this.preparation = new PaperEditPreparation(plugin, mainThread);
-        this.executor = new FaweEditExecutor(maxChangedBlocks, plugin.getLogger());
+        this.executor = new FaweEditExecutor(maxChangedBlocks, log);
     }
 
     @Override

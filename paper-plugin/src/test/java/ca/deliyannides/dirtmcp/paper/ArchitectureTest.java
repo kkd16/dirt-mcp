@@ -68,13 +68,26 @@ final class ArchitectureTest {
     }
 
     @Test
-    void transportLibrariesStayInsideTheBridge() {
+    void httpTransportStaysInsideTheBridge() {
         noClasses()
                 .that()
                 .resideOutsideOfPackage("ca.deliyannides.dirtmcp.paper.bridge..")
                 .should()
                 .dependOnClassesThat()
-                .resideInAnyPackage("com.google.gson..", "com.sun.net.httpserver..")
+                .resideInAnyPackage("com.sun.net.httpserver..")
+                .check(PRODUCTION_CLASSES);
+    }
+
+    @Test
+    void jsonSerializationStaysInsideTheBridgeAndLoggingAdapters() {
+        noClasses()
+                .that()
+                .resideOutsideOfPackages(
+                        "ca.deliyannides.dirtmcp.paper.bridge..",
+                        "ca.deliyannides.dirtmcp.paper.logging..")
+                .should()
+                .dependOnClassesThat()
+                .resideInAnyPackage("com.google.gson..")
                 .check(PRODUCTION_CLASSES);
     }
 

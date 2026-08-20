@@ -71,8 +71,9 @@ The bridge always binds to `127.0.0.1`; do not proxy or expose it publicly. Give
 the same `DIRT_MCP_BRIDGE_TOKEN` to the MCP process. Tokens must satisfy the
 configured byte minimum, which defaults to 32; lowering it weakens
 authentication. Never commit or log tokens. All settings are validated at
-startup; active tool limits, edit-history configuration, defaults, and the
-resolved MCP tool allowlist are reported by `get_server_status`. The shipped
+startup; active tool limits, edit-history configuration, defaults, logging
+configuration, and the resolved MCP tool allowlist are reported by
+`get_server_status`. The shipped
 `tools` section explicitly enables every tool. Each recognized entry is an
 independent boolean; an entry omitted from that section resolves to false, while
 unknown or invalid entries stop plugin startup. Other configuration keys remain
@@ -96,6 +97,24 @@ configuration file changes.
 
 The command requires `dirtmcp.command`, which is granted to operators by
 default and may be assigned explicitly through a permission plugin.
+
+### Logs
+
+Paper's server console receives concise lifecycle, completed mutation and undo,
+actionable warning, and unexpected-failure events at the configured
+`logging.console-level`. Detailed structured events are written as JSON Lines to
+`plugins/DirtMCP/logs/dirt-detail.%g.jsonl`. The positive
+`logging.detail-file-max-bytes` and `logging.detail-file-retained-files` settings
+bound size-based rotation; retained-file count must be between two and 100. The
+shipped values are 10,485,760 bytes and five files. If the detail sink cannot be opened
+or later fails, Dirt continues and reports the logging degradation as a
+prominent Paper console error.
+
+The MCP process writes one structured JSON object per diagnostic line to
+stderr. Stdout remains reserved for MCP protocol messages. Paper and MCP records
+carry applicable call, edit, operation, world, outcome, and duration fields so
+the two sides can be correlated. Neither sink records bearer tokens, raw request
+bodies, or complete block payloads.
 
 The repository includes a project-scoped Codex configuration in
 `.codex/config.toml`. Run `make up` at least once to build the project and create

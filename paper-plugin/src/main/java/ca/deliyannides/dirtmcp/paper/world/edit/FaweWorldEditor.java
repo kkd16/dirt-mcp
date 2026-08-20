@@ -1,6 +1,7 @@
 package ca.deliyannides.dirtmcp.paper.world.edit;
 
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.platform.MainThread;
@@ -38,12 +39,14 @@ public final class FaweWorldEditor
             JavaPlugin plugin,
             MainThread mainThread,
             DirtConfig.Limits limits,
-            DirtConfig.EditHistory history) {
+            DirtConfig.EditHistory history,
+            DirtLog log) {
         this(
                 new PaperFaweEditPlatform(
                         Objects.requireNonNull(plugin, "plugin"),
                         Objects.requireNonNull(mainThread, "mainThread"),
-                        Objects.requireNonNull(limits, "limits").maxChangedBlocks()),
+                        Objects.requireNonNull(limits, "limits").maxChangedBlocks(),
+                        Objects.requireNonNull(log, "log")),
                 limits.maxRegionVolume(),
                 limits.maxTouchedChunks(),
                 limits.maxBlockStatePatterns(),
