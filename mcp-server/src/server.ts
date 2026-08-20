@@ -8,22 +8,41 @@ import { registerInspectionTools } from './tools/inspection.ts';
 import { registerStatusTools } from './tools/status.ts';
 
 function serverInstructions(configuration: McpToolConfiguration): string {
-  const instructions = [
-    'Dirt operates on live Paper worlds. Inspections and new edits require already-loaded chunks; undo can reload existing chunks without generating terrain.',
-    'Coordinates are absolute Minecraft block coordinates (X east/west, Y up/down, Z south/north); region corners are inclusive and normalized automatically.',
-  ];
+  if (!Object.values(configuration).some(Boolean)) {
+    return 'No Dirt MCP tools are enabled for this server.';
+  }
 
-  if (configuration.get_server_status) {
+  const hasInspection =
+    configuration.count_region_block_states || configuration.get_region_blocks || configuration.scan_orthographic_view;
+  const hasMutation = configuration.replace_region_blocks || configuration.fill_region || configuration.set_blocks;
+  const hasRegion =
+    configuration.count_region_block_states ||
+    configuration.get_region_blocks ||
+    configuration.replace_region_blocks ||
+    configuration.fill_region;
+  const hasDetailedInspection = configuration.get_region_blocks || configuration.scan_orthographic_view;
+  const hasWorldTool = hasInspection || hasMutation || configuration.get_edit_history || configuration.undo_edit;
+  const instructions: string[] = [];
+
+  if (hasWorldTool) instructions.push('World tools operate on live Paper worlds.');
+  if (hasInspection) instructions.push('Inspections require already-loaded chunks.');
+  if (hasMutation) instructions.push('New edits require already-loaded chunks.');
+  if (configuration.undo_edit) instructions.push('Undo can reload existing chunks without generating terrain.');
+
+  if (hasInspection || hasMutation) {
+    instructions.push('Minecraft axes use X east/west, Y up/down, and Z south/north.');
+  }
+  if (hasRegion) {
+    instructions.push('Region corners are inclusive absolute block positions and normalized automatically.');
+  }
+
+  if (configuration.get_server_status && (hasInspection || hasMutation)) {
     instructions.push(
-      'Call get_server_status before large inspections or edits and keep request size, scan volume, result count, region volume, and changed blocks within its active limits.',
+      'Call get_server_status before large world operations and keep requests within its active limits.',
     );
   }
 
-  if (
-    configuration.count_region_block_states ||
-    configuration.get_region_blocks ||
-    configuration.scan_orthographic_view
-  ) {
+  if (hasDetailedInspection) {
     instructions.push('Inspection result limits fail the call instead of truncating data.');
   }
 
@@ -35,7 +54,7 @@ function serverInstructions(configuration: McpToolConfiguration): string {
   }
   instructions.push(errorGuidance);
 
-  if (configuration.replace_region_blocks || configuration.fill_region || configuration.set_blocks) {
+  if (hasMutation) {
     instructions.push(
       'Mutation tools can apply immediately; pass dryRun=true when a preview is needed, and retain the edit ID returned by every committed result.',
     );

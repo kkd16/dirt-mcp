@@ -32,6 +32,7 @@ export interface JsonRpcResult {
 }
 
 export interface JsonRpcResponse {
+  readonly jsonrpc?: string;
   readonly id?: JsonRpcId;
   readonly error?: { readonly code: number; readonly message: string };
   readonly result?: JsonRpcResult;

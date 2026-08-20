@@ -259,6 +259,11 @@ test('correlates orthographic metadata, geometry, counts, offsets, and positions
   wrongPosition.blocks[0]!.position.z = 3;
   assertInvalid(() => requireMatchingScanResponse(scanInput, wrongPosition));
 
+  const duplicateCell = scanOutput();
+  duplicateCell.blocks[1]!.offset = { ...duplicateCell.blocks[0]!.offset };
+  duplicateCell.blocks[1]!.position = { ...duplicateCell.blocks[0]!.position };
+  assertInvalid(() => requireMatchingScanResponse(scanInput, duplicateCell));
+
   const wrongOrder = scanOutput();
   [wrongOrder.blocks[0], wrongOrder.blocks[1]] = [wrongOrder.blocks[1]!, wrongOrder.blocks[0]!];
   assertInvalid(() => requireMatchingScanResponse(scanInput, wrongOrder));

@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import packageMetadata from '../package.json' with { type: 'json' };
 import { MCP_TOOL_NAMES, type McpToolConfiguration } from '../dist/tools/configuration.js';
 import {
   collectLines,
@@ -798,8 +799,9 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.equal(exitCode, 0);
 });
 
-test('exposes only the configured tool snapshot and rejects disabled calls before bridge dispatch', async (context) => {
+test('serves the configured tool snapshot over MCP 2025-06-18 and rejects disabled calls locally', async (context) => {
   const configuredTools = toolConfiguration(false);
+  configuredTools.ping_server = true;
   configuredTools.get_region_blocks = true;
   configuredTools.set_blocks = true;
   configuredTools.undo_edit = true;
@@ -814,7 +816,7 @@ test('exposes only the configured tool snapshot and rejects disabled calls befor
       body: rawBody.length === 0 ? undefined : JSON.parse(rawBody),
     });
     response.setHeader('Content-Type', 'application/json');
-    response.end(JSON.stringify(minimalServerStatus(configuredTools)));
+    response.end(JSON.stringify(request.url === '/v1/ping' ? { status: 'ok' } : minimalServerStatus(configuredTools)));
   });
   bridge.listen(0, '127.0.0.1');
   await once(bridge, 'listening');
@@ -838,10 +840,24 @@ test('exposes only the configured tool snapshot and rejects disabled calls befor
   });
   const messages = collectLines(child.stdout, (line) => JSON.parse(line) as JsonRpcResponse);
 
-  send(child, { jsonrpc: '2.0', id: 20, method: 'server/discover', params: requestParams({}) });
-  const discovered = await waitFor(messages, 20);
-  assert.ok(discovered.result);
-  const instructions = discovered.result.instructions;
+  send(child, {
+    jsonrpc: '2.0',
+    id: 20,
+    method: 'initialize',
+    params: {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'legacy-test', version: '1' },
+    },
+  });
+  const initialized = await waitFor(messages, 20);
+  assert.equal(initialized.jsonrpc, '2.0');
+  assert.equal(initialized.result?.protocolVersion, '2025-06-18');
+  assert.deepEqual(initialized.result?.capabilities, { tools: { listChanged: false } });
+  assert.deepEqual(initialized.result?.serverInfo, { name: 'dirt-mcp', version: packageMetadata.version });
+  assert.equal(initialized.result?.resultType, undefined);
+  assert.equal(Object.hasOwn(initialized.result ?? {}, '_meta'), false);
+  const instructions = initialized.result?.instructions;
   assert.equal(typeof instructions, 'string');
   assert.match(instructions as string, /live Paper worlds/);
   assert.match(instructions as string, /Mutation tools can apply immediately/);
@@ -849,29 +865,47 @@ test('exposes only the configured tool snapshot and rejects disabled calls befor
   assert.doesNotMatch(instructions as string, /Enabled tools|Available inspection tools/);
   assert.doesNotMatch(instructions as string, /get_server_status|get_edit_history/);
 
-  send(child, { jsonrpc: '2.0', id: 21, method: 'tools/list', params: requestParams({}) });
+  send(child, { jsonrpc: '2.0', method: 'notifications/initialized', params: {} });
+  send(child, { jsonrpc: '2.0', id: 21, method: 'tools/list', params: {} });
   const catalog = await waitFor(messages, 21);
   assert.ok(catalog.result);
+  assert.equal(catalog.jsonrpc, '2.0');
+  assert.equal(catalog.result.resultType, undefined);
+  assert.equal(Object.hasOwn(catalog.result, '_meta'), false);
   assert.deepEqual(
     catalog.result.tools?.map((tool) => tool.name),
-    ['get_region_blocks', 'set_blocks', 'undo_edit'],
+    ['ping_server', 'get_region_blocks', 'set_blocks', 'undo_edit'],
   );
   const listedMetadata = JSON.stringify(catalog.result.tools);
   assert.doesNotMatch(listedMetadata, /get_server_status|get_edit_history/);
 
-  const requestCountBeforeDisabledCall = requests.length;
   send(child, {
     jsonrpc: '2.0',
     id: 22,
     method: 'tools/call',
-    params: requestParams({ name: 'ping_server', arguments: {} }),
+    params: { name: 'ping_server', arguments: {} },
   });
-  const disabled = await waitFor(messages, 22);
+  const pinged = await waitFor(messages, 22);
+  assert.equal(pinged.jsonrpc, '2.0');
+  assert.deepEqual(pinged.result?.content, [{ type: 'text', text: 'ok' }]);
+  assert.deepEqual(pinged.result?.structuredContent, { status: 'ok' });
+  assert.equal(pinged.result?.resultType, undefined);
+  assert.equal(Object.hasOwn(pinged.result ?? {}, '_meta'), false);
+
+  const requestCountBeforeDisabledCall = requests.length;
+  send(child, {
+    jsonrpc: '2.0',
+    id: 23,
+    method: 'tools/call',
+    params: { name: 'get_server_status', arguments: {} },
+  });
+  const disabled = await waitFor(messages, 23);
   assert.equal(disabled.error?.code, -32_602);
-  assert.match(disabled.error?.message ?? '', /Tool ping_server disabled/);
+  assert.match(disabled.error?.message ?? '', /Tool get_server_status disabled/);
   assert.equal(requests.length, requestCountBeforeDisabledCall);
-  assert.equal(requests.length, 1);
+  assert.equal(requests.length, 2);
   assert.equal(requestAt(requests, 0).path, '/v1/server-status');
+  assert.equal(requestAt(requests, 1).path, '/v1/ping');
 
   const exited = once(child, 'exit');
   child.stdin.end();
@@ -981,7 +1015,6 @@ for (const bootstrapFailure of ['unauthorized', 'malformed', 'unavailable', 'dom
 test('retries a failed bootstrap and fixes the first successful snapshot for the process', async (context) => {
   let bootstrapAttempts = 0;
   const configuredTools = toolConfiguration(false);
-  configuredTools.ping_server = true;
   const bridge = createServer((_request, response) => {
     bootstrapAttempts++;
     response.setHeader('Content-Type', 'application/json');
@@ -1024,17 +1057,21 @@ test('retries a failed bootstrap and fixes the first successful snapshot for the
   assert.ok(recovered.result);
   assert.deepEqual(
     recovered.result.tools?.map((tool) => tool.name),
-    ['ping_server'],
+    [],
   );
   assert.equal(bootstrapAttempts, 2);
 
+  send(child, { jsonrpc: '2.0', id: 42, method: 'server/discover', params: requestParams({}) });
+  const discovered = await waitFor(messages, 42);
+  assert.equal(discovered.result?.instructions, 'No Dirt MCP tools are enabled for this server.');
+
   configuredTools.get_server_status = true;
-  send(child, { jsonrpc: '2.0', id: 42, method: 'tools/list', params: requestParams({}) });
-  const fixedSnapshot = await waitFor(messages, 42);
+  send(child, { jsonrpc: '2.0', id: 43, method: 'tools/list', params: requestParams({}) });
+  const fixedSnapshot = await waitFor(messages, 43);
   assert.ok(fixedSnapshot.result);
   assert.deepEqual(
     fixedSnapshot.result.tools?.map((tool) => tool.name),
-    ['ping_server'],
+    [],
   );
   assert.equal(bootstrapAttempts, 2);
 
