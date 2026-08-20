@@ -7,7 +7,6 @@ import { createDirtServer } from './server.ts';
 const config = readBridgeConfig(process.env);
 
 void serveStdio(() => createDirtServer(config), {
-  legacy: 'reject',
   onerror(error) {
     process.stderr.write(`Dirt MCP stdio error_type=${JSON.stringify(error.name)}\n`);
   },

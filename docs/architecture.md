@@ -94,9 +94,9 @@ token even on loopback. Routes use exact method and path matching and do not
 accept query strings. A bounded authenticated-request admission gate rejects
 excess work rather than allowing Paper scheduler waiters to grow without bound.
 The MCP server receives the bridge URL and token through its process environment.
-It supports MCP protocol revision `2026-07-28` only. The configured bridge URL
-must be a bare `http://127.0.0.1` origin with an optional port; paths, queries,
-fragments, credentials, and other hosts are rejected at startup.
+The configured bridge URL must be a bare `http://127.0.0.1` origin with an
+optional port; paths, queries, fragments, credentials, and other hosts are
+rejected at startup.
 
 ## Edit execution
 
