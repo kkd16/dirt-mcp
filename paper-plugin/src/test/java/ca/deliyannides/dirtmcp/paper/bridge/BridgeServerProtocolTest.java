@@ -173,7 +173,8 @@ final class BridgeServerProtocolTest {
     void includesEditIdInTypedOperationFailureResponses() throws Exception {
         UUID editId = BridgeTestFixture.EDIT_ID;
         List<LogRecord> records = new CopyOnWriteArrayList<>();
-        DirtLog log = recordingLog(records, null);
+        CountDownLatch audited = new CountDownLatch(1);
+        DirtLog log = recordingLog(records, audited);
         BridgeTestFixture.TestOperations operations =
                 new BridgeTestFixture.TestOperations() {
                     @Override
@@ -200,6 +201,7 @@ final class BridgeServerProtocolTest {
                                     + editId
                                     + "\"}}"),
                     json(response.body()));
+            assertTrue(audited.await(2, TimeUnit.SECONDS));
             LogRecord audit = requestRecords(records).getFirst();
             assertEquals(Level.WARNING, audit.getLevel());
             assertEquals(editId, context(audit).values().get("edit_id"));
@@ -209,7 +211,8 @@ final class BridgeServerProtocolTest {
     @Test
     void elevatesTypedInternalFailuresWithoutEditIds() throws Exception {
         List<LogRecord> records = new CopyOnWriteArrayList<>();
-        DirtLog log = recordingLog(records, null);
+        CountDownLatch audited = new CountDownLatch(1);
+        DirtLog log = recordingLog(records, audited);
         BridgeTestFixture.TestOperations operations =
                 new BridgeTestFixture.TestOperations() {
                     @Override
@@ -229,6 +232,7 @@ final class BridgeServerProtocolTest {
                             HttpResponse.BodyHandlers.ofString());
 
             assertEquals(500, response.statusCode());
+            assertTrue(audited.await(2, TimeUnit.SECONDS));
             LogRecord audit = requestRecords(records).getFirst();
             assertEquals(Level.SEVERE, audit.getLevel());
             assertEquals("internal_error", context(audit).values().get("error_code"));
@@ -238,7 +242,8 @@ final class BridgeServerProtocolTest {
     @Test
     void keepsExpectedAvailabilityFailuresDetailOnly() throws Exception {
         List<LogRecord> records = new CopyOnWriteArrayList<>();
-        DirtLog log = recordingLog(records, null);
+        CountDownLatch audited = new CountDownLatch(1);
+        DirtLog log = recordingLog(records, audited);
         BridgeTestFixture.TestOperations operations =
                 new BridgeTestFixture.TestOperations() {
                     @Override
@@ -258,6 +263,7 @@ final class BridgeServerProtocolTest {
                             HttpResponse.BodyHandlers.ofString());
 
             assertEquals(503, response.statusCode());
+            assertTrue(audited.await(2, TimeUnit.SECONDS));
             LogRecord audit = requestRecords(records).getFirst();
             assertEquals(Level.FINE, audit.getLevel());
             assertEquals("temporarily unavailable", context(audit).values().get("failure_reason"));
@@ -268,7 +274,8 @@ final class BridgeServerProtocolTest {
     void neverRecordsBearerCredentials() throws Exception {
         String suppliedCredential = "credential-that-must-never-appear-in-logs";
         List<LogRecord> records = new CopyOnWriteArrayList<>();
-        DirtLog log = recordingLog(records, null);
+        CountDownLatch audited = new CountDownLatch(1);
+        DirtLog log = recordingLog(records, audited);
 
         try (log;
                 BridgeServer bridge =
@@ -287,6 +294,7 @@ final class BridgeServerProtocolTest {
                             HttpResponse.BodyHandlers.ofString());
 
             assertEquals(401, response.statusCode());
+            assertTrue(audited.await(2, TimeUnit.SECONDS));
             LogRecord audit = requestRecords(records).getFirst();
             assertFalse(audit.getMessage().contains(suppliedCredential));
             assertFalse(context(audit).values().toString().contains(suppliedCredential));
@@ -397,7 +405,8 @@ final class BridgeServerProtocolTest {
     @Test
     void sanitizesUnexpectedFailuresAndWritesOneAuditRecord() throws Exception {
         List<LogRecord> records = new CopyOnWriteArrayList<>();
-        DirtLog log = recordingLog(records, null);
+        CountDownLatch audited = new CountDownLatch(1);
+        DirtLog log = recordingLog(records, audited);
         BridgeTestFixture.TestOperations operations =
                 new BridgeTestFixture.TestOperations() {
                     @Override
@@ -425,6 +434,7 @@ final class BridgeServerProtocolTest {
                             .getAsString());
             assertTrue(response.body().contains("end-to-end health check failed"));
             assertFalse(response.body().contains("secret detail"));
+            assertTrue(audited.await(2, TimeUnit.SECONDS));
             List<LogRecord> audits = requestRecords(records);
             assertEquals(1, audits.size());
             LogRecord audit = audits.getFirst();
