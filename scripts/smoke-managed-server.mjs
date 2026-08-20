@@ -163,6 +163,16 @@ let originalStairFixture;
 let originalCommandFixture;
 let originalSparseFixture;
 try {
+  const unauthenticated = await fetch(`${baseUrl}/v1/ping`);
+  assert.equal(unauthenticated.status, 401);
+  assert.equal((await unauthenticated.json()).error.code, 'unauthorized');
+
+  const unknownRoute = await fetch(`${baseUrl}/v1/ping/extra`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(unknownRoute.status, 404);
+  assert.equal((await unknownRoute.json()).error.code, 'not_found');
+
   assert.deepEqual(await bridgeGet('/v1/ping'), { status: 'ok' });
   const serverStatus = await bridgeGet('/v1/server-status');
   assert.ok(serverStatus.builds.minecraft.length > 0);
@@ -173,9 +183,18 @@ try {
   assert.ok(serverStatus.worlds.some((entry) => entry.name === world));
   assert.ok(serverStatus.limits.maxRequestBytes > 0);
   assert.ok(serverStatus.limits.maxRegionVolume > 0);
+  assert.ok(serverStatus.limits.maxTouchedChunks > 0);
   assert.ok(serverStatus.limits.defaultInspectionResultLimit <= serverStatus.limits.maxInspectionResultLimit);
   assert.ok(serverStatus.limits.maxCommandsPerRequest > 0);
   assert.ok(serverStatus.limits.maxCommandFeedbackCharacters > 0);
+
+  const chunkHeavyRegion = await bridgeResponse('/v1/count-region-block-states', {
+    world,
+    min: { x: 0, y: 0, z: 0 },
+    max: { x: 4096, y: 0, z: 0 },
+  });
+  assert.equal(chunkHeavyRegion.status, 413);
+  assert.equal(chunkHeavyRegion.body.error.code, 'region_too_large');
 
   await paperCommand('forceload add 0 0');
   fixtureIsForceLoaded = true;

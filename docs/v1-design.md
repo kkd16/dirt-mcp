@@ -112,13 +112,14 @@ covered by FAWE limits, per-world mutation locks, or Dirt undo history.
 
 ## Limits and security
 
-The shipped defaults allow regions of 262,144 blocks, 65,536 changed blocks per
-edit, detailed scans of 16,384 blocks, 512 results by default and at most 2,048,
-10 commands per request, 8,192 retained command-feedback characters, and 20 undo
-entries per world. JSON request bodies are capped at 262,144 bytes. Active
-values are available through `get_server_status` and are configured in
-`plugins/DirtMCP/config.yml`; the complete shipped file is shown in the
-repository [README](../README.md#running-on-a-paper-server).
+The shipped defaults allow regions of 262,144 blocks and at most 256 touched
+chunks, 65,536 changed blocks per edit, detailed scans of 16,384 blocks, 512
+results by default and at most 2,048, 10 commands per request, 8,192 retained
+command-feedback characters, and 20 undo entries per world. JSON request bodies
+are capped at 262,144 bytes, and at most 32 authenticated bridge requests execute
+concurrently. Active values are available through `get_server_status` and are
+configured in `plugins/DirtMCP/config.yml`; the complete shipped file is shown
+in the repository [README](../README.md#running-on-a-paper-server).
 
 Limits bound resource use; they are not a permissions or land-policy system.
 Every bridge endpoint requires the shared bearer token, the bridge binds only to

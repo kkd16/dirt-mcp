@@ -1,80 +1,38 @@
 package ca.deliyannides.dirtmcp.paper;
 
-import ca.deliyannides.dirtmcp.paper.api.ApiServer;
-import ca.deliyannides.dirtmcp.paper.command.PaperCommandRunner;
-import ca.deliyannides.dirtmcp.paper.server.PaperServerContext;
-import ca.deliyannides.dirtmcp.paper.world.FaweRegionEditor;
-import ca.deliyannides.dirtmcp.paper.world.PaperRegionInspector;
+import ca.deliyannides.dirtmcp.paper.bootstrap.DirtRuntime;
+import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.config.DirtConfigLoader;
 import java.io.IOException;
-import java.util.logging.Level;
-import org.bukkit.configuration.Configuration;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class DirtMcpPlugin extends JavaPlugin {
     private static final String PORT_ENVIRONMENT_VARIABLE = "DIRT_MCP_BRIDGE_PORT";
     private static final String TOKEN_ENVIRONMENT_VARIABLE = "DIRT_MCP_BRIDGE_TOKEN";
 
-    private ApiServer apiServer;
+    private DirtRuntime runtime;
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
-        Configuration defaults = getConfig().getDefaults();
-        boolean hasMissingDefaults =
-                defaults != null
-                        && defaults.getKeys(true).stream()
-                                .anyMatch(path -> !getConfig().isSet(path));
-        getConfig().options().copyDefaults(true);
-        if (hasMissingDefaults) {
-            saveConfig();
-        }
-
-        PluginSettings settings =
-                PluginSettings.load(getConfig(), System.getenv(PORT_ENVIRONMENT_VARIABLE));
-        PluginSettings.Limits limits = settings.limits();
-        this.apiServer =
-                new ApiServer(
-                        settings,
-                        bridgeToken(),
-                        new PaperServerContext(this, settings),
-                        new PaperRegionInspector(
-                                this,
-                                limits.maxRegionVolume(),
-                                limits.maxInspectionVolume(),
-                                limits.maxInspectionResultLimit()),
-                        new FaweRegionEditor(
-                                this,
-                                limits.maxRegionVolume(),
-                                limits.maxChangedBlocks(),
-                                limits.undoHistoryPerWorld()),
-                        new PaperCommandRunner(
-                                this,
-                                limits.maxCommandsPerRequest(),
-                                limits.maxCommandFeedbackCharacters()),
-                        getLogger());
+        DirtConfig config =
+                DirtConfigLoader.load(getConfig(), System.getenv(PORT_ENVIRONMENT_VARIABLE));
 
         try {
-            this.apiServer.start();
+            this.runtime = DirtRuntime.start(this, config, bridgeToken());
         } catch (IOException exception) {
-            this.apiServer = null;
+            this.runtime = null;
             throw new IllegalStateException(
-                    "Could not start the Dirt MCP bridge on 127.0.0.1:" + settings.bridge().port(),
+                    "Could not start the Dirt MCP bridge on 127.0.0.1:" + config.bridge().port(),
                     exception);
-        }
-
-        if (getLogger().isLoggable(Level.INFO)) {
-            getLogger()
-                    .info(
-                            "Dirt MCP bridge listening on http://127.0.0.1:"
-                                    + settings.bridge().port());
         }
     }
 
     @Override
     public void onDisable() {
-        if (this.apiServer != null) {
-            this.apiServer.close();
-            this.apiServer = null;
+        if (this.runtime != null) {
+            this.runtime.close();
+            this.runtime = null;
         }
     }
 

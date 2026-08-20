@@ -1,0 +1,353 @@
+package ca.deliyannides.dirtmcp.paper.bridge;
+
+import static ca.deliyannides.dirtmcp.paper.bridge.BridgeTestFixture.authorized;
+import static ca.deliyannides.dirtmcp.paper.bridge.BridgeTestFixture.availablePort;
+import static ca.deliyannides.dirtmcp.paper.bridge.BridgeTestFixture.config;
+import static ca.deliyannides.dirtmcp.paper.bridge.BridgeTestFixture.json;
+import static ca.deliyannides.dirtmcp.paper.bridge.BridgeTestFixture.server;
+import static ca.deliyannides.dirtmcp.paper.bridge.BridgeTestFixture.uri;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import ca.deliyannides.dirtmcp.paper.operation.OperationException;
+import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
+import ca.deliyannides.dirtmcp.paper.status.PingServer;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+
+final class BridgeServerProtocolTest {
+    @Test
+    void servesJsonOnLoopbackWithRequiredResponseHeaders() throws Exception {
+        try (BridgeServer bridge =
+                        server(config(availablePort(), 4), new BridgeTestFixture.TestOperations());
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+
+            HttpResponse<String> response =
+                    client.send(
+                            authorized(bridge, "/v1/ping").GET().build(),
+                            HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, response.statusCode());
+            assertEquals(json("{\"status\":\"ok\"}"), json(response.body()));
+            assertEquals(
+                    "application/json; charset=utf-8",
+                    response.headers().firstValue("Content-Type").orElseThrow());
+            assertEquals("no-store", response.headers().firstValue("Cache-Control").orElseThrow());
+        }
+    }
+
+    @Test
+    void authenticatesBeforeDisclosingRoutesOrMethods() throws Exception {
+        try (BridgeServer bridge =
+                        server(config(availablePort(), 4), new BridgeTestFixture.TestOperations());
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+
+            for (String path : List.of("/v1/not-real", "/v1/ping?probe=true")) {
+                HttpResponse<String> response =
+                        client.send(
+                                HttpRequest.newBuilder(uri(bridge, path))
+                                        .POST(HttpRequest.BodyPublishers.noBody())
+                                        .build(),
+                                HttpResponse.BodyHandlers.ofString());
+                assertEquals(401, response.statusCode());
+                assertEquals(
+                        json(
+                                "{\"error\":{\"code\":\"unauthorized\",\"message\":\"A valid bearer token is required\"}}"),
+                        json(response.body()));
+                assertEquals(
+                        "Bearer realm=\"dirt-mcp\"",
+                        response.headers().firstValue("WWW-Authenticate").orElseThrow());
+            }
+        }
+    }
+
+    @Test
+    void usesExactPathsAndReportsUnknownRoutesAndMethodsAsJson() throws Exception {
+        try (BridgeServer bridge =
+                        server(config(availablePort(), 4), new BridgeTestFixture.TestOperations());
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+
+            for (String path : List.of("/v1/not-real", "/v1/ping/extra", "/v1/ping?probe=true")) {
+                HttpResponse<String> response =
+                        client.send(
+                                authorized(bridge, path).GET().build(),
+                                HttpResponse.BodyHandlers.ofString());
+                assertEquals(404, response.statusCode());
+                assertEquals(
+                        "not_found",
+                        json(response.body())
+                                .getAsJsonObject()
+                                .getAsJsonObject("error")
+                                .get("code")
+                                .getAsString());
+            }
+
+            HttpResponse<String> wrongMethod =
+                    client.send(
+                            authorized(bridge, "/v1/ping")
+                                    .POST(HttpRequest.BodyPublishers.noBody())
+                                    .build(),
+                            HttpResponse.BodyHandlers.ofString());
+            assertEquals(405, wrongMethod.statusCode());
+            assertEquals("GET", wrongMethod.headers().firstValue("Allow").orElseThrow());
+            assertEquals(
+                    "method_not_allowed",
+                    json(wrongMethod.body())
+                            .getAsJsonObject()
+                            .getAsJsonObject("error")
+                            .get("code")
+                            .getAsString());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("operationFailures")
+    void mapsTypedOperationFailures(
+            OperationFailure failure, int expectedStatus, String expectedCode) throws Exception {
+        BridgeTestFixture.TestOperations operations =
+                new BridgeTestFixture.TestOperations() {
+                    @Override
+                    public PingServer.Result ping() throws OperationException {
+                        throw new OperationException(failure, "safe message");
+                    }
+                };
+        try (BridgeServer bridge = server(config(availablePort(), 4), operations);
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+            HttpResponse<String> response =
+                    client.send(
+                            authorized(bridge, "/v1/ping").GET().build(),
+                            HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(expectedStatus, response.statusCode());
+            assertEquals(
+                    json(
+                            "{\"error\":{\"code\":\""
+                                    + expectedCode
+                                    + "\",\"message\":\"safe message\"}}"),
+                    json(response.body()));
+        }
+    }
+
+    @Test
+    void rejectsExcessConcurrentWorkWithoutQueueing() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        BridgeTestFixture.TestOperations operations =
+                new BridgeTestFixture.TestOperations() {
+                    @Override
+                    public PingServer.Result ping() {
+                        entered.countDown();
+                        try {
+                            release.await();
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                        }
+                        return new PingServer.Result("ok");
+                    }
+                };
+        try (BridgeServer bridge = server(config(availablePort(), 1), operations);
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+            CompletableFuture<HttpResponse<String>> first =
+                    client.sendAsync(
+                            authorized(bridge, "/v1/ping").GET().build(),
+                            HttpResponse.BodyHandlers.ofString());
+            assertTrue(entered.await(2, TimeUnit.SECONDS));
+
+            HttpResponse<String> busy =
+                    client.send(
+                            authorized(bridge, "/v1/ping").GET().build(),
+                            HttpResponse.BodyHandlers.ofString());
+            assertEquals(503, busy.statusCode());
+            assertEquals(
+                    "bridge_busy",
+                    json(busy.body())
+                            .getAsJsonObject()
+                            .getAsJsonObject("error")
+                            .get("code")
+                            .getAsString());
+            release.countDown();
+            assertEquals(200, first.get(2, TimeUnit.SECONDS).statusCode());
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void rollsBackFailedStartsAndClosesIdempotently() throws Exception {
+        int port = availablePort();
+        BridgeServer bridge = server(config(port, 4), new BridgeTestFixture.TestOperations());
+        assertThrows(IllegalStateException.class, bridge::boundPort);
+
+        try (ServerSocket occupied =
+                new ServerSocket(port, 0, InetAddress.getByName("127.0.0.1"))) {
+            assertFalse(occupied.isClosed());
+            assertThrows(IOException.class, bridge::start);
+        }
+
+        bridge.start();
+        assertThrows(IllegalStateException.class, bridge::start);
+        bridge.close();
+        bridge.close();
+        assertThrows(IllegalStateException.class, bridge::boundPort);
+    }
+
+    @Test
+    void sanitizesUnexpectedFailuresAndWritesOneAuditRecord() throws Exception {
+        List<String> messages = new ArrayList<>();
+        Logger logger = Logger.getAnonymousLogger();
+        logger.setUseParentHandlers(false);
+        logger.addHandler(
+                new Handler() {
+                    @Override
+                    public void publish(LogRecord record) {
+                        messages.add(record.getMessage());
+                    }
+
+                    @Override
+                    public void flush() {}
+
+                    @Override
+                    public void close() {}
+                });
+        BridgeTestFixture.TestOperations operations =
+                new BridgeTestFixture.TestOperations() {
+                    @Override
+                    public PingServer.Result ping() {
+                        throw new IllegalStateException("secret detail");
+                    }
+                };
+        try (BridgeServer bridge = server(config(availablePort(), 4), operations, logger);
+                HttpClient client =
+                        HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build()) {
+            bridge.start();
+            HttpResponse<String> response =
+                    client.send(
+                            authorized(bridge, "/v1/ping").GET().build(),
+                            HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(500, response.statusCode());
+            assertEquals(
+                    "internal_error",
+                    json(response.body())
+                            .getAsJsonObject()
+                            .getAsJsonObject("error")
+                            .get("code")
+                            .getAsString());
+            assertTrue(response.body().contains("end-to-end health check failed"));
+            assertFalse(response.body().contains("secret detail"));
+            assertTrue(
+                    messages.stream()
+                            .anyMatch(
+                                    message ->
+                                            message.matches(
+                                                    "Dirt MCP bridge_call operation=ping_server method=GET status=500 duration_ms=\\d+")));
+        }
+    }
+
+    @Test
+    void keepsAuditMetadataRequestLocalAndNeverLogsRequestBodies() throws Exception {
+        List<String> messages = new CopyOnWriteArrayList<>();
+        CountDownLatch audited = new CountDownLatch(2);
+        Logger logger = Logger.getAnonymousLogger();
+        logger.setUseParentHandlers(false);
+        logger.addHandler(
+                new Handler() {
+                    @Override
+                    public void publish(LogRecord record) {
+                        messages.add(record.getMessage());
+                        if (record.getMessage().contains("bridge_call")) {
+                            audited.countDown();
+                        }
+                    }
+
+                    @Override
+                    public void flush() {}
+
+                    @Override
+                    public void close() {}
+                });
+        try (BridgeServer bridge =
+                        server(
+                                config(availablePort(), 4),
+                                new BridgeTestFixture.TestOperations(),
+                                logger);
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+            HttpResponse<String> edit =
+                    client.send(
+                            authorized(bridge, "/v1/set-blocks")
+                                    .header("Content-Type", "application/json")
+                                    .header(
+                                            "X-Dirt-Call-Id",
+                                            "123e4567-e89b-42d3-a456-426614174000")
+                                    .POST(
+                                            HttpRequest.BodyPublishers.ofString(
+                                                    """
+                                                    {"world":"audit-world","changes":[{
+                                                     "position":{"x":1,"y":2,"z":3},
+                                                     "blockState":"minecraft:secret_gold_block"}]}
+                                                    """))
+                                    .build(),
+                            HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> command =
+                    client.send(
+                            BridgeTestFixture.post(
+                                    bridge,
+                                    "/v1/run-minecraft-commands",
+                                    "{\"commands\":[\"say private payload\"]}"),
+                            HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, edit.statusCode());
+            assertEquals(200, command.statusCode());
+            assertTrue(audited.await(2, TimeUnit.SECONDS));
+
+            List<String> calls =
+                    messages.stream().filter(message -> message.contains("bridge_call")).toList();
+            assertEquals(2, calls.size());
+            assertTrue(calls.get(0).contains("world=\"audit-world\""));
+            assertTrue(calls.get(0).contains("call=123e4567-e89b-42d3-a456-426614174000"));
+            assertFalse(calls.get(1).contains(" world="));
+            assertFalse(String.join("\n", messages).contains("secret_gold_block"));
+            assertFalse(String.join("\n", messages).contains("private payload"));
+        }
+    }
+
+    private static Stream<Arguments> operationFailures() {
+        return Stream.of(
+                Arguments.of(OperationFailure.INVALID_REQUEST, 400, "invalid_request"),
+                Arguments.of(OperationFailure.WORLD_NOT_FOUND, 404, "world_not_found"),
+                Arguments.of(OperationFailure.NOTHING_TO_UNDO, 409, "nothing_to_undo"),
+                Arguments.of(OperationFailure.WORLD_BUSY, 409, "world_busy"),
+                Arguments.of(OperationFailure.CHANGE_LIMIT_EXCEEDED, 413, "change_limit_exceeded"),
+                Arguments.of(OperationFailure.REGION_TOO_LARGE, 413, "region_too_large"),
+                Arguments.of(OperationFailure.RESULT_TOO_LARGE, 413, "result_too_large"),
+                Arguments.of(OperationFailure.SERVER_UNAVAILABLE, 503, "server_unavailable"),
+                Arguments.of(OperationFailure.UNHEALTHY, 503, "unhealthy"),
+                Arguments.of(OperationFailure.WORLD_UNAVAILABLE, 503, "world_unavailable"));
+    }
+}

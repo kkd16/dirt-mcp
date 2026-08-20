@@ -29,6 +29,16 @@ The Java plugin owns everything that touches the Minecraft server:
 Paper and FAWE classes stop at this boundary. The plugin never hosts a model or
 parses MCP messages.
 
+The plugin remains one deployable JAR but is organized as cohesive feature
+packages. A small bootstrap owns lifecycle; the bridge dispatcher owns exact
+routing, authentication, admission, and error mapping; narrow operation
+interfaces connect endpoints to status, command, inspection, and edit services.
+Endpoints compose an operation with a typed request-decoder function, keeping
+wire parsing adjacent to the operation without a decoder class hierarchy.
+Paper scheduler access is centralized, while Dirt-owned models and inspection
+algorithms remain independent of HTTP, Bukkit, and FAWE. Adding an operation is
+a vertical slice rather than another branch in a central server class.
+
 ### MCP server
 
 The TypeScript process owns the agent-facing interface:
@@ -64,14 +74,18 @@ snapshots on the main server thread. It counts summary states, extracts exact
 filtered geometry, or scans the nearest non-air block along each sightline of a
 bounded orthographic view from those snapshots off-thread. Exact results are
 rejected rather than truncated when their cap is exceeded. Requests fail if the
-world, height range, or any chunk is unavailable.
+world, height range, or any chunk is unavailable. A separate touched-chunk limit
+is checked before snapshot capture, so thin regions cannot amplify main-thread
+work despite having a small block volume.
 
 ## Deployment
 
 V1 is a same-machine deployment. Loading the plugin starts the Paper bridge on
 the hard-coded `127.0.0.1` interface. Bridge endpoints require a shared bearer
-token even on loopback. The MCP server receives the bridge URL and token through
-its process environment.
+token even on loopback. Routes use exact method and path matching and do not
+accept query strings. A bounded authenticated-request admission gate rejects
+excess work rather than allowing Paper scheduler waiters to grow without bound.
+The MCP server receives the bridge URL and token through its process environment.
 
 ## Edit execution
 
@@ -88,12 +102,16 @@ V1 keeps execution intentionally direct:
 There is no persistent job system. One mutation may run per world at a time;
 additional mutations fail as busy rather than racing. Each world retains its
 configured number of newest Dirt MCP edits in memory; history is cleared on
-restart, and setting the history depth to zero disables undo retention.
+restart or world unload, and setting the history depth to zero disables undo
+retention. Locks and history use the Paper world UUID, so a new world loaded
+under an old name cannot inherit stale state.
 
 Potentially blocking FAWE work stays off Paper's main tick thread. Any Paper API
 that requires server-thread ownership crosses a small scheduler boundary.
 Responses report success only after FAWE has completed and closed its edit
-session.
+session. Plugin chunk tickets are reference counted and held only for the
+duration of an edit or undo; runtime shutdown rejects new work and releases all
+remaining tickets before closing the scheduler boundary.
 
 `replace_region_blocks` and `fill_region` use the same already-loaded-chunk
 rule as inspection. `set_blocks` checks only the chunks containing its explicit
@@ -130,10 +148,13 @@ Dirt resource limits, or Dirt undo history.
 
 ## Dependency direction
 
-Dependencies point toward the live world:
+Dependencies point inward through narrow operation contracts and outward only
+from concrete platform adapters:
 
 ```text
-MCP schemas -> bridge contract -> application services -> FAWE adapter -> Paper
+bootstrap -> bridge endpoints -> operation contracts <- feature services
+                                      ^                    |
+                                      |             Paper / FAWE adapters
 ```
 
 FAWE types do not appear in HTTP or MCP schemas. This keeps tool behavior stable

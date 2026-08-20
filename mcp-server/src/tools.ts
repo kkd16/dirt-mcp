@@ -555,11 +555,29 @@ const RunMinecraftCommandsOutputSchema = z
   .strict()
   .describe('Ordered Paper command dispatch results and bounded feedback.');
 
+const BridgeErrorCodeSchema = z.enum([
+  'bridge_busy',
+  'change_limit_exceeded',
+  'internal_error',
+  'invalid_request',
+  'method_not_allowed',
+  'not_found',
+  'nothing_to_undo',
+  'region_too_large',
+  'result_too_large',
+  'server_unavailable',
+  'unauthorized',
+  'unhealthy',
+  'world_busy',
+  'world_not_found',
+  'world_unavailable',
+]);
+
 const ErrorSchema = z
   .object({
     error: z
       .object({
-        code: z.string().min(1).describe('Stable machine-readable error code.'),
+        code: BridgeErrorCodeSchema.describe('Stable machine-readable error code.'),
         message: z.string().min(1).describe('Human-readable explanation.'),
       })
       .strict(),
@@ -582,6 +600,11 @@ const LimitConfigurationSchema = z
       .int()
       .positive()
       .describe('Maximum cuboid mutation/count volume or explicit positions in set_blocks.'),
+    maxTouchedChunks: z
+      .number()
+      .int()
+      .positive()
+      .describe('Maximum distinct loaded chunks one inspection or mutation may touch.'),
     maxChangedBlocks: z.number().int().positive().describe('Maximum blocks one edit may change.'),
     maxInspectionVolume: z
       .number()

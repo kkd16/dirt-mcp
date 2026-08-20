@@ -1,9 +1,11 @@
 import com.github.spotbugs.snom.Confidence
 import com.github.spotbugs.snom.Effort
 import org.gradle.api.tasks.bundling.AbstractArchiveTask
+import org.gradle.testing.jacoco.tasks.JacocoCoverageVerification
 
 plugins {
     java
+    jacoco
     pmd
     id("com.diffplug.spotless")
     id("com.github.spotbugs")
@@ -43,6 +45,7 @@ dependencies {
     testImplementation("io.papermc.paper:paper-api:$paperApiVersion")
     testImplementation("com.google.code.gson:gson:2.14.0")
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("com.tngtech.archunit:archunit-junit6:1.5.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -75,8 +78,12 @@ spotbugs {
     ignoreFailures = false
 }
 
+jacoco {
+    toolVersion = "0.8.15"
+}
+
 tasks {
-    compileJava {
+    withType<JavaCompile>().configureEach {
         options.encoding = "UTF-8"
         options.release = 25
         options.compilerArgs.addAll(listOf("-Xlint:all", "-Werror"))
@@ -98,6 +105,73 @@ tasks {
 
     test {
         useJUnitPlatform()
+        finalizedBy(jacocoTestReport)
+    }
+
+    jacocoTestReport {
+        dependsOn(test)
+        reports {
+            html.required = true
+            xml.required = true
+        }
+    }
+
+    jacocoTestCoverageVerification {
+        dependsOn(jacocoTestReport)
+        violationRules {
+            rule {
+                limit {
+                    counter = "LINE"
+                    minimum = "0.70".toBigDecimal()
+                }
+                limit {
+                    counter = "BRANCH"
+                    minimum = "0.58".toBigDecimal()
+                }
+            }
+        }
+    }
+
+    val jacocoCoreCoverageVerification =
+        register<JacocoCoverageVerification>("jacocoCoreCoverageVerification") {
+            dependsOn(test)
+            sourceSets(sourceSets.main.get())
+            classDirectories.setFrom(
+                sourceSets.main.get().output.asFileTree.matching {
+                    // These adapters require a running Paper/FAWE environment and are exercised by
+                    // the managed smoke suite. Keep them in the full report and exclude them only
+                    // from the independently testable core gate.
+                    exclude(
+                        "ca/deliyannides/dirtmcp/paper/DirtMcpPlugin.class",
+                        "ca/deliyannides/dirtmcp/paper/bootstrap/DirtRuntime.class",
+                        "ca/deliyannides/dirtmcp/paper/platform/PaperMainThread*.class",
+                        "ca/deliyannides/dirtmcp/paper/command/BukkitCommandAccess*.class",
+                        "ca/deliyannides/dirtmcp/paper/status/BukkitServerStatusAccess*.class",
+                        "ca/deliyannides/dirtmcp/paper/world/edit/PaperEditPreparation*.class",
+                        "ca/deliyannides/dirtmcp/paper/world/edit/FaweEditExecutor*.class",
+                        "ca/deliyannides/dirtmcp/paper/world/edit/PaperFaweEditPlatform*.class",
+                        "ca/deliyannides/dirtmcp/paper/world/edit/WorldEditLifecycleListener*.class",
+                    )
+                },
+            )
+            executionData(layout.buildDirectory.file("jacoco/test.exec"))
+            violationRules {
+                rule {
+                    limit {
+                        counter = "LINE"
+                        minimum = "0.90".toBigDecimal()
+                    }
+                    limit {
+                        counter = "BRANCH"
+                        minimum = "0.75".toBigDecimal()
+                    }
+                }
+            }
+        }
+
+    check {
+        dependsOn(jacocoTestCoverageVerification)
+        dependsOn(jacocoCoreCoverageVerification)
     }
 
     jar {

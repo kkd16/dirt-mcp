@@ -6,11 +6,9 @@ ordered by priority.
 
 ## 1. Expand Paper and FAWE integration coverage
 
-- Cover per-world locking and `world_busy` behavior.
-- Cover bounded and disabled history plus multi-entry undo ordering.
-- Verify live authentication failures and change-limit rejection before mutation.
-- Verify edit-session and chunk-ticket cleanup on success, failure, interruption,
-  and plugin shutdown.
+- Verify live change-limit rejection before mutation.
+- Exercise in-flight plugin shutdown during a FAWE mutation and verify live
+  edit-session and chunk-ticket cleanup.
 
 ## 2. Strengthen MCP bridge failure coverage
 

@@ -68,12 +68,14 @@ The port may instead be set in `plugins/DirtMCP/config.yml`:
 bridge:
   port: 8765
   backlog: 0
-  shutdown-delay-seconds: 0
+  shutdown-delay-seconds: 5
   minimum-token-bytes: 32
+  max-concurrent-requests: 32
 
 limits:
   max-request-bytes: 262144
   max-region-volume: 262144
+  max-touched-chunks: 256
   max-changed-blocks: 65536
   max-inspection-volume: 16384
   default-inspection-results: 512
@@ -93,8 +95,10 @@ the same `DIRT_MCP_BRIDGE_TOKEN` to the MCP process. Tokens must satisfy the
 configured byte minimum, which defaults to 32; lowering it weakens
 authentication. Never commit or log tokens. All settings are validated at
 startup; active tool limits and defaults are reported by `get_server_status`.
-Restart Paper after changing them. Existing configuration files
-receive newly introduced default keys without replacing operator values.
+Restart Paper after changing them. Configuration is intentionally strict:
+missing, unknown, or invalid keys stop plugin startup instead of being migrated
+or silently ignored. Compare an existing file with the shipped `config.yml`
+after upgrading.
 
 The repository includes a project-scoped Codex configuration in
 `.codex/config.toml`. Run `make up` at least once to build the project and create
@@ -216,6 +220,14 @@ temporarily force-loads chunk `0,0`, verifies status and inspection paths,
 mutates a bounded fixture through fill, replacement, sparse setting, and command
 dispatch, checks result caps, exact states, no-ops, and undo, then restores the
 prior world state. Run it without concurrent Dirt MCP edits.
+
+The offline Java suite publishes a complete JaCoCo report at
+`paper-plugin/build/reports/jacoco/test/html/index.html` and enforces 70% line
+and 58% branch coverage across the whole plugin. A second gate enforces 90% line
+and 75% branch coverage on the independently testable core; only explicitly
+listed Paper/FAWE runtime adapters are omitted from that stricter calculation.
+Those adapters remain visible in the complete report and are exercised by the
+managed live smoke suite, whose separate JVM is not counted as JaCoCo coverage.
 
 ## Contributing
 

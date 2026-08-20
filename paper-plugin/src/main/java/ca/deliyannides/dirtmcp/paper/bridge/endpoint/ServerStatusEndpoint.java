@@ -1,0 +1,40 @@
+package ca.deliyannides.dirtmcp.paper.bridge.endpoint;
+
+import ca.deliyannides.dirtmcp.paper.bridge.BridgeEndpoint;
+import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
+import ca.deliyannides.dirtmcp.paper.operation.OperationException;
+import ca.deliyannides.dirtmcp.paper.status.GetServerStatus;
+import java.io.IOException;
+
+public final class ServerStatusEndpoint implements BridgeEndpoint {
+    private final GetServerStatus operation;
+
+    public ServerStatusEndpoint(GetServerStatus operation) {
+        this.operation = operation;
+    }
+
+    @Override
+    public String operation() {
+        return "get_server_status";
+    }
+
+    @Override
+    public String method() {
+        return "GET";
+    }
+
+    @Override
+    public String path() {
+        return "/v1/server-status";
+    }
+
+    @Override
+    public void handle(BridgeExchange exchange) throws IOException, OperationException {
+        exchange.ok(this.operation.getStatus());
+    }
+
+    @Override
+    public String internalErrorMessage() {
+        return "Server status could not be returned";
+    }
+}

@@ -1,0 +1,118 @@
+package ca.deliyannides.dirtmcp.paper.world.edit;
+
+import ca.deliyannides.dirtmcp.paper.operation.OperationException;
+import ca.deliyannides.dirtmcp.paper.platform.MainThread;
+import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
+import java.util.List;
+import org.bukkit.plugin.java.JavaPlugin;
+
+final class PaperFaweEditPlatform implements EditPlatform {
+    private final PaperEditPreparation preparation;
+    private final FaweEditExecutor executor;
+
+    PaperFaweEditPlatform(JavaPlugin plugin, MainThread mainThread, int maxChangedBlocks) {
+        if (maxChangedBlocks < 1) {
+            throw new IllegalArgumentException("Maximum changed blocks must be positive");
+        }
+        this.preparation = new PaperEditPreparation(plugin, mainThread);
+        this.executor = new FaweEditExecutor(maxChangedBlocks);
+    }
+
+    @Override
+    public WorldHandle resolveWorld(String worldName) throws OperationException {
+        return this.preparation.resolveWorld(worldName);
+    }
+
+    @Override
+    public PreparedReplace prepareReplace(
+            WorldHandle world, ReplaceRegionBlocks.Request request, Cuboid region)
+            throws OperationException {
+        return this.preparation.prepareReplace(requireWorld(world), request, region);
+    }
+
+    @Override
+    public PreparedFill prepareFill(WorldHandle world, FillRegion.Request request, Cuboid region)
+            throws OperationException {
+        return this.preparation.prepareFill(requireWorld(world), request, region);
+    }
+
+    @Override
+    public PreparedSet prepareSet(
+            WorldHandle world, SetBlocks.Request request, List<ChunkPosition> touchedChunks)
+            throws OperationException {
+        return this.preparation.prepareSet(requireWorld(world), request, touchedChunks);
+    }
+
+    @Override
+    public EditResult replace(PreparedReplace prepared, Cuboid region, boolean dryRun)
+            throws OperationException {
+        return this.executor.replace(requireReplace(prepared), region, dryRun);
+    }
+
+    @Override
+    public EditResult fill(PreparedFill prepared, Cuboid region, boolean dryRun)
+            throws OperationException {
+        return this.executor.fill(requireFill(prepared), region, dryRun);
+    }
+
+    @Override
+    public EditResult set(PreparedSet prepared, boolean dryRun) throws OperationException {
+        return this.executor.set(requireSet(prepared), dryRun);
+    }
+
+    @Override
+    @SuppressWarnings("try")
+    public void undo(WorldHandle world, UndoToken undo) throws OperationException {
+        PaperEditPreparation.PaperWorld paperWorld = requireWorld(world);
+        FaweEditExecutor.StoredUndo stored = requireUndo(undo);
+        try (ChunkTicketManager.Lease ignored =
+                this.preparation.prepareUndo(paperWorld, stored.chunks())) {
+            this.executor.undo(paperWorld, stored);
+        }
+    }
+
+    @Override
+    public void beginStopping() {
+        this.preparation.beginStopping();
+    }
+
+    @Override
+    public void close() {
+        this.preparation.close();
+    }
+
+    private static PaperEditPreparation.PaperWorld requireWorld(WorldHandle world) {
+        if (world instanceof PaperEditPreparation.PaperWorld paperWorld) {
+            return paperWorld;
+        }
+        throw new IllegalArgumentException("World handle was not created by this edit platform");
+    }
+
+    private static PaperEditPreparation.PreparedReplace requireReplace(PreparedReplace prepared) {
+        if (prepared instanceof PaperEditPreparation.PreparedReplace edit) {
+            return edit;
+        }
+        throw new IllegalArgumentException("Prepared edit belongs to another platform");
+    }
+
+    private static PaperEditPreparation.PreparedFill requireFill(PreparedFill prepared) {
+        if (prepared instanceof PaperEditPreparation.PreparedFill edit) {
+            return edit;
+        }
+        throw new IllegalArgumentException("Prepared edit belongs to another platform");
+    }
+
+    private static PaperEditPreparation.PreparedSet requireSet(PreparedSet prepared) {
+        if (prepared instanceof PaperEditPreparation.PreparedSet edit) {
+            return edit;
+        }
+        throw new IllegalArgumentException("Prepared edit belongs to another platform");
+    }
+
+    private static FaweEditExecutor.StoredUndo requireUndo(UndoToken undo) {
+        if (undo instanceof FaweEditExecutor.StoredUndo stored) {
+            return stored;
+        }
+        throw new IllegalArgumentException("Undo token was not created by this edit platform");
+    }
+}

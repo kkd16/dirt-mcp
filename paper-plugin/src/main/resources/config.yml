@@ -7,16 +7,20 @@ bridge:
   port: 8765
   # Zero asks the operating system to choose its normal HTTP connection backlog.
   backlog: 0
-  # Seconds that the HTTP server allows active exchanges to finish during shutdown.
-  shutdown-delay-seconds: 0
+  # Seconds to wait for interrupted bridge request workers during shutdown.
+  shutdown-delay-seconds: 5
   # Lowering this below 32 weakens bearer-token security.
   minimum-token-bytes: 32
+  # Maximum authenticated requests allowed to execute concurrently.
+  max-concurrent-requests: 32
 
 limits:
   # Maximum JSON request body. Oversized requests fail before parsing or mutation.
   max-request-bytes: 262144
   # Maximum inclusive cuboid volume or explicit positions in one operation.
   max-region-volume: 262144
+  # Maximum distinct loaded chunks one inspection or edit may touch.
+  max-touched-chunks: 256
   # Maximum blocks one mutation may change.
   max-changed-blocks: 65536
   # Maximum blocks scanned by exact block retrieval or an orthographic view.

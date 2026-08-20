@@ -1,0 +1,65 @@
+package ca.deliyannides.dirtmcp.paper.bridge.endpoint;
+
+import ca.deliyannides.dirtmcp.paper.bridge.InvalidRequestException;
+import ca.deliyannides.dirtmcp.paper.bridge.RequestJson;
+import ca.deliyannides.dirtmcp.paper.world.edit.DestinationPaletteEntry;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+
+final class DestinationPaletteDecoder {
+    private static final Set<String> REQUIRED_FIELDS = Set.of("blockState");
+    private static final Set<String> ALLOWED_FIELDS = Set.of("blockState", "weight");
+
+    private DestinationPaletteDecoder() {}
+
+    static List<DestinationPaletteEntry> decode(JsonElement element)
+            throws InvalidRequestException {
+        if (element == null || !element.isJsonArray() || element.getAsJsonArray().isEmpty()) {
+            throw new InvalidRequestException("destinationPalette must be a non-empty array");
+        }
+        List<DestinationPaletteEntry> entries = new ArrayList<>(element.getAsJsonArray().size());
+        boolean hasWeights = false;
+        boolean hasUnweightedEntries = false;
+        int weightTotal = 0;
+        for (int index = 0; index < element.getAsJsonArray().size(); index++) {
+            JsonElement value = element.getAsJsonArray().get(index);
+            if (!value.isJsonObject()) {
+                throw new InvalidRequestException(
+                        "destinationPalette[" + index + "] must be an object");
+            }
+            JsonObject object = value.getAsJsonObject();
+            RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS);
+            Integer weight = null;
+            if (object.has("weight")) {
+                weight =
+                        RequestJson.integer(
+                                object.get("weight"), "destinationPalette[" + index + "].weight");
+                if (weight < 1 || weight > 100) {
+                    throw new InvalidRequestException(
+                            "destinationPalette[" + index + "].weight must be between 1 and 100");
+                }
+                hasWeights = true;
+                weightTotal = Math.addExact(weightTotal, weight);
+            } else {
+                hasUnweightedEntries = true;
+            }
+            entries.add(
+                    new DestinationPaletteEntry(
+                            RequestJson.string(
+                                    object.get("blockState"),
+                                    "destinationPalette[" + index + "].blockState"),
+                            weight));
+        }
+        if (hasWeights && hasUnweightedEntries) {
+            throw new InvalidRequestException(
+                    "destinationPalette weights must be provided for every entry or omitted from every entry");
+        }
+        if (hasWeights && weightTotal != 100) {
+            throw new InvalidRequestException("destinationPalette weights must total 100");
+        }
+        return List.copyOf(entries);
+    }
+}

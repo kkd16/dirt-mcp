@@ -115,6 +115,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     limits: {
       maxRequestBytes: 262_144,
       maxRegionVolume: 1_000_000,
+      maxTouchedChunks: 256,
       maxChangedBlocks: 250_000,
       maxInspectionVolume: 32_768,
       defaultInspectionResultLimit: 512,
