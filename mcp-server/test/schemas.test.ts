@@ -28,7 +28,7 @@ test('applies inspection defaults and rejects combined pattern amplification', (
     }).success,
     false,
   );
-  assert.equal(
+  assert.deepEqual(
     ScanOrthographicViewInputSchema.parse({
       world: 'world',
       origin: { x: 0, y: 0, z: 0 },
@@ -36,8 +36,17 @@ test('applies inspection defaults and rejects combined pattern amplification', (
       horizontalRadius: 0,
       verticalRadius: 0,
       maxDistance: 1,
-    }).format,
-    'blocks',
+    }),
+    {
+      world: 'world',
+      origin: { x: 0, y: 0, z: 0 },
+      direction: 'north',
+      horizontalRadius: 0,
+      verticalRadius: 0,
+      maxDistance: 1,
+      depth: 0,
+      format: 'blocks',
+    },
   );
 });
 

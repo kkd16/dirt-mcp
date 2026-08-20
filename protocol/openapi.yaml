@@ -163,7 +163,7 @@ paths:
   /v1/scan-orthographic-view:
     post:
       operationId: scanOrthographicView
-      summary: Return the first non-air block along each sightline in an orthographic view
+      summary: Return a selected non-air depth along each sightline in an orthographic view
       requestBody:
         required: true
         content:
@@ -827,6 +827,12 @@ components:
           format: int32
           minimum: 1
           description: Blocks scanned forward from the origin; distance 1 is adjacent.
+        depth:
+          type: integer
+          format: int32
+          minimum: 0
+          default: 0
+          description: Zero-based non-air hit to return on each sightline; 0 is the first, 1 is the second, and so on.
         maxResults:
           type: integer
           format: int32
@@ -877,6 +883,7 @@ components:
         - horizontalRadius
         - verticalRadius
         - maxDistance
+        - depth
       properties:
         horizontalRadius:
           type: integer
@@ -890,6 +897,11 @@ components:
           type: integer
           format: int32
           minimum: 1
+        depth:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Zero-based non-air depth returned for each sightline.
     ViewOffset:
       type: object
       additionalProperties: false

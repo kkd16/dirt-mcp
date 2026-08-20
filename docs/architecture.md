@@ -79,7 +79,7 @@ orthographic views share one detailed-inspection volume limit and one default
 and maximum result limit. The plugin verifies that
 every intersecting chunk is already loaded and captures thread-safe Paper chunk
 snapshots on the main server thread. It counts summary states, extracts exact
-filtered geometry, or scans the nearest non-air block along each sightline of a
+filtered geometry, or scans a selected non-air depth along each sightline of a
 bounded orthographic view from those snapshots off-thread. Exact results are
 rejected rather than truncated when their cap is exceeded. Requests fail if the
 world, height range, or any chunk is unavailable. A separate touched-chunk limit

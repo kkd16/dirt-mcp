@@ -26,6 +26,7 @@ public interface ScanOrthographicView {
             int horizontalRadius,
             int verticalRadius,
             int maxDistance,
+            int depth,
             int maxResults) {}
 
     record AxisVector(int x, int y, int z) {}
@@ -38,7 +39,7 @@ public interface ScanOrthographicView {
         }
     }
 
-    record Viewport(int horizontalRadius, int verticalRadius, int maxDistance) {}
+    record Viewport(int horizontalRadius, int verticalRadius, int maxDistance, int depth) {}
 
     record ViewOffset(int horizontal, int vertical, int distance) {}
 

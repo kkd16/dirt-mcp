@@ -138,7 +138,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       horizontal: { x: 1, y: 0, z: 0 },
       vertical: { x: 0, y: 1, z: 0 },
     },
-    viewport: { horizontalRadius: 1, verticalRadius: 1, maxDistance: 3 },
+    viewport: { horizontalRadius: 1, verticalRadius: 1, maxDistance: 3, depth: 1 },
     bounds: { min: { x: 0, y: 1, z: 1 }, max: { x: 2, y: 3, z: 3 } },
     scannedVolume: 27,
     visibleBlockCount: 3,
@@ -335,6 +335,18 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { name: 'run_minecraft_commands', annotations: mutationAnnotations(false) },
     ],
   );
+  const listedView = listedTools.find((tool) => tool.name === 'scan_orthographic_view');
+  assert.ok(listedView);
+  const viewInputSchema = listedView.inputSchema as {
+    readonly properties: { readonly depth: unknown };
+  };
+  assert.deepEqual(viewInputSchema.properties.depth, {
+    default: 0,
+    description: 'Zero-based non-air hit to return per sightline: 0 is first, 1 is second, and so on.',
+    type: 'integer',
+    minimum: 0,
+    maximum: 2_147_483_647,
+  });
   const listedSetBlocks = listedTools.find((tool) => tool.name === 'set_blocks');
   assert.ok(listedSetBlocks);
   const setBlocksInputSchema = listedSetBlocks.inputSchema as {
@@ -396,6 +408,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     horizontalRadius: 1,
     verticalRadius: 1,
     maxDistance: 3,
+    depth: 1,
   };
   send(child, {
     jsonrpc: '2.0',

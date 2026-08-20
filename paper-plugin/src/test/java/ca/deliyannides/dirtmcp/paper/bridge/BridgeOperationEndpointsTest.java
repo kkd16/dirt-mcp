@@ -118,7 +118,7 @@ final class BridgeOperationEndpointsTest {
                                     """
                                     {"world":"world","origin":{"x":8,"y":70,"z":9},
                                      "direction":"west","horizontalRadius":4,"verticalRadius":3,
-                                     "maxDistance":12,"maxResults":40}
+                                     "maxDistance":12,"depth":2,"maxResults":40}
                                     """));
 
             assertEquals(200, count.statusCode());
@@ -145,6 +145,7 @@ final class BridgeOperationEndpointsTest {
             assertEquals(4, viewRequest.get().horizontalRadius());
             assertEquals(3, viewRequest.get().verticalRadius());
             assertEquals(12, viewRequest.get().maxDistance());
+            assertEquals(2, viewRequest.get().depth());
             assertEquals(40, viewRequest.get().maxResults());
             assertEquals(200, view.statusCode());
         }

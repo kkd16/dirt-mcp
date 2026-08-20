@@ -14,7 +14,7 @@ behavior that matters when choosing and combining tools.
 | `get_server_status`         | `GET /v1/server-status`              | Return builds, performance, players with facing, worlds, and config.  |
 | `count_region_block_states` | `POST /v1/count-region-block-states` | Count canonical block states in an inclusive region.                  |
 | `get_region_blocks`         | `POST /v1/get-region-blocks`         | Return filtered exact blocks or lossless axis-aligned runs.           |
-| `scan_orthographic_view`    | `POST /v1/scan-orthographic-view`    | Find the first non-air block on each bounded world-axis sightline.    |
+| `scan_orthographic_view`    | `POST /v1/scan-orthographic-view`    | Find a selected non-air depth on each bounded world-axis sightline.   |
 | `replace_region_blocks`     | `POST /v1/replace-region-blocks`     | Replace a union of block-state patterns with a destination palette.   |
 | `fill_region`               | `POST /v1/fill-region`               | Fill a region from a destination palette.                             |
 | `set_blocks`                | `POST /v1/set-blocks`                | Place weighted-palette states at relative offsets as one edit.        |
@@ -38,12 +38,14 @@ properties match any value. Both lists are limited to 64 entries combined and
 exact duplicates are evaluated once. The `runs` format returns a deterministic,
 non-overlapping exact cover using inclusive axis-aligned spans.
 
-`scan_orthographic_view` scans away from an origin, beginning at distance one,
-and stops at the first non-air block on each sightline. Horizontal views use
-world-up as their vertical axis. Up and down views use east as horizontal and
-north as vertical. The bridge returns explicit blocks; the MCP-only `grid`
-format converts them to a one-based `blockStatePalette` with aligned state-index
-and distance rows. Zero denotes an empty sightline.
+`scan_orthographic_view` scans away from an origin, beginning at distance one.
+Its zero-based `depth` selects the non-air hit returned on each sightline: zero
+is the first, one is the second, and omission defaults to zero. Air gaps do not
+count toward depth. Horizontal views use world-up as their vertical axis. Up and
+down views use east as horizontal and north as vertical. The bridge returns
+explicit blocks; the MCP-only `grid` format converts them to a one-based
+`blockStatePalette` with aligned state-index and distance rows. Zero denotes an
+empty sightline.
 
 Inspection result caps never truncate data. Dirt returns `result_too_large`
 when exact blocks, runs, or visible blocks exceed the applicable cap.

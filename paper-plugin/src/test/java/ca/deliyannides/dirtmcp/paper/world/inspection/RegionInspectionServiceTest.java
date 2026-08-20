@@ -116,7 +116,7 @@ final class RegionInspectionServiceTest {
         RegionInspectionService service = service(source, 16);
         ScanOrthographicView.Request request =
                 new ScanOrthographicView.Request(
-                        "world", position(0, 0, 0), Direction.NORTH, 0, 0, 3, 2);
+                        "world", position(0, 0, 0), Direction.NORTH, 0, 0, 3, 0, 2);
 
         ScanOrthographicView.Result result = service.scanOrthographicView(request);
 
@@ -341,7 +341,7 @@ final class RegionInspectionServiceTest {
                                 () ->
                                         service.scanOrthographicView(
                                                 new ScanOrthographicView.Request(
-                                                        "world", null, null, 0, 0, 1, 1)))
+                                                        "world", null, null, 0, 0, 1, 0, 1)))
                         .failure());
     }
 

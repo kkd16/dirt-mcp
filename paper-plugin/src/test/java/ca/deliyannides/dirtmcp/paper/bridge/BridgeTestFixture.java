@@ -173,7 +173,8 @@ final class BridgeTestFixture {
                     new ScanOrthographicView.Viewport(
                             request.horizontalRadius(),
                             request.verticalRadius(),
-                            request.maxDistance()),
+                            request.maxDistance(),
+                            request.depth()),
                     new BlockBounds(request.origin(), request.origin()),
                     1,
                     0,

@@ -27,6 +27,7 @@ final class ScanOrthographicViewRequestDecoder {
                     "horizontalRadius",
                     "verticalRadius",
                     "maxDistance",
+                    "depth",
                     "maxResults");
 
     private ScanOrthographicViewRequestDecoder() {}
@@ -39,6 +40,7 @@ final class ScanOrthographicViewRequestDecoder {
                 RequestJson.integer(object.get("horizontalRadius"), "horizontalRadius");
         int verticalRadius = RequestJson.integer(object.get("verticalRadius"), "verticalRadius");
         int maxDistance = RequestJson.integer(object.get("maxDistance"), "maxDistance");
+        int depth = object.has("depth") ? RequestJson.integer(object.get("depth"), "depth") : 0;
         int maxResults =
                 object.has("maxResults")
                         ? RequestJson.integer(object.get("maxResults"), "maxResults")
@@ -50,6 +52,7 @@ final class ScanOrthographicViewRequestDecoder {
                 horizontalRadius,
                 verticalRadius,
                 maxDistance,
+                depth,
                 maxResults);
     }
 

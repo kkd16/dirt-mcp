@@ -481,6 +481,7 @@ try {
     horizontalRadius: 0,
     verticalRadius: 0,
     maxDistance: 2,
+    depth: 0,
   });
   assert.deepEqual(view.bounds, {
     min: { x: 0, y: 0, z: 0 },
@@ -492,6 +493,25 @@ try {
     {
       position: { x: 0, y: 0, z: 1 },
       offset: { horizontal: 0, vertical: 0, distance: 1 },
+      blockState: filledState,
+    },
+  ]);
+
+  const deeperView = await bridgeRequest('/v1/scan-orthographic-view', {
+    ...viewRequest,
+    depth: 1,
+  });
+  assert.deepEqual(deeperView.viewport, {
+    horizontalRadius: 0,
+    verticalRadius: 0,
+    maxDistance: 2,
+    depth: 1,
+  });
+  assert.equal(deeperView.visibleBlockCount, 1);
+  assert.deepEqual(deeperView.blocks, [
+    {
+      position: { x: 0, y: 0, z: 0 },
+      offset: { horizontal: 0, vertical: 0, distance: 2 },
       blockState: filledState,
     },
   ]);

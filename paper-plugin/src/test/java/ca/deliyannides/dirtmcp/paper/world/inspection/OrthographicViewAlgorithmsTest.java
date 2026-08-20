@@ -109,10 +109,34 @@ final class OrthographicViewAlgorithmsTest {
     }
 
     @Test
+    void returnsRequestedNonAirDepthWithoutCountingAirGaps() throws Exception {
+        Request request =
+                new Request("world", new BlockPosition(0, 0, 0), Direction.DOWN, 0, 0, 5, 1, 10);
+        ViewGeometry geometry = OrthographicViewAlgorithms.geometry(request, 100);
+        Map<BlockPosition, BlockSample> states =
+                Map.of(
+                        new BlockPosition(0, -1, 0), solid("grass_block"),
+                        new BlockPosition(0, -3, 0), solid("dirt"),
+                        new BlockPosition(0, -4, 0), solid("stone"));
+
+        List<ViewBlock> blocks =
+                OrthographicViewAlgorithms.collectVisibleBlocks(
+                        request, geometry, viewCapture(states));
+
+        assertEquals(
+                List.of(
+                        new ViewBlock(
+                                new BlockPosition(0, -3, 0), new ViewOffset(0, 0, 3), "dirt")),
+                blocks);
+    }
+
+    @Test
     void rejectsOversizedOverflowingAndInvalidViews() {
         Request oversized = request(new BlockPosition(0, 0, 0), Direction.NORTH, 100, 100, 1, 10);
         Request overflowing =
                 request(new BlockPosition(Integer.MAX_VALUE, 0, 0), Direction.EAST, 0, 0, 1, 10);
+        Request negativeDepth =
+                new Request("world", new BlockPosition(0, 0, 0), Direction.NORTH, 0, 0, 1, -1, 1);
 
         OperationException oversizedFailure =
                 assertThrows(
@@ -124,6 +148,15 @@ final class OrthographicViewAlgorithmsTest {
                         () -> OrthographicViewAlgorithms.geometry(overflowing, 32_768));
         assertAll(
                 () -> assertEquals(OperationFailure.REGION_TOO_LARGE, oversizedFailure.failure()),
+                () ->
+                        assertEquals(
+                                OperationFailure.INVALID_REQUEST,
+                                assertThrows(
+                                                OperationException.class,
+                                                () ->
+                                                        OrthographicViewAlgorithms.geometry(
+                                                                negativeDepth, 10))
+                                        .failure()),
                 () ->
                         assertEquals(
                                 "View scan volume 40401 exceeds the maximum of 32768 blocks",
@@ -230,6 +263,7 @@ final class OrthographicViewAlgorithmsTest {
                 horizontalRadius,
                 verticalRadius,
                 maxDistance,
+                0,
                 maxResults);
     }
 

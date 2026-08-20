@@ -4,6 +4,7 @@ import type { ScanOrthographicViewBlocksOutput, ScanOrthographicViewGridOutput }
 const MAX_ARRAY_LENGTH = 0xffff_ffff;
 
 interface RequestedViewport {
+  readonly depth: number;
   readonly horizontalRadius: number;
   readonly maxDistance: number;
   readonly verticalRadius: number;
@@ -14,6 +15,7 @@ export function compactView(
   requested: RequestedViewport,
 ): ScanOrthographicViewGridOutput {
   if (
+    view.viewport.depth !== requested.depth ||
     view.viewport.horizontalRadius !== requested.horizontalRadius ||
     view.viewport.verticalRadius !== requested.verticalRadius ||
     view.viewport.maxDistance !== requested.maxDistance

@@ -156,7 +156,8 @@ public final class RegionInspectionService
                             new Viewport(
                                     request.horizontalRadius(),
                                     request.verticalRadius(),
-                                    request.maxDistance()),
+                                    request.maxDistance(),
+                                    request.depth()),
                             geometry.region().bounds(),
                             geometry.scannedVolume(),
                             blocks.size(),

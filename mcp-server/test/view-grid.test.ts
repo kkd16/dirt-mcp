@@ -4,7 +4,7 @@ import { ToolFailure } from '../dist/bridge/errors.js';
 import type { ScanOrthographicViewBlocksOutput } from '../dist/tools/inspection.js';
 import { compactView } from '../dist/tools/view-grid.js';
 
-const requested = { horizontalRadius: 1, verticalRadius: 1, maxDistance: 3 };
+const requested = { horizontalRadius: 1, verticalRadius: 1, maxDistance: 3, depth: 1 };
 
 function viewFixture(): ScanOrthographicViewBlocksOutput {
   return {
@@ -84,6 +84,10 @@ test('rejects inconsistent or resource-amplifying bridge views before returning 
   mismatchedViewport.viewport = { ...requested, maxDistance: 2 };
   assertInvalid(mismatchedViewport);
 
+  const mismatchedDepth = viewFixture();
+  mismatchedDepth.viewport = { ...requested, depth: 0 };
+  assertInvalid(mismatchedDepth);
+
   const mismatchedCount = viewFixture();
   mismatchedCount.visibleBlockCount = 2;
   assertInvalid(mismatchedCount);
@@ -115,6 +119,7 @@ test('rejects inconsistent or resource-amplifying bridge views before returning 
     horizontalRadius: 2_147_483_647,
     verticalRadius: 2_147_483_647,
     maxDistance: 2_147_483_647,
+    depth: 1,
   };
   assertInvalid(unsafeDimensions, unsafeDimensions.viewport);
 });

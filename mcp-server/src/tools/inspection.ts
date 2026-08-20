@@ -160,6 +160,14 @@ export const ScanOrthographicViewInputSchema = z
       .min(1)
       .max(INT32_MAX)
       .describe('Maximum forward scan distance; distance 1 is adjacent to origin.'),
+    depth: z
+      .number()
+      .int()
+      .min(0)
+      .max(INT32_MAX)
+      .optional()
+      .default(0)
+      .describe('Zero-based non-air hit to return per sightline: 0 is first, 1 is second, and so on.'),
     maxResults: z
       .number()
       .int()
@@ -176,7 +184,7 @@ export const ScanOrthographicViewInputSchema = z
       .describe('blocks returns explicit positions; grid returns compact lossless palette and distance matrices.'),
   })
   .strict()
-  .describe('Bounded orthographic sightlines to scan for their first non-air blocks.');
+  .describe('Bounded orthographic sightlines scanned for a selected non-air depth.');
 
 const AxisVectorSchema = z
   .object({
@@ -204,12 +212,13 @@ const ViewMetadata = {
       horizontalRadius: z.number().int().nonnegative().describe('Horizontal radius used.'),
       verticalRadius: z.number().int().nonnegative().describe('Vertical radius used.'),
       maxDistance: z.number().int().positive().describe('Forward distance used.'),
+      depth: z.number().int().nonnegative().describe('Zero-based non-air depth returned.'),
     })
     .strict()
     .describe('Resolved scan dimensions.'),
   bounds: BoundsSchema.describe('Inclusive world-space bounds scanned.'),
   scannedVolume: z.number().int().positive().describe('Total blocks checked across all sightlines.'),
-  visibleBlockCount: z.number().int().nonnegative().describe('Sightlines whose first non-air block was found.'),
+  visibleBlockCount: z.number().int().nonnegative().describe('Sightlines whose requested non-air block was found.'),
 };
 
 const ScanOrthographicViewBlocksOutputSchema = z
@@ -220,7 +229,7 @@ const ScanOrthographicViewBlocksOutputSchema = z
       .array(
         z
           .object({
-            position: BlockPositionSchema.describe('Absolute position of the first non-air block.'),
+            position: BlockPositionSchema.describe('Absolute position of the requested non-air block.'),
             offset: z
               .object({
                 horizontal: z
@@ -247,7 +256,7 @@ const ScanOrthographicViewBlocksOutputSchema = z
             blockState: z.string().min(1).describe('Canonical state of the visible block.'),
           })
           .strict()
-          .describe('First non-air block on one sightline.'),
+          .describe('Requested non-air block on one sightline.'),
       )
       .describe('Visible blocks in deterministic viewport order.'),
   })
@@ -347,7 +356,7 @@ export function registerInspectionTools(server: McpServer, bridge: BridgeClient)
     {
       title: 'Scan an orthographic view',
       description:
-        'Return the first non-air block on each bounded world-axis sightline. Prefer grid for larger views. Active scan and result ceilings are reported by get_server_status.',
+        'Return a selected zero-based non-air depth on each bounded world-axis sightline. Depth 0 is the first non-air block, 1 is the second, and so on. Prefer grid for larger views. Active scan and result ceilings are reported by get_server_status.',
       inputSchema: ScanOrthographicViewInputSchema,
       outputSchema: ScanOrthographicViewOutputSchema,
       annotations: READ_WORLD_ANNOTATIONS,

@@ -30,6 +30,9 @@ final class OrthographicViewAlgorithms {
         if (request.maxDistance() < 1) {
             throw invalid("maxDistance must be positive");
         }
+        if (request.depth() < 0) {
+            throw invalid("depth must be non-negative");
+        }
 
         long horizontalSize = 2L * request.horizontalRadius() + 1;
         long verticalSize = 2L * request.verticalRadius() + 1;
@@ -79,7 +82,6 @@ final class OrthographicViewAlgorithms {
         return new ViewGeometry(basis, region, scannedVolume);
     }
 
-    @SuppressWarnings("PMD.AvoidBranchingStatementAsLastInLoop")
     static List<ViewBlock> collectVisibleBlocks(
             Request request, ViewGeometry geometry, CapturedRegion capture)
             throws OperationException {
@@ -90,6 +92,7 @@ final class OrthographicViewAlgorithms {
             for (int horizontal = -request.horizontalRadius();
                     horizontal <= request.horizontalRadius();
                     horizontal++) {
+                int remainingDepth = request.depth();
                 for (int distance = 1; ; distance++) {
                     BlockPosition position =
                             viewPosition(
@@ -99,25 +102,27 @@ final class OrthographicViewAlgorithms {
                                     vertical,
                                     distance);
                     BlockSample sample = capture.sample(position);
-                    if (sample.air()) {
-                        if (distance == request.maxDistance()) {
+                    if (!sample.air()) {
+                        if (remainingDepth == 0) {
+                            blocks.add(
+                                    new ViewBlock(
+                                            position,
+                                            new ViewOffset(horizontal, vertical, distance),
+                                            sample.blockState()));
+                            if (blocks.size() > request.maxResults()) {
+                                throw new OperationException(
+                                        OperationFailure.RESULT_TOO_LARGE,
+                                        "View result exceeds maxResults of "
+                                                + request.maxResults()
+                                                + " visible blocks");
+                            }
                             break;
                         }
-                        continue;
+                        remainingDepth--;
                     }
-                    blocks.add(
-                            new ViewBlock(
-                                    position,
-                                    new ViewOffset(horizontal, vertical, distance),
-                                    sample.blockState()));
-                    if (blocks.size() > request.maxResults()) {
-                        throw new OperationException(
-                                OperationFailure.RESULT_TOO_LARGE,
-                                "View result exceeds maxResults of "
-                                        + request.maxResults()
-                                        + " visible blocks");
+                    if (distance == request.maxDistance()) {
+                        break;
                     }
-                    break;
                 }
             }
         }
