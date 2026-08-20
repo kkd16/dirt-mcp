@@ -1,6 +1,6 @@
 import type { BRIDGE_ERROR_CODES } from './contract.ts';
 
-export type ToolFailureCode =
+type ToolFailureCode =
   | (typeof BRIDGE_ERROR_CODES)[number]
   | 'bridge_unavailable'
   | 'bridge_unauthorized'

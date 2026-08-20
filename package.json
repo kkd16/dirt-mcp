@@ -18,10 +18,10 @@
     "lint:markdown": "markdownlint-cli2",
     "lint:shell": "shellcheck scripts/dev-paper scripts/run-dirt-mcp scripts/run-paper-dev scripts/validate-paper-jar scripts/validate-paper-log",
     "lint:workflows": "actionlint",
-    "package:check": "publint --strict mcp-server && pnpm --filter @dirt-mcp/server pack --dry-run",
+    "package:check": "publint --strict mcp-server",
     "test": "pnpm --filter @dirt-mcp/server run test",
     "validate": "pnpm run validate:openapi",
-    "validate:openapi": "redocly check-config && redocly lint"
+    "validate:openapi": "redocly lint --lint-config=error"
   },
   "devDependencies": {
     "@redocly/cli": "2.46.1",

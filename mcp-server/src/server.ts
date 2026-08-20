@@ -2,20 +2,14 @@ import { McpServer } from '@modelcontextprotocol/server';
 import packageMetadata from '../package.json' with { type: 'json' };
 import type { BridgeClient } from './bridge/client.ts';
 import type { DirtLogger } from './logging.ts';
-import { registerToolCatalog } from './tools/catalog.ts';
-import { MCP_TOOL_NAMES, type McpToolConfiguration, type McpToolName } from './tools/configuration.ts';
-
-function enabledNames(configuration: McpToolConfiguration, names: readonly McpToolName[]): McpToolName[] {
-  return names.filter((name) => configuration[name]);
-}
+import type { McpToolConfiguration } from './tools/configuration.ts';
+import { registerEditingTools } from './tools/editing.ts';
+import { registerInspectionTools } from './tools/inspection.ts';
+import { registerStatusTools } from './tools/status.ts';
 
 function serverInstructions(configuration: McpToolConfiguration): string {
-  const enabled = enabledNames(configuration, MCP_TOOL_NAMES);
   const instructions = [
-    enabled.length === 0
-      ? 'This Dirt server snapshot has no enabled MCP tools.'
-      : `Enabled tools for this Dirt server snapshot: ${enabled.join(', ')}.`,
-    'Dirt operates on live, already-loaded Paper worlds and chunks.',
+    'Dirt operates on live Paper worlds. Inspections and new edits require already-loaded chunks; undo can reload existing chunks without generating terrain.',
     'Coordinates are absolute Minecraft block coordinates (X east/west, Y up/down, Z south/north); region corners are inclusive and normalized automatically.',
   ];
 
@@ -25,34 +19,25 @@ function serverInstructions(configuration: McpToolConfiguration): string {
     );
   }
 
-  const inspections = enabledNames(configuration, [
-    'count_region_block_states',
-    'get_region_blocks',
-    'scan_orthographic_view',
-  ]);
-  if (inspections.length > 0) instructions.push(`Available inspection tools: ${inspections.join(', ')}.`);
-  if (configuration.get_region_blocks) {
-    instructions.push('Prefer filters or runs for exact retrieval so structured results stay compact.');
-  }
-  if (configuration.scan_orthographic_view) {
-    instructions.push('Prefer grid format for larger orthographic views so structured results stay compact.');
-  }
-  if (inspections.length > 0) {
+  if (
+    configuration.count_region_block_states ||
+    configuration.get_region_blocks ||
+    configuration.scan_orthographic_view
+  ) {
     instructions.push('Inspection result limits fail the call instead of truncating data.');
   }
 
   let errorGuidance =
-    'Treat structuredContent as the canonical result; text content is only a summary. Failures mapped by a Dirt tool handler set isError=true with structuredContent.error.code, .message, and .callId and may add .editId for edit transaction reconciliation. Invalid tool names or arguments are rejected before Dirt generates a call ID. MCP SDK output-validation failures occur outside Dirt error mapping and do not carry structuredContent.error.callId.';
+    'Treat structuredContent as the canonical result; text content is only a summary. Dirt-mapped failures set isError=true and put code, message, and callId in structuredContent.error, with an optional editId for reconciliation.';
   if (configuration.get_edit_history) {
     errorGuidance +=
       ' Reconcile records returned by get_edit_history using editId or callId; an absent record means no undoable edit remains.';
   }
   instructions.push(errorGuidance);
 
-  const mutations = enabledNames(configuration, ['replace_region_blocks', 'fill_region', 'set_blocks']);
-  if (mutations.length > 0) {
+  if (configuration.replace_region_blocks || configuration.fill_region || configuration.set_blocks) {
     instructions.push(
-      `${mutations.join(', ')} can mutate immediately; pass dryRun=true when a preview is needed, and retain the edit ID returned by every committed result.`,
+      'Mutation tools can apply immediately; pass dryRun=true when a preview is needed, and retain the edit ID returned by every committed result.',
     );
   }
 
@@ -83,6 +68,8 @@ export function createDirtServer(
       capabilities: { tools: { listChanged: false } },
     },
   );
-  registerToolCatalog(server, bridge, toolConfiguration, logger);
+  registerStatusTools(server, bridge, toolConfiguration, logger);
+  registerInspectionTools(server, bridge, toolConfiguration, logger);
+  registerEditingTools(server, bridge, toolConfiguration, logger);
   return server;
 }

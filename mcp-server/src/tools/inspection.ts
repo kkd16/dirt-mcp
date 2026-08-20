@@ -57,7 +57,6 @@ export const GetRegionBlocksInputSchema = z
     includeBlockStatePatterns: z
       .array(NonBlankStringSchema)
       .max(MAX_BLOCK_STATE_ENTRIES)
-      .optional()
       .default([])
       .describe(
         'Optional allowlist of block-state patterns. Omitted properties match any value; an empty list allows all states.',
@@ -65,7 +64,6 @@ export const GetRegionBlocksInputSchema = z
     excludeBlockStatePatterns: z
       .array(NonBlankStringSchema)
       .max(MAX_BLOCK_STATE_ENTRIES)
-      .optional()
       .default([])
       .describe('Block-state patterns rejected after include filtering. Omitted properties match any value.'),
     includeAir: z
@@ -178,7 +176,6 @@ export const ScanOrthographicViewInputSchema = z
       .int()
       .min(0)
       .max(INT32_MAX)
-      .optional()
       .default(0)
       .describe('Zero-based non-air hit to return per sightline: 0 is first, 1 is second, and so on.'),
     maxResults: z
@@ -192,7 +189,6 @@ export const ScanOrthographicViewInputSchema = z
       ),
     format: z
       .enum(['blocks', 'grid'])
-      .optional()
       .default('blocks')
       .describe('blocks returns explicit positions; grid returns compact lossless palette and distance matrices.'),
   })
@@ -489,20 +485,9 @@ function viewBounds(
   input: ScanOrthographicViewInput,
   basis: (typeof VIEW_BASIS)[keyof typeof VIEW_BASIS],
 ): z.infer<typeof BoundsSchema> {
-  const corners = [-input.horizontalRadius, input.horizontalRadius].flatMap((horizontal) =>
-    [-input.verticalRadius, input.verticalRadius].flatMap((vertical) =>
-      [1, input.maxDistance].map((distance) => viewPosition(input.origin, basis, horizontal, vertical, distance)),
-    ),
-  );
-  return corners.slice(1).reduce(
-    (bounds, corner) => {
-      for (const axis of BLOCK_AXES) {
-        bounds.min[axis] = Math.min(bounds.min[axis], corner[axis]);
-        bounds.max[axis] = Math.max(bounds.max[axis], corner[axis]);
-      }
-      return bounds;
-    },
-    normalizedBounds(corners[0]!, corners[0]!),
+  return normalizedBounds(
+    viewPosition(input.origin, basis, -input.horizontalRadius, -input.verticalRadius, 1),
+    viewPosition(input.origin, basis, input.horizontalRadius, input.verticalRadius, input.maxDistance),
   );
 }
 
@@ -619,7 +604,7 @@ export function registerInspectionTools(
           );
           requireMatchingScanResponse(input, sparseView);
           if (format === 'grid') {
-            const result = compactView(sparseView, input);
+            const result = compactView(sparseView);
             const width = result.viewport.horizontalRadius * 2 + 1;
             const height = result.viewport.verticalRadius * 2 + 1;
             return successResult(

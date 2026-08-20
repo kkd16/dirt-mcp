@@ -843,10 +843,11 @@ test('exposes only the configured tool snapshot and rejects disabled calls befor
   assert.ok(discovered.result);
   const instructions = discovered.result.instructions;
   assert.equal(typeof instructions, 'string');
-  assert.match(instructions as string, /get_region_blocks, set_blocks, undo_edit/);
-  for (const disabledName of MCP_TOOL_NAMES.filter((name) => !configuredTools[name])) {
-    assert.doesNotMatch(instructions as string, new RegExp(`\\b${disabledName}\\b`));
-  }
+  assert.match(instructions as string, /live Paper worlds/);
+  assert.match(instructions as string, /Mutation tools can apply immediately/);
+  assert.match(instructions as string, /undo_edit/);
+  assert.doesNotMatch(instructions as string, /Enabled tools|Available inspection tools/);
+  assert.doesNotMatch(instructions as string, /get_server_status|get_edit_history/);
 
   send(child, { jsonrpc: '2.0', id: 21, method: 'tools/list', params: requestParams({}) });
   const catalog = await waitFor(messages, 21);
