@@ -12,6 +12,7 @@ import {
   READ_WORLD_ANNOTATIONS,
 } from './common.ts';
 import { executeToolCall, successResult } from './execution.ts';
+import type { McpToolConfiguration } from './configuration.ts';
 import { compactView } from './view-grid.ts';
 
 const CountRegionBlockStatesInputSchema = z
@@ -66,7 +67,7 @@ export const GetRegionBlocksInputSchema = z
       .max(INT32_MAX)
       .optional()
       .describe(
-        'Maximum returned blocks or runs, bounded by get_server_status.limits.maxInspectionResultLimit. Results fail instead of truncating.',
+        'Maximum returned blocks or runs, bounded by the active inspection-result limit. Results fail instead of truncating.',
       ),
     format: z
       .enum(['blocks', 'runs'])
@@ -175,7 +176,7 @@ export const ScanOrthographicViewInputSchema = z
       .max(INT32_MAX)
       .optional()
       .describe(
-        'Maximum visible blocks, bounded by get_server_status.limits.maxInspectionResultLimit. Results fail instead of truncating.',
+        'Maximum visible blocks, bounded by the active inspection-result limit. Results fail instead of truncating.',
       ),
     format: z
       .enum(['blocks', 'grid'])
@@ -287,8 +288,12 @@ const ScanOrthographicViewOutputSchema = z
 export type ScanOrthographicViewBlocksOutput = z.infer<typeof ScanOrthographicViewBlocksOutputSchema>;
 export type ScanOrthographicViewGridOutput = z.infer<typeof ScanOrthographicViewGridOutputSchema>;
 
-export function registerInspectionTools(server: McpServer, bridge: BridgeClient): void {
-  server.registerTool(
+export function registerInspectionTools(
+  server: McpServer,
+  bridge: BridgeClient,
+  toolConfiguration: McpToolConfiguration,
+): void {
+  const countRegionBlockStates = server.registerTool(
     'count_region_block_states',
     {
       title: 'Count region block states',
@@ -320,13 +325,15 @@ export function registerInspectionTools(server: McpServer, bridge: BridgeClient)
         },
       ),
   );
+  if (!toolConfiguration.count_region_block_states) countRegionBlockStates.disable();
 
-  server.registerTool(
+  const getRegionBlocks = server.registerTool(
     'get_region_blocks',
     {
       title: 'Get region blocks',
       description:
-        'Return filtered exact blocks or lossless runs from an inclusive region. Use filters and runs to keep output compact. Active scan and result ceilings are reported by get_server_status; results fail rather than truncate.',
+        'Return filtered exact blocks or lossless runs from an inclusive region. Use filters and runs to keep output compact. Results that exceed active scan or result ceilings fail rather than truncate.' +
+        (toolConfiguration.get_server_status ? ' The active ceilings are reported by get_server_status.' : ''),
       inputSchema: GetRegionBlocksInputSchema,
       outputSchema: GetRegionBlocksOutputSchema,
       annotations: READ_WORLD_ANNOTATIONS,
@@ -350,13 +357,17 @@ export function registerInspectionTools(server: McpServer, bridge: BridgeClient)
         },
       ),
   );
+  if (!toolConfiguration.get_region_blocks) getRegionBlocks.disable();
 
-  server.registerTool(
+  const scanOrthographicView = server.registerTool(
     'scan_orthographic_view',
     {
       title: 'Scan an orthographic view',
       description:
-        'Return a selected zero-based non-air depth on each bounded world-axis sightline. Depth 0 is the first non-air block, 1 is the second, and so on. Prefer grid for larger views. Active scan and result ceilings are reported by get_server_status.',
+        'Return a selected zero-based non-air depth on each bounded world-axis sightline. Depth 0 is the first non-air block, 1 is the second, and so on. Prefer grid for larger views.' +
+        (toolConfiguration.get_server_status
+          ? ' Active scan and result ceilings are reported by get_server_status.'
+          : ''),
       inputSchema: ScanOrthographicViewInputSchema,
       outputSchema: ScanOrthographicViewOutputSchema,
       annotations: READ_WORLD_ANNOTATIONS,
@@ -393,4 +404,5 @@ export function registerInspectionTools(server: McpServer, bridge: BridgeClient)
         },
       ),
   );
+  if (!toolConfiguration.scan_orthographic_view) scanOrthographicView.disable();
 }

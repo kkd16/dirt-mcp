@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import { BRIDGE_ERROR_CODES, BRIDGE_ROUTES } from '../dist/bridge/contract.js';
+import { MCP_TOOL_NAMES } from '../dist/tools/configuration.js';
 
 const read = (relative: string): string => readFileSync(new URL(relative, import.meta.url), 'utf8');
 const sorted = (values: Iterable<string>): string[] => [...values].toSorted();
@@ -82,6 +83,30 @@ test('Java, OpenAPI, and Zod expose the same bridge error codes', () => {
 
   assert.deepEqual(sorted(BRIDGE_ERROR_CODES), sorted(openapiCodes));
   assert.deepEqual(sorted(javaCodes), sorted(openapiCodes));
+});
+
+test('Paper, OpenAPI, shipped YAML, and MCP expose one exact tool catalog', () => {
+  const openapi = read('../../protocol/openapi.yaml');
+  const toolSchema = openapiSchema(openapi, 'ToolConfiguration');
+  const requiredBlock = /required:\n([\s\S]*?)\n      properties:/.exec(toolSchema)?.[1];
+  assert.ok(requiredBlock);
+  const openapiRequired = [...requiredBlock.matchAll(/- ([a-z_]+)/g)].flatMap((match) => match[1] ?? []);
+  const openapiProperties = [...toolSchema.matchAll(/^        ([a-z_]+):$/gm)].flatMap((match) => match[1] ?? []);
+
+  const shippedConfig = read('../../paper-plugin/src/main/resources/config.yml');
+  const shippedTools = /\ntools:\n([\s\S]*?)\n\nlimits:/.exec(shippedConfig)?.[1];
+  assert.ok(shippedTools);
+  const shippedKeys = [...shippedTools.matchAll(/^  ([a-z_]+): true$/gm)].flatMap((match) => match[1] ?? []);
+
+  const javaToolSource = read('../../paper-plugin/src/main/java/ca/deliyannides/dirtmcp/paper/config/McpTool.java');
+  const javaIds = [...javaToolSource.matchAll(/^[ ]{4}[A-Z_]+\("([a-z_]+)"\)[,;]/gm)].flatMap(
+    (match) => match[1] ?? [],
+  );
+
+  assert.deepEqual(openapiRequired, [...MCP_TOOL_NAMES]);
+  assert.deepEqual(openapiProperties, [...MCP_TOOL_NAMES]);
+  assert.deepEqual(shippedKeys, [...MCP_TOOL_NAMES]);
+  assert.deepEqual(javaIds, [...MCP_TOOL_NAMES]);
 });
 
 test('does not retain legacy last-edit undo contract aliases', () => {

@@ -21,6 +21,18 @@ behavior that matters when choosing and combining tools.
 | `get_edit_history`          | `POST /v1/get-edit-history`          | List retained undoable edits for one loaded world, newest first.      |
 | `undo_edit`                 | `POST /v1/undo-edit`                 | Undo the identified newest retained edit in one loaded world.         |
 
+The table is the implemented surface. The `tools` configuration section is an
+explicit allowlist for the agent-facing MCP catalog. The shipped file lists all
+ten tools as true; every recognized tool omitted from that section resolves to
+false. Disabled tools are absent from MCP discovery and calls to them are
+rejected before Dirt creates a call ID or bridge request. Flags are independent,
+so operators can expose only the workflow they intend. Authenticated bridge
+routes remain available for the local MCP process, including the status request
+used to load the allowlist.
+
+Tool settings are snapshotted when Paper starts and when the MCP process loads
+its catalog. After editing YAML, restart Paper and the MCP host or process.
+
 Coordinates are signed 32-bit integers. Region corners are inclusive and are
 normalized independently on each axis.
 
@@ -173,10 +185,11 @@ detailed scans of 16,384 blocks, 512 results by default and at most 2,048, and 2
 history entries per world, 100 entries across all worlds, and 1,310,720 changed
 blocks across retained entries. JSON request bodies are capped at 262,144 bytes
 with a five-second upload deadline. At most 32 authenticated bridge requests and
-two inspection scans execute concurrently. Active operation limits and the
-separate `editHistory` object are available through `get_server_status`; its
-fields are `maxEntriesPerWorld`, `maxEntriesTotal`, and
-`maxRetainedChangedBlocks`. The YAML settings live in
+two inspection scans execute concurrently. Active operation limits, the
+separate `editHistory` object, and every resolved per-tool boolean in `tools` are
+available through `get_server_status`; the history fields are
+`maxEntriesPerWorld`, `maxEntriesTotal`, and `maxRetainedChangedBlocks`. The YAML
+settings live in
 `plugins/DirtMCP/config.yml`; every shipped setting and default is documented in
 the plugin's
 [configuration file](../paper-plugin/src/main/resources/config.yml).

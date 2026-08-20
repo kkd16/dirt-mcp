@@ -22,6 +22,7 @@ import {
 } from '../dist/tools/editing.js';
 import { GetRegionBlocksInputSchema, ScanOrthographicViewInputSchema } from '../dist/tools/inspection.js';
 import { EditHistoryConfigurationSchema, ServerStatusSchema } from '../dist/tools/status.js';
+import { MCP_TOOL_NAMES, McpToolConfigurationSchema } from '../dist/tools/configuration.js';
 
 const region = {
   world: 'world',
@@ -135,6 +136,7 @@ test('validates bounded edit-history configuration relationships', () => {
 });
 
 test('requires server history capacity to hold one maximum-sized edit', () => {
+  const tools = Object.fromEntries(MCP_TOOL_NAMES.map((name) => [name, true]));
   const status = {
     builds: { minecraft: '26.2', paper: '26.2-112', dirtMcp: 'test', fawe: '2.15.4' },
     performance: { tpsOneMinute: 20, averageTickTimeMillis: 1 },
@@ -153,6 +155,7 @@ test('requires server history capacity to hold one maximum-sized edit', () => {
     },
     editHistory: { maxEntriesPerWorld: 1, maxEntriesTotal: 1, maxRetainedChangedBlocks: 1 },
     defaults: { regionBlocksIncludeAir: false, regionBlocksFormat: 'blocks', editDryRun: false },
+    tools,
   };
   assert.equal(ServerStatusSchema.safeParse(status).success, true);
   assert.equal(
@@ -162,6 +165,9 @@ test('requires server history capacity to hold one maximum-sized edit', () => {
     }).success,
     false,
   );
+  assert.equal(McpToolConfigurationSchema.safeParse(tools).success, true);
+  assert.equal(McpToolConfigurationSchema.safeParse({ ...tools, undo_edit: undefined }).success, false);
+  assert.equal(McpToolConfigurationSchema.safeParse({ ...tools, unknown_tool: false }).success, false);
 });
 
 test('validates weighted set-block palettes and compact placements', () => {

@@ -38,7 +38,7 @@ paths:
   /v1/server-status:
     get:
       operationId: getServerStatus
-      summary: Report current server, player, world, build, and tool-limit context
+      summary: Report current server, player, world, build, limit, and MCP tool context
       responses:
         '200':
           description: Lightweight current server context
@@ -1618,6 +1618,42 @@ components:
         editDryRun:
           type: boolean
           description: Default dry-run behavior for every Dirt block-edit tool.
+    ToolConfiguration:
+      type: object
+      additionalProperties: false
+      description: Resolved MCP tool allowlist. Every flag is reported; a tool omitted from YAML resolves to false.
+      required:
+        - ping_server
+        - get_server_status
+        - count_region_block_states
+        - get_region_blocks
+        - scan_orthographic_view
+        - replace_region_blocks
+        - fill_region
+        - set_blocks
+        - get_edit_history
+        - undo_edit
+      properties:
+        ping_server:
+          type: boolean
+        get_server_status:
+          type: boolean
+        count_region_block_states:
+          type: boolean
+        get_region_blocks:
+          type: boolean
+        scan_orthographic_view:
+          type: boolean
+        replace_region_blocks:
+          type: boolean
+        fill_region:
+          type: boolean
+        set_blocks:
+          type: boolean
+        get_edit_history:
+          type: boolean
+        undo_edit:
+          type: boolean
     PingResponse:
       type: object
       additionalProperties: false
@@ -1767,6 +1803,7 @@ components:
         - limits
         - editHistory
         - defaults
+        - tools
       properties:
         builds:
           $ref: '#/components/schemas/ServerBuilds'
@@ -1784,3 +1821,5 @@ components:
           $ref: '#/components/schemas/EditHistoryConfiguration'
         defaults:
           $ref: '#/components/schemas/DefaultConfiguration'
+        tools:
+          $ref: '#/components/schemas/ToolConfiguration'

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.config.McpTool;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.edit.DestinationPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditOperation;
@@ -56,6 +57,11 @@ final class BridgeOperationEndpointsTest {
                             .getAsJsonObject()
                             .get("facing")
                             .getAsString());
+            var tools = json(response.body()).getAsJsonObject().getAsJsonObject("tools");
+            assertEquals(McpTool.values().length, tools.size());
+            for (McpTool tool : McpTool.values()) {
+                assertTrue(tools.get(tool.id()).getAsBoolean());
+            }
         }
     }
 
@@ -400,6 +406,7 @@ final class BridgeOperationEndpointsTest {
         DirtConfig configured =
                 new DirtConfig(
                         standard.bridge(),
+                        standard.tools(),
                         standard.limits(),
                         standard.editHistory(),
                         new DirtConfig.Defaults(true, "runs", true));
@@ -489,6 +496,7 @@ final class BridgeOperationEndpointsTest {
         DirtConfig small =
                 new DirtConfig(
                         standard.bridge(),
+                        standard.tools(),
                         new DirtConfig.Limits(
                                 64,
                                 limits.maxRegionVolume(),

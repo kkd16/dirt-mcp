@@ -1,13 +1,21 @@
 package ca.deliyannides.dirtmcp.paper.config;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
-public record DirtConfig(Bridge bridge, Limits limits, EditHistory editHistory, Defaults defaults) {
+public record DirtConfig(
+        Bridge bridge, Tools tools, Limits limits, EditHistory editHistory, Defaults defaults) {
     private static final Set<String> REGION_BLOCKS_FORMATS = Set.of("blocks", "runs");
 
     public DirtConfig {
-        if (bridge == null || limits == null || editHistory == null || defaults == null) {
+        if (bridge == null
+                || tools == null
+                || limits == null
+                || editHistory == null
+                || defaults == null) {
             throw new IllegalArgumentException("Configuration sections are required");
         }
         requireAtMost(
@@ -15,6 +23,27 @@ public record DirtConfig(Bridge bridge, Limits limits, EditHistory editHistory, 
                 limits.maxChangedBlocks(),
                 "edit-history.max-retained-changed-blocks",
                 editHistory.maxRetainedChangedBlocks());
+    }
+
+    public record Tools(Set<McpTool> enabled) {
+        public Tools {
+            if (enabled == null) {
+                throw new IllegalArgumentException("tools configuration is required");
+            }
+            enabled = Set.copyOf(enabled);
+        }
+
+        public boolean isEnabled(McpTool tool) {
+            return this.enabled.contains(tool);
+        }
+
+        public Map<String, Boolean> flags() {
+            Map<String, Boolean> flags = new LinkedHashMap<>();
+            for (McpTool tool : McpTool.values()) {
+                flags.put(tool.id(), isEnabled(tool));
+            }
+            return Collections.unmodifiableMap(flags);
+        }
     }
 
     public record Bridge(

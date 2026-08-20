@@ -375,6 +375,18 @@ try {
   assert.ok(serverStatus.editHistory.maxEntriesPerWorld > 0);
   assert.ok(serverStatus.editHistory.maxEntriesTotal >= serverStatus.editHistory.maxEntriesPerWorld);
   assert.ok(serverStatus.editHistory.maxRetainedChangedBlocks >= serverStatus.limits.maxChangedBlocks);
+  assert.deepEqual(serverStatus.tools, {
+    ping_server: true,
+    get_server_status: true,
+    count_region_block_states: true,
+    get_region_blocks: true,
+    scan_orthographic_view: true,
+    replace_region_blocks: true,
+    fill_region: true,
+    set_blocks: true,
+    get_edit_history: true,
+    undo_edit: true,
+  });
   await assertEditHistory([]);
 
   const chunkHeavyRegion = await bridgeResponse('/v1/count-region-block-states', {

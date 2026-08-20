@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.config.McpTool;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus;
@@ -120,6 +121,17 @@ final class DirtAdminCommandTest {
         assertTrue(plain.contains("minimum-token-bytes  32"));
         assertTrue(plain.contains("max-concurrent-requests  30"));
         assertTrue(plain.contains("max-concurrent-inspections  2"));
+        assertTrue(plain.contains("TOOLS"));
+        assertTrue(plain.contains("ping_server  true"));
+        assertTrue(plain.contains("get_server_status  false"));
+        assertTrue(plain.contains("count_region_block_states  true"));
+        assertTrue(plain.contains("get_region_blocks  false"));
+        assertTrue(plain.contains("scan_orthographic_view  true"));
+        assertTrue(plain.contains("replace_region_blocks  false"));
+        assertTrue(plain.contains("fill_region  true"));
+        assertTrue(plain.contains("set_blocks  false"));
+        assertTrue(plain.contains("get_edit_history  true"));
+        assertTrue(plain.contains("undo_edit  false"));
         assertTrue(plain.contains("max-request-bytes  262144"));
         assertTrue(plain.contains("max-region-volume  131072"));
         assertTrue(plain.contains("max-touched-chunks  128"));
@@ -174,6 +186,13 @@ final class DirtAdminCommandTest {
     private static DirtConfig config() {
         return new DirtConfig(
                 new DirtConfig.Bridge(8_765, 0, 5, 6, 32, 30, 2),
+                new DirtConfig.Tools(
+                        Set.of(
+                                McpTool.PING_SERVER,
+                                McpTool.COUNT_REGION_BLOCK_STATES,
+                                McpTool.SCAN_ORTHOGRAPHIC_VIEW,
+                                McpTool.FILL_REGION,
+                                McpTool.GET_EDIT_HISTORY)),
                 new DirtConfig.Limits(262_144, 131_072, 128, 16, 32, 65_536, 8_192, 256, 1_024),
                 new DirtConfig.EditHistory(10, 50, 655_360),
                 new DirtConfig.Defaults(true, "runs", true));
@@ -206,6 +225,7 @@ final class DirtAdminCommandTest {
                                         false,
                                         false,
                                         1)),
+                        config().tools().flags(),
                         new GetServerStatus.EffectiveLimits(1, 1, 1, 1, 1, 1, 1, 1, 1),
                         new GetServerStatus.EffectiveEditHistory(2, 3, 4),
                         new GetServerStatus.EffectiveDefaults(false, "blocks", false));

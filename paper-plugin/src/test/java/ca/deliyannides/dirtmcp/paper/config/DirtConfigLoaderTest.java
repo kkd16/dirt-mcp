@@ -1,11 +1,14 @@
 package ca.deliyannides.dirtmcp.paper.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.EnumSet;
 import java.util.stream.Stream;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.junit.jupiter.api.Test;
@@ -19,11 +22,63 @@ final class DirtConfigLoaderTest {
         DirtConfig config = DirtConfigLoader.load(defaultConfiguration(), null);
 
         assertEquals(new DirtConfig.Bridge(8_765, 0, 5, 5, 32, 32, 2), config.bridge());
+        assertEquals(EnumSet.allOf(McpTool.class), config.tools().enabled());
+        assertEquals(McpTool.values().length, config.tools().flags().size());
+        assertTrue(config.tools().flags().values().stream().allMatch(Boolean::booleanValue));
         assertEquals(
                 new DirtConfig.Limits(262_144, 262_144, 256, 32, 64, 65_536, 16_384, 512, 2_048),
                 config.limits());
         assertEquals(new DirtConfig.EditHistory(20, 100, 1_310_720), config.editHistory());
         assertEquals(new DirtConfig.Defaults(false, "blocks", false), config.defaults());
+    }
+
+    @Test
+    void missingToolSectionAndKeysDefaultToDisabled() {
+        YamlConfiguration withoutSection = defaultConfiguration();
+        withoutSection.set("tools", null);
+
+        DirtConfig noTools = DirtConfigLoader.load(withoutSection, null);
+
+        assertTrue(noTools.tools().enabled().isEmpty());
+        assertTrue(noTools.tools().flags().values().stream().noneMatch(Boolean::booleanValue));
+
+        YamlConfiguration withoutKey = defaultConfiguration();
+        withoutKey.set("tools.undo_edit", null);
+
+        DirtConfig oneMissing = DirtConfigLoader.load(withoutKey, null);
+
+        assertFalse(oneMissing.tools().isEnabled(McpTool.UNDO_EDIT));
+        assertEquals(McpTool.values().length - 1, oneMissing.tools().enabled().size());
+    }
+
+    @Test
+    void ignoresBundledDefaultsWhenCheckingExplicitValues() {
+        YamlConfiguration configuration = defaultConfiguration();
+        configuration.set("tools", null);
+        configuration.setDefaults(defaultConfiguration());
+        configuration.options().copyDefaults(true);
+
+        DirtConfig config = DirtConfigLoader.load(configuration, null);
+
+        assertTrue(config.tools().enabled().isEmpty());
+
+        configuration.set("limits.max-request-bytes", null);
+        IllegalArgumentException error =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> DirtConfigLoader.load(configuration, null));
+        assertEquals("limits.max-request-bytes is required", error.getMessage());
+    }
+
+    @Test
+    void explicitFalseDisablesOnlyThatTool() {
+        YamlConfiguration configuration = defaultConfiguration();
+        configuration.set("tools.fill_region", false);
+
+        DirtConfig config = DirtConfigLoader.load(configuration, null);
+
+        assertFalse(config.tools().isEnabled(McpTool.FILL_REGION));
+        assertTrue(config.tools().isEnabled(McpTool.SET_BLOCKS));
     }
 
     @ParameterizedTest
@@ -68,6 +123,9 @@ final class DirtConfigLoaderTest {
         return Stream.of(
                 Arguments.of("limits.max-request-bytes", null),
                 Arguments.of("bridge.unknown", 1),
+                Arguments.of("tools", true),
+                Arguments.of("tools.fill_region", "true"),
+                Arguments.of("tools.not_a_tool", true),
                 Arguments.of("bridge.port", 0),
                 Arguments.of("bridge.backlog", -1),
                 Arguments.of("bridge.shutdown-delay-seconds", -1),

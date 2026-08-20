@@ -7,7 +7,10 @@ implemented behavior.
 The bridge is authenticated and loopback-only. It covers runtime status,
 bounded inspection, FAWE-backed cuboid and palette-based edits, bounded retained
 edit history, newest-first history lookup, and identity-checked undo.
-Unimplemented operations are not included.
+Unimplemented operations are not included. Server status reports every resolved
+MCP tool boolean in `tools`; the local MCP process uses that snapshot to omit
+disabled tools from its agent-facing catalog while bridge routing remains
+available internally.
 
 Every block-edit response distinguishes `preview`, `no_change`, and `committed`;
 only a committed result contains an `EditRecord`. Its fields are `editId`,

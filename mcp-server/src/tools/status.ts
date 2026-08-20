@@ -3,6 +3,7 @@ import * as z from 'zod/v4';
 import { BridgeClient } from '../bridge/client.ts';
 import { BRIDGE_ROUTES } from '../bridge/contract.ts';
 import { BlockPositionSchema, EmptyInputSchema, INT32_MAX, READ_WORLD_ANNOTATIONS } from './common.ts';
+import { McpToolConfigurationSchema, type McpToolConfiguration } from './configuration.ts';
 import { executeToolCall, successResult } from './execution.ts';
 
 const PositiveInt32Schema = z.number().int().min(1).max(INT32_MAX);
@@ -21,7 +22,7 @@ const LimitConfigurationSchema = z
       .number()
       .int()
       .positive()
-      .describe('Maximum cuboid mutation/count volume or placements in set_blocks.'),
+      .describe('Maximum cuboid mutation/count volume or explicit block placements.'),
     maxTouchedChunks: z.number().int().positive().describe('Maximum distinct loaded chunks one mutation may touch.'),
     maxInspectionTouchedChunks: z
       .number()
@@ -36,11 +37,7 @@ const LimitConfigurationSchema = z
         'Maximum block-state patterns or palette entries in one operation; inspection include and exclude lists share this cap.',
       ),
     maxChangedBlocks: z.number().int().positive().describe('Maximum blocks one edit may change.'),
-    maxInspectionVolume: z
-      .number()
-      .int()
-      .positive()
-      .describe('Maximum blocks scanned by get_region_blocks or scan_orthographic_view.'),
+    maxInspectionVolume: z.number().int().positive().describe('Maximum blocks scanned by a detailed inspection.'),
     defaultInspectionResultLimit: z
       .number()
       .int()
@@ -72,8 +69,8 @@ export const EditHistoryConfigurationSchema = z
 
 const DefaultConfigurationSchema = z
   .object({
-    regionBlocksIncludeAir: z.boolean().describe('Default air inclusion for get_region_blocks.'),
-    regionBlocksFormat: z.enum(['blocks', 'runs']).describe('Default get_region_blocks format.'),
+    regionBlocksIncludeAir: z.boolean().describe('Default air inclusion for exact region retrieval.'),
+    regionBlocksFormat: z.enum(['blocks', 'runs']).describe('Default exact region-retrieval format.'),
     editDryRun: z.boolean().describe('Default dry-run behavior for every Dirt block-edit tool.'),
   })
   .strict()
@@ -139,6 +136,7 @@ export const ServerStatusSchema = z
     limits: LimitConfigurationSchema,
     editHistory: EditHistoryConfigurationSchema,
     defaults: DefaultConfigurationSchema,
+    tools: McpToolConfigurationSchema,
   })
   .strict()
   .refine((status) => status.editHistory.maxRetainedChangedBlocks >= status.limits.maxChangedBlocks, {
@@ -146,11 +144,15 @@ export const ServerStatusSchema = z
     path: ['editHistory', 'maxRetainedChangedBlocks'],
   })
   .describe(
-    'Current lightweight Paper context, limits, and edit-history retention for grounding subsequent Dirt calls.',
+    'Current lightweight Paper context, limits, edit-history retention, defaults, and MCP tool availability for grounding subsequent Dirt calls.',
   );
 
-export function registerStatusTools(server: McpServer, bridge: BridgeClient): void {
-  server.registerTool(
+export function registerStatusTools(
+  server: McpServer,
+  bridge: BridgeClient,
+  toolConfiguration: McpToolConfiguration,
+): void {
+  const pingServer = server.registerTool(
     'ping_server',
     {
       title: 'Ping Dirt server',
@@ -173,13 +175,14 @@ export function registerStatusTools(server: McpServer, bridge: BridgeClient): vo
         },
       ),
   );
+  if (!toolConfiguration.ping_server) pingServer.disable();
 
-  server.registerTool(
+  const getServerStatus = server.registerTool(
     'get_server_status',
     {
       title: 'Get Dirt server status',
       description:
-        'Return current Minecraft, Paper, Dirt MCP, and FAWE builds; TPS; online players, block positions, and cardinal facing directions; loaded worlds; and active Dirt limits, edit-history retention, and defaults. Use this to ground later world operations.',
+        'Return current Minecraft, Paper, Dirt MCP, and FAWE builds; TPS; online players, block positions, and cardinal facing directions; loaded worlds; and active Dirt limits, edit-history retention, defaults, and MCP tool availability. Use this to ground later world operations.',
       inputSchema: EmptyInputSchema,
       outputSchema: ServerStatusSchema,
       annotations: READ_WORLD_ANNOTATIONS,
@@ -201,4 +204,5 @@ export function registerStatusTools(server: McpServer, bridge: BridgeClient): vo
         },
       ),
   );
+  if (!toolConfiguration.get_server_status) getServerStatus.disable();
 }

@@ -1,8 +1,10 @@
 package ca.deliyannides.dirtmcp.paper.status;
 
+import ca.deliyannides.dirtmcp.paper.config.McpTool;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import java.util.List;
+import java.util.Map;
 
 @FunctionalInterface
 public interface GetServerStatus {
@@ -13,11 +15,27 @@ public interface GetServerStatus {
             Performance performance,
             PlayerSummary players,
             List<WorldStatus> worlds,
+            Map<String, Boolean> tools,
             EffectiveLimits limits,
             EffectiveEditHistory editHistory,
             EffectiveDefaults defaults) {
         public Result {
             worlds = List.copyOf(worlds);
+            tools = validateTools(tools);
+        }
+
+        private static Map<String, Boolean> validateTools(Map<String, Boolean> tools) {
+            if (tools == null || tools.size() != McpTool.values().length) {
+                throw new IllegalArgumentException(
+                        "tools must contain every canonical MCP tool flag");
+            }
+            for (McpTool tool : McpTool.values()) {
+                if (tools.get(tool.id()) == null) {
+                    throw new IllegalArgumentException(
+                            "tools must contain every canonical MCP tool flag");
+                }
+            }
+            return Map.copyOf(tools);
         }
     }
 

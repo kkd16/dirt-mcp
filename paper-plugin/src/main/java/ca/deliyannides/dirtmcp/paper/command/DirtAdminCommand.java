@@ -1,6 +1,7 @@
 package ca.deliyannides.dirtmcp.paper.command;
 
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.config.McpTool;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus;
 import com.mojang.brigadier.Command;
@@ -137,6 +138,11 @@ public final class DirtAdminCommand {
         appendValue(message, "minimum-token-bytes", bridge.minimumTokenBytes());
         appendValue(message, "max-concurrent-requests", bridge.maxConcurrentRequests());
         appendValue(message, "max-concurrent-inspections", bridge.maxConcurrentInspections());
+
+        appendSection(message, "Tools");
+        for (McpTool tool : McpTool.values()) {
+            appendValue(message, tool.id(), this.config.tools().isEnabled(tool));
+        }
 
         DirtConfig.Limits limits = this.config.limits();
         appendSection(message, "Limits");

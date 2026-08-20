@@ -71,21 +71,28 @@ The bridge always binds to `127.0.0.1`; do not proxy or expose it publicly. Give
 the same `DIRT_MCP_BRIDGE_TOKEN` to the MCP process. Tokens must satisfy the
 configured byte minimum, which defaults to 32; lowering it weakens
 authentication. Never commit or log tokens. All settings are validated at
-startup; active tool limits, edit-history configuration, and defaults are
-reported by `get_server_status`.
-Restart Paper after changing them. Configuration is intentionally strict:
-missing, unknown, or invalid keys stop plugin startup instead of being migrated
-or silently ignored. Compare an existing file with the shipped `config.yml`
-after upgrading.
+startup; active tool limits, edit-history configuration, defaults, and the
+resolved MCP tool allowlist are reported by `get_server_status`. The shipped
+`tools` section explicitly enables every tool. Each recognized entry is an
+independent boolean; an entry omitted from that section resolves to false, while
+unknown or invalid entries stop plugin startup. Other configuration keys remain
+required. Compare an existing file with the shipped `config.yml` after
+upgrading.
+
+Restart Paper after changing the file, then restart the MCP host or process so
+it loads the new catalog. Tool configuration controls the agent-facing MCP
+catalog; authenticated loopback bridge routes remain available to the matching
+local MCP process.
 
 ### Paper operator command
 
 Operators can inspect the running plugin with `/dirt`. Running it without a
 subcommand displays its formatted help menu; `/dirt version` shows the packaged
 plugin version, `/dirt status` gives a compact server and bridge summary, and
-`/dirt config` lists the active startup-snapshotted configuration. The config
-view reflects the `DIRT_MCP_BRIDGE_PORT` override when present. Restart Paper
-to apply configuration file changes.
+`/dirt config` lists the active startup-snapshotted configuration, including
+every resolved per-tool flag. The config view reflects the
+`DIRT_MCP_BRIDGE_PORT` override when present. Restart Paper to apply
+configuration file changes.
 
 The command requires `dirtmcp.command`, which is granted to operators by
 default and may be assigned explicitly through a permission plugin.
@@ -113,10 +120,12 @@ For another MCP host, configure it to launch the source build:
 }
 ```
 
-The current tool surface contains `ping_server`, `get_server_status`,
+The implemented tool surface contains `ping_server`, `get_server_status`,
 `count_region_block_states`, `get_region_blocks`, `scan_orthographic_view`,
 `replace_region_blocks`, `fill_region`, `set_blocks`, `get_edit_history`,
-and `undo_edit`. See the
+and `undo_edit`. Fresh configurations enable all ten. The MCP process advertises
+only tools enabled in the Paper startup snapshot; a disabled tool is absent from
+`tools/list` and cannot be called. See the
 [v1 behavior guide](docs/v1-design.md) for selection and execution semantics, and the
 [OpenAPI contract](protocol/openapi.yaml) for exact bridge schemas.
 

@@ -3,11 +3,16 @@ package ca.deliyannides.dirtmcp.paper.status;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.config.McpTool;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.platform.MainThread;
 import ca.deliyannides.dirtmcp.paper.platform.PaperMainThreadException;
+import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 final class PaperServerStatusServiceTest {
@@ -76,15 +81,39 @@ final class PaperServerStatusServiceTest {
                 assertThrows(OperationException.class, service::ping).failure());
     }
 
+    @Test
+    void rejectsIncompleteUnknownAndNullToolFlags() {
+        Map<String, Boolean> incomplete = new HashMap<>(allTools());
+        incomplete.remove(McpTool.UNDO_EDIT.id());
+        assertThrows(IllegalArgumentException.class, () -> status(incomplete));
+
+        Map<String, Boolean> unknown = new HashMap<>(allTools());
+        unknown.put("not_a_tool", true);
+        assertThrows(IllegalArgumentException.class, () -> status(unknown));
+
+        Map<String, Boolean> nullValue = new HashMap<>(allTools());
+        nullValue.put(McpTool.UNDO_EDIT.id(), null);
+        assertThrows(IllegalArgumentException.class, () -> status(nullValue));
+    }
+
     private static GetServerStatus.Result status() {
+        return status(allTools());
+    }
+
+    private static GetServerStatus.Result status(Map<String, Boolean> tools) {
         return new GetServerStatus.Result(
                 new GetServerStatus.Builds("26.2", "Paper", "Dirt", "FAWE"),
                 new GetServerStatus.Performance(20, 1),
                 new GetServerStatus.PlayerSummary(0, 20, List.of()),
                 List.of(),
+                tools,
                 new GetServerStatus.EffectiveLimits(1, 1, 1, 1, 1, 1, 1, 1, 1),
                 new GetServerStatus.EffectiveEditHistory(2, 3, 4),
                 new GetServerStatus.EffectiveDefaults(false, "blocks", false));
+    }
+
+    private static Map<String, Boolean> allTools() {
+        return new DirtConfig.Tools(EnumSet.allOf(McpTool.class)).flags();
     }
 
     private static final class DirectMainThread implements MainThread {

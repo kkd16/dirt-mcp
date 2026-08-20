@@ -13,6 +13,7 @@ import {
   READ_WORLD_ANNOTATIONS,
 } from './common.ts';
 import { executeToolCall, successResult } from './execution.ts';
+import type { McpToolConfiguration } from './configuration.ts';
 
 export const SourceBlockStatePatternsSchema = z
   .array(NonBlankStringSchema)
@@ -515,8 +516,12 @@ export const UndoEditOutputSchema = z
   .strict()
   .describe('Result of undoing and consuming an identified retained Dirt edit.');
 
-export function registerEditingTools(server: McpServer, bridge: BridgeClient): void {
-  server.registerTool(
+export function registerEditingTools(
+  server: McpServer,
+  bridge: BridgeClient,
+  toolConfiguration: McpToolConfiguration,
+): void {
+  const replaceRegionBlocks = server.registerTool(
     'replace_region_blocks',
     {
       title: 'Replace region blocks',
@@ -554,8 +559,9 @@ export function registerEditingTools(server: McpServer, bridge: BridgeClient): v
         },
       ),
   );
+  if (!toolConfiguration.replace_region_blocks) replaceRegionBlocks.disable();
 
-  server.registerTool(
+  const fillRegion = server.registerTool(
     'fill_region',
     {
       title: 'Fill a region',
@@ -583,13 +589,16 @@ export function registerEditingTools(server: McpServer, bridge: BridgeClient): v
         },
       ),
   );
+  if (!toolConfiguration.fill_region) fillRegion.disable();
 
-  server.registerTool(
+  const setBlocks = server.registerTool(
     'set_blocks',
     {
       title: 'Set blocks',
       description:
-        'Place blocks from weighted palettes at distinct origin-relative positions, using one FAWE edit and one retained Dirt history entry. Each placement is [paletteIndex, x, y, z], where paletteIndex is zero-based. Omit every weight in a palette for equal probability, or provide whole percentages totaling 100. Reuse the returned seed to replay a preview. All states and resolved positions are validated before mutation. Keep palettes within get_server_status.limits.maxBlockStatePatterns and the encoded request within maxRequestBytes. Placement does not trigger Minecraft neighbor physics. Set dryRun=true to preview exact counts. Every committed non-empty edit returns retained edit metadata including its edit ID.',
+        'Place blocks from weighted palettes at distinct origin-relative positions, using one FAWE edit and one retained Dirt history entry. Each placement is [paletteIndex, x, y, z], where paletteIndex is zero-based. Omit every weight in a palette for equal probability, or provide whole percentages totaling 100. Reuse the returned seed to replay a preview. All states and resolved positions are validated before mutation. Keep palettes and the encoded request within the active configured limits.' +
+        (toolConfiguration.get_server_status ? ' Those limits are reported by get_server_status.' : '') +
+        ' Placement does not trigger Minecraft neighbor physics. Set dryRun=true to preview exact counts. Every committed non-empty edit returns retained edit metadata including its edit ID.',
       inputSchema: SetBlocksInputSchema,
       outputSchema: SetBlocksOutputSchema,
       annotations: NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
@@ -611,8 +620,9 @@ export function registerEditingTools(server: McpServer, bridge: BridgeClient): v
         },
       ),
   );
+  if (!toolConfiguration.set_blocks) setBlocks.disable();
 
-  server.registerTool(
+  const getEditHistory = server.registerTool(
     'get_edit_history',
     {
       title: 'Get edit history',
@@ -638,13 +648,15 @@ export function registerEditingTools(server: McpServer, bridge: BridgeClient): v
         },
       ),
   );
+  if (!toolConfiguration.get_edit_history) getEditHistory.disable();
 
-  server.registerTool(
+  const undoEdit = server.registerTool(
     'undo_edit',
     {
       title: 'Undo an edit',
       description:
-        'Undo the retained Dirt edit identified by editId in one loaded world. The edit must still be retained and must be the newest entry returned by get_edit_history, preventing an intervening edit from being undone accidentally.',
+        'Undo the retained Dirt edit identified by editId in one loaded world. The edit must still be retained and must be the newest retained entry, preventing an intervening edit from being undone accidentally.' +
+        (toolConfiguration.get_edit_history ? ' Use get_edit_history to identify that entry.' : ''),
       inputSchema: UndoEditInputSchema,
       outputSchema: UndoEditOutputSchema,
       annotations: NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
@@ -668,4 +680,5 @@ export function registerEditingTools(server: McpServer, bridge: BridgeClient): v
         },
       ),
   );
+  if (!toolConfiguration.undo_edit) undoEdit.disable();
 }

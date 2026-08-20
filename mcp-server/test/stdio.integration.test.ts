@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { MCP_TOOL_NAMES } from '../dist/tools/configuration.js';
 import {
   collectLines,
   modernParams,
@@ -18,6 +19,30 @@ import {
 
 const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 const uuidV4Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const allToolsEnabled = Object.fromEntries(MCP_TOOL_NAMES.map((name) => [name, true]));
+
+function emptyServerStatus(tools: Readonly<Record<string, boolean>> = allToolsEnabled): Record<string, unknown> {
+  return {
+    builds: { minecraft: '26.2', paper: '26.2-test', dirtMcp: '0.1.0-test', fawe: '2.15.4-test' },
+    performance: { tpsOneMinute: 20, averageTickTimeMillis: 1 },
+    players: { online: 0, maximum: 20, entries: [] },
+    worlds: [],
+    limits: {
+      maxRequestBytes: 1,
+      maxRegionVolume: 1,
+      maxTouchedChunks: 1,
+      maxInspectionTouchedChunks: 1,
+      maxBlockStatePatterns: 1,
+      maxChangedBlocks: 1,
+      maxInspectionVolume: 1,
+      defaultInspectionResultLimit: 1,
+      maxInspectionResultLimit: 1,
+    },
+    editHistory: { maxEntriesPerWorld: 1, maxEntriesTotal: 1, maxRetainedChangedBlocks: 1 },
+    defaults: { regionBlocksIncludeAir: false, regionBlocksFormat: 'blocks', editDryRun: false },
+    tools,
+  };
+}
 
 interface BridgeRequestRecord {
   readonly body: unknown;
@@ -104,6 +129,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       regionBlocksFormat: 'blocks',
       editDryRun: false,
     },
+    tools: allToolsEnabled,
   };
   const regionBlocks = {
     world: 'world',
@@ -297,22 +323,12 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     params: modernParams({}),
   });
   const catalog = await waitFor(messages, 1);
+  assert.ok(catalog.result);
   const listedTools = catalog.result.tools;
   assert.ok(listedTools);
   assert.deepEqual(
     listedTools.map((tool) => tool.name),
-    [
-      'ping_server',
-      'get_server_status',
-      'count_region_block_states',
-      'get_region_blocks',
-      'scan_orthographic_view',
-      'replace_region_blocks',
-      'fill_region',
-      'set_blocks',
-      'get_edit_history',
-      'undo_edit',
-    ],
+    [...MCP_TOOL_NAMES],
   );
   assert.deepEqual(
     listedTools.map((tool) => ({ name: tool.name, annotations: tool.annotations })),
@@ -455,6 +471,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     }),
   });
   const failedFill = await waitFor(messages, 6);
+  assert.ok(failedFill.result);
   const failedFillCallId = failedFill.result.structuredContent?.error?.callId;
   assert.ok(typeof failedFillCallId === 'string');
   assert.match(failedFillCallId, uuidV4Pattern);
@@ -541,6 +558,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     params: modernParams({ name: 'undo_edit', arguments: { world: 'world', editId: 'not-a-uuid' } }),
   });
   const invalidUndo = await waitFor(messages, 9);
+  assert.ok(invalidUndo.result);
   assert.equal(invalidUndo.result.isError, true);
   assert.equal(invalidUndo.result.structuredContent, undefined);
   assert.match(
@@ -634,6 +652,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.deepEqual(
     requests.map(({ method, path }) => ({ method, path })),
     [
+      { method: 'GET', path: '/v1/server-status' },
       { method: 'GET', path: '/v1/ping' },
       { method: 'POST', path: '/v1/get-region-blocks' },
       { method: 'POST', path: '/v1/scan-orthographic-view' },
@@ -659,37 +678,38 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     assert.equal(typeof callId, 'string');
     return callId;
   });
-  assert.equal(new Set(callIds).size, 11);
-  assert.equal(failedFillCallId, callIds[4]);
-  assert.equal(setBlocks.edit.callId, callIds[6]);
-  assert.equal(undone.undoCallId, callIds[10]);
-  assert.deepEqual(requestAt(requests, 1).body, {
+  assert.equal(new Set(callIds).size, 12);
+  const toolCallIds = callIds.slice(1);
+  assert.equal(failedFillCallId, toolCallIds[4]);
+  assert.equal(setBlocks.edit.callId, toolCallIds[6]);
+  assert.equal(undone.undoCallId, toolCallIds[10]);
+  assert.deepEqual(requestAt(requests, 2).body, {
     ...region,
     includeBlockStatePatterns: [],
     excludeBlockStatePatterns: [],
   });
-  assert.equal(requestAt(requests, 1).headers['content-type'], 'application/json');
-  assert.deepEqual(requestAt(requests, 2).body, viewInput);
   assert.equal(requestAt(requests, 2).headers['content-type'], 'application/json');
   assert.deepEqual(requestAt(requests, 3).body, viewInput);
   assert.equal(requestAt(requests, 3).headers['content-type'], 'application/json');
-  assert.deepEqual(requestAt(requests, 4).body, {
+  assert.deepEqual(requestAt(requests, 4).body, viewInput);
+  assert.equal(requestAt(requests, 4).headers['content-type'], 'application/json');
+  assert.deepEqual(requestAt(requests, 5).body, {
     ...region,
     destinationPalette: [{ blockState: 'minecraft:dirt' }],
   });
-  assert.equal(requestAt(requests, 4).headers['content-type'], 'application/json');
-  assert.deepEqual(requestAt(requests, 6).body, setBlocksInput);
-  assert.equal(requestAt(requests, 6).headers['content-type'], 'application/json');
-  assert.deepEqual(requestAt(requests, 7).body, region);
-  assert.deepEqual(requestAt(requests, 8).body, {
+  assert.equal(requestAt(requests, 5).headers['content-type'], 'application/json');
+  assert.deepEqual(requestAt(requests, 7).body, setBlocksInput);
+  assert.equal(requestAt(requests, 7).headers['content-type'], 'application/json');
+  assert.deepEqual(requestAt(requests, 8).body, region);
+  assert.deepEqual(requestAt(requests, 9).body, {
     ...region,
     sourceBlockStatePatterns: ['minecraft:stone'],
     destinationPalette: [{ blockState: 'minecraft:dirt', weight: 100 }],
     seed: 123,
     dryRun: true,
   });
-  assert.deepEqual(requestAt(requests, 9).body, { world: 'world' });
-  assert.deepEqual(requestAt(requests, 10).body, {
+  assert.deepEqual(requestAt(requests, 10).body, { world: 'world' });
+  assert.deepEqual(requestAt(requests, 11).body, {
     world: 'world',
     editId: '11111111-1111-4111-8111-111111111111',
   });
@@ -712,7 +732,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   expectedAudits.forEach(([tool, requestId, includesWorld, outcome], index) => {
     const world = includesWorld ? ' world="world"' : '';
     const auditLine = auditLines[index];
-    const callId = callIds[index];
+    const callId = toolCallIds[index];
     assert.ok(auditLine);
     assert.ok(callId);
     assert.match(
@@ -730,9 +750,227 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.equal(exitCode, 0);
 });
 
+test('exposes only the configured tool snapshot and rejects disabled calls before bridge dispatch', async (context) => {
+  const configuredTools = Object.fromEntries(MCP_TOOL_NAMES.map((name) => [name, false]));
+  configuredTools.get_region_blocks = true;
+  configuredTools.set_blocks = true;
+  configuredTools.undo_edit = true;
+  const requests: BridgeRequestRecord[] = [];
+  const bridge = createServer(async (request, response) => {
+    let rawBody = '';
+    for await (const chunk of request) rawBody += chunk;
+    requests.push({
+      method: request.method,
+      path: request.url,
+      headers: request.headers,
+      body: rawBody.length === 0 ? undefined : JSON.parse(rawBody),
+    });
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify(emptyServerStatus(configuredTools)));
+  });
+  bridge.listen(0, '127.0.0.1');
+  await once(bridge, 'listening');
+  context.after(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        bridge.close((error) => (error === undefined ? resolve() : reject(error)));
+      }),
+  );
+
+  const child = spawn(process.execPath, [join(packageDirectory, 'dist/index.js')], {
+    env: {
+      ...process.env,
+      DIRT_MCP_BRIDGE_TOKEN: 'bridge-test-token',
+      DIRT_MCP_BRIDGE_URL: `http://127.0.0.1:${serverAddressPort(bridge.address())}`,
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  context.after(() => {
+    if (child.exitCode === null) child.kill();
+  });
+  const messages = collectLines(child.stdout, (line) => JSON.parse(line) as JsonRpcResponse);
+
+  send(child, { jsonrpc: '2.0', id: 20, method: 'server/discover', params: modernParams({}) });
+  const discovered = await waitFor(messages, 20);
+  assert.ok(discovered.result);
+  const instructions = discovered.result.instructions;
+  assert.equal(typeof instructions, 'string');
+  assert.match(instructions as string, /get_region_blocks, set_blocks, undo_edit/);
+  for (const disabledName of MCP_TOOL_NAMES.filter((name) => !configuredTools[name])) {
+    assert.doesNotMatch(instructions as string, new RegExp(`\\b${disabledName}\\b`));
+  }
+
+  send(child, { jsonrpc: '2.0', id: 21, method: 'tools/list', params: modernParams({}) });
+  const catalog = await waitFor(messages, 21);
+  assert.ok(catalog.result);
+  assert.deepEqual(
+    catalog.result.tools?.map((tool) => tool.name),
+    ['get_region_blocks', 'set_blocks', 'undo_edit'],
+  );
+  const listedMetadata = JSON.stringify(catalog.result.tools);
+  assert.doesNotMatch(listedMetadata, /get_server_status|get_edit_history/);
+
+  const requestCountBeforeDisabledCall = requests.length;
+  send(child, {
+    jsonrpc: '2.0',
+    id: 22,
+    method: 'tools/call',
+    params: modernParams({ name: 'ping_server', arguments: {} }),
+  });
+  const disabled = await waitFor(messages, 22);
+  assert.equal(disabled.error?.code, -32_602);
+  assert.match(disabled.error?.message ?? '', /Tool ping_server disabled/);
+  assert.equal(requests.length, requestCountBeforeDisabledCall);
+  assert.equal(requests.length, 1);
+  assert.equal(requestAt(requests, 0).path, '/v1/server-status');
+
+  const exited = once(child, 'exit');
+  child.stdin.end();
+  const [exitCode] = await exited;
+  assert.equal(exitCode, 0);
+});
+
+for (const bootstrapFailure of ['unauthorized', 'malformed', 'unavailable'] as const) {
+  test(`fails closed when tool-configuration bootstrap is ${bootstrapFailure}`, async (context) => {
+    const expectedFailureCode = {
+      malformed: 'bridge_invalid_response',
+      unauthorized: 'bridge_unauthorized',
+      unavailable: 'bridge_unavailable',
+    }[bootstrapFailure];
+    let bridgeRequestCount = 0;
+    const bridge = createServer((_request, response) => {
+      bridgeRequestCount++;
+      if (bootstrapFailure === 'unauthorized') {
+        response.statusCode = 401;
+        response.setHeader('Content-Type', 'application/json');
+        response.end(JSON.stringify({ error: { code: 'unauthorized', message: 'bad token' } }));
+      } else {
+        response.setHeader('Content-Type', 'application/json');
+        response.end('{}');
+      }
+    });
+    bridge.listen(0, '127.0.0.1');
+    await once(bridge, 'listening');
+    const bridgeUrl = `http://127.0.0.1:${serverAddressPort(bridge.address())}`;
+    if (bootstrapFailure === 'unavailable') {
+      await new Promise<void>((resolve, reject) => {
+        bridge.close((error) => (error === undefined ? resolve() : reject(error)));
+      });
+    } else {
+      context.after(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            bridge.close((error) => (error === undefined ? resolve() : reject(error)));
+          }),
+      );
+    }
+
+    const child = spawn(process.execPath, [join(packageDirectory, 'dist/index.js')], {
+      env: {
+        ...process.env,
+        DIRT_MCP_BRIDGE_TOKEN: 'bridge-test-token',
+        DIRT_MCP_BRIDGE_URL: bridgeUrl,
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    context.after(() => {
+      if (child.exitCode === null) child.kill();
+    });
+    const messages = collectLines(child.stdout, (line) => JSON.parse(line) as JsonRpcResponse);
+    const errors = collectLines(child.stderr, (line) => line);
+
+    send(child, { jsonrpc: '2.0', id: 30, method: 'tools/list', params: modernParams({}) });
+    const failure = await waitFor(messages, 30);
+    assert.equal(failure.error?.code, -32_603);
+    assert.equal(failure.error?.message, 'Internal server error');
+    assert.equal(failure.result, undefined);
+    assert.equal(bridgeRequestCount, bootstrapFailure === 'unavailable' ? 0 : 1);
+    await waitForValue(
+      errors,
+      (line) => line === `Dirt MCP stdio error_type="ToolFailure" code="${expectedFailureCode}"`,
+    );
+
+    const exited = once(child, 'exit');
+    child.stdin.end();
+    const [exitCode] = await exited;
+    assert.equal(exitCode, 0);
+  });
+}
+
+test('retries a failed bootstrap and fixes the first successful snapshot for the process', async (context) => {
+  let bootstrapAttempts = 0;
+  const configuredTools = Object.fromEntries(MCP_TOOL_NAMES.map((name) => [name, false]));
+  configuredTools.ping_server = true;
+  const bridge = createServer((_request, response) => {
+    bootstrapAttempts++;
+    response.setHeader('Content-Type', 'application/json');
+    if (bootstrapAttempts === 1) {
+      response.end('{}');
+      return;
+    }
+    response.end(JSON.stringify(emptyServerStatus(configuredTools)));
+  });
+  bridge.listen(0, '127.0.0.1');
+  await once(bridge, 'listening');
+  context.after(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        bridge.close((error) => (error === undefined ? resolve() : reject(error)));
+      }),
+  );
+
+  const child = spawn(process.execPath, [join(packageDirectory, 'dist/index.js')], {
+    env: {
+      ...process.env,
+      DIRT_MCP_BRIDGE_TOKEN: 'bridge-test-token',
+      DIRT_MCP_BRIDGE_URL: `http://127.0.0.1:${serverAddressPort(bridge.address())}`,
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  context.after(() => {
+    if (child.exitCode === null) child.kill();
+  });
+  const messages = collectLines(child.stdout, (line) => JSON.parse(line) as JsonRpcResponse);
+
+  send(child, { jsonrpc: '2.0', id: 40, method: 'tools/list', params: modernParams({}) });
+  const failed = await waitFor(messages, 40);
+  assert.equal(failed.error?.code, -32_603);
+  assert.equal(failed.result, undefined);
+  assert.equal(bootstrapAttempts, 1);
+
+  send(child, { jsonrpc: '2.0', id: 41, method: 'tools/list', params: modernParams({}) });
+  const recovered = await waitFor(messages, 41);
+  assert.ok(recovered.result);
+  assert.deepEqual(
+    recovered.result.tools?.map((tool) => tool.name),
+    ['ping_server'],
+  );
+  assert.equal(bootstrapAttempts, 2);
+
+  configuredTools.get_server_status = true;
+  send(child, { jsonrpc: '2.0', id: 42, method: 'tools/list', params: modernParams({}) });
+  const fixedSnapshot = await waitFor(messages, 42);
+  assert.ok(fixedSnapshot.result);
+  assert.deepEqual(
+    fixedSnapshot.result.tools?.map((tool) => tool.name),
+    ['ping_server'],
+  );
+  assert.equal(bootstrapAttempts, 2);
+
+  const exited = once(child, 'exit');
+  child.stdin.end();
+  const [exitCode] = await exited;
+  assert.equal(exitCode, 0);
+});
+
 test('returns stable structured codes for MCP-local bridge failures', async (context) => {
   let behavior = 'unauthorized';
-  const bridge = createServer((_request, response) => {
+  const bridge = createServer((request, response) => {
+    if (request.url === '/v1/server-status') {
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify(emptyServerStatus()));
+      return;
+    }
     if (behavior === 'unauthorized') {
       response.statusCode = 401;
       response.setHeader('Content-Type', 'application/json');
@@ -782,6 +1020,7 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
   }
 
   const unauthorized = await callPing(10);
+  assert.ok(unauthorized.result);
   assert.equal(unauthorized.result.isError, true);
   const unauthorizedCallId = unauthorized.result.structuredContent?.error?.callId;
   assert.ok(typeof unauthorizedCallId === 'string');
@@ -796,6 +1035,7 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
 
   behavior = 'invalid';
   const invalid = await callPing(11);
+  assert.ok(invalid.result);
   assert.equal(invalid.result.isError, true);
   const invalidCallId = invalid.result.structuredContent?.error?.callId;
   assert.ok(typeof invalidCallId === 'string');
@@ -810,6 +1050,7 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
 
   behavior = 'malformed';
   const malformed = await callPing(12);
+  assert.ok(malformed.result);
   assert.equal(malformed.result.isError, true);
   const malformedCallId = malformed.result.structuredContent?.error?.callId;
   assert.ok(typeof malformedCallId === 'string');
@@ -824,6 +1065,7 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
 
   behavior = 'unstructured';
   const unstructured = await callPing(13);
+  assert.ok(unstructured.result);
   assert.equal(unstructured.result.isError, true);
   const unstructuredCallId = unstructured.result.structuredContent?.error?.callId;
   assert.ok(typeof unstructuredCallId === 'string');
@@ -840,6 +1082,7 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
     bridge.close((error) => (error === undefined ? resolve() : reject(error)));
   });
   const unavailable = await callPing(14);
+  assert.ok(unavailable.result);
   assert.equal(unavailable.result.isError, true);
   assert.equal(unavailable.result.structuredContent?.error?.code, 'bridge_unavailable');
 

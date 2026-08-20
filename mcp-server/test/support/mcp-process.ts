@@ -28,7 +28,8 @@ export interface JsonRpcResult {
 
 export interface JsonRpcResponse {
   readonly id?: JsonRpcId;
-  readonly result: JsonRpcResult;
+  readonly error?: { readonly code: number; readonly message: string };
+  readonly result?: JsonRpcResult;
 }
 
 interface Collected<T> {

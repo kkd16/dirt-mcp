@@ -53,13 +53,16 @@ The TypeScript process owns the agent-facing interface:
 It does not read world files or reproduce Minecraft editing logic. Stdout is
 reserved for MCP; process diagnostics go to stderr.
 
-The process entry point only validates its environment and starts the current
-MCP stdio transport. A composition root installs a deterministic static tool
-catalog from cohesive status, inspection, and editing registrars. Tool
-schemas stay with their feature; one concrete bridge client owns authenticated
-HTTP and response validation; one execution helper owns call IDs, error mapping,
-and auditing. The design uses functions and concrete modules rather than a tool
-class hierarchy or dependency-injection framework.
+The process entry point validates its environment and starts the current MCP
+stdio transport. During startup, a composition root reads the authenticated
+Paper status snapshot and installs a deterministic catalog containing only tools
+enabled there. Missing tool entries resolve false in the Paper configuration;
+disabled tools stay out of discovery and are rejected before their handlers run.
+Tool schemas stay with their cohesive
+status, inspection, and editing registrars; one concrete bridge client owns
+authenticated HTTP and response validation; one execution helper owns call IDs,
+error mapping, and auditing. The design uses functions and concrete modules
+rather than a tool class hierarchy or dependency-injection framework.
 
 Each accepted tool call writes one completion record to stderr with a generated
 call ID, MCP request ID, client label when available, world, outcome, and elapsed
@@ -100,6 +103,12 @@ The MCP server receives the bridge URL and token through its process environment
 The configured bridge URL must be a bare `http://127.0.0.1` origin with an
 optional port; paths, queries, fragments, credentials, and other hosts are
 rejected at startup.
+
+The MCP allowlist is a Paper startup snapshot reported by the authenticated
+status endpoint. The MCP process snapshots it again while building its tool
+catalog, so changing YAML requires a Paper restart followed by an MCP host or
+process restart. Bridge routes remain an internal authenticated transport and
+are not removed when their agent-facing tool is disabled.
 
 ## Edit execution
 

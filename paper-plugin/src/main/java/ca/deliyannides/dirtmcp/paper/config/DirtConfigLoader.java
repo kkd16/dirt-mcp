@@ -1,12 +1,15 @@
 package ca.deliyannides.dirtmcp.paper.config;
 
+import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.bukkit.configuration.file.FileConfiguration;
 
 public final class DirtConfigLoader {
     private static final Set<String> SECTIONS =
-            Set.of("bridge", "limits", "edit-history", "defaults");
-    private static final Set<String> PATHS =
+            Set.of("bridge", "tools", "limits", "edit-history", "defaults");
+    private static final Set<String> REQUIRED_PATHS =
             Set.of(
                     "bridge.port",
                     "bridge.backlog",
@@ -30,6 +33,10 @@ public final class DirtConfigLoader {
                     "defaults.region-blocks-include-air",
                     "defaults.region-blocks-format",
                     "defaults.edit-dry-run");
+    private static final Set<String> TOOL_PATHS =
+            Arrays.stream(McpTool.values())
+                    .map(tool -> "tools." + tool.id())
+                    .collect(Collectors.toUnmodifiableSet());
 
     private DirtConfigLoader() {}
 
@@ -47,6 +54,7 @@ public final class DirtConfigLoader {
                         requiredInteger(config, "bridge.minimum-token-bytes"),
                         requiredInteger(config, "bridge.max-concurrent-requests"),
                         requiredInteger(config, "bridge.max-concurrent-inspections")),
+                loadTools(config),
                 new DirtConfig.Limits(
                         requiredInteger(config, "limits.max-request-bytes"),
                         requiredInteger(config, "limits.max-region-volume"),
@@ -68,16 +76,31 @@ public final class DirtConfigLoader {
     }
 
     private static void validateKeys(FileConfiguration config) {
-        for (String path : PATHS) {
-            if (!config.isSet(path)) {
+        for (String path : REQUIRED_PATHS) {
+            if (!isExplicitlySet(config, path)) {
                 throw new IllegalArgumentException(path + " is required");
             }
         }
         for (String key : config.getKeys(true)) {
-            if (!SECTIONS.contains(key) && !PATHS.contains(key)) {
+            if (!SECTIONS.contains(key)
+                    && !REQUIRED_PATHS.contains(key)
+                    && !TOOL_PATHS.contains(key)) {
                 throw new IllegalArgumentException("Unknown configuration key: " + key);
             }
         }
+    }
+
+    private static DirtConfig.Tools loadTools(FileConfiguration config) {
+        if (isExplicitlySet(config, "tools") && !config.isConfigurationSection("tools")) {
+            throw new IllegalArgumentException("tools must be a configuration section");
+        }
+        EnumSet<McpTool> enabled = EnumSet.noneOf(McpTool.class);
+        for (McpTool tool : McpTool.values()) {
+            if (optionalBoolean(config, "tools." + tool.id())) {
+                enabled.add(tool);
+            }
+        }
+        return new DirtConfig.Tools(enabled);
     }
 
     private static int parsePortOverride(String override, int configuredPort) {
@@ -109,6 +132,17 @@ public final class DirtConfigLoader {
             throw new IllegalArgumentException(path + " must be true or false");
         }
         return config.getBoolean(path);
+    }
+
+    private static boolean optionalBoolean(FileConfiguration config, String path) {
+        if (!isExplicitlySet(config, path)) {
+            return false;
+        }
+        return requiredBoolean(config, path);
+    }
+
+    private static boolean isExplicitlySet(FileConfiguration config, String path) {
+        return config.contains(path, true);
     }
 
     private static String requiredString(FileConfiguration config, String path) {

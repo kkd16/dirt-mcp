@@ -95,6 +95,7 @@ public final class BukkitServerStatusAccess implements PaperServerStatusService.
                 new Performance(tps[0], server.getAverageTickTime()),
                 new PlayerSummary(players.size(), server.getMaxPlayers(), players),
                 worlds,
+                this.config.tools().flags(),
                 new EffectiveLimits(
                         limits.maxRequestBytes(),
                         limits.maxRegionVolume(),

@@ -11,6 +11,7 @@ import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ServerStatusEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.SetBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.UndoEditEndpoint;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.config.McpTool;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus;
 import ca.deliyannides.dirtmcp.paper.status.PingServer;
@@ -36,6 +37,7 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpRequest;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -52,6 +54,7 @@ final class BridgeTestFixture {
     static DirtConfig config(int port, int maximumConcurrentRequests) {
         return new DirtConfig(
                 new DirtConfig.Bridge(port, 0, 1, 1, 32, maximumConcurrentRequests, 1),
+                allTools(),
                 new DirtConfig.Limits(262_144, 1_000_000, 256, 32, 64, 250_000, 32_768, 321, 654),
                 new DirtConfig.EditHistory(20, 100, 1_000_000),
                 new DirtConfig.Defaults(false, "blocks", false));
@@ -137,6 +140,7 @@ final class BridgeTestFixture {
                                             "north",
                                             new BlockPosition(12, 70, -4)))),
                     List.of(),
+                    allTools().flags(),
                     new GetServerStatus.EffectiveLimits(
                             262_144, 1_000_000, 256, 32, 64, 250_000, 32_768, 321, 654),
                     new GetServerStatus.EffectiveEditHistory(20, 100, 1_000_000),
@@ -312,5 +316,9 @@ final class BridgeTestFixture {
                     "2026-08-19T12:00:00Z",
                     EditStatus.COMMITTED);
         }
+    }
+
+    private static DirtConfig.Tools allTools() {
+        return new DirtConfig.Tools(EnumSet.allOf(McpTool.class));
     }
 }
