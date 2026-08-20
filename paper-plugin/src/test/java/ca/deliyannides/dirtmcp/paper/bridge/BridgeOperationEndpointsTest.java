@@ -230,8 +230,10 @@ final class BridgeOperationEndpointsTest {
                                     bridge,
                                     "/v1/set-blocks",
                                     """
-                                    {"world":"world","changes":[{"position":{"x":7,"y":8,"z":9},
-                                     "blockState":"minecraft:gold_block"}],"dryRun":true}
+                                    {"world":"world","origin":{"x":7,"y":8,"z":9},
+                                     "palette":["minecraft:gold_block"],
+                                     "placements":[{"paletteIndex":0,"offsets":[[0,0,0]]}],
+                                     "dryRun":true}
                                     """));
             HttpResponse<String> undo =
                     send(client, post(bridge, "/v1/undo-last-dirt-edit", "{\"world\":\"world\"}"));
@@ -252,10 +254,12 @@ final class BridgeOperationEndpointsTest {
             assertTrue(fillRequest.get().dryRun());
             assertFalse(json(fill.body()).toString().contains("weight"));
             assertEquals(200, set.statusCode());
+            assertEquals(new BlockPosition(7, 8, 9), setRequest.get().origin());
+            assertEquals(List.of("minecraft:gold_block"), setRequest.get().palette());
+            assertEquals(0, setRequest.get().placements().getFirst().paletteIndex());
             assertEquals(
-                    new BlockPosition(7, 8, 9), setRequest.get().changes().getFirst().position());
-            assertEquals(
-                    "minecraft:gold_block", setRequest.get().changes().getFirst().blockState());
+                    new SetBlocks.Offset(0, 0, 0),
+                    setRequest.get().placements().getFirst().offsets().getFirst());
             assertEquals(new UndoLastEdit.Request("world"), undoRequest.get());
             assertEquals(200, undo.statusCode());
             assertEquals(List.of("say hello"), commandRequest.get().commands());
@@ -398,11 +402,22 @@ final class BridgeOperationEndpointsTest {
                                     bridge,
                                     "/v1/set-blocks",
                                     """
-                                    {"world":"world","changes":[{"position":
-                                     {"x":1e2147483648,"y":0,"z":0},
-                                     "blockState":"minecraft:stone"}]}
+                                    {"world":"world","origin":{"x":0,"y":0,"z":0},
+                                     "palette":["minecraft:stone"],"placements":[{
+                                     "paletteIndex":0,"offsets":[[1e2147483648,0,0]]}]}
                                     """)),
-                    "changes[0].position.x must be a signed 32-bit integer");
+                    "placements[0].offsets[0][0] must be a signed 32-bit integer");
+            assertError(
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/set-blocks",
+                                    """
+                                    {"world":"world","changes":[{"position":
+                                     {"x":0,"y":0,"z":0},"blockState":"minecraft:stone"}]}
+                                    """)),
+                    "Request contains missing or unknown fields");
         }
     }
 

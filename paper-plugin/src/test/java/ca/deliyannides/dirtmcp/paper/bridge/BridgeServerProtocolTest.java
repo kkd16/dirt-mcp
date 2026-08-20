@@ -356,9 +356,11 @@ final class BridgeServerProtocolTest {
                                     .POST(
                                             HttpRequest.BodyPublishers.ofString(
                                                     """
-                                                    {"world":"audit-world","changes":[{
-                                                     "position":{"x":1,"y":2,"z":3},
-                                                     "blockState":"minecraft:secret_gold_block"}]}
+                                                    {"world":"audit-world",
+                                                     "origin":{"x":1,"y":2,"z":3},
+                                                     "palette":["minecraft:secret_gold_block"],
+                                                     "placements":[{"paletteIndex":0,
+                                                     "offsets":[[0,0,0]]}]}
                                                     """))
                                     .build(),
                             HttpResponse.BodyHandlers.ofString());

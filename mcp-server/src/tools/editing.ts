@@ -147,27 +147,91 @@ const FillRegionOutputSchema = z
   .strict()
   .describe('Completed or previewed region fill.');
 
-const SetBlocksInputSchema = z
+const BlockOffsetSchema = z
+  .tuple([
+    z.number().int().min(INT32_MIN).max(INT32_MAX),
+    z.number().int().min(INT32_MIN).max(INT32_MAX),
+    z.number().int().min(INT32_MIN).max(INT32_MAX),
+  ])
+  .describe('Signed [x, y, z] offset from the origin.');
+
+const SetBlocksPaletteSchema = z
+  .array(NonBlankStringSchema)
+  .min(1)
+  .max(64)
+  .superRefine((palette, context) => {
+    const seen = new Set<string>();
+    palette.forEach((blockState, index) => {
+      if (seen.has(blockState)) {
+        context.addIssue({
+          code: 'custom',
+          path: [index],
+          message: 'Palette block states must be distinct.',
+        });
+      }
+      seen.add(blockState);
+    });
+  })
+  .describe('One or more distinct exact block states referenced by zero-based index.');
+
+export const SetBlocksInputSchema = z
   .object({
     world: NonBlankStringSchema.describe('Exact name of an already loaded Paper world.'),
-    changes: z
+    origin: BlockPositionSchema.describe('Absolute anchor added to every placement offset.'),
+    palette: SetBlocksPaletteSchema,
+    placements: z
       .array(
         z
           .object({
-            position: BlockPositionSchema,
-            blockState: NonBlankStringSchema.describe('Canonical block state to write at this position.'),
+            paletteIndex: z.number().int().min(0).max(INT32_MAX).describe('Zero-based index into palette.'),
+            offsets: z
+              .array(BlockOffsetSchema)
+              .min(1)
+              .describe('Origin-relative positions that receive this palette state.'),
           })
           .strict(),
       )
       .min(1)
-      .describe('Distinct block positions and their destination states. Duplicate positions are rejected.'),
+      .describe('Palette-indexed groups of origin-relative block offsets.'),
     dryRun: z
       .boolean()
       .optional()
       .describe('Preview exact counts without mutating the world; omission uses the Paper plugin default.'),
   })
   .strict()
-  .describe('One sparse, undoable block edit across explicitly listed positions.');
+  .superRefine((input, context) => {
+    const positions = new Set<string>();
+    input.placements.forEach((placement, placementIndex) => {
+      if (placement.paletteIndex >= input.palette.length) {
+        context.addIssue({
+          code: 'custom',
+          path: ['placements', placementIndex, 'paletteIndex'],
+          message: 'Palette index must reference an entry in palette.',
+        });
+      }
+      placement.offsets.forEach((offset, offsetIndex) => {
+        const resolved = [input.origin.x + offset[0], input.origin.y + offset[1], input.origin.z + offset[2]];
+        if (resolved.some((coordinate) => coordinate < INT32_MIN || coordinate > INT32_MAX)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['placements', placementIndex, 'offsets', offsetIndex],
+            message: 'Resolved position must use signed 32-bit coordinates.',
+          });
+          return;
+        }
+        const key = resolved.join(',');
+        if (positions.has(key)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['placements', placementIndex, 'offsets', offsetIndex],
+            message: 'Resolved block positions must be distinct.',
+          });
+        }
+        positions.add(key);
+      });
+    });
+  })
+  .describe('One undoable palette-based block edit at origin-relative offsets.');
 
 const SetBlocksOutputSchema = z
   .object({
@@ -178,7 +242,7 @@ const SetBlocksOutputSchema = z
     unchangedBlockCount: z.number().int().nonnegative().describe('Blocks already in their requested state.'),
   })
   .strict()
-  .describe('Completed or previewed sparse block edit.');
+  .describe('Completed or previewed palette-based block edit.');
 
 const UndoLastDirtEditInputSchema = z
   .object({
@@ -259,7 +323,7 @@ export function registerEditingTools(server: McpServer, bridge: BridgeClient): v
     {
       title: 'Set blocks',
       description:
-        'Set distinct explicit positions to individual canonical block states in one FAWE edit and one Dirt undo entry. All entries are validated before mutation; duplicate positions are rejected. Keep the encoded request within get_server_status.limits.maxRequestBytes. Placement does not trigger Minecraft neighbor physics. Set dryRun=true to preview exact counts.',
+        'Place exact block states from a palette at distinct [x, y, z] offsets from one origin, using one FAWE edit and one Dirt undo entry. paletteIndex is zero-based. All states and resolved positions are validated before mutation. Keep the encoded request within get_server_status.limits.maxRequestBytes. Placement does not trigger Minecraft neighbor physics. Set dryRun=true to preview exact counts.',
       inputSchema: SetBlocksInputSchema,
       outputSchema: SetBlocksOutputSchema,
       annotations: MUTATION_ANNOTATIONS,
@@ -272,7 +336,7 @@ export function registerEditingTools(server: McpServer, bridge: BridgeClient): v
           const verb = result.dryRun ? 'Would change' : 'Changed';
           return successResult(
             result,
-            `${verb} ${result.changedBlockCount} of ${result.blockCount} explicitly listed blocks in ${result.world}.`,
+            `${verb} ${result.changedBlockCount} of ${result.blockCount} requested blocks in ${result.world}.`,
           );
         },
       ),
@@ -283,7 +347,7 @@ export function registerEditingTools(server: McpServer, bridge: BridgeClient): v
     {
       title: 'Undo the last Dirt edit',
       description:
-        'Undo the newest successful Dirt replace, fill, or sparse set in one loaded world. History is in-memory and scoped per world.',
+        'Undo the newest successful Dirt replace, fill, or palette-based set in one loaded world. History is in-memory and scoped per world.',
       inputSchema: UndoLastDirtEditInputSchema,
       outputSchema: UndoLastDirtEditOutputSchema,
       annotations: NON_IDEMPOTENT_MUTATION_ANNOTATIONS,

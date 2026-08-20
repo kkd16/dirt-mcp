@@ -15,8 +15,8 @@ inspect region -> describe an edit -> optionally preview -> execute -> inspect -
 
 - **Live-world ownership:** Paper remains the sole owner of loaded worlds and
   persistence. Dirt MCP never edits region files underneath a running server.
-- **Semantic tools:** tools batch bounded regions or explicit positions instead
-  of requiring one model call per block.
+- **Semantic tools:** tools batch bounded regions or palette-based placements
+  instead of requiring one model call per block.
 - **Deterministic execution:** the model chooses an operation; Paper and FAWE
   execute it predictably.
 - **Local by design:** the MCP process and Paper bridge run on the same machine.
@@ -34,7 +34,7 @@ V1 provides these world capabilities:
   views;
 - replace matching blocks;
 - fill a bounded region;
-- set mixed block states at explicitly listed positions as one edit;
+- set mixed block states at origin-relative offsets as one edit;
 - undo the most recent Dirt MCP edit in a world; and
 - run an ordered batch of registered Minecraft commands with operator-level
   permissions through a non-player Paper sender.

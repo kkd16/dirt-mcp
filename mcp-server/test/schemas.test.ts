@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BlockPositionSchema, NonBlankStringSchema } from '../dist/tools/common.js';
-import { DestinationPaletteSchema, SourceBlockStatePatternsSchema } from '../dist/tools/editing.js';
+import {
+  DestinationPaletteSchema,
+  SetBlocksInputSchema,
+  SourceBlockStatePatternsSchema,
+} from '../dist/tools/editing.js';
 import { GetRegionBlocksInputSchema, ScanOrthographicViewInputSchema } from '../dist/tools/inspection.js';
 
 const region = {
@@ -80,4 +84,55 @@ test('keeps common Minecraft wire values strict and bounded', () => {
   assert.equal(BlockPositionSchema.safeParse({ x: 0, y: 0, z: 0, extra: true }).success, false);
   assert.equal(BlockPositionSchema.safeParse({ x: 2_147_483_648, y: 0, z: 0 }).success, false);
   assert.equal(BlockPositionSchema.safeParse({ x: -2_147_483_648, y: 0, z: 2_147_483_647 }).success, true);
+});
+
+test('validates palette-based set-block placements and rejects the replaced contract', () => {
+  const input = {
+    world: 'world',
+    origin: { x: 10, y: 20, z: 30 },
+    palette: ['minecraft:stone', 'minecraft:snow_block'],
+    placements: [
+      { paletteIndex: 0, offsets: [[0, 0, 0] as const, [1, 0, 0] as const] },
+      { paletteIndex: 1, offsets: [[0, 1, 0] as const] },
+    ],
+  };
+
+  assert.equal(SetBlocksInputSchema.safeParse(input).success, true);
+  assert.equal(
+    SetBlocksInputSchema.safeParse({
+      world: 'world',
+      changes: [{ position: { x: 10, y: 20, z: 30 }, blockState: 'minecraft:stone' }],
+    }).success,
+    false,
+  );
+  assert.equal(
+    SetBlocksInputSchema.safeParse({
+      ...input,
+      placements: [{ paletteIndex: 2, offsets: [[0, 0, 0]] }],
+    }).success,
+    false,
+  );
+  assert.equal(
+    SetBlocksInputSchema.safeParse({
+      ...input,
+      placements: [
+        {
+          paletteIndex: 0,
+          offsets: [
+            [0, 0, 0],
+            [0, 0, 0],
+          ],
+        },
+      ],
+    }).success,
+    false,
+  );
+  assert.equal(
+    SetBlocksInputSchema.safeParse({
+      ...input,
+      origin: { x: 2_147_483_647, y: 20, z: 30 },
+      placements: [{ paletteIndex: 0, offsets: [[1, 0, 0]] }],
+    }).success,
+    false,
+  );
 });

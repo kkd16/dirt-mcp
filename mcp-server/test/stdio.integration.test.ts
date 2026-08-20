@@ -460,17 +460,22 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     }),
   );
 
-  const sparseChanges = [
-    { position: { x: 1, y: 2, z: 3 }, blockState: 'minecraft:stone' },
-    { position: { x: 5, y: 2, z: 3 }, blockState: 'minecraft:glass' },
-  ];
+  const setBlocksInput = {
+    world: 'world',
+    origin: { x: 1, y: 2, z: 3 },
+    palette: ['minecraft:stone', 'minecraft:glass'],
+    placements: [
+      { paletteIndex: 0, offsets: [[0, 0, 0]] },
+      { paletteIndex: 1, offsets: [[4, 0, 0]] },
+    ],
+  };
   send(child, {
     jsonrpc: '2.0',
     id: 8,
     method: 'tools/call',
     params: modernParams({
       name: 'set_blocks',
-      arguments: { world: 'world', changes: sparseChanges },
+      arguments: setBlocksInput,
     }),
   });
   const blocksSet = await waitFor(messages, 8);
@@ -480,7 +485,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       content: [
         {
           type: 'text',
-          text: 'Changed 1 of 2 explicitly listed blocks in world.',
+          text: 'Changed 1 of 2 requested blocks in world.',
         },
       ],
       structuredContent: setBlocks,
@@ -614,7 +619,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     destinationPalette: [{ blockState: 'minecraft:dirt' }],
   });
   assert.equal(requestAt(requests, 4).headers['content-type'], 'application/json');
-  assert.deepEqual(requestAt(requests, 6).body, { world: 'world', changes: sparseChanges });
+  assert.deepEqual(requestAt(requests, 6).body, setBlocksInput);
   assert.equal(requestAt(requests, 6).headers['content-type'], 'application/json');
   assert.deepEqual(requestAt(requests, 7).body, {
     commands: ['/say hello', 'missing', 'time query daytime'],

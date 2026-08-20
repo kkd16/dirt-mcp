@@ -13,10 +13,8 @@ import com.sk89q.worldedit.function.pattern.RandomPattern;
 import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldedit.world.block.BlockState;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -94,9 +92,9 @@ final class PaperEditPreparation implements AutoCloseable {
         return onMainThread(
                 () -> {
                     requireAvailable(world);
-                    List<PreparedBlockChange> changes = prepareChanges(world, request.changes());
+                    List<PreparedBlockChange> changes = prepareChanges(world, request);
                     ChunkTicketManager.Lease lease =
-                            this.tickets.acquire(world, touchedChunks, "Sparse edit");
+                            this.tickets.acquire(world, touchedChunks, "Set-blocks edit");
                     return new PreparedSet(world, changes, List.copyOf(touchedChunks), lease);
                 });
     }
@@ -115,46 +113,55 @@ final class PaperEditPreparation implements AutoCloseable {
         this.tickets.close();
     }
 
-    private List<PreparedBlockChange> prepareChanges(
-            PaperWorld world, List<BlockChange> requestedChanges) throws OperationException {
-        Map<BlockPosition, Integer> positions = new HashMap<>();
-        Map<String, BlockState> parsedStates = new HashMap<>();
-        List<PreparedBlockChange> changes = new ArrayList<>(requestedChanges.size());
-        for (int index = 0; index < requestedChanges.size(); index++) {
-            BlockChange change = requestedChanges.get(index);
-            BlockPosition position = change.position();
-            if (position.y() < world.bukkitWorld().getMinHeight()
-                    || position.y() >= world.bukkitWorld().getMaxHeight()) {
-                throw invalid(
-                        "changes["
-                                + index
-                                + "].position.y must be between "
-                                + world.bukkitWorld().getMinHeight()
-                                + " and "
-                                + (world.bukkitWorld().getMaxHeight() - 1));
+    private List<PreparedBlockChange> prepareChanges(PaperWorld world, SetBlocks.Request request)
+            throws OperationException {
+        List<BlockState> palette = prepareSetPalette(request.palette());
+        List<PreparedBlockChange> changes = new ArrayList<>();
+        for (int placementIndex = 0;
+                placementIndex < request.placements().size();
+                placementIndex++) {
+            SetBlocks.Placement placement = request.placements().get(placementIndex);
+            BlockState state = palette.get(placement.paletteIndex());
+            for (int offsetIndex = 0; offsetIndex < placement.offsets().size(); offsetIndex++) {
+                SetBlocks.Offset offset = placement.offsets().get(offsetIndex);
+                BlockPosition position =
+                        new BlockPosition(
+                                Math.addExact(request.origin().x(), offset.x()),
+                                Math.addExact(request.origin().y(), offset.y()),
+                                Math.addExact(request.origin().z(), offset.z()));
+                if (position.y() < world.bukkitWorld().getMinHeight()
+                        || position.y() >= world.bukkitWorld().getMaxHeight()) {
+                    throw invalid(
+                            "placements["
+                                    + placementIndex
+                                    + "].offsets["
+                                    + offsetIndex
+                                    + "] resolves to a Y coordinate outside "
+                                    + world.bukkitWorld().getMinHeight()
+                                    + " through "
+                                    + (world.bukkitWorld().getMaxHeight() - 1));
+                }
+                changes.add(
+                        new PreparedBlockChange(
+                                BlockVector3.at(position.x(), position.y(), position.z()), state));
             }
-            Integer previous = positions.putIfAbsent(position, index);
-            if (previous != null) {
-                throw invalid(
-                        "changes["
-                                + index
-                                + "].position duplicates changes["
-                                + previous
-                                + "].position");
-            }
-            BlockState state = parsedStates.get(change.blockState());
-            if (state == null) {
-                state =
-                        BukkitAdapter.adapt(
-                                parseBlockData(
-                                        change.blockState(), "changes[" + index + "].blockState"));
-                parsedStates.put(change.blockState(), state);
-            }
-            changes.add(
-                    new PreparedBlockChange(
-                            BlockVector3.at(position.x(), position.y(), position.z()), state));
         }
         return List.copyOf(changes);
+    }
+
+    private static List<BlockState> prepareSetPalette(List<String> inputs)
+            throws OperationException {
+        Set<String> statesSeen = new LinkedHashSet<>();
+        List<BlockState> states = new ArrayList<>(inputs.size());
+        for (int index = 0; index < inputs.size(); index++) {
+            BlockData data = parseBlockData(inputs.get(index), "palette[" + index + "]");
+            String canonicalState = data.getAsString();
+            if (!statesSeen.add(canonicalState)) {
+                throw invalid("palette contains a duplicate block state: " + canonicalState);
+            }
+            states.add(BukkitAdapter.adapt(data));
+        }
+        return List.copyOf(states);
     }
 
     private static PreparedSources prepareSources(List<String> inputs) throws OperationException {

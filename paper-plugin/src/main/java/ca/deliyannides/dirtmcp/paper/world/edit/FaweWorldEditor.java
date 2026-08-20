@@ -127,7 +127,7 @@ public final class FaweWorldEditor
 
     @Override
     public SetBlocks.Result setBlocks(SetBlocks.Request request) throws OperationException {
-        List<ChunkPosition> chunks = validateSparseRequest(request);
+        List<ChunkPosition> chunks = validateSetRequest(request);
         EditPlatform.WorldHandle world = resolveWorld(request.world());
         try (EditCoordinator.Lease lease = this.coordinator.enter(world.id(), world.name())) {
             EditPlatform.EditResult execution;
@@ -208,40 +208,94 @@ public final class FaweWorldEditor
         return region;
     }
 
-    private List<ChunkPosition> validateSparseRequest(SetBlocks.Request request)
+    private List<ChunkPosition> validateSetRequest(SetBlocks.Request request)
             throws OperationException {
-        if (request == null || request.changes() == null || request.changes().isEmpty()) {
-            throw invalid("changes must contain at least one block change");
+        if (request == null || request.origin() == null) {
+            throw invalid("origin is required");
         }
-        if (request.changes().size() > this.maxRegionVolume) {
-            throw new OperationException(
-                    OperationFailure.REGION_TOO_LARGE,
-                    "Sparse edit contains "
-                            + request.changes().size()
-                            + " blocks; maximum is "
-                            + this.maxRegionVolume);
+        validateSetPalette(request.palette());
+        if (request.placements() == null || request.placements().isEmpty()) {
+            throw invalid("placements must contain at least one entry");
         }
 
         Set<ChunkPosition> chunks = new LinkedHashSet<>();
-        for (int index = 0; index < request.changes().size(); index++) {
-            BlockChange change = request.changes().get(index);
-            if (change == null
-                    || change.position() == null
-                    || change.blockState() == null
-                    || change.blockState().isBlank()) {
-                throw invalid("changes[" + index + "] must contain a position and blockState");
+        Set<BlockPosition> positions = new LinkedHashSet<>();
+        long blockCount = 0;
+        for (int placementIndex = 0;
+                placementIndex < request.placements().size();
+                placementIndex++) {
+            SetBlocks.Placement placement = request.placements().get(placementIndex);
+            String placementName = "placements[" + placementIndex + "]";
+            if (placement == null) {
+                throw invalid(placementName + " is required");
             }
-            BlockPosition position = change.position();
-            chunks.add(ChunkPosition.containing(position.x(), position.z()));
-            if (chunks.size() > this.maxTouchedChunks) {
-                throw new OperationException(
-                        OperationFailure.REGION_TOO_LARGE,
-                        "Operation touches more than the maximum of "
-                                + this.maxTouchedChunks
-                                + " chunks");
+            if (placement.paletteIndex() < 0
+                    || placement.paletteIndex() >= request.palette().size()) {
+                throw invalid(placementName + ".paletteIndex must reference an entry in palette");
+            }
+            if (placement.offsets() == null || placement.offsets().isEmpty()) {
+                throw invalid(placementName + ".offsets must contain at least one offset");
+            }
+            for (int offsetIndex = 0; offsetIndex < placement.offsets().size(); offsetIndex++) {
+                SetBlocks.Offset offset = placement.offsets().get(offsetIndex);
+                String offsetName = placementName + ".offsets[" + offsetIndex + "]";
+                if (offset == null) {
+                    throw invalid(offsetName + " is required");
+                }
+                blockCount++;
+                if (blockCount > this.maxRegionVolume) {
+                    throw new OperationException(
+                            OperationFailure.REGION_TOO_LARGE,
+                            "Set-blocks edit contains more than the maximum of "
+                                    + this.maxRegionVolume
+                                    + " blocks");
+                }
+                BlockPosition position = resolvePosition(request.origin(), offset, offsetName);
+                if (!positions.add(position)) {
+                    throw invalid(offsetName + " resolves to a duplicate block position");
+                }
+                chunks.add(ChunkPosition.containing(position.x(), position.z()));
+                if (chunks.size() > this.maxTouchedChunks) {
+                    throw new OperationException(
+                            OperationFailure.REGION_TOO_LARGE,
+                            "Operation touches more than the maximum of "
+                                    + this.maxTouchedChunks
+                                    + " chunks");
+                }
             }
         }
         return List.copyOf(chunks);
+    }
+
+    private void validateSetPalette(List<String> palette) throws OperationException {
+        if (palette == null || palette.isEmpty()) {
+            throw invalid("palette must contain at least one block state");
+        }
+        if (palette.size() > this.maxBlockStatePatterns) {
+            throw invalid("palette may contain at most " + this.maxBlockStatePatterns + " entries");
+        }
+        Set<String> distinct = new LinkedHashSet<>();
+        for (int index = 0; index < palette.size(); index++) {
+            String blockState = palette.get(index);
+            if (blockState == null || blockState.isBlank()) {
+                throw invalid("palette[" + index + "] must be a non-empty block state");
+            }
+            if (!distinct.add(blockState)) {
+                throw invalid("palette contains a duplicate block state: " + blockState);
+            }
+        }
+    }
+
+    private static BlockPosition resolvePosition(
+            BlockPosition origin, SetBlocks.Offset offset, String field) throws OperationException {
+        try {
+            return new BlockPosition(
+                    Math.addExact(origin.x(), offset.x()),
+                    Math.addExact(origin.y(), offset.y()),
+                    Math.addExact(origin.z(), offset.z()));
+        } catch (ArithmeticException exception) {
+            throw invalid(field + " resolves outside the signed 32-bit coordinate range");
+        }
     }
 
     private EditPlatform.WorldHandle resolveWorld(String worldName) throws OperationException {

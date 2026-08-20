@@ -24,7 +24,7 @@ const stairMin = { x: 2, y: 0, z: 0 };
 const stairMiddle = { x: 3, y: 0, z: 0 };
 const stairMax = { x: 4, y: 0, z: 0 };
 const commandPosition = { x: 5, y: 0, z: 0 };
-const sparsePosition = { x: 6, y: 0, z: 0 };
+const setPosition = { x: 6, y: 0, z: 0 };
 const northStairs = 'minecraft:dark_oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]';
 const southStairs = 'minecraft:dark_oak_stairs[facing=south,half=bottom,shape=straight,waterlogged=false]';
 const baseUrl = `http://127.0.0.1:${bridgePort}`;
@@ -75,7 +75,7 @@ async function paperCommand(command) {
   });
 }
 
-async function bridgeSetBlocks(blocks) {
+async function restoreBlocks(blocks) {
   const result = await bridgeRequest('/v1/run-minecraft-commands', {
     commands: blocks.map(
       ({ position, blockState }) => `setblock ${position.x} ${position.y} ${position.z} ${blockState} replace`,
@@ -161,7 +161,7 @@ let editsToUndo = 0;
 let fixtureIsForceLoaded = false;
 let originalStairFixture;
 let originalCommandFixture;
-let originalSparseFixture;
+let originalSetFixture;
 try {
   const unauthenticated = await fetch(`${baseUrl}/v1/ping`);
   assert.equal(unauthenticated.status, 401);
@@ -295,7 +295,7 @@ try {
   assert.ok(invalidSyntaxRun.results[0].rawMessage.length > 0);
   assert.notEqual(invalidSyntaxRun.results[0].message, invalidSyntaxRun.results[0].rawMessage);
 
-  await bridgeSetBlocks([
+  await restoreBlocks([
     {
       position: commandPosition,
       blockState: originalCommandFixture.blocks[0].blockState,
@@ -303,37 +303,39 @@ try {
   ]);
   originalCommandFixture = undefined;
 
-  originalSparseFixture = await bridgeRequest('/v1/get-region-blocks', {
+  originalSetFixture = await bridgeRequest('/v1/get-region-blocks', {
     world,
     min: commandPosition,
-    max: sparsePosition,
+    max: setPosition,
     includeAir: true,
   });
-  assert.equal(originalSparseFixture.matchedBlockCount, 2);
-  const originalSparseStates = new Map(
-    originalSparseFixture.blocks.map((block) => [
+  assert.equal(originalSetFixture.matchedBlockCount, 2);
+  const originalSetStates = new Map(
+    originalSetFixture.blocks.map((block) => [
       `${block.position.x},${block.position.y},${block.position.z}`,
       block.blockState,
     ]),
   );
-  const firstOriginalState = originalSparseStates.get('5,0,0');
-  const secondOriginalState = originalSparseStates.get('6,0,0');
+  const firstOriginalState = originalSetStates.get('5,0,0');
+  const secondOriginalState = originalSetStates.get('6,0,0');
   assert.ok(firstOriginalState);
   assert.ok(secondOriginalState);
-  const firstSparseState =
+  const firstSetState =
     firstOriginalState === 'minecraft:diamond_block' ? 'minecraft:gold_block' : 'minecraft:diamond_block';
-  const secondSparseState =
+  const secondSetState =
     secondOriginalState === 'minecraft:emerald_block' ? 'minecraft:redstone_block' : 'minecraft:emerald_block';
 
-  const sparsePreview = await bridgeRequest('/v1/set-blocks', {
+  const setPreview = await bridgeRequest('/v1/set-blocks', {
     world,
-    changes: [
-      { position: commandPosition, blockState: firstOriginalState },
-      { position: sparsePosition, blockState: secondSparseState },
+    origin: commandPosition,
+    palette: [firstOriginalState, secondSetState],
+    placements: [
+      { paletteIndex: 0, offsets: [[0, 0, 0]] },
+      { paletteIndex: 1, offsets: [[1, 0, 0]] },
     ],
     dryRun: true,
   });
-  assert.deepEqual(sparsePreview, {
+  assert.deepEqual(setPreview, {
     world,
     dryRun: true,
     blockCount: 2,
@@ -341,65 +343,71 @@ try {
     unchangedBlockCount: 1,
   });
 
-  const duplicateSparse = await bridgeResponse('/v1/set-blocks', {
+  const duplicateSet = await bridgeResponse('/v1/set-blocks', {
     world,
-    changes: [
-      { position: commandPosition, blockState: firstSparseState },
-      { position: commandPosition, blockState: secondSparseState },
+    origin: commandPosition,
+    palette: [firstSetState, secondSetState],
+    placements: [
+      { paletteIndex: 0, offsets: [[0, 0, 0]] },
+      { paletteIndex: 1, offsets: [[0, 0, 0]] },
     ],
   });
-  assert.equal(duplicateSparse.status, 400);
-  assert.equal(duplicateSparse.body.error.code, 'invalid_request');
+  assert.equal(duplicateSet.status, 400);
+  assert.equal(duplicateSet.body.error.code, 'invalid_request');
 
-  const invalidSparse = await bridgeResponse('/v1/set-blocks', {
+  const invalidSet = await bridgeResponse('/v1/set-blocks', {
     world,
-    changes: [
-      { position: commandPosition, blockState: firstSparseState },
-      { position: sparsePosition, blockState: 'minecraft:not_a_block' },
+    origin: commandPosition,
+    palette: [firstSetState, 'minecraft:not_a_block'],
+    placements: [
+      { paletteIndex: 0, offsets: [[0, 0, 0]] },
+      { paletteIndex: 1, offsets: [[1, 0, 0]] },
     ],
   });
-  assert.equal(invalidSparse.status, 400);
-  assert.equal(invalidSparse.body.error.code, 'invalid_request');
-  const afterInvalidSparse = await bridgeRequest('/v1/get-region-blocks', {
+  assert.equal(invalidSet.status, 400);
+  assert.equal(invalidSet.body.error.code, 'invalid_request');
+  const afterInvalidSet = await bridgeRequest('/v1/get-region-blocks', {
     world,
     min: commandPosition,
-    max: sparsePosition,
+    max: setPosition,
     includeAir: true,
   });
-  assert.deepEqual(sortedBlockKeys(afterInvalidSparse.blocks), sortedBlockKeys(originalSparseFixture.blocks));
+  assert.deepEqual(sortedBlockKeys(afterInvalidSet.blocks), sortedBlockKeys(originalSetFixture.blocks));
 
-  const sparseSet = await bridgeRequest('/v1/set-blocks', {
+  const setResult = await bridgeRequest('/v1/set-blocks', {
     world,
-    changes: [
-      { position: commandPosition, blockState: firstSparseState },
-      { position: sparsePosition, blockState: secondSparseState },
+    origin: commandPosition,
+    palette: [firstSetState, secondSetState],
+    placements: [
+      { paletteIndex: 0, offsets: [[0, 0, 0]] },
+      { paletteIndex: 1, offsets: [[1, 0, 0]] },
     ],
   });
-  editsToUndo += sparseSet.changedBlockCount > 0 ? 1 : 0;
-  assert.deepEqual(sparseSet, {
+  editsToUndo += setResult.changedBlockCount > 0 ? 1 : 0;
+  assert.deepEqual(setResult, {
     world,
     dryRun: false,
     blockCount: 2,
     changedBlockCount: 2,
     unchangedBlockCount: 0,
   });
-  const afterSparseSet = await bridgeRequest('/v1/get-region-blocks', {
+  const afterSet = await bridgeRequest('/v1/get-region-blocks', {
     world,
     min: commandPosition,
-    max: sparsePosition,
+    max: setPosition,
   });
-  assert.deepEqual(sortedBlockKeys(afterSparseSet.blocks), [`5,0,0:${firstSparseState}`, `6,0,0:${secondSparseState}`]);
-  const sparseUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
+  assert.deepEqual(sortedBlockKeys(afterSet.blocks), [`5,0,0:${firstSetState}`, `6,0,0:${secondSetState}`]);
+  const setUndone = await bridgeRequest('/v1/undo-last-dirt-edit', { world });
   editsToUndo -= 1;
-  assert.equal(sparseUndone.changedBlockCount, 2);
-  const afterSparseUndo = await bridgeRequest('/v1/get-region-blocks', {
+  assert.equal(setUndone.changedBlockCount, 2);
+  const afterSetUndo = await bridgeRequest('/v1/get-region-blocks', {
     world,
     min: commandPosition,
-    max: sparsePosition,
+    max: setPosition,
     includeAir: true,
   });
-  assert.deepEqual(sortedBlockKeys(afterSparseUndo.blocks), sortedBlockKeys(originalSparseFixture.blocks));
-  originalSparseFixture = undefined;
+  assert.deepEqual(sortedBlockKeys(afterSetUndo.blocks), sortedBlockKeys(originalSetFixture.blocks));
+  originalSetFixture = undefined;
 
   const originalStates = Object.keys(original.blockStateCounts);
   const fillBlockState =
@@ -558,7 +566,7 @@ try {
     includeAir: true,
   });
   assert.equal(originalStairFixture.matchedBlockCount, 3);
-  await bridgeSetBlocks([
+  await restoreBlocks([
     { position: stairMin, blockState: northStairs },
     { position: stairMiddle, blockState: 'minecraft:air' },
     { position: stairMax, blockState: southStairs },
@@ -655,7 +663,7 @@ try {
   editsToUndo -= 1;
   assert.equal(propertyFillUndone.changedBlockCount, 1);
 
-  await bridgeSetBlocks(originalStairFixture.blocks);
+  await restoreBlocks(originalStairFixture.blocks);
   originalStairFixture = undefined;
   process.stdout.write(`managed server smoke test passed in ${world}\n`);
 } finally {
@@ -673,14 +681,14 @@ try {
   }
   if (originalStairFixture) {
     try {
-      await bridgeSetBlocks(originalStairFixture.blocks);
+      await restoreBlocks(originalStairFixture.blocks);
     } catch (error) {
       process.stderr.write(`Could not restore stair fixture: ${error.message}\n`);
     }
   }
   if (originalCommandFixture) {
     try {
-      await bridgeSetBlocks([
+      await restoreBlocks([
         {
           position: commandPosition,
           blockState: originalCommandFixture.blocks[0].blockState,
@@ -690,11 +698,11 @@ try {
       process.stderr.write(`Could not restore command fixture: ${error.message}\n`);
     }
   }
-  if (originalSparseFixture) {
+  if (originalSetFixture) {
     try {
-      await bridgeSetBlocks(originalSparseFixture.blocks);
+      await restoreBlocks(originalSetFixture.blocks);
     } catch (error) {
-      process.stderr.write(`Could not restore sparse fixture: ${error.message}\n`);
+      process.stderr.write(`Could not restore set-blocks fixture: ${error.message}\n`);
     }
   }
   if (fixtureIsForceLoaded) {

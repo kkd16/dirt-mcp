@@ -328,7 +328,7 @@ paths:
   /v1/set-blocks:
     post:
       operationId: setBlocks
-      summary: Set explicitly listed block positions in one sparse edit
+      summary: Place palette states at origin-relative offsets in one edit
       requestBody:
         required: true
         content:
@@ -343,7 +343,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/SetBlocksResponse'
         '400':
-          description: Invalid JSON, fields, coordinates, world height, block state, or duplicate position
+          description: Invalid JSON, fields, palette, offsets, resolved coordinates, world height, block state, or duplicate position
           content:
             application/json:
               schema:
@@ -1146,37 +1146,63 @@ components:
           type: integer
           format: int64
           minimum: 0
-    BlockChange:
+    BlockOffset:
+      type: array
+      minItems: 3
+      maxItems: 3
+      description: Signed [x, y, z] offset from the request origin.
+      items:
+        type: integer
+        format: int32
+    PalettePlacement:
       type: object
       additionalProperties: false
       required:
-        - position
-        - blockState
+        - paletteIndex
+        - offsets
       properties:
-        position:
-          $ref: '#/components/schemas/BlockPosition'
-        blockState:
-          type: string
-          minLength: 1
-          pattern: '.*\S.*'
-          description: Canonical block state to write at this position.
+        paletteIndex:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Zero-based index into the request palette.
+        offsets:
+          type: array
+          minItems: 1
+          description: Origin-relative block positions that receive this palette state.
+          items:
+            $ref: '#/components/schemas/BlockOffset'
     SetBlocksRequest:
       type: object
       additionalProperties: false
       required:
         - world
-        - changes
+        - origin
+        - palette
+        - placements
       properties:
         world:
           type: string
           minLength: 1
           pattern: '.*\S.*'
-        changes:
+        origin:
+          $ref: '#/components/schemas/BlockPosition'
+        palette:
           type: array
           minItems: 1
-          description: Distinct block positions and destination states; duplicate positions are rejected.
+          maxItems: 64
+          uniqueItems: true
+          description: Exact block states referenced by zero-based index from placements.
           items:
-            $ref: '#/components/schemas/BlockChange'
+            type: string
+            minLength: 1
+            pattern: '.*\S.*'
+        placements:
+          type: array
+          minItems: 1
+          description: Palette-indexed groups of origin-relative offsets; resolved positions must be distinct.
+          items:
+            $ref: '#/components/schemas/PalettePlacement'
         dryRun:
           type: boolean
           description: Omission uses the configured set-blocks default.
@@ -1340,7 +1366,7 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum cuboid mutation/count volume or explicit positions in a sparse set.
+          description: Maximum cuboid mutation/count volume or resolved offsets in set_blocks.
         maxTouchedChunks:
           type: integer
           format: int32

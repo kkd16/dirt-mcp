@@ -8,7 +8,7 @@ for inspecting bounded regions and performing deterministic bulk edits through
 while Paper remains the owner of the live world.
 
 The repository ships the Paper plugin, authenticated loopback bridge, and MCP
-tools for server status, bounded inspection, FAWE-backed cuboid and sparse
+tools for server status, bounded inspection, FAWE-backed cuboid and palette-based
 edits, undo, and ordered operator-level Minecraft command dispatch.
 
 ## Platform support
@@ -118,11 +118,12 @@ The current tool surface contains `ping_server`, `get_server_status`,
 selection and execution semantics, and the
 [OpenAPI contract](protocol/openapi.yaml) for exact bridge schemas.
 
-`set_blocks` applies distinct explicitly listed positions and block states
-through one FAWE edit session and records the non-empty batch as one Dirt undo
-entry. It validates the complete list and rejects duplicate positions before
-mutation. The shipped 256 KiB request limit supports coherent sparse batches
-while bounding request memory. It does not request Minecraft neighbor physics.
+`set_blocks` takes one absolute `origin`, a block-state `palette`, and
+`placements` that assign a zero-based `paletteIndex` to `[x, y, z]` offset
+tuples. It resolves and validates every position before one FAWE edit, rejects
+duplicates, and records a non-empty batch as one Dirt undo entry. The shipped
+256 KiB request limit bounds request memory. Placement does not request
+Minecraft neighbor physics.
 
 `run_minecraft_commands` accepts a non-empty command array and dispatches it in
 order with console-equivalent permissions. Its Paper sender is not a player, so
@@ -204,7 +205,7 @@ Node, MCP, contract, configuration, package, and formatting checks, validates
 the built Paper JAR, restarts the managed server, runs live bridge, Paper, and
 FAWE coverage, and rejects serious lifecycle log failures. The live suite
 temporarily force-loads chunk `0,0`, verifies status and inspection paths,
-mutates a bounded fixture through fill, replacement, sparse setting, and command
+mutates a bounded fixture through fill, replacement, palette-based setting, and command
 dispatch, checks result caps, exact states, no-ops, and undo, then restores the
 prior world state. Run it without concurrent Dirt MCP edits.
 
