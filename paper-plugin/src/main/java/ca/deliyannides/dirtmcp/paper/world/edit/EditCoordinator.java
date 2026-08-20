@@ -14,6 +14,14 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
+/**
+ * Coordinates per-world operations with globally bounded retained history.
+ *
+ * <p>The {@code worlds} monitor guards both indexes, all history accounting, and mutable {@link
+ * WorldState} fields other than lock ownership. A lease may acquire that monitor while it holds its
+ * world lock, so code inside the monitor must never wait for a world lock. Undo resources are
+ * detached and accounted for under the monitor, then closed only after the monitor is released.
+ */
 final class EditCoordinator implements AutoCloseable {
     private final Map<UUID, WorldState> worlds = new HashMap<>();
     private final LinkedHashMap<UUID, RetainedEdit> retained = new LinkedHashMap<>();

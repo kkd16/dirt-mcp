@@ -64,7 +64,7 @@ async function bridgeGet(path, callId) {
     headers,
     signal: AbortSignal.timeout(bridgeTimeoutMilliseconds(path)),
   });
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 200, `GET ${path} returned HTTP ${response.status}`);
   return response.json();
 }
 
@@ -200,7 +200,7 @@ async function paperCommand(command) {
       if (code === 0) {
         resolve();
       } else {
-        reject(new Error(`Paper command exited with status ${code}`));
+        reject(new Error(`Paper command ${JSON.stringify(command)} exited with status ${code}`));
       }
     });
   });

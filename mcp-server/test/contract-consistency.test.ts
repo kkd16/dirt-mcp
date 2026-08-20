@@ -10,7 +10,7 @@ const sorted = (values: Iterable<string>): string[] => [...values].toSorted();
 function openapiPath(openapi: string, path: string): string {
   const marker = `  ${path}:\n`;
   const start = openapi.indexOf(marker);
-  assert.notEqual(start, -1);
+  assert.notEqual(start, -1, `OpenAPI path is missing: ${path}`);
   const end = openapi.indexOf('\n  /v1/', start + marker.length);
   return openapi.slice(start, end === -1 ? openapi.length : end);
 }
@@ -18,7 +18,7 @@ function openapiPath(openapi: string, path: string): string {
 function openapiSchema(openapi: string, name: string): string {
   const marker = `    ${name}:\n`;
   const start = openapi.indexOf(marker);
-  assert.notEqual(start, -1);
+  assert.notEqual(start, -1, `OpenAPI schema is missing: ${name}`);
   const following = openapi.slice(start + marker.length);
   const relativeEnd = following.search(/\n    [A-Z][A-Za-z0-9]+:\n/);
   return openapi.slice(start, relativeEnd === -1 ? openapi.length : start + marker.length + relativeEnd);
@@ -73,7 +73,7 @@ test('Java, OpenAPI, and Zod expose the same bridge error codes', () => {
   );
 
   const openapiBlock = /code:\n\s+type: string\n\s+enum:\n([\s\S]*?)\n\s+message:/.exec(openapi)?.[1];
-  assert.ok(openapiBlock);
+  assert.ok(openapiBlock, 'OpenAPI error response is missing its code enum');
 
   const openapiCodes = new Set([...openapiBlock.matchAll(/- ([a-z_]+)/g)].flatMap((match) => match[1] ?? []));
   const operationCodes = new Set(
@@ -99,13 +99,13 @@ test('Paper, OpenAPI, shipped YAML, and MCP expose one exact tool catalog', () =
   const openapi = read('../../protocol/openapi.yaml');
   const toolSchema = openapiSchema(openapi, 'ToolConfiguration');
   const requiredBlock = /required:\n([\s\S]*?)\n      properties:/.exec(toolSchema)?.[1];
-  assert.ok(requiredBlock);
+  assert.ok(requiredBlock, 'ToolConfiguration is missing its required-property block');
   const openapiRequired = [...requiredBlock.matchAll(/- ([a-z_]+)/g)].flatMap((match) => match[1] ?? []);
   const openapiProperties = [...toolSchema.matchAll(/^        ([a-z_]+):$/gm)].flatMap((match) => match[1] ?? []);
 
   const shippedConfig = read('../../paper-plugin/src/main/resources/config.yml');
   const shippedTools = yamlTopLevelMappingBlock(shippedConfig, 'tools');
-  assert.ok(shippedTools);
+  assert.ok(shippedTools, 'Shipped config is missing its top-level tools section');
   const shippedKeys = [...shippedTools.matchAll(/^  ([a-z_]+): true$/gm)].flatMap((match) => match[1] ?? []);
 
   const javaToolSource = read('../../paper-plugin/src/main/java/ca/deliyannides/dirtmcp/paper/config/McpTool.java');
@@ -133,7 +133,7 @@ test('requires a UUIDv4 call ID on edits and undo but not history lookup', () =>
   );
   assert.doesNotMatch(openapiPath(openapi, '/v1/get-edit-history'), /#\/components\/parameters\/DirtCallId/);
   const uuidV4Pattern = /^    UuidV4:\n(?:      .*\n)*?      pattern: '([^']+)'$/m.exec(openapi)?.[1];
-  assert.ok(uuidV4Pattern);
+  assert.ok(uuidV4Pattern, 'OpenAPI UuidV4 schema is missing its validation pattern');
   const uuidV4 = new RegExp(uuidV4Pattern);
   assert.match('123E4567-E89B-42D3-A456-426614174000', uuidV4);
   assert.match('123e4567-e89b-42d3-a456-426614174000', uuidV4);

@@ -208,12 +208,7 @@ public final class DirtAdminCommand {
     }
 
     private int showTools(CommandSender sender) {
-        int enabledCount = 0;
-        for (McpTool tool : McpTool.values()) {
-            if (this.config.tools().isEnabled(tool)) {
-                enabledCount++;
-            }
-        }
+        int enabledCount = this.config.tools().enabled().size();
 
         TextComponent.Builder message = panel("MCP Tools");
         message.append(Component.newline());

@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { MCP_TOOL_NAMES } from '../dist/tools/configuration.js';
+import { MCP_TOOL_NAMES, type McpToolConfiguration } from '../dist/tools/configuration.js';
 import {
   collectLines,
   requestParams,
@@ -20,9 +20,14 @@ import {
 const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 const uuidV4Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const bridgeToken = '0123456789abcdef0123456789abcdef';
-const allToolsEnabled = Object.fromEntries(MCP_TOOL_NAMES.map((name) => [name, true]));
 
-function emptyServerStatus(tools: Readonly<Record<string, boolean>> = allToolsEnabled): Record<string, unknown> {
+function toolConfiguration(enabled: boolean): McpToolConfiguration {
+  return Object.fromEntries(MCP_TOOL_NAMES.map((name) => [name, enabled])) as McpToolConfiguration;
+}
+
+const allToolsEnabled = toolConfiguration(true);
+
+function minimalServerStatus(tools: McpToolConfiguration = allToolsEnabled): Record<string, unknown> {
   return {
     builds: { minecraft: '26.2', paper: '26.2-test', dirtMcp: '0.1.0-test', fawe: '2.15.4-test' },
     performance: { tpsOneMinute: 20, averageTickTimeMillis: 1 },
@@ -343,7 +348,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   });
   const catalog = await waitFor(messages, 1);
   assert.ok(catalog.result);
-  const catalogLog = await waitForValue(logs, (record) => record.event === 'catalog.loaded');
+  const catalogLog = await waitForValue(logs, (record) => record.event === 'catalog.loaded', 'catalog.loaded log');
   assert.equal(catalogLog.level, 'info');
   assert.equal(catalogLog.component, 'catalog');
   assert.equal(catalogLog.call_id, requestAt(requests, 0).headers['x-dirt-call-id']);
@@ -515,7 +520,11 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       },
     }),
   );
-  await waitForValue(logs, (record) => record.event === 'tool.completed' && record.operation === 'fill_region');
+  await waitForValue(
+    logs,
+    (record) => record.event === 'tool.completed' && record.operation === 'fill_region',
+    'fill_region tool.completed log',
+  );
 
   send(child, {
     jsonrpc: '2.0',
@@ -790,7 +799,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
 });
 
 test('exposes only the configured tool snapshot and rejects disabled calls before bridge dispatch', async (context) => {
-  const configuredTools = Object.fromEntries(MCP_TOOL_NAMES.map((name) => [name, false]));
+  const configuredTools = toolConfiguration(false);
   configuredTools.get_region_blocks = true;
   configuredTools.set_blocks = true;
   configuredTools.undo_edit = true;
@@ -805,7 +814,7 @@ test('exposes only the configured tool snapshot and rejects disabled calls befor
       body: rawBody.length === 0 ? undefined : JSON.parse(rawBody),
     });
     response.setHeader('Content-Type', 'application/json');
-    response.end(JSON.stringify(emptyServerStatus(configuredTools)));
+    response.end(JSON.stringify(minimalServerStatus(configuredTools)));
   });
   bridge.listen(0, '127.0.0.1');
   await once(bridge, 'listening');
@@ -877,7 +886,11 @@ test('reports startup configuration failures as structured stderr without using 
   const messages = collectLines(child.stdout, (line) => line);
   const logs = collectLines(child.stderr, parseLogRecord);
 
-  const failure = await waitForValue(logs, (record) => record.event === 'runtime.start_failed');
+  const failure = await waitForValue(
+    logs,
+    (record) => record.event === 'runtime.start_failed',
+    'runtime.start_failed log',
+  );
   assert.equal(failure.level, 'error');
   assert.equal(failure.service, 'dirt-mcp-stdio');
   assert.equal(failure.component, 'runtime');
@@ -952,6 +965,7 @@ for (const bootstrapFailure of ['unauthorized', 'malformed', 'unavailable', 'dom
     const catalogFailure = await waitForValue(
       logs,
       (record) => record.event === 'catalog.load_failed' && record.error_code === expectedFailureCode,
+      `catalog.load_failed log with ${expectedFailureCode}`,
     );
     assert.equal(catalogFailure.operation, 'get_server_status');
     assert.equal(catalogFailure.level, bootstrapFailure === 'malformed' ? 'error' : 'warning');
@@ -965,7 +979,7 @@ for (const bootstrapFailure of ['unauthorized', 'malformed', 'unavailable', 'dom
 
 test('retries a failed bootstrap and fixes the first successful snapshot for the process', async (context) => {
   let bootstrapAttempts = 0;
-  const configuredTools = Object.fromEntries(MCP_TOOL_NAMES.map((name) => [name, false]));
+  const configuredTools = toolConfiguration(false);
   configuredTools.ping_server = true;
   const bridge = createServer((_request, response) => {
     bootstrapAttempts++;
@@ -974,7 +988,7 @@ test('retries a failed bootstrap and fixes the first successful snapshot for the
       response.end('{}');
       return;
     }
-    response.end(JSON.stringify(emptyServerStatus(configuredTools)));
+    response.end(JSON.stringify(minimalServerStatus(configuredTools)));
   });
   bridge.listen(0, '127.0.0.1');
   await once(bridge, 'listening');
@@ -1034,7 +1048,7 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
   const bridge = createServer((request, response) => {
     if (request.url === '/v1/server-status') {
       response.setHeader('Content-Type', 'application/json');
-      response.end(JSON.stringify(emptyServerStatus()));
+      response.end(JSON.stringify(minimalServerStatus()));
       return;
     }
     if (behavior === 'unauthorized') {

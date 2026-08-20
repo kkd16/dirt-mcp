@@ -54,6 +54,8 @@ public interface ReplaceRegionBlocks {
     }
 
     private static <T> List<T> immutableCopy(List<T> values) {
+        // List.copyOf would reject null entries before operation-layer validation can describe
+        // them.
         return values == null ? null : Collections.unmodifiableList(new ArrayList<>(values));
     }
 }

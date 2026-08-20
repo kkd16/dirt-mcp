@@ -25,6 +25,8 @@ Dirt MCP tracks the latest stable Paper release only. The current baseline is:
 Older Paper or Minecraft versions are not supported.
 Source development also requires GNU Make, curl, tmux, ShellCheck 0.9 or newer,
 and actionlint 1.7.12 or newer.
+The managed development-server commands target Linux or WSL and use Bash and
+GNU coreutils.
 
 ## Installation from source
 

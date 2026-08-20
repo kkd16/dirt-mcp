@@ -101,6 +101,8 @@ public interface GetRegionBlocks {
     }
 
     private static List<String> immutableCopy(List<String> values) {
+        // List.copyOf would reject null entries before operation-layer validation can describe
+        // them.
         return values == null ? null : Collections.unmodifiableList(new ArrayList<>(values));
     }
 }

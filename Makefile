@@ -11,7 +11,7 @@ NODE_MODULES_STAMP := node_modules/.modules.yaml
 
 help: ## Show the available development commands.
 	@awk 'BEGIN { FS = ":.*## "; printf "Dirt MCP development commands:\n\n" } /^[a-zA-Z_-]+:.*## / { printf "  %-14s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
-	@printf '\nOverrides: MC_PORT=%s BRIDGE_PORT=%s\n' "$(MC_PORT)" "$(BRIDGE_PORT)"
+	@printf '\nNew managed-server ports: MC_PORT=%s BRIDGE_PORT=%s; existing and reloaded servers keep saved ports.\n' "$(MC_PORT)" "$(BRIDGE_PORT)"
 
 doctor: ## Verify the required Java, Node.js, pnpm, Gradle, curl, tmux, and lint tools.
 	@command -v java >/dev/null || { printf 'Java 25 is required.\n' >&2; exit 1; }
@@ -90,7 +90,7 @@ format: node-deps ## Apply the repository's Java, TypeScript, and configuration 
 	./gradlew spotlessApply
 	pnpm run format
 
-dev-token: ## Create the ignored bearer token used by local development.
+dev-token: ## Create or repair the ignored local bearer token and its permissions.
 	@mkdir -p "$(dir $(DEV_TOKEN_FILE))"
 	@token=''; \
 	  if [[ -f "$(DEV_TOKEN_FILE)" ]]; then token="$$(<"$(DEV_TOKEN_FILE)")"; fi; \

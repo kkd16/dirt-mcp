@@ -4,6 +4,9 @@ import * as z from 'zod/v4';
 export const INT32_MIN = -2_147_483_648;
 export const INT32_MAX = 2_147_483_647;
 export const MAX_BLOCK_STATE_ENTRIES = 64;
+export const BLOCK_AXES = ['x', 'y', 'z'] as const;
+
+export const SignedInt32Schema = z.number().int().min(INT32_MIN).max(INT32_MAX);
 
 export const NonBlankStringSchema = z
   .string()
@@ -14,9 +17,9 @@ export const EmptyInputSchema = z.object({}).strict().describe('No arguments.');
 
 export const BlockPositionSchema = z
   .object({
-    x: z.number().int().min(INT32_MIN).max(INT32_MAX).describe('World X block coordinate.'),
-    y: z.number().int().min(INT32_MIN).max(INT32_MAX).describe('World Y block coordinate.'),
-    z: z.number().int().min(INT32_MIN).max(INT32_MAX).describe('World Z block coordinate.'),
+    x: SignedInt32Schema.describe('World X block coordinate.'),
+    y: SignedInt32Schema.describe('World Y block coordinate.'),
+    z: SignedInt32Schema.describe('World Z block coordinate.'),
   })
   .strict()
   .describe('An absolute Minecraft block position.');
@@ -28,7 +31,7 @@ export const BoundsSchema = z
   })
   .strict()
   .superRefine((bounds, context) => {
-    for (const axis of ['x', 'y', 'z'] as const) {
+    for (const axis of BLOCK_AXES) {
       if (bounds.min[axis] > bounds.max[axis]) {
         context.addIssue({
           code: 'custom',

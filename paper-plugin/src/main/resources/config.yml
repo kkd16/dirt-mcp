@@ -5,13 +5,13 @@
 bridge:
   # HTTP port on 127.0.0.1. DIRT_MCP_BRIDGE_PORT overrides this value.
   port: 8765
-  # Seconds to wait for interrupted bridge request workers during shutdown.
+  # Seconds to wait for interrupted bridge request workers during shutdown (1-30).
   shutdown-delay-seconds: 5
-  # Maximum seconds an authenticated request may take to upload its JSON body.
+  # Maximum seconds an authenticated request may take to upload its JSON body (1-30).
   request-body-timeout-seconds: 5
   # Maximum authenticated requests allowed to execute concurrently.
   max-concurrent-requests: 32
-  # Maximum inspection operations allowed to capture and scan concurrently.
+  # Maximum concurrent inspections; cannot exceed max-concurrent-requests.
   max-concurrent-inspections: 2
 
 # MCP tool allowlist. Only tools explicitly set to true are exposed; a missing
@@ -44,25 +44,28 @@ limits:
   max-region-volume: 262144
   # Maximum distinct loaded chunks one edit may touch.
   max-touched-chunks: 256
-  # Maximum distinct loaded chunks one inspection may snapshot.
+  # Maximum distinct loaded chunks one inspection may snapshot; cannot exceed
+  # max-touched-chunks.
   max-inspection-touched-chunks: 32
-  # Maximum block-state patterns or palette entries; inspection filters share it.
+  # Maximum block-state patterns or palette entries (1-64); inspection filters share it.
   max-block-state-patterns: 64
-  # Maximum blocks one mutation may change.
+  # Maximum blocks one mutation may change; cannot exceed max-region-volume.
   max-changed-blocks: 65536
-  # Maximum blocks scanned by exact block retrieval or an orthographic view.
+  # Maximum blocks scanned by exact retrieval or an orthographic view; cannot
+  # exceed max-region-volume.
   max-inspection-volume: 16384
-  # Result limit used when a detailed inspection omits maxResults.
+  # Result limit used when maxResults is omitted; cannot exceed max-inspection-results.
   default-inspection-results: 512
-  # Highest maxResults accepted for a detailed inspection.
+  # Highest maxResults accepted; cannot exceed max-inspection-volume.
   max-inspection-results: 2048
 
 edit-history:
-  # Maximum undoable edits retained for any one world.
+  # Maximum undoable edits per world; cannot exceed max-entries-total.
   max-entries-per-world: 20
   # Maximum undoable edits retained across all loaded worlds.
   max-entries-total: 100
-  # Maximum changed blocks represented by all retained undo entries.
+  # Sum of changed blocks across retained undo entries; must accommodate one
+  # max-changed-blocks edit.
   max-retained-changed-blocks: 1310720
 
 defaults:

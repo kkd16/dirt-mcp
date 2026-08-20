@@ -20,6 +20,7 @@ public interface FillRegion {
             int seed,
             boolean dryRun) {
         public Request {
+            // Preserve malformed null entries for operation-layer INVALID_REQUEST reporting.
             destinationPalette =
                     destinationPalette == null
                             ? null

@@ -53,8 +53,8 @@ final class ChunkTicketManager implements AutoCloseable {
                     TicketKey key = new TicketKey(world.id(), chunk);
                     TicketState state = this.tickets.get(key);
                     if (state == null) {
-                        boolean owned = world.addTicket(chunk);
-                        state = new TicketState(world, owned);
+                        boolean addedByManager = world.addTicket(chunk);
+                        state = new TicketState(world, addedByManager);
                         this.tickets.put(key, state);
                     }
                     state.references++;
@@ -126,7 +126,7 @@ final class ChunkTicketManager implements AutoCloseable {
                 state.references--;
                 if (state.references == 0) {
                     try {
-                        if (state.owned) {
+                        if (state.addedByManager) {
                             state.world.removeTicket(key.chunk());
                         }
                         this.tickets.remove(key);
@@ -152,7 +152,7 @@ final class ChunkTicketManager implements AutoCloseable {
                     continue;
                 }
                 try {
-                    if (state.owned) {
+                    if (state.addedByManager) {
                         state.world.removeTicket(entry.getKey().chunk());
                     }
                     iterator.remove();
@@ -216,12 +216,12 @@ final class ChunkTicketManager implements AutoCloseable {
 
     private static final class TicketState {
         private final TicketWorld world;
-        private final boolean owned;
+        private final boolean addedByManager;
         private int references;
 
-        private TicketState(TicketWorld world, boolean owned) {
+        private TicketState(TicketWorld world, boolean addedByManager) {
             this.world = world;
-            this.owned = owned;
+            this.addedByManager = addedByManager;
         }
     }
 }

@@ -5,13 +5,14 @@ import { BRIDGE_ROUTES } from '../bridge/contract.ts';
 import type { DirtLogger } from '../logging.ts';
 import {
   BlockPositionSchema,
+  BLOCK_AXES,
   BoundsSchema,
   DimensionsSchema,
   INT32_MAX,
-  INT32_MIN,
   MAX_BLOCK_STATE_ENTRIES,
   NonBlankStringSchema,
   READ_WORLD_ANNOTATIONS,
+  SignedInt32Schema,
 } from './common.ts';
 import { executeToolCall, successResult } from './execution.ts';
 import type { McpToolConfiguration } from './configuration.ts';
@@ -244,18 +245,8 @@ const ScanOrthographicViewBlocksOutputSchema = z
             position: BlockPositionSchema.describe('Absolute position of the requested non-air block.'),
             offset: z
               .object({
-                horizontal: z
-                  .number()
-                  .int()
-                  .min(INT32_MIN)
-                  .max(INT32_MAX)
-                  .describe('Signed displacement along basis.horizontal.'),
-                vertical: z
-                  .number()
-                  .int()
-                  .min(INT32_MIN)
-                  .max(INT32_MAX)
-                  .describe('Signed displacement along basis.vertical.'),
+                horizontal: SignedInt32Schema.describe('Signed displacement along basis.horizontal.'),
+                vertical: SignedInt32Schema.describe('Signed displacement along basis.vertical.'),
                 distance: z
                   .number()
                   .int()
@@ -406,7 +397,7 @@ export function requireMatchingGetRegionResponse(expected: GetRegionBlocksInput,
     if (!containsPosition(bounds, run.from) || !containsPosition(bounds, run.to)) {
       invalidBridgeResponse('Paper bridge returned a block run outside the requested region.');
     }
-    const varyingAxes = (['x', 'y', 'z'] as const).filter((axis) => run.from[axis] !== run.to[axis]);
+    const varyingAxes = BLOCK_AXES.filter((axis) => run.from[axis] !== run.to[axis]);
     if (varyingAxes.length > 1 || run.from.x > run.to.x || run.from.y > run.to.y || run.from.z > run.to.z) {
       invalidBridgeResponse('Paper bridge returned an invalid axis-aligned block run.');
     }
@@ -505,7 +496,7 @@ function viewBounds(
   );
   return corners.slice(1).reduce(
     (bounds, corner) => {
-      for (const axis of ['x', 'y', 'z'] as const) {
+      for (const axis of BLOCK_AXES) {
         bounds.min[axis] = Math.min(bounds.min[axis], corner[axis]);
         bounds.max[axis] = Math.max(bounds.max[axis], corner[axis]);
       }

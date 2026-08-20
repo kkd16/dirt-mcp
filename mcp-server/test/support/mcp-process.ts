@@ -55,6 +55,7 @@ export function collectLines<T>(stream: Readable, parse: (line: string) => T): C
 export function waitForValue<T>(
   collected: Collected<T>,
   predicate: (value: T) => boolean,
+  expectation: string,
   timeoutMilliseconds = 5_000,
 ): Promise<T> {
   const existing = collected.values.find(predicate);
@@ -72,14 +73,18 @@ export function waitForValue<T>(
     };
     const timer = setTimeout(() => {
       collected.waiters = collected.waiters.filter((waiter) => waiter !== receive);
-      reject(new Error('Timed out waiting for MCP process output'));
+      reject(
+        new Error(
+          `Timed out after ${timeoutMilliseconds} ms waiting for ${expectation}; collected ${collected.values.length} lines`,
+        ),
+      );
     }, timeoutMilliseconds);
     collected.waiters.push(receive);
   });
 }
 
 export function waitFor(messages: Collected<JsonRpcResponse>, id: JsonRpcId): Promise<JsonRpcResponse> {
-  return waitForValue(messages, (message) => message.id === id);
+  return waitForValue(messages, (message) => message.id === id, `JSON-RPC response id ${String(id)}`);
 }
 
 export function send(child: ChildProcessWithoutNullStreams, message: unknown): void {

@@ -6,6 +6,7 @@ import type { DirtLogger } from '../logging.ts';
 import { ToolFailure } from '../bridge/errors.ts';
 import {
   BlockPositionSchema,
+  BLOCK_AXES,
   BoundsSchema,
   INT32_MAX,
   INT32_MIN,
@@ -13,6 +14,7 @@ import {
   NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
   NonBlankStringSchema,
   READ_WORLD_ANNOTATIONS,
+  SignedInt32Schema,
 } from './common.ts';
 import { executeToolCall, successResult } from './execution.ts';
 import type { McpToolConfiguration } from './configuration.ts';
@@ -83,12 +85,17 @@ export const DestinationPaletteSchema = z
   })
   .describe('One or more exact destination states. Omitted weights give every entry equal probability.');
 
-const SeedSchema = z
-  .number()
-  .int()
-  .min(INT32_MIN)
-  .max(INT32_MAX)
-  .describe('Signed 32-bit seed for reproducible per-coordinate palette choices.');
+const SeedSchema = SignedInt32Schema.describe('Signed 32-bit seed for reproducible per-coordinate palette choices.');
+
+const EditOptionsInputShape = {
+  seed: SeedSchema.optional().describe(
+    'Optional reproducibility seed. Omission generates a fresh seed returned in the result.',
+  ),
+  dryRun: z
+    .boolean()
+    .optional()
+    .describe('True previews without mutation, false executes the edit, and omission uses the plugin default.'),
+};
 
 const EditOperationSchema = z.enum(['replace_region_blocks', 'fill_region', 'set_blocks']);
 
@@ -198,13 +205,7 @@ const ReplaceRegionBlocksInputSchema = z
     max: BlockPositionSchema.describe('The other inclusive corner; ordering relative to min does not matter.'),
     sourceBlockStatePatterns: SourceBlockStatePatternsSchema,
     destinationPalette: DestinationPaletteSchema,
-    seed: SeedSchema.optional().describe(
-      'Optional reproducibility seed. Omission generates a fresh seed returned in the result.',
-    ),
-    dryRun: z
-      .boolean()
-      .optional()
-      .describe('True previews without mutation, false executes the edit, and omission uses the plugin default.'),
+    ...EditOptionsInputShape,
   })
   .strict()
   .describe('Property-aware block-state replacement with a weighted destination palette.');
@@ -239,13 +240,7 @@ const FillRegionInputSchema = z
     min: BlockPositionSchema.describe('One inclusive corner; ordering relative to max does not matter.'),
     max: BlockPositionSchema.describe('The other inclusive corner; ordering relative to min does not matter.'),
     destinationPalette: DestinationPaletteSchema,
-    seed: SeedSchema.optional().describe(
-      'Optional reproducibility seed. Omission generates a fresh seed returned in the result.',
-    ),
-    dryRun: z
-      .boolean()
-      .optional()
-      .describe('True previews without mutation, false executes the edit, and omission uses the plugin default.'),
+    ...EditOptionsInputShape,
   })
   .strict()
   .describe('Weighted block-state palette fill of an inclusive region.');
@@ -267,7 +262,7 @@ export const FillRegionOutputSchema = z
   .describe('Completed or previewed region fill.');
 
 const SetBlocksPlacementSchema = z
-  .array(z.number().int().min(INT32_MIN).max(INT32_MAX))
+  .array(SignedInt32Schema)
   .length(4)
   .describe('Exact [paletteIndex, x, y, z] tuple; x, y, and z are signed offsets from the origin.');
 
@@ -294,13 +289,7 @@ export const SetBlocksInputSchema = z
     origin: BlockPositionSchema.describe('Absolute anchor added to every placement offset.'),
     palettes: SetBlocksPalettesSchema,
     placements: z.array(SetBlocksPlacementSchema).min(1).describe('Palette-indexed origin-relative block placements.'),
-    seed: SeedSchema.optional().describe(
-      'Optional reproducibility seed. Omission generates a fresh seed returned in the result.',
-    ),
-    dryRun: z
-      .boolean()
-      .optional()
-      .describe('True previews without mutation, false executes the edit, and omission uses the plugin default.'),
+    ...EditOptionsInputShape,
   })
   .strict()
   .superRefine((input, context) => {
@@ -457,7 +446,7 @@ function setBlocksBounds(input: z.infer<typeof SetBlocksInputSchema>): z.infer<t
       y: input.origin.y + placement[2]!,
       z: input.origin.z + placement[3]!,
     };
-    for (const axis of ['x', 'y', 'z'] as const) {
+    for (const axis of BLOCK_AXES) {
       bounds.min[axis] = Math.min(bounds.min[axis], position[axis]);
       bounds.max[axis] = Math.max(bounds.max[axis], position[axis]);
     }

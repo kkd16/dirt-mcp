@@ -59,6 +59,7 @@ public interface SetBlocks {
 
     private static List<List<DestinationPaletteEntry>> immutablePalettes(
             List<List<DestinationPaletteEntry>> palettes) {
+        // Preserve malformed null entries for operation-layer INVALID_REQUEST reporting.
         List<List<DestinationPaletteEntry>> copy = new ArrayList<>(palettes.size());
         for (List<DestinationPaletteEntry> palette : palettes) {
             copy.add(

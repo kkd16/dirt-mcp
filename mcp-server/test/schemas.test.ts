@@ -25,7 +25,7 @@ import {
   LoggingConfigurationSchema,
   ServerStatusSchema,
 } from '../dist/tools/status.js';
-import { MCP_TOOL_NAMES, McpToolConfigurationSchema } from '../dist/tools/configuration.js';
+import { MCP_TOOL_NAMES, McpToolConfigurationSchema, type McpToolConfiguration } from '../dist/tools/configuration.js';
 import { requireMatchingWorld } from '../dist/tools/response-validation.js';
 
 const region = {
@@ -140,7 +140,7 @@ test('validates bounded edit-history configuration relationships', () => {
 });
 
 test('validates bounded server limits and their relationships', () => {
-  const tools = Object.fromEntries(MCP_TOOL_NAMES.map((name) => [name, true]));
+  const tools = Object.fromEntries(MCP_TOOL_NAMES.map((name) => [name, true])) as McpToolConfiguration;
   const status = {
     builds: { minecraft: '26.2', paper: '26.2-112', dirtMcp: 'test', fawe: '2.15.4' },
     performance: { tpsOneMinute: 20, averageTickTimeMillis: 1 },

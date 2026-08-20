@@ -1,6 +1,6 @@
 import type * as z from 'zod/v4';
 import { ToolFailure } from '../bridge/errors.ts';
-import { BlockPositionSchema, BoundsSchema } from './common.ts';
+import type { BlockPositionSchema, BoundsSchema } from './common.ts';
 
 type BlockPosition = z.infer<typeof BlockPositionSchema>;
 type Bounds = z.infer<typeof BoundsSchema>;
