@@ -15,12 +15,8 @@ public final class SetBlocksEndpoint implements BridgeEndpoint {
     private final RequestDecoder<SetBlocks.Request> decoder;
 
     public SetBlocksEndpoint(SetBlocks operation, DirtConfig config) {
-        this(operation, exchange -> SetBlocksRequestDecoder.decode(exchange, config));
-    }
-
-    SetBlocksEndpoint(SetBlocks operation, RequestDecoder<SetBlocks.Request> decoder) {
         this.operation = Objects.requireNonNull(operation, "operation");
-        this.decoder = Objects.requireNonNull(decoder, "decoder");
+        this.decoder = exchange -> SetBlocksRequestDecoder.decode(exchange, config);
     }
 
     @Override

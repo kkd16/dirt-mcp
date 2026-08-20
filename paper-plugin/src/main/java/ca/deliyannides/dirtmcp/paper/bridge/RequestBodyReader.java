@@ -2,6 +2,7 @@ package ca.deliyannides.dirtmcp.paper.bridge;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.Serial;
 import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -22,7 +23,7 @@ final class RequestBodyReader implements AutoCloseable {
         this.timeoutSeconds = timeoutSeconds;
     }
 
-    byte[] read(InputStream input, int maximumBytes) throws IOException, RequestTimeoutException {
+    byte[] read(InputStream input, int maximumBytes) throws IOException {
         Objects.requireNonNull(input, "input");
         Future<byte[]> read;
         try {
@@ -35,7 +36,7 @@ final class RequestBodyReader implements AutoCloseable {
         } catch (TimeoutException exception) {
             read.cancel(true);
             closeInputAsync(input);
-            throw new RequestTimeoutException(
+            throw new BodyTimeoutException(
                     "Request body was not received within " + this.timeoutSeconds + " seconds");
         } catch (InterruptedException exception) {
             read.cancel(true);
@@ -71,6 +72,14 @@ final class RequestBodyReader implements AutoCloseable {
                     });
         } catch (RejectedExecutionException ignored) {
             // Server shutdown closes the owning exchange.
+        }
+    }
+
+    static final class BodyTimeoutException extends IOException {
+        @Serial private static final long serialVersionUID = 1L;
+
+        private BodyTimeoutException(String message) {
+            super(message);
         }
     }
 }

@@ -15,7 +15,7 @@ final class UndoLastEditRequestDecoder {
 
     static UndoLastEdit.Request decode(BridgeExchange exchange)
             throws IOException, InvalidRequestException {
-        JsonObject object = RequestJson.object(exchange);
+        JsonObject object = exchange.readJsonObject();
         RequestJson.requireExactFields(object, FIELDS, "Request");
         return new UndoLastEdit.Request(RequestJson.string(object.get("world"), "world"));
     }

@@ -39,9 +39,8 @@ interface EditPlatform extends AutoCloseable {
         String name();
     }
 
+    @FunctionalInterface
     interface PreparedOperation extends AutoCloseable {
-        WorldHandle world();
-
         @Override
         void close() throws OperationException;
     }

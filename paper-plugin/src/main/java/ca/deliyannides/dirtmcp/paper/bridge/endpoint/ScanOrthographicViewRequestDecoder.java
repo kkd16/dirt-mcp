@@ -33,7 +33,7 @@ final class ScanOrthographicViewRequestDecoder {
 
     static ScanOrthographicView.Request decode(BridgeExchange exchange, DirtConfig config)
             throws IOException, InvalidRequestException {
-        JsonObject object = RequestJson.object(exchange);
+        JsonObject object = exchange.readJsonObject();
         RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS);
         int horizontalRadius =
                 RequestJson.integer(object.get("horizontalRadius"), "horizontalRadius");

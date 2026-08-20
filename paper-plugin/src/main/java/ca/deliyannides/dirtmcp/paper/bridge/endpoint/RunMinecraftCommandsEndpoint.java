@@ -14,13 +14,8 @@ public final class RunMinecraftCommandsEndpoint implements BridgeEndpoint {
     private final RequestDecoder<RunMinecraftCommands.Request> decoder;
 
     public RunMinecraftCommandsEndpoint(RunMinecraftCommands operation) {
-        this(operation, RunMinecraftCommandsRequestDecoder::decode);
-    }
-
-    RunMinecraftCommandsEndpoint(
-            RunMinecraftCommands operation, RequestDecoder<RunMinecraftCommands.Request> decoder) {
         this.operation = Objects.requireNonNull(operation, "operation");
-        this.decoder = Objects.requireNonNull(decoder, "decoder");
+        this.decoder = RunMinecraftCommandsRequestDecoder::decode;
     }
 
     @Override

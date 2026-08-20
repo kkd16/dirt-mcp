@@ -14,14 +14,8 @@ public final class CountRegionBlockStatesEndpoint implements BridgeEndpoint {
     private final RequestDecoder<CountRegionBlockStates.Request> decoder;
 
     public CountRegionBlockStatesEndpoint(CountRegionBlockStates operation) {
-        this(operation, CountRegionBlockStatesRequestDecoder::decode);
-    }
-
-    CountRegionBlockStatesEndpoint(
-            CountRegionBlockStates operation,
-            RequestDecoder<CountRegionBlockStates.Request> decoder) {
         this.operation = Objects.requireNonNull(operation, "operation");
-        this.decoder = Objects.requireNonNull(decoder, "decoder");
+        this.decoder = CountRegionBlockStatesRequestDecoder::decode;
     }
 
     @Override

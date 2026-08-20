@@ -19,9 +19,14 @@ final class RegionBlockAlgorithms {
 
     static Map<String, Long> countBlockStates(Cuboid region, CapturedRegion capture) {
         Map<String, Long> counts = new HashMap<>();
-        forEachPosition(
-                region,
-                position -> counts.merge(capture.sample(position).blockState(), 1L, Long::sum));
+        for (long y = region.min().y(); y <= region.max().y(); y++) {
+            for (long z = region.min().z(); z <= region.max().z(); z++) {
+                for (long x = region.min().x(); x <= region.max().x(); x++) {
+                    BlockPosition position = new BlockPosition((int) x, (int) y, (int) z);
+                    counts.merge(capture.sample(position).blockState(), 1L, Long::sum);
+                }
+            }
+        }
         return counts;
     }
 
@@ -90,16 +95,6 @@ final class RegionBlockAlgorithms {
         return List.copyOf(runs);
     }
 
-    private static void forEachPosition(Cuboid region, PositionConsumer consumer) {
-        for (long y = region.min().y(); y <= region.max().y(); y++) {
-            for (long z = region.min().z(); z <= region.max().z(); z++) {
-                for (long x = region.min().x(); x <= region.max().x(); x++) {
-                    consumer.accept(new BlockPosition((int) x, (int) y, (int) z));
-                }
-            }
-        }
-    }
-
     private static int runLength(
             BlockPosition from, String state, Axis axis, Map<BlockPosition, String> remaining) {
         int length = 1;
@@ -128,11 +123,6 @@ final class RegionBlockAlgorithms {
         return new OperationException(
                 OperationFailure.RESULT_TOO_LARGE,
                 "Inspection result exceeds maxResults of " + maxResults + " entries");
-    }
-
-    @FunctionalInterface
-    private interface PositionConsumer {
-        void accept(BlockPosition position);
     }
 
     private enum Axis {

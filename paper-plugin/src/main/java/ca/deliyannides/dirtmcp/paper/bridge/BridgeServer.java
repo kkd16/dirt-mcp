@@ -33,7 +33,7 @@ public final class BridgeServer implements AutoCloseable {
                         config.bridge().minimumTokenBytes());
         this.dispatcher =
                 new BridgeDispatcher(
-                        List.copyOf(Objects.requireNonNull(endpoints, "endpoints")),
+                        Objects.requireNonNull(endpoints, "endpoints"),
                         authenticator,
                         config.bridge().maxConcurrentRequests(),
                         config.limits().maxRequestBytes(),

@@ -15,7 +15,7 @@ final class RunMinecraftCommandsRequestDecoder {
 
     static RunMinecraftCommands.Request decode(BridgeExchange exchange)
             throws IOException, InvalidRequestException {
-        JsonObject object = RequestJson.object(exchange);
+        JsonObject object = exchange.readJsonObject();
         RequestJson.requireExactFields(object, FIELDS, "Request");
         return new RunMinecraftCommands.Request(
                 RequestJson.stringList(object.get("commands"), "commands"));

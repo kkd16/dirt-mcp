@@ -53,8 +53,7 @@ public final class PaperRegionSnapshotSource implements RegionSnapshotSource {
                                     includeBlockStatePatterns,
                                     excludeBlockStatePatterns));
         } catch (PaperMainThreadException exception) {
-            OperationException operationException = operationCause(exception);
-            if (operationException != null) {
+            if (exception.getCause() instanceof OperationException operationException) {
                 throw operationException;
             }
             String message =
@@ -134,17 +133,6 @@ public final class PaperRegionSnapshotSource implements RegionSnapshotSource {
             }
         }
         return List.copyOf(patterns);
-    }
-
-    private static OperationException operationCause(Throwable failure) {
-        Throwable cause = failure;
-        while (cause != null) {
-            if (cause instanceof OperationException operationException) {
-                return operationException;
-            }
-            cause = cause.getCause();
-        }
-        return null;
     }
 
     private static long chunkKey(int chunkX, int chunkZ) {

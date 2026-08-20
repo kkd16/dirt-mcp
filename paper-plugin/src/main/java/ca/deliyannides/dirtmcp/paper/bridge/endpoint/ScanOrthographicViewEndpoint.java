@@ -15,13 +15,8 @@ public final class ScanOrthographicViewEndpoint implements BridgeEndpoint {
     private final RequestDecoder<ScanOrthographicView.Request> decoder;
 
     public ScanOrthographicViewEndpoint(ScanOrthographicView operation, DirtConfig config) {
-        this(operation, exchange -> ScanOrthographicViewRequestDecoder.decode(exchange, config));
-    }
-
-    ScanOrthographicViewEndpoint(
-            ScanOrthographicView operation, RequestDecoder<ScanOrthographicView.Request> decoder) {
         this.operation = Objects.requireNonNull(operation, "operation");
-        this.decoder = Objects.requireNonNull(decoder, "decoder");
+        this.decoder = exchange -> ScanOrthographicViewRequestDecoder.decode(exchange, config);
     }
 
     @Override

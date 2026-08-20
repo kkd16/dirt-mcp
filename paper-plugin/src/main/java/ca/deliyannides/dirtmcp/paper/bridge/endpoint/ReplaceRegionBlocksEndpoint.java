@@ -15,13 +15,8 @@ public final class ReplaceRegionBlocksEndpoint implements BridgeEndpoint {
     private final RequestDecoder<ReplaceRegionBlocks.Request> decoder;
 
     public ReplaceRegionBlocksEndpoint(ReplaceRegionBlocks operation, DirtConfig config) {
-        this(operation, exchange -> ReplaceRegionBlocksRequestDecoder.decode(exchange, config));
-    }
-
-    ReplaceRegionBlocksEndpoint(
-            ReplaceRegionBlocks operation, RequestDecoder<ReplaceRegionBlocks.Request> decoder) {
         this.operation = Objects.requireNonNull(operation, "operation");
-        this.decoder = Objects.requireNonNull(decoder, "decoder");
+        this.decoder = exchange -> ReplaceRegionBlocksRequestDecoder.decode(exchange, config);
     }
 
     @Override

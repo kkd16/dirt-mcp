@@ -142,9 +142,6 @@ final class PaperEditPreparation implements AutoCloseable {
                                 + previous
                                 + "].position");
             }
-            if (change.blockState() == null || change.blockState().isBlank()) {
-                throw invalid("changes[" + index + "].blockState must be a non-empty string");
-            }
             BlockState state = parsedStates.get(change.blockState());
             if (state == null) {
                 state =
@@ -161,9 +158,6 @@ final class PaperEditPreparation implements AutoCloseable {
     }
 
     private static PreparedSources prepareSources(List<String> inputs) throws OperationException {
-        if (inputs == null || inputs.isEmpty()) {
-            throw invalid("sourceBlockStatePatterns must contain at least one entry");
-        }
         Set<String> canonicalPatterns = new LinkedHashSet<>();
         Set<BlockState> matchingStates = new LinkedHashSet<>();
         for (int index = 0; index < inputs.size(); index++) {
@@ -186,17 +180,11 @@ final class PaperEditPreparation implements AutoCloseable {
 
     private static PreparedPalette preparePalette(List<DestinationPaletteEntry> inputs, int seed)
             throws OperationException {
-        if (inputs == null || inputs.isEmpty()) {
-            throw invalid("destinationPalette must contain at least one entry");
-        }
         List<DestinationPaletteEntry> canonical = new ArrayList<>(inputs.size());
         Set<String> statesSeen = new LinkedHashSet<>();
         List<WeightedState> weightedStates = new ArrayList<>(inputs.size());
         for (int index = 0; index < inputs.size(); index++) {
             DestinationPaletteEntry entry = inputs.get(index);
-            if (entry == null) {
-                throw invalid("destinationPalette[" + index + "] must contain a blockState");
-            }
             BlockData data =
                     parseBlockData(
                             entry.blockState(), "destinationPalette[" + index + "].blockState");
@@ -218,9 +206,6 @@ final class PaperEditPreparation implements AutoCloseable {
     }
 
     private static BlockData parseBlockData(String input, String field) throws OperationException {
-        if (input == null || input.isBlank()) {
-            throw invalid(field + " must be a non-empty string");
-        }
         try {
             return Bukkit.createBlockData(input);
         } catch (IllegalArgumentException exception) {
@@ -235,10 +220,8 @@ final class PaperEditPreparation implements AutoCloseable {
         try {
             return this.mainThread.call(action);
         } catch (PaperMainThreadException exception) {
-            for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
-                if (cause instanceof OperationException operationException) {
-                    throw operationException;
-                }
+            if (exception.getCause() instanceof OperationException operationException) {
+                throw operationException;
             }
             throw new OperationException(
                     OperationFailure.WORLD_UNAVAILABLE,
@@ -320,11 +303,6 @@ final class PaperEditPreparation implements AutoCloseable {
             ChunkTicketManager.Lease lease)
             implements EditPlatform.PreparedReplace {
         @Override
-        public EditPlatform.WorldHandle world() {
-            return this.paperWorld;
-        }
-
-        @Override
         public List<String> sourcePatterns() {
             return this.sources.patterns();
         }
@@ -347,11 +325,6 @@ final class PaperEditPreparation implements AutoCloseable {
             ChunkTicketManager.Lease lease)
             implements EditPlatform.PreparedFill {
         @Override
-        public EditPlatform.WorldHandle world() {
-            return this.paperWorld;
-        }
-
-        @Override
         public List<DestinationPaletteEntry> destinationPalette() {
             return this.palette.entries();
         }
@@ -368,11 +341,6 @@ final class PaperEditPreparation implements AutoCloseable {
             List<ChunkPosition> chunks,
             ChunkTicketManager.Lease lease)
             implements EditPlatform.PreparedSet {
-        @Override
-        public EditPlatform.WorldHandle world() {
-            return this.paperWorld;
-        }
-
         @Override
         public int blockCount() {
             return this.changes.size();

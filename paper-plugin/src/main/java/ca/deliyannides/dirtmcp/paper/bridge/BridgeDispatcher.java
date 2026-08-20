@@ -78,7 +78,7 @@ final class BridgeDispatcher implements AutoCloseable {
             }
             try {
                 endpoint.handle(exchange);
-            } catch (RequestTimeoutException exception) {
+            } catch (RequestBodyReader.BodyTimeoutException exception) {
                 exchange.abort();
             } catch (InvalidRequestException exception) {
                 exchange.sendError(400, "invalid_request", exception.getMessage());

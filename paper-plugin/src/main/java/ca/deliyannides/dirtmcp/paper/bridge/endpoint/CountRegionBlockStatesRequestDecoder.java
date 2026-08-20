@@ -15,7 +15,7 @@ final class CountRegionBlockStatesRequestDecoder {
 
     static CountRegionBlockStates.Request decode(BridgeExchange exchange)
             throws IOException, InvalidRequestException {
-        JsonObject object = RequestJson.object(exchange);
+        JsonObject object = exchange.readJsonObject();
         RequestJson.requireExactFields(object, FIELDS, "Request");
         return new CountRegionBlockStates.Request(
                 RequestJson.string(object.get("world"), "world"),

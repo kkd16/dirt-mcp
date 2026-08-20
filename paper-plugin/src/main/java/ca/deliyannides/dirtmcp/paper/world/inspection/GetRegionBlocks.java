@@ -3,6 +3,8 @@ package ca.deliyannides.dirtmcp.paper.world.inspection;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -25,14 +27,8 @@ public interface GetRegionBlocks {
             int maxResults,
             Format format) {
         public Request {
-            includeBlockStatePatterns =
-                    includeBlockStatePatterns == null
-                            ? null
-                            : List.copyOf(includeBlockStatePatterns);
-            excludeBlockStatePatterns =
-                    excludeBlockStatePatterns == null
-                            ? null
-                            : List.copyOf(excludeBlockStatePatterns);
+            includeBlockStatePatterns = immutableCopy(includeBlockStatePatterns);
+            excludeBlockStatePatterns = immutableCopy(excludeBlockStatePatterns);
         }
     }
 
@@ -102,5 +98,9 @@ public interface GetRegionBlocks {
         if (matchedBlockCount < 0) {
             throw new IllegalArgumentException("Matched block count must be non-negative");
         }
+    }
+
+    private static List<String> immutableCopy(List<String> values) {
+        return values == null ? null : Collections.unmodifiableList(new ArrayList<>(values));
     }
 }

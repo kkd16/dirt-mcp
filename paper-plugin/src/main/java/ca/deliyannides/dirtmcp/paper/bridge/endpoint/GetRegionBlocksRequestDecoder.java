@@ -27,7 +27,7 @@ final class GetRegionBlocksRequestDecoder {
 
     static GetRegionBlocks.Request decode(BridgeExchange exchange, DirtConfig config)
             throws IOException, InvalidRequestException {
-        JsonObject object = RequestJson.object(exchange);
+        JsonObject object = exchange.readJsonObject();
         RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS);
         int maxResults =
                 object.has("maxResults")

@@ -15,13 +15,8 @@ public final class GetRegionBlocksEndpoint implements BridgeEndpoint {
     private final RequestDecoder<GetRegionBlocks.Request> decoder;
 
     public GetRegionBlocksEndpoint(GetRegionBlocks operation, DirtConfig config) {
-        this(operation, exchange -> GetRegionBlocksRequestDecoder.decode(exchange, config));
-    }
-
-    GetRegionBlocksEndpoint(
-            GetRegionBlocks operation, RequestDecoder<GetRegionBlocks.Request> decoder) {
         this.operation = Objects.requireNonNull(operation, "operation");
-        this.decoder = Objects.requireNonNull(decoder, "decoder");
+        this.decoder = exchange -> GetRegionBlocksRequestDecoder.decode(exchange, config);
     }
 
     @Override

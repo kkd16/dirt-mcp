@@ -7,7 +7,6 @@ import ca.deliyannides.dirtmcp.paper.platform.MainThread;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import ca.deliyannides.dirtmcp.paper.world.model.RegionGeometry;
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -66,7 +65,7 @@ public final class FaweWorldEditor
             throw invalid("min and max are required");
         }
         validateBlockStateList(request.sourceBlockStatePatterns(), "sourceBlockStatePatterns");
-        validatePaletteSize(request.destinationPalette());
+        validatePalette(request.destinationPalette());
         Cuboid region = boundedRegion(request.min(), request.max());
         EditPlatform.WorldHandle world = resolveWorld(request.world());
         try (EditCoordinator.Lease lease = this.coordinator.enter(world.id(), world.name())) {
@@ -104,7 +103,7 @@ public final class FaweWorldEditor
         if (request == null || request.min() == null || request.max() == null) {
             throw invalid("min and max are required");
         }
-        validatePaletteSize(request.destinationPalette());
+        validatePalette(request.destinationPalette());
         Cuboid region = boundedRegion(request.min(), request.max());
         EditPlatform.WorldHandle world = resolveWorld(request.world());
         try (EditCoordinator.Lease lease = this.coordinator.enter(world.id(), world.name())) {
@@ -234,7 +233,10 @@ public final class FaweWorldEditor
         Set<ChunkPosition> chunks = new LinkedHashSet<>();
         for (int index = 0; index < request.changes().size(); index++) {
             BlockChange change = request.changes().get(index);
-            if (change == null || change.position() == null) {
+            if (change == null
+                    || change.position() == null
+                    || change.blockState() == null
+                    || change.blockState().isBlank()) {
                 throw invalid("changes[" + index + "] must contain a position and blockState");
             }
             BlockPosition position = change.position();
@@ -247,7 +249,7 @@ public final class FaweWorldEditor
                                 + " chunks");
             }
         }
-        return List.copyOf(new ArrayList<>(chunks));
+        return List.copyOf(chunks);
     }
 
     private EditPlatform.WorldHandle resolveWorld(String worldName) throws OperationException {
@@ -257,8 +259,7 @@ public final class FaweWorldEditor
         return this.platform.resolveWorld(worldName);
     }
 
-    private void validatePaletteSize(List<DestinationPaletteEntry> palette)
-            throws OperationException {
+    private void validatePalette(List<DestinationPaletteEntry> palette) throws OperationException {
         if (palette == null || palette.isEmpty()) {
             throw invalid("destinationPalette must contain at least one entry");
         }

@@ -15,12 +15,8 @@ public final class FillRegionEndpoint implements BridgeEndpoint {
     private final RequestDecoder<FillRegion.Request> decoder;
 
     public FillRegionEndpoint(FillRegion operation, DirtConfig config) {
-        this(operation, exchange -> FillRegionRequestDecoder.decode(exchange, config));
-    }
-
-    FillRegionEndpoint(FillRegion operation, RequestDecoder<FillRegion.Request> decoder) {
         this.operation = Objects.requireNonNull(operation, "operation");
-        this.decoder = Objects.requireNonNull(decoder, "decoder");
+        this.decoder = exchange -> FillRegionRequestDecoder.decode(exchange, config);
     }
 
     @Override

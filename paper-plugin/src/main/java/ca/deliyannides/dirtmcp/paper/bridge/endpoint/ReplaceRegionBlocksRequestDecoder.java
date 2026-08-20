@@ -27,7 +27,7 @@ final class ReplaceRegionBlocksRequestDecoder {
 
     static ReplaceRegionBlocks.Request decode(BridgeExchange exchange, DirtConfig config)
             throws IOException, InvalidRequestException {
-        JsonObject object = RequestJson.object(exchange);
+        JsonObject object = exchange.readJsonObject();
         RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS);
         return new ReplaceRegionBlocks.Request(
                 RequestJson.string(object.get("world"), "world"),

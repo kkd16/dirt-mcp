@@ -323,6 +323,22 @@ final class RegionInspectionServiceTest {
                 assertThrows(
                                 OperationException.class,
                                 () ->
+                                        service.getRegionBlocks(
+                                                new GetRegionBlocks.Request(
+                                                        "world",
+                                                        position(0, 0, 0),
+                                                        position(0, 0, 0),
+                                                        java.util.Collections.singletonList(null),
+                                                        List.of(),
+                                                        false,
+                                                        1,
+                                                        Format.BLOCKS)))
+                        .failure());
+        assertEquals(
+                OperationFailure.INVALID_REQUEST,
+                assertThrows(
+                                OperationException.class,
+                                () ->
                                         service.scanOrthographicView(
                                                 new ScanOrthographicView.Request(
                                                         "world", null, null, 0, 0, 1, 1)))

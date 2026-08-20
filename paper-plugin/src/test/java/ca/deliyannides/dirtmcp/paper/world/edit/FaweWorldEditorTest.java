@@ -569,11 +569,6 @@ final class FaweWorldEditorTest {
             }
 
             @Override
-            public WorldHandle world() {
-                return this.world;
-            }
-
-            @Override
             public List<String> sourcePatterns() {
                 return List.of("canonical:source");
             }

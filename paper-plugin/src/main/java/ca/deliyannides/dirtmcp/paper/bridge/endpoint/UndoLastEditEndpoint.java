@@ -14,12 +14,8 @@ public final class UndoLastEditEndpoint implements BridgeEndpoint {
     private final RequestDecoder<UndoLastEdit.Request> decoder;
 
     public UndoLastEditEndpoint(UndoLastEdit operation) {
-        this(operation, UndoLastEditRequestDecoder::decode);
-    }
-
-    UndoLastEditEndpoint(UndoLastEdit operation, RequestDecoder<UndoLastEdit.Request> decoder) {
         this.operation = Objects.requireNonNull(operation, "operation");
-        this.decoder = Objects.requireNonNull(decoder, "decoder");
+        this.decoder = UndoLastEditRequestDecoder::decode;
     }
 
     @Override

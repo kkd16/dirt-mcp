@@ -4,7 +4,6 @@ import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -13,11 +12,6 @@ public final class RequestJson {
     private static final Set<String> POSITION_FIELDS = Set.of("x", "y", "z");
 
     private RequestJson() {}
-
-    public static JsonObject object(BridgeExchange exchange)
-            throws IOException, InvalidRequestException {
-        return exchange.readJsonObject();
-    }
 
     public static String string(JsonElement element, String name) throws InvalidRequestException {
         if (!(element instanceof JsonPrimitive primitive)
