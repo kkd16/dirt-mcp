@@ -560,7 +560,9 @@ export function registerEditingTools(
       title: 'Set blocks',
       description:
         'Place blocks from weighted palettes at distinct origin-relative positions, using one FAWE edit and one retained Dirt history entry. Each placement is [paletteIndex, x, y, z], where paletteIndex is zero-based. Omit every weight in a palette for equal probability, or provide whole percentages totaling 100. Reuse the returned seed to replay a preview. All states and resolved positions are validated before mutation. Keep palettes and the encoded request within the active configured limits.' +
-        (toolConfiguration.get_server_status ? ' Those limits are reported by get_server_status.' : '') +
+        (toolConfiguration.get_server_status
+          ? ' Those limits are reported by get_server_status with include.configuration=true.'
+          : '') +
         ' Placement does not trigger Minecraft neighbor physics. Set dryRun=true to preview exact counts. Every committed non-empty edit returns retained edit metadata including its edit ID.',
       inputSchema: SetBlocksInputSchema,
       outputSchema: toolOutputSchema(SetBlocksOutputSchema),

@@ -11,7 +11,7 @@ behavior that matters when choosing and combining tools.
 | MCP tool                    | Bridge operation                     | Purpose                                                               |
 | --------------------------- | ------------------------------------ | --------------------------------------------------------------------- |
 | `ping_server`               | `GET /v1/ping`                       | Verify the authenticated Dirt, Paper, and FAWE path without mutation. |
-| `get_server_status`         | `GET /v1/server-status`              | Return builds, performance, players, worlds, and active config.       |
+| `get_server_status`         | `GET /v1/server-status`              | Return builds, performance, and selected status sections.             |
 | `count_region_block_states` | `POST /v1/count-region-block-states` | Count canonical block states in an inclusive region.                  |
 | `get_region_blocks`         | `POST /v1/get-region-blocks`         | Return filtered exact blocks or lossless axis-aligned runs.           |
 | `scan_orthographic_view`    | `POST /v1/scan-orthographic-view`    | Find a selected non-air depth on each bounded world-axis sightline.   |
@@ -33,6 +33,14 @@ used to load the allowlist.
 
 Tool settings are snapshotted when Paper starts and when the MCP process loads
 its catalog. After editing YAML, restart Paper and the MCP host or process.
+
+`get_server_status` always returns runtime builds and lightweight performance.
+Its MCP-only `include` object defaults `worlds` to true and `players` and
+`configuration` to false. The configuration group contains limits, edit-history
+retention, defaults, logging, and tool availability. Set
+`include.configuration=true` when planning against active limits, or
+`include.players=true` when selecting an online player. Excluded sections are
+null.
 
 Coordinates are signed 32-bit integers. Region corners are inclusive and are
 normalized independently on each axis.
@@ -260,7 +268,8 @@ player-view checked chunks, changed blocks, detailed scans and player-view ray
 budgets, result sizes and ray counts, request bodies, concurrent bridge and
 inspection work, and retained history. Active operation
 limits, the separate `editHistory` object, `logging` configuration, and every
-resolved per-tool boolean in `tools` are available through `get_server_status`;
+resolved per-tool boolean in `tools` are available through `get_server_status`
+with `include.configuration=true`;
 the history fields are
 `maxEntriesPerWorld`, `maxEntriesTotal`, and `maxRetainedChangedBlocks`. The YAML
 settings live in

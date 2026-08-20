@@ -22,7 +22,10 @@ import {
 import { GetRegionBlocksInputSchema, ScanOrthographicViewInputSchema } from '../dist/tools/inspection.js';
 import {
   EditHistoryConfigurationSchema,
+  GetServerStatusInputSchema,
+  GetServerStatusOutputSchema,
   LoggingConfigurationSchema,
+  projectServerStatus,
   ServerStatusSchema,
 } from '../dist/tools/status.js';
 import { MCP_TOOL_NAMES, McpToolConfigurationSchema, type McpToolConfiguration } from '../dist/tools/configuration.js';
@@ -36,6 +39,31 @@ const region = {
 
 const isInvalidBridgeResponse = (error: unknown): boolean =>
   error instanceof ToolFailure && error.code === 'bridge_invalid_response';
+
+function serverStatusFixture() {
+  const tools = Object.fromEntries(MCP_TOOL_NAMES.map((name) => [name, true])) as McpToolConfiguration;
+  return {
+    builds: { minecraft: '26.2', paper: '26.2-112', dirtMcp: 'test', fawe: '2.15.4' },
+    performance: { tpsOneMinute: 20, averageTickTimeMillis: 1 },
+    players: { online: 0, maximum: 20, entries: [] },
+    worlds: [],
+    limits: {
+      maxRequestBytes: 1_048_576,
+      maxRegionVolume: 100,
+      maxTouchedChunks: 10,
+      maxInspectionTouchedChunks: 5,
+      maxBlockStatePatterns: 64,
+      maxChangedBlocks: 50,
+      maxInspectionVolume: 80,
+      defaultInspectionResultLimit: 10,
+      maxInspectionResultLimit: 20,
+    },
+    editHistory: { maxEntriesPerWorld: 1, maxEntriesTotal: 1, maxRetainedChangedBlocks: 50 },
+    defaults: { regionBlocksIncludeAir: false, regionBlocksFormat: 'blocks', editDryRun: false },
+    logging: { consoleLevel: 'info', detailFileMaxBytes: 1, detailFileRetainedFiles: 2 },
+    tools,
+  };
+}
 
 test('applies inspection defaults and rejects combined pattern amplification', () => {
   assert.deepEqual(GetRegionBlocksInputSchema.parse(region), {
@@ -140,28 +168,7 @@ test('validates bounded edit-history configuration relationships', () => {
 });
 
 test('validates bounded server limits and their relationships', () => {
-  const tools = Object.fromEntries(MCP_TOOL_NAMES.map((name) => [name, true])) as McpToolConfiguration;
-  const status = {
-    builds: { minecraft: '26.2', paper: '26.2-112', dirtMcp: 'test', fawe: '2.15.4' },
-    performance: { tpsOneMinute: 20, averageTickTimeMillis: 1 },
-    players: { online: 0, maximum: 20, entries: [] },
-    worlds: [],
-    limits: {
-      maxRequestBytes: 1_048_576,
-      maxRegionVolume: 100,
-      maxTouchedChunks: 10,
-      maxInspectionTouchedChunks: 5,
-      maxBlockStatePatterns: 64,
-      maxChangedBlocks: 50,
-      maxInspectionVolume: 80,
-      defaultInspectionResultLimit: 10,
-      maxInspectionResultLimit: 20,
-    },
-    editHistory: { maxEntriesPerWorld: 1, maxEntriesTotal: 1, maxRetainedChangedBlocks: 50 },
-    defaults: { regionBlocksIncludeAir: false, regionBlocksFormat: 'blocks', editDryRun: false },
-    logging: { consoleLevel: 'info', detailFileMaxBytes: 1, detailFileRetainedFiles: 2 },
-    tools,
-  };
+  const status = serverStatusFixture();
   assert.equal(ServerStatusSchema.safeParse(status).success, true);
   assert.equal(
     ServerStatusSchema.safeParse({
@@ -196,9 +203,46 @@ test('validates bounded server limits and their relationships', () => {
     }).success,
     false,
   );
-  assert.equal(McpToolConfigurationSchema.safeParse(tools).success, true);
-  assert.equal(McpToolConfigurationSchema.safeParse({ ...tools, undo_edit: undefined }).success, false);
-  assert.equal(McpToolConfigurationSchema.safeParse({ ...tools, unknown_tool: false }).success, false);
+  assert.equal(McpToolConfigurationSchema.safeParse(status.tools).success, true);
+  assert.equal(McpToolConfigurationSchema.safeParse({ ...status.tools, undo_edit: undefined }).success, false);
+  assert.equal(McpToolConfigurationSchema.safeParse({ ...status.tools, unknown_tool: false }).success, false);
+});
+
+test('projects only requested server status sections', () => {
+  const status = serverStatusFixture();
+  const defaultInput = GetServerStatusInputSchema.parse({});
+  assert.deepEqual(defaultInput, { include: { players: false, worlds: true, configuration: false } });
+  assert.deepEqual(GetServerStatusInputSchema.parse({ include: { players: true } }), {
+    include: { players: true, worlds: true, configuration: false },
+  });
+  assert.equal(GetServerStatusInputSchema.safeParse({ include: { unknown: true } }).success, false);
+
+  const parsedStatus = ServerStatusSchema.parse(status);
+  assert.deepEqual(projectServerStatus(defaultInput, parsedStatus), {
+    builds: status.builds,
+    performance: status.performance,
+    players: null,
+    worlds: status.worlds,
+    configuration: null,
+  });
+  const completeProjection = projectServerStatus(
+    GetServerStatusInputSchema.parse({ include: { players: true, worlds: false, configuration: true } }),
+    parsedStatus,
+  );
+  assert.deepEqual(completeProjection, {
+    builds: status.builds,
+    performance: status.performance,
+    players: status.players,
+    worlds: null,
+    configuration: {
+      limits: status.limits,
+      editHistory: status.editHistory,
+      defaults: status.defaults,
+      logging: status.logging,
+      tools: status.tools,
+    },
+  });
+  assert.equal(GetServerStatusOutputSchema.safeParse(completeProjection).success, true);
 });
 
 test('strictly validates active Paper logging configuration', () => {

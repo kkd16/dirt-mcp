@@ -448,6 +448,27 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { name: 'undo_edit', annotations: mutationAnnotations(false) },
     ],
   );
+  const listedStatus = listedTools.find((tool) => tool.name === 'get_server_status');
+  assert.ok(listedStatus);
+  const statusInputSchema = listedStatus.inputSchema as {
+    readonly required?: readonly string[];
+    readonly properties: {
+      readonly include: {
+        readonly default: unknown;
+        readonly required?: readonly string[];
+        readonly properties: Readonly<Record<string, { readonly default: unknown }>>;
+      };
+    };
+  };
+  const statusInclude = statusInputSchema.properties.include;
+  const statusIncludeDefaults = { players: false, worlds: true, configuration: false };
+  assert.equal(statusInputSchema.required?.length ?? 0, 0);
+  assert.equal(statusInclude.required?.length ?? 0, 0);
+  assert.deepEqual(statusInclude.default, statusIncludeDefaults);
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(statusInclude.properties).map(([name, schema]) => [name, schema.default])),
+    statusIncludeDefaults,
+  );
   const advertisedFailure = {
     callId: '11111111-1111-4111-8111-111111111111',
     error: {
@@ -652,10 +673,16 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       content: [
         {
           type: 'text',
-          text: 'Paper 26.2-112-main; players 1/20; loaded worlds: world.',
+          text: 'Paper 26.2-112-main; loaded worlds: world.',
         },
       ],
-      structuredContent: serverStatus,
+      structuredContent: {
+        builds: serverStatus.builds,
+        performance: serverStatus.performance,
+        players: null,
+        worlds: serverStatus.worlds,
+        configuration: null,
+      },
     }),
   );
 

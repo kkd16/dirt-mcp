@@ -35,7 +35,7 @@ const CanonicalUuidSchema = z.string().regex(CANONICAL_UUID_SELECTOR);
 const NonnegativeInt32Schema = SignedInt32Schema.nonnegative();
 const PositiveInt32Schema = SignedInt32Schema.positive();
 const PlayerSelectorSchema = BridgePlayerSelectorSchema.describe(
-  'Exact online player name (available from get_server_status when enabled) or canonical UUID.',
+  'Exact online player name (available from get_server_status with include.players=true when enabled) or canonical UUID.',
 );
 
 const PlayerContextIncludeOptionsSchema = z
@@ -103,7 +103,7 @@ const PlayerViewOptionsSchema = z
       .describe('Whether passable but collidable blocks are ignored.'),
   })
   .strict()
-  .describe('Perspective block-collision projection options.');
+  .describe('Perspective block-collision projection options. Omit when include.view=false.');
 
 export const GetPlayerContextInputSchema = z
   .object({

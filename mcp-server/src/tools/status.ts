@@ -16,6 +16,36 @@ import { executeToolCall, successResult } from './execution.ts';
 
 const PositiveInt32Schema = z.number().int().min(1).max(INT32_MAX);
 
+const DEFAULT_STATUS_INCLUDE = {
+  players: false,
+  worlds: true,
+  configuration: false,
+} as const;
+
+const ServerStatusIncludeOptionsSchema = z
+  .object({
+    players: z
+      .boolean()
+      .default(DEFAULT_STATUS_INCLUDE.players)
+      .describe('Include online player names, locations, game modes, and facing directions.'),
+    worlds: z
+      .boolean()
+      .default(DEFAULT_STATUS_INCLUDE.worlds)
+      .describe('Include loaded worlds and their current world-level state.'),
+    configuration: z
+      .boolean()
+      .default(DEFAULT_STATUS_INCLUDE.configuration)
+      .describe('Include active limits, edit-history settings, defaults, logging, and MCP tool availability.'),
+  })
+  .strict()
+  .default(DEFAULT_STATUS_INCLUDE)
+  .describe('Optional status sections; build and performance information are always returned.');
+
+export const GetServerStatusInputSchema = z
+  .object({ include: ServerStatusIncludeOptionsSchema })
+  .strict()
+  .describe('Status sections to return.');
+
 const PingServerOutputSchema = z
   .object({
     status: z.literal('ok').describe('All Dirt, Paper, and FAWE health checks passed.'),
@@ -107,77 +137,132 @@ export const LoggingConfigurationSchema = z
   .strict()
   .describe('Active Paper console threshold and rotating detail-log limits.');
 
-export const ServerStatusSchema = z
+const BuildsSchema = z
   .object({
-    builds: z
-      .object({
-        minecraft: z.string().min(1).describe('Running Minecraft build.'),
-        paper: z.string().min(1).describe('Full running Paper build identifier.'),
-        dirtMcp: z.string().min(1).describe('Running Dirt MCP Paper plugin build.'),
-        fawe: z.string().min(1).describe('Running FastAsyncWorldEdit build.'),
-      })
-      .strict()
-      .describe('Exact runtime build identifiers.'),
-    performance: z
-      .object({
-        tpsOneMinute: z.number().nonnegative().describe('Paper one-minute ticks per second.'),
-        averageTickTimeMillis: z.number().nonnegative().describe('Paper average tick duration in milliseconds.'),
-      })
-      .strict()
-      .describe('Lightweight current Paper performance indicators.'),
-    players: z
-      .object({
-        online: z.number().int().nonnegative().describe('Current online player count.'),
-        maximum: z.number().int().nonnegative().describe('Configured player capacity.'),
-        entries: z
-          .array(
-            z
-              .object({
-                name: z.string().min(1).describe('Current player name.'),
-                world: z.string().min(1).describe('Loaded world containing the player.'),
-                gameMode: z.enum(['survival', 'creative', 'adventure', 'spectator']).describe('Current game mode.'),
-                facing: z
-                  .enum(['north', 'east', 'south', 'west'])
-                  .describe('Current horizontal cardinal direction the player is facing.'),
-                blockPosition: BlockPositionSchema.describe('Current integer block position.'),
-              })
-              .strict(),
-          )
-          .describe('Online players sorted by name, with location and facing context.'),
-      })
-      .strict()
-      .describe('Current player presence.'),
-    worlds: z
+    minecraft: z.string().min(1).describe('Running Minecraft build.'),
+    paper: z.string().min(1).describe('Full running Paper build identifier.'),
+    dirtMcp: z.string().min(1).describe('Running Dirt MCP Paper plugin build.'),
+    fawe: z.string().min(1).describe('Running FastAsyncWorldEdit build.'),
+  })
+  .strict()
+  .describe('Exact runtime build identifiers.');
+
+const PerformanceSchema = z
+  .object({
+    tpsOneMinute: z.number().nonnegative().describe('Paper one-minute ticks per second.'),
+    averageTickTimeMillis: z.number().nonnegative().describe('Paper average tick duration in milliseconds.'),
+  })
+  .strict()
+  .describe('Lightweight current Paper performance indicators.');
+
+const PlayerSummarySchema = z
+  .object({
+    online: z.number().int().nonnegative().describe('Current online player count.'),
+    maximum: z.number().int().nonnegative().describe('Configured player capacity.'),
+    entries: z
       .array(
         z
           .object({
-            name: z.string().min(1).describe('Exact loaded world name accepted by world tools.'),
-            environment: z.string().min(1).describe('Paper world environment, such as normal or nether.'),
-            minY: z.number().int().describe('Minimum valid block Y.'),
-            maxY: z.number().int().describe('Maximum valid block Y, inclusive.'),
-            spawn: BlockPositionSchema.describe('Current world spawn block.'),
-            timeOfDay: z.number().int().min(0).max(23_999).describe('Current Minecraft time of day.'),
-            storm: z.boolean().describe('Whether the world currently has a storm.'),
-            thundering: z.boolean().describe('Whether the world is currently thundering.'),
-            playerCount: z.number().int().nonnegative().describe('Players currently in this world.'),
+            name: z.string().min(1).describe('Current player name.'),
+            world: z.string().min(1).describe('Loaded world containing the player.'),
+            gameMode: z.enum(['survival', 'creative', 'adventure', 'spectator']).describe('Current game mode.'),
+            facing: z
+              .enum(['north', 'east', 'south', 'west'])
+              .describe('Current horizontal cardinal direction the player is facing.'),
+            blockPosition: BlockPositionSchema.describe('Current integer block position.'),
           })
           .strict(),
       )
-      .describe('All currently loaded worlds in Paper order.'),
-    limits: LimitConfigurationSchema,
-    editHistory: EditHistoryConfigurationSchema,
-    defaults: DefaultConfigurationSchema,
-    logging: LoggingConfigurationSchema,
-    tools: McpToolConfigurationSchema,
+      .describe('Online players sorted by name, with location and facing context.'),
   })
   .strict()
-  .refine((status) => status.editHistory.maxRetainedChangedBlocks >= status.limits.maxChangedBlocks, {
-    message: 'maxRetainedChangedBlocks must be at least maxChangedBlocks.',
-    path: ['editHistory', 'maxRetainedChangedBlocks'],
+  .describe('Current player presence.');
+
+const WorldsSchema = z
+  .array(
+    z
+      .object({
+        name: z.string().min(1).describe('Exact loaded world name accepted by world tools.'),
+        environment: z.string().min(1).describe('Paper world environment, such as normal or nether.'),
+        minY: z.number().int().describe('Minimum valid block Y.'),
+        maxY: z.number().int().describe('Maximum valid block Y, inclusive.'),
+        spawn: BlockPositionSchema.describe('Current world spawn block.'),
+        timeOfDay: z.number().int().min(0).max(23_999).describe('Current Minecraft time of day.'),
+        storm: z.boolean().describe('Whether the world currently has a storm.'),
+        thundering: z.boolean().describe('Whether the world is currently thundering.'),
+        playerCount: z.number().int().nonnegative().describe('Players currently in this world.'),
+      })
+      .strict(),
+  )
+  .describe('All currently loaded worlds in Paper order.');
+
+const ServerConfigurationShape = {
+  limits: LimitConfigurationSchema,
+  editHistory: EditHistoryConfigurationSchema,
+  defaults: DefaultConfigurationSchema,
+  logging: LoggingConfigurationSchema,
+  tools: McpToolConfigurationSchema,
+};
+
+const hasSufficientHistoryCapacity = (configuration: {
+  limits: z.infer<typeof LimitConfigurationSchema>;
+  editHistory: z.infer<typeof EditHistoryConfigurationSchema>;
+}): boolean => configuration.editHistory.maxRetainedChangedBlocks >= configuration.limits.maxChangedBlocks;
+
+const HISTORY_CAPACITY_REFINEMENT = {
+  message: 'maxRetainedChangedBlocks must be at least maxChangedBlocks.',
+  path: ['editHistory', 'maxRetainedChangedBlocks'],
+};
+
+const ServerConfigurationSchema = z
+  .object(ServerConfigurationShape)
+  .strict()
+  .refine(hasSufficientHistoryCapacity, HISTORY_CAPACITY_REFINEMENT)
+  .describe('Active Dirt limits, retention, defaults, logging, and MCP tool availability.');
+
+export const ServerStatusSchema = z
+  .object({
+    builds: BuildsSchema,
+    performance: PerformanceSchema,
+    players: PlayerSummarySchema,
+    worlds: WorldsSchema,
+    ...ServerConfigurationShape,
   })
+  .strict()
+  .refine(hasSufficientHistoryCapacity, HISTORY_CAPACITY_REFINEMENT)
   .describe(
     'Current lightweight Paper context, limits, edit-history retention, defaults, logging, and MCP tool availability for grounding subsequent Dirt calls.',
   );
+
+export const GetServerStatusOutputSchema = z
+  .object({
+    builds: BuildsSchema,
+    performance: PerformanceSchema,
+    players: PlayerSummarySchema.nullable().describe('Current player presence, or null when not requested.'),
+    worlds: WorldsSchema.nullable().describe('Loaded worlds, or null when not requested.'),
+    configuration: ServerConfigurationSchema.nullable().describe(
+      'Active Dirt configuration, or null when not requested.',
+    ),
+  })
+  .strict()
+  .describe('Current server status projected to the requested optional sections.');
+
+type GetServerStatusInput = z.infer<typeof GetServerStatusInputSchema>;
+type ServerStatus = z.infer<typeof ServerStatusSchema>;
+
+export function projectServerStatus(
+  input: GetServerStatusInput,
+  status: ServerStatus,
+): z.infer<typeof GetServerStatusOutputSchema> {
+  const { builds, performance, players, worlds, ...configuration } = status;
+  return {
+    builds,
+    performance,
+    players: input.include.players ? players : null,
+    worlds: input.include.worlds ? worlds : null,
+    configuration: input.include.configuration ? configuration : null,
+  };
+}
 
 export function registerStatusTools(
   server: McpServer,
@@ -216,12 +301,12 @@ export function registerStatusTools(
     {
       title: 'Get Dirt server status',
       description:
-        'Return current Minecraft, Paper, Dirt MCP, and FAWE builds; TPS; online players, block positions, and cardinal facing directions; loaded worlds; and active Dirt limits, edit-history retention, defaults, logging, and MCP tool availability. Use this to ground later world operations.',
-      inputSchema: EmptyInputSchema,
-      outputSchema: toolOutputSchema(ServerStatusSchema),
+        'Return current builds and performance plus selected player, world, and configuration sections. Worlds default on; players and configuration default off. Use include.configuration=true to inspect active limits and defaults.',
+      inputSchema: GetServerStatusInputSchema,
+      outputSchema: toolOutputSchema(GetServerStatusOutputSchema),
       annotations: READ_WORLD_ANNOTATIONS,
     },
-    async (_input, context) =>
+    async (input, context) =>
       executeToolCall(
         logger,
         {
@@ -231,11 +316,14 @@ export function registerStatusTools(
         },
         async (callId) => {
           const status = await bridge.request(BRIDGE_ROUTES.serverStatus, callId, ServerStatusSchema);
-          const worldNames = status.worlds.map((world) => world.name).join(', ') || 'none';
-          return successResult(
-            status,
-            `Paper ${status.builds.paper}; players ${status.players.online}/${status.players.maximum}; loaded worlds: ${worldNames}.`,
-          );
+          const result = projectServerStatus(input, status);
+          const summary = [`Paper ${result.builds.paper}`];
+          if (result.players !== null) summary.push(`players ${result.players.online}/${result.players.maximum}`);
+          if (result.worlds !== null) {
+            const worldNames = result.worlds.map((world) => world.name).join(', ') || 'none';
+            summary.push(`loaded worlds: ${worldNames}`);
+          }
+          return successResult(result, `${summary.join('; ')}.`);
         },
       ),
   );

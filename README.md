@@ -73,7 +73,7 @@ the same `DIRT_MCP_BRIDGE_TOKEN` to the MCP process. Tokens must contain at
 least 32 bytes. Never commit or log tokens. All settings are validated at
 startup; active tool limits, edit-history configuration, defaults, logging
 configuration, and the resolved MCP tool allowlist are reported by
-`get_server_status`. The shipped
+`get_server_status` when called with `include.configuration=true`. The shipped
 `tools` section explicitly enables every tool. Each recognized entry is an
 independent boolean; an entry omitted from that section resolves to false, while
 unknown or invalid entries stop plugin startup. Other configuration keys remain

@@ -21,20 +21,25 @@ final class McpToolHelp {
                             "Get Dirt server status",
                             ToolKind.READ_ONLY,
                             "Returns current server context used to ground later world operations.",
-                            "None.",
-                            "builds, performance (TPS and tick time), players, worlds, limits, "
-                                    + "editHistory, defaults, logging, and tools.",
-                            "Read-only; use the reported world names and active limits for later calls.");
+                            "Optional include.players (default false), include.worlds (true), and "
+                                    + "include.configuration (false).",
+                            "builds and performance; requested players, worlds, and configuration, "
+                                    + "or null. Configuration groups limits, editHistory, defaults, "
+                                    + "logging, and tools.",
+                            "Read-only; excluded sections are null. Include configuration when "
+                                    + "active limits or defaults are needed.");
             case GET_PLAYER_CONTEXT ->
                     new ToolSpec(
                             "Get player context",
                             ToolKind.READ_ONLY,
                             "Captures an online player's exact pose and optional perspective, items, vitals, movement, client state, and effects.",
-                            "player (exact online name or UUID); optional include flags and bounded view "
-                                    + "width, height, verticalFieldOfViewDegrees, maxDistance, "
-                                    + "fluidCollision, and ignorePassableBlocks.",
-                            "One coherent player snapshot with requested nullable sections and sparse "
-                                    + "first block-collision hits from the captured eye pose.",
+                            "player (exact online name or UUID); optional include flags (view and "
+                                    + "equipment default true; all others false) and bounded view width, "
+                                    + "height, verticalFieldOfViewDegrees, maxDistance, fluidCollision, "
+                                    + "and ignorePassableBlocks.",
+                            "One coherent player snapshot; requested sections are non-null, excluded "
+                                    + "sections are null, and the view contains sparse first "
+                                    + "block-collision hits from the captured eye pose.",
                             "Read-only; the view is a server-side ray projection, not the client's "
                                     + "framebuffer, third-person camera, resource-pack rendering, or FOV setting.");
             case COUNT_REGION_BLOCK_STATES ->

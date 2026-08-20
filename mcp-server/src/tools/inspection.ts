@@ -540,7 +540,9 @@ export function registerInspectionTools(
       title: 'Get region blocks',
       description:
         'Return filtered exact blocks or lossless runs from an inclusive region. Use filters and runs to keep output compact. Results that exceed active scan or result ceilings fail rather than truncate.' +
-        (toolConfiguration.get_server_status ? ' The active ceilings are reported by get_server_status.' : ''),
+        (toolConfiguration.get_server_status
+          ? ' The active ceilings are reported by get_server_status with include.configuration=true.'
+          : ''),
       inputSchema: GetRegionBlocksInputSchema,
       outputSchema: toolOutputSchema(GetRegionBlocksOutputSchema),
       annotations: READ_WORLD_ANNOTATIONS,
@@ -580,7 +582,7 @@ export function registerInspectionTools(
       description:
         'Return a selected zero-based non-air depth on each bounded world-axis sightline. Depth 0 is the first non-air block, 1 is the second, and so on. Prefer grid for larger views.' +
         (toolConfiguration.get_server_status
-          ? ' Active scan and result ceilings are reported by get_server_status.'
+          ? ' Active scan and result ceilings are reported by get_server_status with include.configuration=true.'
           : ''),
       inputSchema: ScanOrthographicViewInputSchema,
       outputSchema: toolOutputSchema(ScanOrthographicViewOutputSchema),

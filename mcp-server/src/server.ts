@@ -43,7 +43,7 @@ function serverInstructions(configuration: McpToolConfiguration): string {
 
   if (configuration.get_server_status && (hasInspection || hasMutation)) {
     instructions.push(
-      'Call get_server_status before large world operations and keep requests within its active limits.',
+      'Call get_server_status with include.configuration=true before large world operations and keep requests within its active limits.',
     );
   }
 
