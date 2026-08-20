@@ -38,14 +38,6 @@ public final class FaweWorldEditor
             EditPlatform platform,
             int maxRegionVolume,
             int maxTouchedChunks,
-            int undoHistoryPerWorld) {
-        this(platform, maxRegionVolume, maxTouchedChunks, undoHistoryPerWorld, 64);
-    }
-
-    private FaweWorldEditor(
-            EditPlatform platform,
-            int maxRegionVolume,
-            int maxTouchedChunks,
             int undoHistoryPerWorld,
             int maxBlockStatePatterns) {
         this.platform = Objects.requireNonNull(platform, "platform");

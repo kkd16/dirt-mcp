@@ -20,6 +20,7 @@ import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Test;
 
 final class FaweWorldEditorTest {
+    private static final int MAX_BLOCK_STATE_PATTERNS = 64;
     private static final UUID WORLD_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static final UUID OTHER_WORLD_ID =
             UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
@@ -78,7 +79,8 @@ final class FaweWorldEditorTest {
     @Test
     void rejectsRegionTouchingTooManyChunksBeforeResolvingWorld() {
         FakePlatform platform = new FakePlatform();
-        FaweWorldEditor editor = new FaweWorldEditor(platform, 1_000, 2, 3);
+        FaweWorldEditor editor =
+                new FaweWorldEditor(platform, 1_000, 2, 3, MAX_BLOCK_STATE_PATTERNS);
 
         OperationException exception =
                 assertThrows(
@@ -101,7 +103,7 @@ final class FaweWorldEditorTest {
     @Test
     void rejectsSparseChunkLimitBeforeWorldAndStatePreparation() {
         FakePlatform platform = new FakePlatform();
-        FaweWorldEditor editor = new FaweWorldEditor(platform, 100, 1, 3);
+        FaweWorldEditor editor = new FaweWorldEditor(platform, 100, 1, 3, MAX_BLOCK_STATE_PATTERNS);
 
         OperationException exception =
                 assertThrows(
@@ -135,7 +137,8 @@ final class FaweWorldEditorTest {
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () -> editor.undoLastEdit(new UndoLastEdit.Request(" ")));
-        FaweWorldEditor smallEditor = new FaweWorldEditor(new FakePlatform(), 3, 10, 3);
+        FaweWorldEditor smallEditor =
+                new FaweWorldEditor(new FakePlatform(), 3, 10, 3, MAX_BLOCK_STATE_PATTERNS);
         assertFailure(
                 OperationFailure.REGION_TOO_LARGE,
                 () ->
@@ -156,7 +159,8 @@ final class FaweWorldEditorTest {
                                         "world",
                                         position(0, 0, 0),
                                         position(0, 0, 0),
-                                        java.util.Collections.nCopies(65, "minecraft:stone"),
+                                        java.util.Collections.nCopies(
+                                                MAX_BLOCK_STATE_PATTERNS + 1, "minecraft:stone"),
                                         palette(),
                                         0,
                                         false)));
@@ -257,7 +261,8 @@ final class FaweWorldEditorTest {
     void zeroCapacityStoresNothingAndBoundedHistoryEvictsOldest() throws Exception {
         FakePlatform zeroPlatform = new FakePlatform();
         zeroPlatform.nextChanges = 1;
-        FaweWorldEditor zero = new FaweWorldEditor(zeroPlatform, 100, 10, 0);
+        FaweWorldEditor zero =
+                new FaweWorldEditor(zeroPlatform, 100, 10, 0, MAX_BLOCK_STATE_PATTERNS);
         zero.fillRegion(fillRequest("world", false));
         assertFailure(
                 OperationFailure.NOTHING_TO_UNDO,
@@ -265,7 +270,8 @@ final class FaweWorldEditorTest {
 
         FakePlatform boundedPlatform = new FakePlatform();
         boundedPlatform.nextChanges = 1;
-        FaweWorldEditor bounded = new FaweWorldEditor(boundedPlatform, 100, 10, 2);
+        FaweWorldEditor bounded =
+                new FaweWorldEditor(boundedPlatform, 100, 10, 2, MAX_BLOCK_STATE_PATTERNS);
         bounded.fillRegion(fillRequest("world", false));
         bounded.fillRegion(fillRequest("world", false));
         bounded.fillRegion(fillRequest("world", false));
@@ -364,6 +370,7 @@ final class FaweWorldEditorTest {
         editor.close();
         editor.close();
 
+        assertTrue(platform.stopping);
         assertTrue(platform.closed);
         assertFailure(
                 OperationFailure.WORLD_UNAVAILABLE,
@@ -382,6 +389,7 @@ final class FaweWorldEditorTest {
             platform.entered.await();
 
             assertFalse(editor.closeIfQuiescent());
+            assertTrue(platform.stopping);
             assertFalse(platform.closed);
 
             platform.release.countDown();
@@ -405,7 +413,7 @@ final class FaweWorldEditorTest {
     }
 
     private static FaweWorldEditor editor(FakePlatform platform, int history) {
-        return new FaweWorldEditor(platform, 100, 10, history);
+        return new FaweWorldEditor(platform, 100, 10, history, MAX_BLOCK_STATE_PATTERNS);
     }
 
     private static FillRegion.Request fillRequest(String world, boolean dryRun) {
@@ -451,6 +459,7 @@ final class FaweWorldEditorTest {
         private boolean failClose;
         private boolean failUndo;
         private boolean returnUndoForDryRun;
+        private boolean stopping;
         private boolean closed;
         private FakePrepared lastPrepared;
 
@@ -547,6 +556,11 @@ final class FaweWorldEditorTest {
                 throw new OperationException(OperationFailure.WORLD_UNAVAILABLE, "undo failed");
             }
             this.undoneIds.add(((FakeUndo) undo).id());
+        }
+
+        @Override
+        public void beginStopping() {
+            this.stopping = true;
         }
 
         @Override

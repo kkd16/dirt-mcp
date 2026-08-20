@@ -28,7 +28,7 @@ interface EditPlatform extends AutoCloseable {
 
     void undo(WorldHandle world, UndoToken undo) throws OperationException;
 
-    default void beginStopping() {}
+    void beginStopping();
 
     @Override
     void close();
