@@ -6,3 +6,7 @@ author: kkd16
 website: https://github.com/kkd16/dirt-mcp
 api-version: '${paperVersion}'
 depend: [FastAsyncWorldEdit]
+permissions:
+  dirtmcp.command:
+    description: View Dirt MCP status and active configuration
+    default: op

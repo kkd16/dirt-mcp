@@ -188,6 +188,25 @@ try {
   assert.ok(serverStatus.limits.maxCommandsPerRequest > 0);
   assert.ok(serverStatus.limits.maxCommandFeedbackCharacters > 0);
 
+  const adminCommandRun = await bridgeRequest('/v1/run-minecraft-commands', {
+    commands: ['dirt', 'dirt version', 'dirt status', 'dirt config'],
+  });
+  assert.equal(adminCommandRun.feedbackTruncated, false);
+  assert.deepEqual(
+    adminCommandRun.results.map(({ outcome }) => outcome),
+    ['dispatched', 'dispatched', 'dispatched', 'dispatched'],
+  );
+  const [helpFeedback, versionFeedback, statusFeedback, configFeedback] = adminCommandRun.results.map(({ feedback }) =>
+    feedback.join('\n'),
+  );
+  assert.ok(helpFeedback.includes('DIRT MCP  /  Command Center'));
+  assert.ok(helpFeedback.includes('/dirt status'));
+  assert.ok(versionFeedback.includes(`Version  ${serverStatus.builds.dirtMcp}`));
+  assert.ok(statusFeedback.includes('● Running'));
+  assert.ok(statusFeedback.includes(`Bridge  127.0.0.1:${bridgePort}`));
+  assert.ok(configFeedback.includes('DIRT MCP  /  Active Configuration'));
+  assert.ok(configFeedback.includes(`port  ${bridgePort}`));
+
   const chunkHeavyRegion = await bridgeResponse('/v1/count-region-block-states', {
     world,
     min: { x: 0, y: 0, z: 0 },

@@ -64,6 +64,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
           name: 'Builder',
           world: 'world',
           gameMode: 'creative',
+          facing: 'west',
           blockPosition: { x: 12, y: 70, z: -4 },
         },
       ],

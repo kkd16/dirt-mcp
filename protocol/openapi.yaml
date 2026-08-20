@@ -1457,6 +1457,7 @@ components:
         - name
         - world
         - gameMode
+        - facing
         - blockPosition
       properties:
         name:
@@ -1472,6 +1473,14 @@ components:
             - creative
             - adventure
             - spectator
+        facing:
+          type: string
+          description: Current horizontal cardinal direction the player is facing.
+          enum:
+            - north
+            - east
+            - south
+            - west
         blockPosition:
           $ref: '#/components/schemas/BlockPosition'
     PlayerSummary:

@@ -8,18 +8,18 @@ behavior that matters when choosing and combining tools.
 
 ## Tools
 
-| MCP tool                    | Bridge operation                     | Purpose                                                                   |
-| --------------------------- | ------------------------------------ | ------------------------------------------------------------------------- |
-| `ping_server`               | `GET /v1/ping`                       | Verify the authenticated Dirt, Paper, and FAWE path without mutation.     |
-| `get_server_status`         | `GET /v1/server-status`              | Return builds, performance, players, loaded worlds, limits, and defaults. |
-| `count_region_block_states` | `POST /v1/count-region-block-states` | Count canonical block states in an inclusive region.                      |
-| `get_region_blocks`         | `POST /v1/get-region-blocks`         | Return filtered exact blocks or lossless axis-aligned runs.               |
-| `scan_orthographic_view`    | `POST /v1/scan-orthographic-view`    | Find the first non-air block on each bounded world-axis sightline.        |
-| `replace_region_blocks`     | `POST /v1/replace-region-blocks`     | Replace a union of block-state patterns with a destination palette.       |
-| `fill_region`               | `POST /v1/fill-region`               | Fill a region from a destination palette.                                 |
-| `set_blocks`                | `POST /v1/set-blocks`                | Apply different states at distinct explicit positions as one edit.        |
-| `undo_last_dirt_edit`       | `POST /v1/undo-last-dirt-edit`       | Undo the newest retained Dirt edit in one world.                          |
-| `run_minecraft_commands`    | `POST /v1/run-minecraft-commands`    | Dispatch an ordered command batch with operator-level permissions.        |
+| MCP tool                    | Bridge operation                     | Purpose                                                               |
+| --------------------------- | ------------------------------------ | --------------------------------------------------------------------- |
+| `ping_server`               | `GET /v1/ping`                       | Verify the authenticated Dirt, Paper, and FAWE path without mutation. |
+| `get_server_status`         | `GET /v1/server-status`              | Return builds, performance, players with facing, worlds, and config.  |
+| `count_region_block_states` | `POST /v1/count-region-block-states` | Count canonical block states in an inclusive region.                  |
+| `get_region_blocks`         | `POST /v1/get-region-blocks`         | Return filtered exact blocks or lossless axis-aligned runs.           |
+| `scan_orthographic_view`    | `POST /v1/scan-orthographic-view`    | Find the first non-air block on each bounded world-axis sightline.    |
+| `replace_region_blocks`     | `POST /v1/replace-region-blocks`     | Replace a union of block-state patterns with a destination palette.   |
+| `fill_region`               | `POST /v1/fill-region`               | Fill a region from a destination palette.                             |
+| `set_blocks`                | `POST /v1/set-blocks`                | Apply different states at distinct explicit positions as one edit.    |
+| `undo_last_dirt_edit`       | `POST /v1/undo-last-dirt-edit`       | Undo the newest retained Dirt edit in one world.                      |
+| `run_minecraft_commands`    | `POST /v1/run-minecraft-commands`    | Dispatch an ordered command batch with operator-level permissions.    |
 
 Coordinates are signed 32-bit integers. Region corners are inclusive and are
 normalized independently on each axis.

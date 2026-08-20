@@ -30,7 +30,12 @@ public interface GetServerStatus {
         }
     }
 
-    record OnlinePlayer(String name, String world, String gameMode, BlockPosition blockPosition) {}
+    record OnlinePlayer(
+            String name,
+            String world,
+            String gameMode,
+            String facing,
+            BlockPosition blockPosition) {}
 
     record WorldStatus(
             String name,

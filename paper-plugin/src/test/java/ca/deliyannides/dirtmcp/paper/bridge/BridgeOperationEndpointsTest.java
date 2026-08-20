@@ -30,6 +30,30 @@ import org.junit.jupiter.api.Test;
 
 final class BridgeOperationEndpointsTest {
     @Test
+    void returnsOnlinePlayerFacingInServerStatus() throws Exception {
+        try (BridgeServer bridge =
+                        server(config(availablePort(), 4), new BridgeTestFixture.TestOperations());
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+
+            HttpResponse<String> response =
+                    send(client, authorized(bridge, "/v1/server-status").GET().build());
+
+            assertEquals(200, response.statusCode());
+            assertEquals(
+                    "north",
+                    json(response.body())
+                            .getAsJsonObject()
+                            .getAsJsonObject("players")
+                            .getAsJsonArray("entries")
+                            .get(0)
+                            .getAsJsonObject()
+                            .get("facing")
+                            .getAsString());
+        }
+    }
+
+    @Test
     void parsesAndDispatchesInspectionOperations() throws Exception {
         AtomicReference<CountRegionBlockStates.Request> countRequest = new AtomicReference<>();
         AtomicReference<GetRegionBlocks.Request> blocksRequest = new AtomicReference<>();

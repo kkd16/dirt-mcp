@@ -121,11 +121,12 @@ public final class BukkitServerStatusAccess implements PaperServerStatusService.
         return fawe;
     }
 
-    private static OnlinePlayer onlinePlayer(Player player) {
+    static OnlinePlayer onlinePlayer(Player player) {
         return new OnlinePlayer(
                 player.getName(),
                 player.getWorld().getName(),
                 player.getGameMode().name().toLowerCase(Locale.ROOT),
+                player.getFacing().name().toLowerCase(Locale.ROOT),
                 blockPosition(player.getLocation()));
     }
 

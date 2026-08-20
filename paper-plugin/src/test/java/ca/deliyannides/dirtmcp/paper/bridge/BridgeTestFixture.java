@@ -24,6 +24,7 @@ import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockDimensions;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import java.io.IOException;
@@ -116,7 +117,16 @@ final class BridgeTestFixture {
             return new GetServerStatus.Result(
                     new GetServerStatus.Builds("26.2", "paper", "test", "fawe"),
                     new GetServerStatus.Performance(20.0, 1.25),
-                    new GetServerStatus.PlayerSummary(0, 20, List.of()),
+                    new GetServerStatus.PlayerSummary(
+                            1,
+                            20,
+                            List.of(
+                                    new GetServerStatus.OnlinePlayer(
+                                            "Builder",
+                                            "world",
+                                            "creative",
+                                            "north",
+                                            new BlockPosition(12, 70, -4)))),
                     List.of(),
                     new GetServerStatus.EffectiveLimits(
                             262_144, 1_000_000, 256, 32, 64, 250_000, 32_768, 321, 654, 20, 32_768,

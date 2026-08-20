@@ -12,6 +12,7 @@ import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ServerStatusEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.SetBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.UndoLastEditEndpoint;
 import ca.deliyannides.dirtmcp.paper.command.BukkitCommandAccess;
+import ca.deliyannides.dirtmcp.paper.command.DirtAdminCommand;
 import ca.deliyannides.dirtmcp.paper.command.PaperCommandService;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.platform.PaperMainThread;
@@ -21,6 +22,8 @@ import ca.deliyannides.dirtmcp.paper.world.edit.FaweWorldEditor;
 import ca.deliyannides.dirtmcp.paper.world.edit.WorldEditLifecycleListener;
 import ca.deliyannides.dirtmcp.paper.world.inspection.PaperRegionSnapshotSource;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionInspectionService;
+import io.papermc.paper.plugin.configuration.PluginMeta;
+import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
@@ -102,6 +105,7 @@ public final class DirtRuntime implements AutoCloseable {
                                     new RunMinecraftCommandsEndpoint(commands)),
                             plugin.getLogger());
             bridge.start();
+            registerAdminCommand(plugin, config, status);
             return new DirtRuntime(
                     mainThread, worldEditor, worldLifecycle, bridge, plugin.getLogger());
         } catch (IOException | RuntimeException failure) {
@@ -129,6 +133,21 @@ public final class DirtRuntime implements AutoCloseable {
             mainThread.close();
             throw failure;
         }
+    }
+
+    private static void registerAdminCommand(
+            JavaPlugin plugin, DirtConfig config, PaperServerStatusService status) {
+        PluginMeta metadata = plugin.getPluginMeta();
+        DirtAdminCommand adminCommand =
+                new DirtAdminCommand(metadata.getName(), metadata.getVersion(), config, status);
+        plugin.getLifecycleManager()
+                .registerEventHandler(
+                        LifecycleEvents.COMMANDS,
+                        event ->
+                                event.registrar()
+                                        .register(
+                                                adminCommand.command(),
+                                                "Inspect Dirt MCP status and configuration"));
     }
 
     @Override

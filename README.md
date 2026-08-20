@@ -76,6 +76,18 @@ missing, unknown, or invalid keys stop plugin startup instead of being migrated
 or silently ignored. Compare an existing file with the shipped `config.yml`
 after upgrading.
 
+### Paper operator command
+
+Operators can inspect the running plugin with `/dirt`. Running it without a
+subcommand displays its formatted help menu; `/dirt version` shows the packaged
+plugin version, `/dirt status` gives a compact server and bridge summary, and
+`/dirt config` lists the active startup-snapshotted configuration. The config
+view reflects the `DIRT_MCP_BRIDGE_PORT` override when present. Restart Paper
+to apply configuration file changes.
+
+The command requires `dirtmcp.command`, which is granted to operators by
+default and may be assigned explicitly through a permission plugin.
+
 The repository includes a project-scoped Codex configuration in
 `.codex/config.toml`. Run `make up` at least once to build the project and create
 its ignored development token, then start Codex from this trusted repository.

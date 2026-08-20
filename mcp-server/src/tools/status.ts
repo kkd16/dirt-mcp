@@ -98,11 +98,14 @@ const ServerStatusSchema = z
                 name: z.string().min(1).describe('Current player name.'),
                 world: z.string().min(1).describe('Loaded world containing the player.'),
                 gameMode: z.enum(['survival', 'creative', 'adventure', 'spectator']).describe('Current game mode.'),
+                facing: z
+                  .enum(['north', 'east', 'south', 'west'])
+                  .describe('Current horizontal cardinal direction the player is facing.'),
                 blockPosition: BlockPositionSchema.describe('Current integer block position.'),
               })
               .strict(),
           )
-          .describe('Online players sorted by name, with location context.'),
+          .describe('Online players sorted by name, with location and facing context.'),
       })
       .strict()
       .describe('Current player presence.'),
@@ -159,7 +162,7 @@ export function registerStatusTools(server: McpServer, bridge: BridgeClient): vo
     {
       title: 'Get Dirt server status',
       description:
-        'Return current Minecraft, Paper, Dirt MCP, and FAWE builds; TPS; online players and block positions; loaded worlds; and active Dirt limits/defaults. Use this to ground later world operations.',
+        'Return current Minecraft, Paper, Dirt MCP, and FAWE builds; TPS; online players, block positions, and cardinal facing directions; loaded worlds; and active Dirt limits/defaults. Use this to ground later world operations.',
       inputSchema: EmptyInputSchema,
       outputSchema: ServerStatusSchema,
       annotations: READ_WORLD_ANNOTATIONS,
