@@ -41,21 +41,7 @@ public interface SetBlocks {
             long blockCount,
             long changedBlockCount,
             long unchangedBlockCount,
-            EditRecord edit) {
-        public Result {
-            palettes = immutablePalettes(palettes);
-            if (blockCount < 1
-                    || changedBlockCount < 0
-                    || unchangedBlockCount < 0
-                    || changedBlockCount > blockCount
-                    || unchangedBlockCount != blockCount - changedBlockCount) {
-                throw new IllegalArgumentException(
-                        "changed and unchanged block counts must partition blockCount");
-            }
-            EditRecord.validateResult(
-                    outcome, edit, EditOperation.SET_BLOCKS, world, bounds, changedBlockCount);
-        }
-    }
+            EditRecord edit) {}
 
     private static List<List<DestinationPaletteEntry>> immutablePalettes(
             List<List<DestinationPaletteEntry>> palettes) {

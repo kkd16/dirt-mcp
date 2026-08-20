@@ -38,6 +38,7 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpRequest;
+import java.time.Instant;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -289,7 +290,7 @@ final class BridgeTestFixture {
                             EditOperation.FILL_REGION,
                             request.editId()),
                     callId,
-                    "2026-08-19T12:01:00Z");
+                    Instant.parse("2026-08-19T12:01:00Z"));
         }
 
         private static EditOutcome outcome(boolean dryRun) {
@@ -319,7 +320,7 @@ final class BridgeTestFixture {
                     WORLD_ID,
                     bounds,
                     1,
-                    "2026-08-19T12:00:00Z",
+                    Instant.parse("2026-08-19T12:00:00Z"),
                     EditStatus.COMMITTED);
         }
     }

@@ -10,8 +10,7 @@ public interface BridgeEndpoint {
 
     String path();
 
-    void handle(BridgeExchange exchange)
-            throws IOException, InvalidRequestException, OperationException;
+    void handle(BridgeExchange exchange) throws IOException, OperationException;
 
     String internalErrorMessage();
 }

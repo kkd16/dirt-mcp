@@ -30,6 +30,7 @@ import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -303,7 +304,7 @@ final class BridgeOperationEndpointsTest {
                         BridgeTestFixture.WORLD_ID,
                         new BlockBounds(new BlockPosition(-2, 64, 8), new BlockPosition(3, 70, 12)),
                         7,
-                        "2026-08-19T12:02:03.120000000Z",
+                        Instant.parse("2026-08-19T12:02:03.120000000Z"),
                         EditStatus.RECOVERY_REQUIRED);
         EditRecord committed =
                 new EditRecord(
@@ -314,7 +315,7 @@ final class BridgeOperationEndpointsTest {
                         BridgeTestFixture.WORLD_ID,
                         new BlockBounds(new BlockPosition(0, 60, 0), new BlockPosition(1, 61, 1)),
                         3,
-                        "2026-08-19T12:00:00.000Z",
+                        Instant.parse("2026-08-19T12:00:00.000Z"),
                         EditStatus.COMMITTED);
         BridgeTestFixture.TestOperations operations =
                 new BridgeTestFixture.TestOperations() {
@@ -326,7 +327,8 @@ final class BridgeOperationEndpointsTest {
 
                     @Override
                     public UndoEdit.Result undoEdit(UndoEdit.Request request, UUID callId) {
-                        return new UndoEdit.Result(recovery, callId, "2026-08-19T12:05:00.000000Z");
+                        return new UndoEdit.Result(
+                                recovery, callId, Instant.parse("2026-08-19T12:05:00.000000Z"));
                     }
                 };
         try (BridgeServer bridge = server(config(availablePort(), 4), operations);

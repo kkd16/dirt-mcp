@@ -8,6 +8,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonSerializer;
+import java.time.Instant;
 
 final class BridgeJson {
     static final Gson GSON =
@@ -39,6 +40,11 @@ final class BridgeJson {
                             (JsonSerializer<EditStatus>)
                                     (status, ignoredType, ignoredContext) ->
                                             new com.google.gson.JsonPrimitive(status.wireName()))
+                    .registerTypeAdapter(
+                            Instant.class,
+                            (JsonSerializer<Instant>)
+                                    (instant, ignoredType, ignoredContext) ->
+                                            new com.google.gson.JsonPrimitive(instant.toString()))
                     .create();
 
     private BridgeJson() {}

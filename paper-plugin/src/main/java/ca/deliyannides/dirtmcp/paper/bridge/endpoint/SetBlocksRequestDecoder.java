@@ -1,9 +1,9 @@
 package ca.deliyannides.dirtmcp.paper.bridge.endpoint;
 
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
-import ca.deliyannides.dirtmcp.paper.bridge.InvalidRequestException;
 import ca.deliyannides.dirtmcp.paper.bridge.RequestJson;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.edit.DestinationPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
 import com.google.gson.JsonArray;
@@ -24,7 +24,7 @@ final class SetBlocksRequestDecoder {
     private SetBlocksRequestDecoder() {}
 
     static SetBlocks.Request decode(BridgeExchange exchange, DirtConfig config)
-            throws IOException, InvalidRequestException {
+            throws IOException, OperationException {
         JsonObject object = exchange.readJsonObject();
         RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS);
         return new SetBlocks.Request(
@@ -41,9 +41,9 @@ final class SetBlocksRequestDecoder {
     }
 
     private static List<List<DestinationPaletteEntry>> palettes(JsonElement element)
-            throws InvalidRequestException {
+            throws OperationException {
         if (element == null || !element.isJsonArray() || element.getAsJsonArray().isEmpty()) {
-            throw new InvalidRequestException("palettes must be a non-empty array");
+            throw RequestJson.invalid("palettes must be a non-empty array");
         }
         List<List<DestinationPaletteEntry>> palettes =
                 new ArrayList<>(element.getAsJsonArray().size());
@@ -56,16 +56,16 @@ final class SetBlocksRequestDecoder {
     }
 
     private static List<SetBlocks.Placement> placements(JsonElement element)
-            throws InvalidRequestException {
+            throws OperationException {
         if (element == null || !element.isJsonArray() || element.getAsJsonArray().isEmpty()) {
-            throw new InvalidRequestException("placements must be a non-empty array");
+            throw RequestJson.invalid("placements must be a non-empty array");
         }
         List<SetBlocks.Placement> placements = new ArrayList<>(element.getAsJsonArray().size());
         for (int index = 0; index < element.getAsJsonArray().size(); index++) {
             JsonElement entry = element.getAsJsonArray().get(index);
             String name = "placements[" + index + "]";
             if (!entry.isJsonArray() || entry.getAsJsonArray().size() != 4) {
-                throw new InvalidRequestException(
+                throw RequestJson.invalid(
                         name + " must be a [paletteIndex, x, y, z] integer tuple");
             }
             JsonArray tuple = entry.getAsJsonArray();

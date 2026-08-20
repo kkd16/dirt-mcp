@@ -35,7 +35,7 @@ final class PaperServerStatusServiceTest {
                         new DirectMainThread(),
                         new PaperServerStatusService.PaperStatusAccess() {
                             @Override
-                            public PaperServerStatusService.HealthTarget prepareHealthCheck() {
+                            public Runnable prepareHealthCheck() {
                                 return () -> {};
                             }
 
@@ -58,7 +58,7 @@ final class PaperServerStatusServiceTest {
                         mainThread,
                         new FixedAccess(status()) {
                             @Override
-                            public PaperServerStatusService.HealthTarget prepareHealthCheck() {
+                            public Runnable prepareHealthCheck() {
                                 return () -> verified[0] = true;
                             }
                         });
@@ -152,7 +152,7 @@ final class PaperServerStatusServiceTest {
         }
 
         @Override
-        public PaperServerStatusService.HealthTarget prepareHealthCheck() {
+        public Runnable prepareHealthCheck() {
             return () -> {};
         }
 

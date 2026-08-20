@@ -1,9 +1,9 @@
 package ca.deliyannides.dirtmcp.paper.bridge.endpoint;
 
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
-import ca.deliyannides.dirtmcp.paper.bridge.InvalidRequestException;
 import ca.deliyannides.dirtmcp.paper.bridge.RequestJson;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import com.google.gson.JsonObject;
 import java.io.IOException;
@@ -26,7 +26,7 @@ final class ReplaceRegionBlocksRequestDecoder {
     private ReplaceRegionBlocksRequestDecoder() {}
 
     static ReplaceRegionBlocks.Request decode(BridgeExchange exchange, DirtConfig config)
-            throws IOException, InvalidRequestException {
+            throws IOException, OperationException {
         JsonObject object = exchange.readJsonObject();
         RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS);
         return new ReplaceRegionBlocks.Request(

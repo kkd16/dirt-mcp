@@ -59,7 +59,6 @@ final class EditCoordinator implements AutoCloseable {
 
     private Lease enter(UUID worldId, String worldName, Access access) throws OperationException {
         WorldState state;
-        long generation;
         synchronized (this.worlds) {
             if (this.closed.get()) {
                 throw unavailable();
@@ -72,7 +71,6 @@ final class EditCoordinator implements AutoCloseable {
                 throw recoveryRequired(worldName);
             }
             state.reservations++;
-            generation = state.generation;
         }
         if (!state.lock.tryLock()) {
             releaseReservation(worldId, state);
@@ -80,7 +78,7 @@ final class EditCoordinator implements AutoCloseable {
         }
         boolean unavailable;
         synchronized (this.worlds) {
-            unavailable = this.closed.get() || state.invalidated || generation != state.generation;
+            unavailable = this.closed.get() || state.invalidated;
             if (!unavailable && access == Access.UNDO) {
                 state.undoActive = true;
             }
@@ -90,7 +88,7 @@ final class EditCoordinator implements AutoCloseable {
             releaseReservation(worldId, state);
             throw unavailable(worldName);
         }
-        return new Lease(worldId, state, generation, access);
+        return new Lease(worldId, state, access);
     }
 
     void invalidate(UUID worldId) {
@@ -98,7 +96,6 @@ final class EditCoordinator implements AutoCloseable {
         synchronized (this.worlds) {
             WorldState state = this.worlds.get(worldId);
             if (state != null) {
-                state.generation++;
                 state.invalidated = true;
                 discarded = pruneIdle(worldId, state);
             }
@@ -114,7 +111,6 @@ final class EditCoordinator implements AutoCloseable {
                 var iterator = this.worlds.entrySet().iterator();
                 while (iterator.hasNext()) {
                     WorldState state = iterator.next().getValue();
-                    state.generation++;
                     state.invalidated = true;
                     if (state.reservations == 0) {
                         discarded.addAll(detachHistory(state));
@@ -296,27 +292,14 @@ final class EditCoordinator implements AutoCloseable {
     }
 
     private void closeDetached(Iterable<RetainedEdit> detached) {
-        Throwable failure = null;
         for (RetainedEdit edit : detached) {
             try {
                 edit.undo().close();
-            } catch (RuntimeException | Error closeFailure) {
-                if (failure == null) {
-                    failure = closeFailure;
-                } else if (failure != closeFailure) {
-                    failure.addSuppressed(closeFailure);
-                }
             } finally {
                 synchronized (this.worlds) {
                     this.pendingDisposals--;
                 }
             }
-        }
-        if (failure instanceof RuntimeException runtimeFailure) {
-            throw runtimeFailure;
-        }
-        if (failure instanceof Error error) {
-            throw error;
         }
     }
 
@@ -371,15 +354,13 @@ final class EditCoordinator implements AutoCloseable {
     final class Lease implements AutoCloseable {
         private final UUID worldId;
         private final WorldState state;
-        private final long generation;
         private final Access access;
         private long historyReservation;
         private boolean released;
 
-        private Lease(UUID worldId, WorldState state, long generation, Access access) {
+        private Lease(UUID worldId, WorldState state, Access access) {
             this.worldId = worldId;
             this.state = state;
-            this.generation = generation;
             this.access = access;
         }
 
@@ -392,9 +373,7 @@ final class EditCoordinator implements AutoCloseable {
                     throw new IllegalStateException(
                             "History can only be reserved once by a current mutation lease");
                 }
-                if (this.generation != this.state.generation
-                        || this.state.invalidated
-                        || closed.get()) {
+                if (this.state.invalidated || closed.get()) {
                     throw unavailable();
                 }
                 evictions = EditCoordinator.this.reserveHistory(this.state, maximumChangedBlocks);
@@ -429,15 +408,13 @@ final class EditCoordinator implements AutoCloseable {
 
         RetainedEdit latest() {
             synchronized (worlds) {
-                return this.generation == this.state.generation
-                        ? this.state.history.peekLast()
-                        : null;
+                return this.state.invalidated ? null : this.state.history.peekLast();
             }
         }
 
         boolean contains(UUID editId) {
             synchronized (worlds) {
-                if (this.generation != this.state.generation) {
+                if (this.state.invalidated) {
                     return false;
                 }
                 return this.state.history.stream()
@@ -447,7 +424,7 @@ final class EditCoordinator implements AutoCloseable {
 
         List<EditRecord> history() {
             synchronized (worlds) {
-                if (this.generation != this.state.generation) {
+                if (this.state.invalidated) {
                     return List.of();
                 }
                 List<EditRecord> snapshot = new ArrayList<>(this.state.history.size());
@@ -461,8 +438,7 @@ final class EditCoordinator implements AutoCloseable {
 
         void markRecoveryRequired(RetainedEdit expected) {
             synchronized (worlds) {
-                if (this.generation != this.state.generation
-                        || this.state.history.peekLast() != expected) {
+                if (this.state.invalidated || this.state.history.peekLast() != expected) {
                     return;
                 }
                 RetainedEdit replacement = expected.requireRecovery();
@@ -475,8 +451,7 @@ final class EditCoordinator implements AutoCloseable {
         void removeLatest(RetainedEdit expected) {
             boolean close = false;
             synchronized (worlds) {
-                if (this.generation == this.state.generation
-                        && this.state.history.peekLast() == expected) {
+                if (!this.state.invalidated && this.state.history.peekLast() == expected) {
                     detach(expected);
                     close = true;
                 }
@@ -488,7 +463,7 @@ final class EditCoordinator implements AutoCloseable {
 
         private boolean isCurrent(RetainedEdit edit) {
             return edit.record().worldId().equals(this.worldId)
-                    && this.generation == this.state.generation
+                    && !this.state.invalidated
                     && !closed.get();
         }
 
@@ -527,7 +502,6 @@ final class EditCoordinator implements AutoCloseable {
     private static final class WorldState {
         private final ReentrantLock lock = new ReentrantLock();
         private final ArrayDeque<RetainedEdit> history = new ArrayDeque<>();
-        private long generation;
         private int reservations;
         private int historyReservations;
         private boolean invalidated;

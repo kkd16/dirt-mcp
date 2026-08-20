@@ -17,11 +17,11 @@ public final class PaperServerStatusService implements PingServer, GetServerStat
 
     @Override
     public PingServer.Result ping() throws OperationException {
-        HealthTarget target = callOnMain(this.paperAccess::prepareHealthCheck, true);
+        Runnable target = callOnMain(this.paperAccess::prepareHealthCheck, true);
         try {
-            target.verify();
+            target.run();
             return new PingServer.Result("ok");
-        } catch (Exception exception) {
+        } catch (RuntimeException exception) {
             throw new OperationException(
                     OperationFailure.UNHEALTHY,
                     "Dirt MCP could not open a Paper-backed FAWE session",
@@ -52,13 +52,8 @@ public final class PaperServerStatusService implements PingServer, GetServerStat
     }
 
     public interface PaperStatusAccess {
-        HealthTarget prepareHealthCheck() throws OperationException;
+        Runnable prepareHealthCheck() throws OperationException;
 
         GetServerStatus.Result captureStatus() throws OperationException;
-    }
-
-    @FunctionalInterface
-    public interface HealthTarget {
-        void verify() throws Exception;
     }
 }

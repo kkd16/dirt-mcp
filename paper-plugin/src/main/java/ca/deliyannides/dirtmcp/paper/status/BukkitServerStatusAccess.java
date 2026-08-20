@@ -39,7 +39,7 @@ public final class BukkitServerStatusAccess implements PaperServerStatusService.
     }
 
     @Override
-    public PaperServerStatusService.HealthTarget prepareHealthCheck() throws OperationException {
+    public Runnable prepareHealthCheck() throws OperationException {
         Server server = this.plugin.getServer();
         if (!this.plugin.isEnabled()) {
             throw new OperationException(

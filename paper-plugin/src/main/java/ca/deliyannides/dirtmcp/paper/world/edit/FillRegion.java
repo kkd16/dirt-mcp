@@ -36,15 +36,5 @@ public interface FillRegion {
             EditOutcome outcome,
             long volume,
             long changedBlockCount,
-            EditRecord edit) {
-        public Result {
-            destinationPalette = List.copyOf(destinationPalette);
-            if (volume < 1 || changedBlockCount > volume) {
-                throw new IllegalArgumentException(
-                        "changedBlockCount must not exceed positive volume");
-            }
-            EditRecord.validateResult(
-                    outcome, edit, EditOperation.FILL_REGION, world, bounds, changedBlockCount);
-        }
-    }
+            EditRecord edit) {}
 }

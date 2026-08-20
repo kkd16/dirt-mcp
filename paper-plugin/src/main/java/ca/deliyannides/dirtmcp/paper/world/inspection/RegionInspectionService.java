@@ -36,11 +36,12 @@ public final class RegionInspectionService
             int maxConcurrentInspections) {
         if (maxRegionVolume < 1
                 || maxInspectionVolume < 1
+                || maxInspectionVolume > maxRegionVolume
                 || maxInspectionResults < 1
                 || maxTouchedChunks < 1
                 || maxBlockStatePatterns < 1
                 || maxConcurrentInspections < 1) {
-            throw new IllegalArgumentException("Inspection limits must be positive");
+            throw new IllegalArgumentException("Inspection limits are invalid");
         }
         this.snapshots = Objects.requireNonNull(snapshots, "snapshots");
         this.maxRegionVolume = maxRegionVolume;
@@ -54,10 +55,10 @@ public final class RegionInspectionService
     @Override
     public CountRegionBlockStates.Result countRegionBlockStates(
             CountRegionBlockStates.Request request) throws OperationException {
-        validateRegionRequest(
-                request == null ? null : request.world(),
-                request == null ? null : request.min(),
-                request == null ? null : request.max());
+        if (request == null || request.min() == null || request.max() == null) {
+            throw invalid("world, min, and max are required");
+        }
+        validateWorld(request.world());
         return admitted(
                 () -> {
                     Cuboid region =
@@ -94,9 +95,9 @@ public final class RegionInspectionService
         }
         return admitted(
                 () -> {
-                    long maximumVolume = Math.min(this.maxRegionVolume, this.maxInspectionVolume);
                     Cuboid region =
-                            RegionGeometry.normalize(request.min(), request.max(), maximumVolume);
+                            RegionGeometry.normalize(
+                                    request.min(), request.max(), this.maxInspectionVolume);
                     enforceChunkLimit(region);
                     CapturedRegion capture =
                             this.snapshots.capture(request.world(), region, includes, excludes);
@@ -137,9 +138,8 @@ public final class RegionInspectionService
         validateMaxResults(request.maxResults());
         return admitted(
                 () -> {
-                    long maximumVolume = Math.min(this.maxRegionVolume, this.maxInspectionVolume);
                     OrthographicViewAlgorithms.ViewGeometry geometry =
-                            OrthographicViewAlgorithms.geometry(request, maximumVolume);
+                            OrthographicViewAlgorithms.geometry(request, this.maxInspectionVolume);
                     enforceChunkLimit(geometry.region());
                     CapturedRegion capture =
                             this.snapshots.capture(
@@ -159,7 +159,7 @@ public final class RegionInspectionService
                                     request.maxDistance(),
                                     request.depth()),
                             geometry.region().bounds(),
-                            geometry.scannedVolume(),
+                            geometry.region().volume(),
                             blocks.size(),
                             blocks);
                 });
@@ -203,17 +203,6 @@ public final class RegionInspectionService
         validateWorld(request.world());
         validatePatterns(request.includeBlockStatePatterns(), "includeBlockStatePatterns");
         validatePatterns(request.excludeBlockStatePatterns(), "excludeBlockStatePatterns");
-    }
-
-    private void validateRegionRequest(
-            String world,
-            ca.deliyannides.dirtmcp.paper.world.model.BlockPosition min,
-            ca.deliyannides.dirtmcp.paper.world.model.BlockPosition max)
-            throws OperationException {
-        if (min == null || max == null) {
-            throw invalid("world, min, and max are required");
-        }
-        validateWorld(world);
     }
 
     private static void validateWorld(String world) throws OperationException {

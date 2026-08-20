@@ -16,6 +16,7 @@ import com.sk89q.worldedit.regions.CuboidRegion;
 import com.sk89q.worldedit.util.SideEffect;
 import com.sk89q.worldedit.util.SideEffectSet;
 import com.sk89q.worldedit.world.block.BlockState;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -75,7 +76,8 @@ final class FaweEditExecutor {
             if (!dryRun && expectedChanges > 0) {
                 changes = session.getChangeSet().longSize();
                 if (changes > 0) {
-                    undo = retainedUndo(session, changes, edit.chunks());
+                    undo = retainedUndo(session, edit.chunks());
+                    changes = undo.changedBlockCount();
                 }
             }
         } catch (MaxChangedBlocksException exception) {
@@ -128,7 +130,8 @@ final class FaweEditExecutor {
             if (!dryRun && expectedChanges > 0) {
                 changes = session.getChangeSet().longSize();
                 if (changes > 0) {
-                    undo = retainedUndo(session, changes, edit.chunks());
+                    undo = retainedUndo(session, edit.chunks());
+                    changes = undo.changedBlockCount();
                 }
             }
         } catch (MaxChangedBlocksException exception) {
@@ -185,7 +188,8 @@ final class FaweEditExecutor {
             }
             changes = dryRun ? expectedChanges : session.getChangeSet().longSize();
             if (!dryRun && changes > 0) {
-                undo = retainedUndo(session, changes, edit.chunks());
+                undo = retainedUndo(session, edit.chunks());
+                changes = undo.changedBlockCount();
             }
         } catch (MaxChangedBlocksException exception) {
             OperationException failure = changeLimit(exception);
@@ -224,6 +228,7 @@ final class FaweEditExecutor {
     }
 
     private void applyUndo(PaperEditPreparation.PaperWorld world, StoredUndo undo) {
+        undo.finalizeForUse();
         try (EditSession session = newEditSession(world.worldEditWorld(), false)) {
             session.setBlocks(undo.changeSet(), ChangeSetExecutor.Type.UNDO);
         }
@@ -240,7 +245,19 @@ final class FaweEditExecutor {
         if (changes == 0) {
             return;
         }
-        StoredUndo recovery = retainedUndo(failedSession, changes, chunks);
+        StoredUndo recovery;
+        try {
+            recovery = retainedUndo(failedSession, chunks);
+        } catch (RuntimeException finalizationFailure) {
+            if (failure != finalizationFailure) {
+                failure.addSuppressed(finalizationFailure);
+            }
+            recovery = StoredUndo.pending(failedSession.getChangeSet(), changes, chunks, this.log);
+            throw new EditRecoveryException(
+                    "World edit failed and its undo data could not be finalized",
+                    failure,
+                    recovery);
+        }
         boolean interrupted = Thread.interrupted();
         try {
             try (EditSession rollback = newEditSession(world.worldEditWorld(), false)) {
@@ -302,14 +319,9 @@ final class FaweEditExecutor {
                 BlockVector3.at(region.max().x(), region.max().y(), region.max().z()));
     }
 
-    private StoredUndo retainedUndo(
-            EditSession session, long changedBlockCount, List<ChunkPosition> chunks) {
+    private StoredUndo retainedUndo(EditSession session, List<ChunkPosition> chunks) {
         ChangeSet changeSet = Objects.requireNonNull(session.getChangeSet(), "changeSet");
-        if (changeSet.longSize() != changedBlockCount) {
-            throw new IllegalStateException(
-                    "FAWE undo data does not match the reported change count");
-        }
-        return new StoredUndo(changeSet, changedBlockCount, chunks, this.log);
+        return new StoredUndo(changeSet, chunks, this.log);
     }
 
     static final class StoredUndo implements EditPlatform.UndoToken {
@@ -317,19 +329,51 @@ final class FaweEditExecutor {
         private final long changedBlockCount;
         private final List<ChunkPosition> chunks;
         private final DirtLog log;
+        private boolean finalized;
 
-        StoredUndo(
+        StoredUndo(ChangeSet changeSet, List<ChunkPosition> chunks, DirtLog log) {
+            ChangeSet retained = Objects.requireNonNull(changeSet, "changeSet");
+            finalizeChangeSet(retained);
+            long changedBlockCount = retained.longSize();
+            requirePositiveCount(changedBlockCount);
+            this.changeSet = new AtomicReference<>(retained);
+            this.changedBlockCount = changedBlockCount;
+            this.chunks = List.copyOf(chunks);
+            this.log = Objects.requireNonNull(log, "log");
+            this.finalized = true;
+        }
+
+        private StoredUndo(
                 ChangeSet changeSet,
                 long changedBlockCount,
                 List<ChunkPosition> chunks,
                 DirtLog log) {
-            if (changedBlockCount < 1) {
-                throw new IllegalArgumentException("Retained undo change count must be positive");
-            }
+            requirePositiveCount(changedBlockCount);
             this.changeSet = new AtomicReference<>(Objects.requireNonNull(changeSet, "changeSet"));
             this.changedBlockCount = changedBlockCount;
             this.chunks = List.copyOf(chunks);
             this.log = Objects.requireNonNull(log, "log");
+        }
+
+        static StoredUndo pending(
+                ChangeSet changeSet,
+                long changedBlockCount,
+                List<ChunkPosition> chunks,
+                DirtLog log) {
+            return new StoredUndo(changeSet, changedBlockCount, chunks, log);
+        }
+
+        synchronized void finalizeForUse() {
+            if (this.finalized) {
+                return;
+            }
+            ChangeSet retained = changeSet();
+            finalizeChangeSet(retained);
+            if (retained.longSize() != this.changedBlockCount) {
+                throw new IllegalStateException(
+                        "FAWE undo data changed while it was awaiting recovery");
+            }
+            this.finalized = true;
         }
 
         ChangeSet changeSet() {
@@ -359,13 +403,33 @@ final class FaweEditExecutor {
                     LogContext context =
                             LogContext.of("changed_block_count", this.changedBlockCount)
                                     .with("chunk_count", this.chunks.size());
-                    this.log.warning(
-                            "edit",
-                            "edit.undo_data_disposal_failed",
-                            "Dirt MCP could not dispose retained FAWE undo data",
-                            context,
-                            failure);
+                    try {
+                        this.log.warning(
+                                "edit",
+                                "edit.undo_data_disposal_failed",
+                                "Dirt MCP could not dispose retained FAWE undo data",
+                                context,
+                                failure);
+                    } catch (RuntimeException loggingFailure) {
+                        if (failure != loggingFailure) {
+                            failure.addSuppressed(loggingFailure);
+                        }
+                    }
                 }
+            }
+        }
+
+        private static void finalizeChangeSet(ChangeSet changeSet) {
+            try {
+                changeSet.close();
+            } catch (IOException exception) {
+                throw new IllegalStateException("FAWE undo data could not be finalized", exception);
+            }
+        }
+
+        private static void requirePositiveCount(long changedBlockCount) {
+            if (changedBlockCount < 1) {
+                throw new IllegalArgumentException("Retained undo change count must be positive");
             }
         }
     }

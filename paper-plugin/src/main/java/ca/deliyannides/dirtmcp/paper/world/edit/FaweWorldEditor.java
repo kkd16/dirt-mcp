@@ -10,13 +10,12 @@ import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import ca.deliyannides.dirtmcp.paper.world.model.RegionGeometry;
-import java.time.Clock;
+import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Supplier;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class FaweWorldEditor
@@ -32,8 +31,6 @@ public final class FaweWorldEditor
     private final int maxTouchedChunks;
     private final int maxBlockStatePatterns;
     private final int maxChangedBlocks;
-    private final Clock clock;
-    private final Supplier<UUID> editIds;
 
     public FaweWorldEditor(
             JavaPlugin plugin,
@@ -51,9 +48,7 @@ public final class FaweWorldEditor
                 limits.maxTouchedChunks(),
                 limits.maxBlockStatePatterns(),
                 limits.maxChangedBlocks(),
-                Objects.requireNonNull(history, "history"),
-                Clock.systemUTC(),
-                UUID::randomUUID);
+                Objects.requireNonNull(history, "history"));
     }
 
     FaweWorldEditor(
@@ -63,26 +58,6 @@ public final class FaweWorldEditor
             int maxBlockStatePatterns,
             int maxChangedBlocks,
             DirtConfig.EditHistory history) {
-        this(
-                platform,
-                maxRegionVolume,
-                maxTouchedChunks,
-                maxBlockStatePatterns,
-                maxChangedBlocks,
-                history,
-                Clock.systemUTC(),
-                UUID::randomUUID);
-    }
-
-    FaweWorldEditor(
-            EditPlatform platform,
-            int maxRegionVolume,
-            int maxTouchedChunks,
-            int maxBlockStatePatterns,
-            int maxChangedBlocks,
-            DirtConfig.EditHistory history,
-            Clock clock,
-            Supplier<UUID> editIds) {
         this.platform = Objects.requireNonNull(platform, "platform");
         if (maxRegionVolume < 1
                 || maxTouchedChunks < 1
@@ -104,8 +79,6 @@ public final class FaweWorldEditor
                         checkedHistory.maxEntriesPerWorld(),
                         checkedHistory.maxEntriesTotal(),
                         checkedHistory.maxRetainedChangedBlocks());
-        this.clock = Objects.requireNonNull(clock, "clock");
-        this.editIds = Objects.requireNonNull(editIds, "editIds");
     }
 
     @Override
@@ -165,6 +138,10 @@ public final class FaweWorldEditor
                                 request.dryRun(),
                                 region.volume(),
                                 execution);
+                if (execution.changedBlockCount() > execution.matchedBlockCount()) {
+                    throw new IllegalStateException(
+                            "Replace changes cannot exceed its matched block count");
+                }
             } catch (OperationException failure) {
                 throw retainedFailure(failure, edit);
             } catch (RuntimeException failure) {
@@ -173,20 +150,16 @@ public final class FaweWorldEditor
                 }
                 throw retainedFailure(failure, edit);
             }
-            try {
-                return new ReplaceRegionBlocks.Result(
-                        world.name(),
-                        region.bounds(),
-                        sourcePatterns,
-                        destinationPalette,
-                        request.seed(),
-                        outcome(request.dryRun(), execution.changedBlockCount()),
-                        execution.matchedBlockCount(),
-                        execution.changedBlockCount(),
-                        edit);
-            } catch (RuntimeException failure) {
-                throw retainedFailure(failure, edit);
-            }
+            return new ReplaceRegionBlocks.Result(
+                    world.name(),
+                    region.bounds(),
+                    sourcePatterns,
+                    destinationPalette,
+                    request.seed(),
+                    outcome(request.dryRun(), execution.changedBlockCount()),
+                    execution.matchedBlockCount(),
+                    execution.changedBlockCount(),
+                    edit);
         }
     }
 
@@ -252,19 +225,15 @@ public final class FaweWorldEditor
                 }
                 throw retainedFailure(failure, edit);
             }
-            try {
-                return new FillRegion.Result(
-                        world.name(),
-                        region.bounds(),
-                        destinationPalette,
-                        request.seed(),
-                        outcome(request.dryRun(), execution.changedBlockCount()),
-                        region.volume(),
-                        execution.changedBlockCount(),
-                        edit);
-            } catch (RuntimeException failure) {
-                throw retainedFailure(failure, edit);
-            }
+            return new FillRegion.Result(
+                    world.name(),
+                    region.bounds(),
+                    destinationPalette,
+                    request.seed(),
+                    outcome(request.dryRun(), execution.changedBlockCount()),
+                    region.volume(),
+                    execution.changedBlockCount(),
+                    edit);
         }
     }
 
@@ -336,20 +305,16 @@ public final class FaweWorldEditor
                 }
                 throw retainedFailure(failure, edit);
             }
-            try {
-                return new SetBlocks.Result(
-                        world.name(),
-                        geometry.bounds(),
-                        palettes,
-                        request.seed(),
-                        outcome(request.dryRun(), execution.changedBlockCount()),
-                        blockCount,
-                        execution.changedBlockCount(),
-                        blockCount - execution.changedBlockCount(),
-                        edit);
-            } catch (RuntimeException failure) {
-                throw retainedFailure(failure, edit);
-            }
+            return new SetBlocks.Result(
+                    world.name(),
+                    geometry.bounds(),
+                    palettes,
+                    request.seed(),
+                    outcome(request.dryRun(), execution.changedBlockCount()),
+                    blockCount,
+                    execution.changedBlockCount(),
+                    blockCount - execution.changedBlockCount(),
+                    edit);
         }
     }
 
@@ -402,7 +367,7 @@ public final class FaweWorldEditor
             }
             try {
                 lease.removeLatest(edit);
-                return new UndoEdit.Result(edit.record(), callId, this.clock.instant().toString());
+                return new UndoEdit.Result(edit.record(), callId, Instant.now());
             } catch (RuntimeException failure) {
                 throw new OperationException(
                         OperationFailure.INTERNAL_ERROR,
@@ -634,7 +599,7 @@ public final class FaweWorldEditor
                 world.id(),
                 bounds,
                 changedBlockCount,
-                this.clock.instant().toString(),
+                Instant.now(),
                 status);
     }
 
@@ -642,13 +607,7 @@ public final class FaweWorldEditor
         if (dryRun) {
             return null;
         }
-        UUID editId = Objects.requireNonNull(this.editIds.get(), "generated editId");
-        try {
-            UuidV4.require(editId, "generated editId");
-        } catch (IllegalArgumentException failure) {
-            throw new IllegalStateException("Generated edit IDs must be UUID version 4", failure);
-        }
-        return editId;
+        return UUID.randomUUID();
     }
 
     private static EditOutcome outcome(boolean dryRun, long changedBlockCount) {

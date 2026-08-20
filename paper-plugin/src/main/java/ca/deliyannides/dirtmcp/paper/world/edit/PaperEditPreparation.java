@@ -104,22 +104,26 @@ final class PaperEditPreparation implements AutoCloseable {
             List<ChunkPosition> touchedChunks)
             throws OperationException {
         List<ChunkPosition> chunks = List.copyOf(touchedChunks);
-        PreparedSetResources resources =
+        List<PreparedPalette> palettes =
                 onMainThread(
                         () -> {
                             requireAvailable(world);
-                            List<PreparedPalette> palettes = prepareSetPalettes(request);
                             requireValidHeight(world.bukkitWorld(), bounds);
-                            ChunkTicketManager.Lease lease =
-                                    this.tickets.acquire(world, chunks, "Set-blocks edit");
-                            try {
-                                return new PreparedSetResources(palettes, chunks, lease);
-                            } catch (RuntimeException | Error failure) {
-                                releaseAfterFailure(lease, failure);
-                                throw failure;
-                            }
+                            return prepareSetPalettes(request);
                         });
-        return finishPreparedSet(world, request, resolvedPositions, resources);
+        List<PreparedBlockChange> changes = prepareChanges(request, resolvedPositions, palettes);
+        return onMainThread(
+                () -> {
+                    requireAvailable(world);
+                    ChunkTicketManager.Lease lease =
+                            this.tickets.acquire(world, chunks, "Set-blocks edit");
+                    try {
+                        return new PreparedSet(world, palettes, changes, chunks, lease);
+                    } catch (RuntimeException | Error failure) {
+                        releaseAfterFailure(lease, failure);
+                        throw failure;
+                    }
+                });
     }
 
     ChunkTicketManager.Lease prepareUndo(PaperWorld world, List<ChunkPosition> chunks)
@@ -130,23 +134,6 @@ final class PaperEditPreparation implements AutoCloseable {
     @Override
     public void close() {
         this.tickets.close();
-    }
-
-    static PreparedSet finishPreparedSet(
-            PaperWorld world,
-            SetBlocks.Request request,
-            List<BlockPosition> resolvedPositions,
-            PreparedSetResources resources)
-            throws OperationException {
-        try {
-            List<PreparedBlockChange> changes =
-                    prepareChanges(request, resolvedPositions, resources.palettes());
-            return new PreparedSet(
-                    world, resources.palettes(), changes, resources.chunks(), resources.lease());
-        } catch (OperationException | RuntimeException | Error failure) {
-            releaseAfterFailure(resources.lease(), failure);
-            throw failure;
-        }
     }
 
     private static List<PreparedBlockChange> prepareChanges(
@@ -224,7 +211,7 @@ final class PaperEditPreparation implements AutoCloseable {
             throws OperationException {
         List<DestinationPaletteEntry> canonical = new ArrayList<>(inputs.size());
         Set<String> statesSeen = new LinkedHashSet<>();
-        List<WeightedState> weightedStates = new ArrayList<>(inputs.size());
+        RandomPattern pattern = new RandomPattern(new PaletteRandom(new CoordinateRandom(seed)));
         for (int index = 0; index < inputs.size(); index++) {
             DestinationPaletteEntry entry = inputs.get(index);
             BlockData data =
@@ -235,12 +222,7 @@ final class PaperEditPreparation implements AutoCloseable {
             }
             Integer weight = entry.weight();
             canonical.add(new DestinationPaletteEntry(canonicalState, weight));
-            weightedStates.add(
-                    new WeightedState(BukkitAdapter.adapt(data), weight == null ? 1 : weight));
-        }
-        RandomPattern pattern = new RandomPattern(new PaletteRandom(new CoordinateRandom(seed)));
-        for (WeightedState state : weightedStates) {
-            pattern.add(state.value(), state.weight());
+            pattern.add(BukkitAdapter.adapt(data), weight == null ? 1 : weight);
         }
         return new PreparedPalette(List.copyOf(canonical), pattern);
     }
@@ -357,17 +339,6 @@ final class PaperEditPreparation implements AutoCloseable {
 
     record PreparedBlockChange(BlockVector3 position, Pattern pattern) {}
 
-    record PreparedSetResources(
-            List<PreparedPalette> palettes,
-            List<ChunkPosition> chunks,
-            ChunkTicketManager.Lease lease) {
-        PreparedSetResources {
-            Objects.requireNonNull(palettes, "palettes");
-            Objects.requireNonNull(chunks, "chunks");
-            Objects.requireNonNull(lease, "lease");
-        }
-    }
-
     record PreparedReplace(
             PaperWorld paperWorld,
             PreparedSources sources,
@@ -443,6 +414,4 @@ final class PaperEditPreparation implements AutoCloseable {
             return this.random.at(x, y, z);
         }
     }
-
-    private record WeightedState(BlockState value, int weight) {}
 }

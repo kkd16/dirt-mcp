@@ -1,9 +1,9 @@
 package ca.deliyannides.dirtmcp.paper.bridge.endpoint;
 
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
-import ca.deliyannides.dirtmcp.paper.bridge.InvalidRequestException;
 import ca.deliyannides.dirtmcp.paper.bridge.RequestJson;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -33,7 +33,7 @@ final class ScanOrthographicViewRequestDecoder {
     private ScanOrthographicViewRequestDecoder() {}
 
     static ScanOrthographicView.Request decode(BridgeExchange exchange, DirtConfig config)
-            throws IOException, InvalidRequestException {
+            throws IOException, OperationException {
         JsonObject object = exchange.readJsonObject();
         RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS);
         int horizontalRadius =
@@ -57,7 +57,7 @@ final class ScanOrthographicViewRequestDecoder {
     }
 
     private static ScanOrthographicView.Direction direction(JsonElement element)
-            throws InvalidRequestException {
+            throws OperationException {
         return switch (RequestJson.string(element, "direction")) {
             case "north" -> ScanOrthographicView.Direction.NORTH;
             case "east" -> ScanOrthographicView.Direction.EAST;
@@ -66,7 +66,7 @@ final class ScanOrthographicViewRequestDecoder {
             case "up" -> ScanOrthographicView.Direction.UP;
             case "down" -> ScanOrthographicView.Direction.DOWN;
             default ->
-                    throw new InvalidRequestException(
+                    throw RequestJson.invalid(
                             "direction must be north, east, south, west, up, or down");
         };
     }

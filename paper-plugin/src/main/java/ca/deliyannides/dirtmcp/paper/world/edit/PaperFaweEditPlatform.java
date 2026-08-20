@@ -15,9 +15,6 @@ final class PaperFaweEditPlatform implements EditPlatform {
 
     PaperFaweEditPlatform(
             JavaPlugin plugin, MainThread mainThread, int maxChangedBlocks, DirtLog log) {
-        if (maxChangedBlocks < 1) {
-            throw new IllegalArgumentException("Maximum changed blocks must be positive");
-        }
         this.preparation = new PaperEditPreparation(plugin, mainThread);
         this.executor = new FaweEditExecutor(maxChangedBlocks, log);
     }

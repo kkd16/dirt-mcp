@@ -27,6 +27,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -42,9 +43,9 @@ final class BridgeDispatcherTest {
     private static final UUID EDIT_ID = UUID.fromString("11111111-1111-4111-8111-111111111111");
 
     @Test
-    void rejectsDuplicateRoutes() {
+    void rejectsDuplicatePaths() {
         BridgeEndpoint first = endpoint("first", "GET", "/v1/ping");
-        BridgeEndpoint duplicate = endpoint("duplicate", "GET", "/v1/ping");
+        BridgeEndpoint duplicate = endpoint("duplicate", "POST", "/v1/ping");
 
         assertThrows(
                 IllegalArgumentException.class,
@@ -248,7 +249,7 @@ final class BridgeDispatcherTest {
                         UUID.fromString("33333333-3333-4333-8333-333333333333"),
                         bounds,
                         1,
-                        "2026-08-20T00:00:00Z",
+                        Instant.parse("2026-08-20T00:00:00Z"),
                         EditStatus.COMMITTED);
         return new FillRegion.Result(
                 "world",

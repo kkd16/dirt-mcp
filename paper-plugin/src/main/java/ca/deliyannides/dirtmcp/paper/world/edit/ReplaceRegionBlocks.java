@@ -35,23 +35,7 @@ public interface ReplaceRegionBlocks {
             EditOutcome outcome,
             long matchedBlockCount,
             long changedBlockCount,
-            EditRecord edit) {
-        public Result {
-            sourceBlockStatePatterns = List.copyOf(sourceBlockStatePatterns);
-            destinationPalette = List.copyOf(destinationPalette);
-            if (matchedBlockCount < 0 || changedBlockCount > matchedBlockCount) {
-                throw new IllegalArgumentException(
-                        "changedBlockCount must not exceed matchedBlockCount");
-            }
-            EditRecord.validateResult(
-                    outcome,
-                    edit,
-                    EditOperation.REPLACE_REGION_BLOCKS,
-                    world,
-                    bounds,
-                    changedBlockCount);
-        }
-    }
+            EditRecord edit) {}
 
     private static <T> List<T> immutableCopy(List<T> values) {
         // List.copyOf would reject null entries before operation-layer validation can describe

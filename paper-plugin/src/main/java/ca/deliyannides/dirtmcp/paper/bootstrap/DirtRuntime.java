@@ -167,42 +167,80 @@ public final class DirtRuntime implements AutoCloseable {
         if (!this.closed.compareAndSet(false, true)) {
             return;
         }
-        DirtLog ownedLog = this.log;
-        PaperMainThread ownedMainThread = this.mainThread;
-        try (ownedLog) {
-            try (ownedMainThread) {
-                HandlerList.unregisterAll(this.worldLifecycle);
-                this.worldEditor.beginStopping();
-                try {
-                    this.bridge.close();
-                } finally {
-                    if (!this.worldEditor.closeIfQuiescent()) {
-                        LogContext context = LogContext.of("resources_retained", true);
-                        this.log.error(
-                                "runtime",
-                                "runtime.resources_retained",
-                                "Dirt MCP left resources owned by an active edit after the "
-                                        + "shutdown deadline",
-                                context,
-                                null);
-                    }
-                }
-            } catch (RuntimeException | Error failure) {
-                try {
-                    LogContext context = LogContext.empty();
-                    this.log.error(
-                            "runtime",
-                            "runtime.stop_failed",
-                            "Dirt MCP encountered a failure while stopping",
-                            context,
-                            failure);
-                } catch (RuntimeException | Error loggingFailure) {
-                    failure.addSuppressed(loggingFailure);
-                }
-                throw failure;
+        Throwable failure = null;
+        failure = cleanup(failure, () -> HandlerList.unregisterAll(this.worldLifecycle));
+        failure = cleanup(failure, this.worldEditor::beginStopping);
+        failure = cleanup(failure, this.bridge::close);
+        try {
+            if (!this.worldEditor.closeIfQuiescent()) {
+                LogContext context = LogContext.of("resources_retained", true);
+                this.log.error(
+                        "runtime",
+                        "runtime.resources_retained",
+                        "Dirt MCP left resources owned by an active edit after the shutdown "
+                                + "deadline",
+                        context,
+                        null);
             }
-            LogContext context = LogContext.empty();
-            this.log.info("runtime", "runtime.stopped", "Dirt MCP stopped", context);
+        } catch (RuntimeException | Error editorFailure) {
+            failure = retain(failure, editorFailure);
+        }
+        failure = cleanup(failure, this.mainThread::close);
+        if (failure == null) {
+            failure =
+                    cleanup(
+                            null,
+                            () ->
+                                    this.log.info(
+                                            "runtime",
+                                            "runtime.stopped",
+                                            "Dirt MCP stopped",
+                                            LogContext.empty()));
+        } else {
+            Throwable stopFailure = failure;
+            failure =
+                    cleanup(
+                            failure,
+                            () ->
+                                    this.log.error(
+                                            "runtime",
+                                            "runtime.stop_failed",
+                                            "Dirt MCP encountered a failure while stopping",
+                                            LogContext.empty(),
+                                            stopFailure));
+        }
+        failure = cleanup(failure, this.log::close);
+        rethrow(failure);
+    }
+
+    private static Throwable cleanup(Throwable failure, Runnable action) {
+        try {
+            action.run();
+            return failure;
+        } catch (RuntimeException | Error cleanupFailure) {
+            return retain(failure, cleanupFailure);
+        }
+    }
+
+    private static Throwable retain(Throwable failure, Throwable cleanupFailure) {
+        if (failure == null) {
+            return cleanupFailure;
+        }
+        if (failure != cleanupFailure) {
+            failure.addSuppressed(cleanupFailure);
+        }
+        return failure;
+    }
+
+    private static void rethrow(Throwable failure) {
+        if (failure instanceof RuntimeException runtimeFailure) {
+            throw runtimeFailure;
+        }
+        if (failure instanceof Error error) {
+            throw error;
+        }
+        if (failure != null) {
+            throw new AssertionError("Unexpected checked shutdown failure", failure);
         }
     }
 }

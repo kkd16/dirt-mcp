@@ -1,5 +1,7 @@
 package ca.deliyannides.dirtmcp.paper.bridge;
 
+import ca.deliyannides.dirtmcp.paper.operation.OperationException;
+import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -13,37 +15,37 @@ public final class RequestJson {
 
     private RequestJson() {}
 
-    public static String string(JsonElement element, String name) throws InvalidRequestException {
+    public static String string(JsonElement element, String name) throws OperationException {
         if (!(element instanceof JsonPrimitive primitive)
                 || !primitive.isString()
                 || primitive.getAsString().isBlank()) {
-            throw new InvalidRequestException(name + " must be a non-empty string");
+            throw invalid(name + " must be a non-empty string");
         }
         return primitive.getAsString();
     }
 
-    public static boolean bool(JsonElement element, String name) throws InvalidRequestException {
+    public static boolean bool(JsonElement element, String name) throws OperationException {
         if (!(element instanceof JsonPrimitive primitive) || !primitive.isBoolean()) {
-            throw new InvalidRequestException(name + " must be a boolean");
+            throw invalid(name + " must be a boolean");
         }
         return primitive.getAsBoolean();
     }
 
-    public static int integer(JsonElement element, String name) throws InvalidRequestException {
+    public static int integer(JsonElement element, String name) throws OperationException {
         if (!(element instanceof JsonPrimitive primitive) || !primitive.isNumber()) {
-            throw new InvalidRequestException(name + " must be a signed 32-bit integer");
+            throw invalid(name + " must be a signed 32-bit integer");
         }
         try {
             return primitive.getAsBigDecimal().intValueExact();
         } catch (ArithmeticException | NumberFormatException exception) {
-            throw new InvalidRequestException(name + " must be a signed 32-bit integer");
+            throw invalid(name + " must be a signed 32-bit integer");
         }
     }
 
     public static BlockPosition position(JsonElement element, String name)
-            throws InvalidRequestException {
+            throws OperationException {
         if (element == null || !element.isJsonObject()) {
-            throw new InvalidRequestException(name + " must be an object");
+            throw invalid(name + " must be an object");
         }
         JsonObject object = element.getAsJsonObject();
         requireExactFields(object, POSITION_FIELDS, name);
@@ -54,9 +56,9 @@ public final class RequestJson {
     }
 
     public static List<String> stringList(JsonElement element, String name)
-            throws InvalidRequestException {
+            throws OperationException {
         if (element == null || !element.isJsonArray()) {
-            throw new InvalidRequestException(name + " must be an array of non-empty strings");
+            throw invalid(name + " must be an array of non-empty strings");
         }
         List<String> values = new ArrayList<>(element.getAsJsonArray().size());
         for (JsonElement value : element.getAsJsonArray()) {
@@ -66,25 +68,29 @@ public final class RequestJson {
     }
 
     public static List<String> nonEmptyStringList(JsonElement element, String name)
-            throws InvalidRequestException {
+            throws OperationException {
         List<String> values = stringList(element, name);
         if (values.isEmpty()) {
-            throw new InvalidRequestException(name + " must contain at least one entry");
+            throw invalid(name + " must contain at least one entry");
         }
         return values;
     }
 
     public static void requireExactFields(JsonObject object, Set<String> expected, String name)
-            throws InvalidRequestException {
+            throws OperationException {
         if (!object.keySet().equals(expected)) {
-            throw new InvalidRequestException(name + " contains missing or unknown fields");
+            throw invalid(name + " contains missing or unknown fields");
         }
     }
 
     public static void requireFields(JsonObject object, Set<String> required, Set<String> allowed)
-            throws InvalidRequestException {
+            throws OperationException {
         if (!object.keySet().containsAll(required) || !allowed.containsAll(object.keySet())) {
-            throw new InvalidRequestException("Request contains missing or unknown fields");
+            throw invalid("Request contains missing or unknown fields");
         }
+    }
+
+    public static OperationException invalid(String message) {
+        return new OperationException(OperationFailure.INVALID_REQUEST, message);
     }
 }

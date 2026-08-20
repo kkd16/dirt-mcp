@@ -2,7 +2,6 @@ package ca.deliyannides.dirtmcp.paper.bridge.endpoint;
 
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
-import ca.deliyannides.dirtmcp.paper.bridge.InvalidRequestException;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.edit.FillRegion;
@@ -34,8 +33,7 @@ public final class FillRegionEndpoint implements BridgeEndpoint {
     }
 
     @Override
-    public void handle(BridgeExchange exchange)
-            throws IOException, InvalidRequestException, OperationException {
+    public void handle(BridgeExchange exchange) throws IOException, OperationException {
         FillRegion.Request request = FillRegionRequestDecoder.decode(exchange, this.config);
         exchange.world(request.world());
         exchange.ok(this.operation.fillRegion(request, exchange.requiredCallId()));

@@ -5,12 +5,13 @@ import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus;
 import java.io.IOException;
+import java.util.Objects;
 
 public final class ServerStatusEndpoint implements BridgeEndpoint {
     private final GetServerStatus operation;
 
     public ServerStatusEndpoint(GetServerStatus operation) {
-        this.operation = operation;
+        this.operation = Objects.requireNonNull(operation, "operation");
     }
 
     @Override

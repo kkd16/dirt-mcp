@@ -1,8 +1,8 @@
 package ca.deliyannides.dirtmcp.paper.bridge.endpoint;
 
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
-import ca.deliyannides.dirtmcp.paper.bridge.InvalidRequestException;
 import ca.deliyannides.dirtmcp.paper.bridge.RequestJson;
+import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.edit.GetEditHistory;
 import com.google.gson.JsonObject;
 import java.io.IOException;
@@ -14,7 +14,7 @@ final class GetEditHistoryRequestDecoder {
     private GetEditHistoryRequestDecoder() {}
 
     static GetEditHistory.Request decode(BridgeExchange exchange)
-            throws IOException, InvalidRequestException {
+            throws IOException, OperationException {
         JsonObject object = exchange.readJsonObject();
         RequestJson.requireExactFields(object, FIELDS, "Request");
         return new GetEditHistory.Request(RequestJson.string(object.get("world"), "world"));

@@ -1,8 +1,8 @@
 package ca.deliyannides.dirtmcp.paper.bridge.endpoint;
 
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
-import ca.deliyannides.dirtmcp.paper.bridge.InvalidRequestException;
 import ca.deliyannides.dirtmcp.paper.bridge.RequestJson;
+import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.validation.UuidV4;
 import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
 import com.google.gson.JsonObject;
@@ -14,8 +14,7 @@ final class UndoEditRequestDecoder {
 
     private UndoEditRequestDecoder() {}
 
-    static UndoEdit.Request decode(BridgeExchange exchange)
-            throws IOException, InvalidRequestException {
+    static UndoEdit.Request decode(BridgeExchange exchange) throws IOException, OperationException {
         JsonObject object = exchange.readJsonObject();
         RequestJson.requireExactFields(object, FIELDS, "Request");
         String editId = RequestJson.string(object.get("editId"), "editId");
@@ -24,7 +23,7 @@ final class UndoEditRequestDecoder {
                     RequestJson.string(object.get("world"), "world"),
                     UuidV4.parseCanonical(editId, "editId"));
         } catch (IllegalArgumentException exception) {
-            throw new InvalidRequestException(exception.getMessage());
+            throw RequestJson.invalid(exception.getMessage());
         }
     }
 }

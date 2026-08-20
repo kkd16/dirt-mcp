@@ -109,41 +109,81 @@ public final class BridgeServer implements AutoCloseable {
         ExecutorService runningExecutor = this.executor;
         this.server = null;
         this.executor = null;
-        try {
-            if (runningServer != null) {
-                // Plugin disable runs on Paper's main thread. Stop accepting work and
-                // interrupt handlers before waiting, so a handler awaiting a Paper task
-                // cannot deadlock shutdown.
-                runningServer.stop(0);
-                if (runningExecutor != null) {
-                    runningExecutor.shutdownNow();
-                    try {
-                        boolean terminated =
-                                runningExecutor.awaitTermination(
-                                        this.config.bridge().shutdownDelaySeconds(),
-                                        TimeUnit.SECONDS);
-                        if (!terminated) {
-                            LogContext context =
-                                    LogContext.of(
-                                                    "shutdown_delay_seconds",
-                                                    this.config.bridge().shutdownDelaySeconds())
-                                            .with("resources_may_be_retained", true);
-                            this.log.warning(
-                                    "bridge",
-                                    "bridge.shutdown_deadline_exceeded",
-                                    "Dirt MCP request workers exceeded the shutdown deadline; "
-                                            + "Paper shutdown will continue",
-                                    context);
-                        }
-                    } catch (InterruptedException exception) {
-                        Thread.currentThread().interrupt();
-                    }
+        Throwable failure = null;
+        if (runningServer != null) {
+            // Plugin disable runs on Paper's main thread. Stop accepting work and
+            // interrupt handlers before waiting, so a handler awaiting a Paper task
+            // cannot deadlock shutdown.
+            failure = cleanup(failure, () -> runningServer.stop(0));
+        }
+        if (runningExecutor != null) {
+            failure = cleanup(failure, runningExecutor::shutdownNow);
+            try {
+                boolean terminated =
+                        runningExecutor.awaitTermination(
+                                this.config.bridge().shutdownDelaySeconds(), TimeUnit.SECONDS);
+                if (!terminated) {
+                    LogContext context =
+                            LogContext.of(
+                                            "shutdown_delay_seconds",
+                                            this.config.bridge().shutdownDelaySeconds())
+                                    .with("resources_may_be_retained", true);
+                    this.log.warning(
+                            "bridge",
+                            "bridge.shutdown_deadline_exceeded",
+                            "Dirt MCP request workers exceeded the shutdown deadline; "
+                                    + "Paper shutdown will continue",
+                            context);
                 }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+            } catch (RuntimeException | Error shutdownFailure) {
+                failure = retain(failure, shutdownFailure);
             }
-        } finally {
-            this.dispatcher.close();
-            LogContext context = LogContext.empty();
-            this.log.debug("bridge", "bridge.stopped", "Dirt MCP bridge stopped", context);
+        }
+        failure = cleanup(failure, this.dispatcher::close);
+        if (failure == null) {
+            failure =
+                    cleanup(
+                            null,
+                            () ->
+                                    this.log.debug(
+                                            "bridge",
+                                            "bridge.stopped",
+                                            "Dirt MCP bridge stopped",
+                                            LogContext.empty()));
+        }
+        rethrow(failure);
+    }
+
+    private static Throwable cleanup(Throwable failure, Runnable action) {
+        try {
+            action.run();
+            return failure;
+        } catch (RuntimeException | Error cleanupFailure) {
+            return retain(failure, cleanupFailure);
+        }
+    }
+
+    private static Throwable retain(Throwable failure, Throwable cleanupFailure) {
+        if (failure == null) {
+            return cleanupFailure;
+        }
+        if (failure != cleanupFailure) {
+            failure.addSuppressed(cleanupFailure);
+        }
+        return failure;
+    }
+
+    private static void rethrow(Throwable failure) {
+        if (failure instanceof RuntimeException runtimeFailure) {
+            throw runtimeFailure;
+        }
+        if (failure instanceof Error error) {
+            throw error;
+        }
+        if (failure != null) {
+            throw new AssertionError("Unexpected checked shutdown failure", failure);
         }
     }
 }

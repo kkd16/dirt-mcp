@@ -13,7 +13,6 @@ import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.ViewO
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import ca.deliyannides.dirtmcp.paper.world.model.RegionGeometry;
-import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -34,52 +33,23 @@ final class OrthographicViewAlgorithms {
             throw invalid("depth must be non-negative");
         }
 
-        long horizontalSize = 2L * request.horizontalRadius() + 1;
-        long verticalSize = 2L * request.verticalRadius() + 1;
-        BigInteger requestedVolume =
-                BigInteger.valueOf(horizontalSize)
-                        .multiply(BigInteger.valueOf(verticalSize))
-                        .multiply(BigInteger.valueOf(request.maxDistance()));
-        if (requestedVolume.compareTo(BigInteger.valueOf(maximumVolume)) > 0) {
-            throw new OperationException(
-                    OperationFailure.REGION_TOO_LARGE,
-                    "View scan volume "
-                            + requestedVolume
-                            + " exceeds the maximum of "
-                            + maximumVolume
-                            + " blocks");
-        }
-        long scannedVolume = requestedVolume.longValueExact();
-
         ViewBasis basis = viewBasis(request.direction());
-        BlockPosition firstCorner =
+        BlockPosition nearCorner =
                 viewPosition(
                         request.origin(),
                         basis,
                         -request.horizontalRadius(),
                         -request.verticalRadius(),
                         1);
-        BlockPosition min = firstCorner;
-        BlockPosition max = firstCorner;
-        int[] horizontalOffsets = {-request.horizontalRadius(), request.horizontalRadius()};
-        int[] verticalOffsets = {-request.verticalRadius(), request.verticalRadius()};
-        int[] distances = {1, request.maxDistance()};
-        for (int horizontal : horizontalOffsets) {
-            for (int vertical : verticalOffsets) {
-                for (int distance : distances) {
-                    BlockPosition corner =
-                            viewPosition(request.origin(), basis, horizontal, vertical, distance);
-                    min = minimum(min, corner);
-                    max = maximum(max, corner);
-                }
-            }
-        }
-
-        Cuboid region = RegionGeometry.normalize(min, max, maximumVolume);
-        if (region.volume() != scannedVolume) {
-            throw new IllegalStateException("View bounds do not match its scan volume");
-        }
-        return new ViewGeometry(basis, region, scannedVolume);
+        BlockPosition farCorner =
+                viewPosition(
+                        request.origin(),
+                        basis,
+                        request.horizontalRadius(),
+                        request.verticalRadius(),
+                        request.maxDistance());
+        return new ViewGeometry(
+                basis, RegionGeometry.normalize(nearCorner, farCorner, maximumVolume));
     }
 
     static List<ViewBlock> collectVisibleBlocks(
@@ -178,23 +148,9 @@ final class OrthographicViewAlgorithms {
         return new BlockPosition((int) x, (int) y, (int) z);
     }
 
-    private static BlockPosition minimum(BlockPosition first, BlockPosition second) {
-        return new BlockPosition(
-                Math.min(first.x(), second.x()),
-                Math.min(first.y(), second.y()),
-                Math.min(first.z(), second.z()));
-    }
-
-    private static BlockPosition maximum(BlockPosition first, BlockPosition second) {
-        return new BlockPosition(
-                Math.max(first.x(), second.x()),
-                Math.max(first.y(), second.y()),
-                Math.max(first.z(), second.z()));
-    }
-
     private static OperationException invalid(String message) {
         return new OperationException(OperationFailure.INVALID_REQUEST, message);
     }
 
-    record ViewGeometry(ViewBasis basis, Cuboid region, long scannedVolume) {}
+    record ViewGeometry(ViewBasis basis, Cuboid region) {}
 }

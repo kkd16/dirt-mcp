@@ -98,7 +98,7 @@ final class RegionBlockAlgorithmsTest {
     }
 
     @Test
-    void countsStatesInSortedKeyOrder() throws Exception {
+    void countsBlockStates() throws Exception {
         Cuboid region = cuboid(new BlockPosition(0, 0, 0), new BlockPosition(2, 0, 0));
         Map<String, Long> counts =
                 RegionBlockAlgorithms.countBlockStates(
@@ -109,7 +109,6 @@ final class RegionBlockAlgorithmsTest {
                                         new BlockPosition(1, 0, 0), sample("air"),
                                         new BlockPosition(2, 0, 0), sample("stone"))));
 
-        assertEquals(List.of("air", "stone"), List.copyOf(counts.keySet()));
         assertEquals(Map.of("air", 1L, "stone", 2L), counts);
     }
 

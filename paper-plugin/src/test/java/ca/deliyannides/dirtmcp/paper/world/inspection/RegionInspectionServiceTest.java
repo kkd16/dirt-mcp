@@ -209,6 +209,9 @@ final class RegionInspectionServiceTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new RegionInspectionService(source, 1, 1, 1, 1, 1, 0));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new RegionInspectionService(source, 1, 2, 1, 1, 1, 1));
     }
 
     @Test

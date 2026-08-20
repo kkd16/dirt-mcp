@@ -2,7 +2,6 @@ package ca.deliyannides.dirtmcp.paper.bridge.endpoint;
 
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
-import ca.deliyannides.dirtmcp.paper.bridge.InvalidRequestException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
 import java.io.IOException;
@@ -31,8 +30,7 @@ public final class UndoEditEndpoint implements BridgeEndpoint {
     }
 
     @Override
-    public void handle(BridgeExchange exchange)
-            throws IOException, InvalidRequestException, OperationException {
+    public void handle(BridgeExchange exchange) throws IOException, OperationException {
         UndoEdit.Request request = UndoEditRequestDecoder.decode(exchange);
         exchange.world(request.world());
         exchange.ok(this.operation.undoEdit(request, exchange.requiredCallId()));

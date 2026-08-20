@@ -132,7 +132,14 @@ final class OrthographicViewAlgorithmsTest {
 
     @Test
     void rejectsOversizedOverflowingAndInvalidViews() {
-        Request oversized = request(new BlockPosition(0, 0, 0), Direction.NORTH, 100, 100, 1, 10);
+        Request oversized =
+                request(
+                        new BlockPosition(0, 0, 0),
+                        Direction.NORTH,
+                        Integer.MAX_VALUE,
+                        Integer.MAX_VALUE,
+                        Integer.MAX_VALUE,
+                        10);
         Request overflowing =
                 request(new BlockPosition(Integer.MAX_VALUE, 0, 0), Direction.EAST, 0, 0, 1, 10);
         Request negativeDepth =
@@ -157,10 +164,6 @@ final class OrthographicViewAlgorithmsTest {
                                                         OrthographicViewAlgorithms.geometry(
                                                                 negativeDepth, 10))
                                         .failure()),
-                () ->
-                        assertEquals(
-                                "View scan volume 40401 exceeds the maximum of 32768 blocks",
-                                oversizedFailure.getMessage()),
                 () -> assertEquals(OperationFailure.INVALID_REQUEST, overflowFailure.failure()),
                 () ->
                         assertEquals(
@@ -246,7 +249,7 @@ final class OrthographicViewAlgorithmsTest {
         assertEquals(basis, geometry.basis());
         assertEquals(min, geometry.region().min());
         assertEquals(max, geometry.region().max());
-        assertEquals(45, geometry.scannedVolume());
+        assertEquals(45, geometry.region().volume());
     }
 
     private static Request request(

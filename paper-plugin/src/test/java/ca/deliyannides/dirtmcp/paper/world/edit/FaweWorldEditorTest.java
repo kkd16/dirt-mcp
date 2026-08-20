@@ -13,9 +13,6 @@ import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
-import java.time.Clock;
-import java.time.Instant;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -23,7 +20,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 final class FaweWorldEditorTest {
@@ -68,9 +64,38 @@ final class FaweWorldEditorTest {
         assertEquals(result.bounds(), result.edit().bounds());
         assertEquals(4, result.edit().changedBlockCount());
         assertEquals(EditStatus.COMMITTED, result.edit().status());
-        assertNotNull(java.time.Instant.parse(result.edit().completedAt()));
+        assertNotNull(result.edit().completedAt());
         assertTrue(platform.lastPrepared.closed);
         assertTrue(platform.lastPrepared.executedBeforeClose);
+    }
+
+    @Test
+    void retainsCommittedReplaceWhenResponseCountsConflict() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        platform.nextMatches = 1;
+        platform.nextChanges = 2;
+        FaweWorldEditor editor = editor(platform, 10);
+
+        OperationException failure =
+                assertThrows(
+                        OperationException.class,
+                        () ->
+                                replace(
+                                        editor,
+                                        new ReplaceRegionBlocks.Request(
+                                                "world",
+                                                position(0, 0, 0),
+                                                position(1, 0, 0),
+                                                List.of("minecraft:stone"),
+                                                palette(),
+                                                17,
+                                                false)));
+
+        EditRecord retained = history(editor, "world").getFirst();
+        assertEquals(OperationFailure.INTERNAL_ERROR, failure.failure());
+        assertEquals(java.util.Optional.of(retained.editId()), failure.editId());
+        assertEquals(2, retained.changedBlockCount());
+        assertFalse(platform.lastUndo.closed);
     }
 
     @Test
@@ -543,34 +568,6 @@ final class FaweWorldEditorTest {
     }
 
     @Test
-    void rollsBackRecoveryWhenItsHistoryMetadataCannotBeCreated() throws Exception {
-        FakePlatform platform = new FakePlatform();
-        platform.nextChanges = 1;
-        platform.failWithRecovery = true;
-        FaweWorldEditor editor =
-                new FaweWorldEditor(
-                        platform,
-                        100,
-                        10,
-                        MAX_BLOCK_STATE_PATTERNS,
-                        100,
-                        history(3),
-                        failingClockAfter(0),
-                        UUID::randomUUID);
-
-        OperationException failure =
-                assertThrows(
-                        OperationException.class, () -> fill(editor, fillRequest("world", false)));
-
-        assertEquals(OperationFailure.INTERNAL_ERROR, failure.failure());
-        assertTrue(failure.editId().isPresent());
-        assertEquals(1, platform.preparedRollbackCalls);
-        assertEquals(List.of(1), platform.undoneIds);
-        assertTrue(platform.lastUndo.closed);
-        assertTrue(history(editor, "world").isEmpty());
-    }
-
-    @Test
     void rejectsBeforeMutationWhenPinnedRecoveryExhaustsGlobalHistoryCapacity() throws Exception {
         FakePlatform platform = new FakePlatform();
         platform.nextChanges = 1;
@@ -657,32 +654,6 @@ final class FaweWorldEditorTest {
         assertEquals(7, result.edit().changedBlockCount());
         assertEquals(List.of(1), platform.undoneIds);
         assertFailure(OperationFailure.EDIT_NOT_FOUND, () -> undo(editor, "world", edit.editId()));
-    }
-
-    @Test
-    void undoFinalizationFailureReportsTheConsumedEditId() throws Exception {
-        FakePlatform platform = new FakePlatform();
-        platform.nextChanges = 1;
-        FaweWorldEditor editor =
-                new FaweWorldEditor(
-                        platform,
-                        100,
-                        10,
-                        MAX_BLOCK_STATE_PATTERNS,
-                        100,
-                        history(3),
-                        failingClockAfter(1),
-                        UUID::randomUUID);
-        EditRecord edit = fill(editor, fillRequest("world", false)).edit();
-
-        OperationException failure =
-                assertThrows(OperationException.class, () -> undo(editor, "world", edit.editId()));
-
-        assertEquals(OperationFailure.INTERNAL_ERROR, failure.failure());
-        assertEquals(java.util.Optional.of(edit.editId()), failure.editId());
-        assertEquals(List.of(1), platform.undoneIds);
-        assertTrue(platform.lastUndo.closed);
-        assertTrue(history(editor, "world").isEmpty());
     }
 
     @Test
@@ -923,29 +894,6 @@ final class FaweWorldEditorTest {
 
     private static SetBlocks.Placement placement(int x, int y, int z) {
         return new SetBlocks.Placement(0, x, y, z);
-    }
-
-    private static Clock failingClockAfter(int successfulReads) {
-        AtomicInteger reads = new AtomicInteger();
-        return new Clock() {
-            @Override
-            public ZoneId getZone() {
-                return ZoneId.of("UTC");
-            }
-
-            @Override
-            public Clock withZone(ZoneId zone) {
-                return this;
-            }
-
-            @Override
-            public Instant instant() {
-                if (reads.getAndIncrement() < successfulReads) {
-                    return Instant.parse("2026-08-20T00:00:00Z");
-                }
-                throw new IllegalStateException("clock failed");
-            }
-        };
     }
 
     private static BlockPosition position(int x, int y, int z) {

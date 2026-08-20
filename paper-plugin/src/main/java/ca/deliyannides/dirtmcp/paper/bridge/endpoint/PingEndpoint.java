@@ -5,12 +5,13 @@ import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.status.PingServer;
 import java.io.IOException;
+import java.util.Objects;
 
 public final class PingEndpoint implements BridgeEndpoint {
     private final PingServer operation;
 
     public PingEndpoint(PingServer operation) {
-        this.operation = operation;
+        this.operation = Objects.requireNonNull(operation, "operation");
     }
 
     @Override

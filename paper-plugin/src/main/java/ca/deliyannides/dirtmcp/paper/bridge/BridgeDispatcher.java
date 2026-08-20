@@ -6,7 +6,7 @@ import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.validation.UuidV4;
 import com.sun.net.httpserver.HttpExchange;
 import java.io.IOException;
-import java.util.LinkedHashMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
@@ -14,7 +14,7 @@ import java.util.concurrent.Semaphore;
 final class BridgeDispatcher implements AutoCloseable {
     private static final String CALL_ID_HEADER = "X-Dirt-Call-Id";
 
-    private final Map<String, Map<String, BridgeEndpoint>> routes;
+    private final Map<String, BridgeEndpoint> routes;
     private final BearerAuthenticator authenticator;
     private final Semaphore admissions;
     private final int maximumRequestBytes;
@@ -58,18 +58,16 @@ final class BridgeDispatcher implements AutoCloseable {
                 return;
             }
 
-            Map<String, BridgeEndpoint> methods =
-                    this.routes.get(rawExchange.getRequestURI().getRawPath());
-            if (methods == null) {
+            BridgeEndpoint endpoint = this.routes.get(rawExchange.getRequestURI().getRawPath());
+            if (endpoint == null) {
                 exchange.sendError(404, "not_found", "No bridge operation matches this path");
                 return;
             }
 
-            BridgeEndpoint endpoint = methods.get(rawExchange.getRequestMethod());
-            if (endpoint == null) {
-                String allow = String.join(", ", methods.keySet());
-                exchange.allow(allow);
-                exchange.sendError(405, "method_not_allowed", "Method must be " + allow);
+            if (!endpoint.method().equals(rawExchange.getRequestMethod())) {
+                exchange.allow(endpoint.method());
+                exchange.sendError(
+                        405, "method_not_allowed", "Method must be " + endpoint.method());
                 return;
             }
             operation = endpoint.operation();
@@ -83,9 +81,6 @@ final class BridgeDispatcher implements AutoCloseable {
             } catch (RequestBodyReader.BodyTimeoutException exception) {
                 requestFailure = exception;
                 exchange.abort("request_body_timeout");
-            } catch (InvalidRequestException exception) {
-                requestFailure = exception;
-                exchange.sendError(400, "invalid_request", exception.getMessage());
             } catch (OperationException exception) {
                 requestFailure = exception;
                 recoveryRisk = exception.editId().isPresent();
@@ -283,22 +278,17 @@ final class BridgeDispatcher implements AutoCloseable {
         return first;
     }
 
-    private static Map<String, Map<String, BridgeEndpoint>> routes(List<BridgeEndpoint> endpoints) {
-        Map<String, Map<String, BridgeEndpoint>> byPath = new LinkedHashMap<>();
+    private static Map<String, BridgeEndpoint> routes(List<BridgeEndpoint> endpoints) {
+        Map<String, BridgeEndpoint> byPath = new HashMap<>();
         for (BridgeEndpoint endpoint : endpoints) {
             if (!endpoint.path().startsWith("/v1/")) {
                 throw new IllegalArgumentException(
                         "Bridge route must be under /v1/: " + endpoint.path());
             }
-            Map<String, BridgeEndpoint> methods =
-                    byPath.computeIfAbsent(endpoint.path(), ignored -> new LinkedHashMap<>());
-            if (methods.putIfAbsent(endpoint.method(), endpoint) != null) {
-                throw new IllegalArgumentException(
-                        "Duplicate bridge route: " + endpoint.method() + " " + endpoint.path());
+            if (byPath.putIfAbsent(endpoint.path(), endpoint) != null) {
+                throw new IllegalArgumentException("Duplicate bridge path: " + endpoint.path());
             }
         }
-        Map<String, Map<String, BridgeEndpoint>> frozen = new LinkedHashMap<>();
-        byPath.forEach((path, methods) -> frozen.put(path, Map.copyOf(methods)));
-        return Map.copyOf(frozen);
+        return Map.copyOf(byPath);
     }
 }

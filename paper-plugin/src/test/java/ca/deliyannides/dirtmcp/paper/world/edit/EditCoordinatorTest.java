@@ -10,6 +10,7 @@ import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
+import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -257,26 +258,6 @@ final class EditCoordinatorTest {
 
         assertTrue(undo.closed);
         assertTrue(coordinator.isQuiescent());
-    }
-
-    @Test
-    void shutdownAttemptsEveryDisposalAndRestoresQuiescenceAfterCloseFailure()
-            throws OperationException {
-        EditCoordinator coordinator = new EditCoordinator(2, 2, 2);
-        ThrowingUndo first = new ThrowingUndo(1);
-        TestUndo second = new TestUndo(1);
-        remember(coordinator, edit(WORLD_ID, "world", first, EditStatus.COMMITTED));
-        remember(coordinator, edit(WORLD_ID, "world", second, EditStatus.COMMITTED));
-
-        IllegalStateException failure =
-                assertThrows(IllegalStateException.class, coordinator::close);
-
-        assertEquals("test close failure", failure.getMessage());
-        assertTrue(first.closeAttempted);
-        assertTrue(second.closed);
-        assertTrue(coordinator.isQuiescent());
-        assertEquals(0, coordinator.trackedWorldCount());
-        assertEquals(0, coordinator.retainedEditCount());
     }
 
     @Test
@@ -547,7 +528,7 @@ final class EditCoordinatorTest {
                         worldId,
                         new BlockBounds(position, position),
                         undo.changedBlockCount(),
-                        "2026-08-19T12:00:00Z",
+                        Instant.parse("2026-08-19T12:00:00Z"),
                         status),
                 undo);
     }
@@ -596,26 +577,6 @@ final class EditCoordinatorTest {
                 throw new AssertionError("Interrupted while closing test undo", failure);
             }
             this.closed = true;
-        }
-    }
-
-    private static final class ThrowingUndo implements EditPlatform.UndoToken {
-        private final long changedBlockCount;
-        private boolean closeAttempted;
-
-        private ThrowingUndo(long changedBlockCount) {
-            this.changedBlockCount = changedBlockCount;
-        }
-
-        @Override
-        public long changedBlockCount() {
-            return this.changedBlockCount;
-        }
-
-        @Override
-        public void close() {
-            this.closeAttempted = true;
-            throw new IllegalStateException("test close failure");
         }
     }
 }

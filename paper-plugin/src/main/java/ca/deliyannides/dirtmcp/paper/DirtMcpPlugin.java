@@ -22,7 +22,6 @@ public final class DirtMcpPlugin extends JavaPlugin {
         try {
             this.runtime = DirtRuntime.start(this, config, bridgeToken(), log);
         } catch (IOException exception) {
-            this.runtime = null;
             reportStartupFailure(
                     log, config, "Dirt MCP could not start its loopback bridge", exception);
             closeAfterStartupFailure(log, exception);
@@ -30,7 +29,6 @@ public final class DirtMcpPlugin extends JavaPlugin {
                     "Could not start the Dirt MCP bridge on 127.0.0.1:" + config.bridge().port(),
                     exception);
         } catch (RuntimeException | Error failure) {
-            this.runtime = null;
             reportStartupFailure(log, config, "Dirt MCP could not start", failure);
             closeAfterStartupFailure(log, failure);
             throw failure;
@@ -81,9 +79,10 @@ public final class DirtMcpPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        if (this.runtime != null) {
-            this.runtime.close();
-            this.runtime = null;
+        DirtRuntime running = this.runtime;
+        this.runtime = null;
+        if (running != null) {
+            running.close();
         }
     }
 
