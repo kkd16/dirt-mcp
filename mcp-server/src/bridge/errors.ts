@@ -1,13 +1,12 @@
 import type { BRIDGE_ERROR_CODES } from './contract.ts';
 
-export type BridgeErrorCode = (typeof BRIDGE_ERROR_CODES)[number];
-export type LocalErrorCode =
+type ToolFailureCode =
+  | (typeof BRIDGE_ERROR_CODES)[number]
   | 'bridge_unavailable'
   | 'bridge_unauthorized'
   | 'bridge_http_error'
   | 'bridge_invalid_response'
   | 'dirt_internal_error';
-export type ToolFailureCode = BridgeErrorCode | LocalErrorCode;
 
 export class ToolFailure extends Error {
   readonly code: ToolFailureCode;

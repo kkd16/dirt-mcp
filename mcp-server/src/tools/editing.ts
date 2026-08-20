@@ -32,7 +32,7 @@ export const SourceBlockStatePatternsSchema = z
   })
   .describe('One or more block-state patterns matched as a union. Omitted properties match any value.');
 
-export const DestinationPaletteEntrySchema = z
+const DestinationPaletteEntrySchema = z
   .object({
     blockState: NonBlankStringSchema.describe('Exact canonical block state to place.'),
     weight: z
@@ -78,14 +78,14 @@ export const DestinationPaletteSchema = z
   })
   .describe('One or more exact destination states. Omitted weights give every entry equal probability.');
 
-export const SeedSchema = z
+const SeedSchema = z
   .number()
   .int()
   .min(INT32_MIN)
   .max(INT32_MAX)
   .describe('Signed 32-bit seed for reproducible per-coordinate palette choices.');
 
-export const ReplaceRegionBlocksInputSchema = z
+const ReplaceRegionBlocksInputSchema = z
   .object({
     world: NonBlankStringSchema.describe('Exact name of an already loaded Paper world.'),
     min: BlockPositionSchema.describe('One inclusive corner; ordering relative to max does not matter.'),
@@ -103,7 +103,7 @@ export const ReplaceRegionBlocksInputSchema = z
   .strict()
   .describe('Property-aware block-state replacement with a weighted destination palette.');
 
-export const ReplaceRegionBlocksOutputSchema = z
+const ReplaceRegionBlocksOutputSchema = z
   .object({
     world: z.string().min(1).describe('Edited world name.'),
     bounds: BoundsSchema,
@@ -117,7 +117,7 @@ export const ReplaceRegionBlocksOutputSchema = z
   .strict()
   .describe('Completed or previewed property-aware block-state replacement.');
 
-export const FillRegionInputSchema = z
+const FillRegionInputSchema = z
   .object({
     world: NonBlankStringSchema.describe('Exact name of an already loaded Paper world.'),
     min: BlockPositionSchema.describe('One inclusive corner; ordering relative to max does not matter.'),
@@ -134,7 +134,7 @@ export const FillRegionInputSchema = z
   .strict()
   .describe('Weighted block-state palette fill of an inclusive region.');
 
-export const FillRegionOutputSchema = z
+const FillRegionOutputSchema = z
   .object({
     world: z.string().min(1).describe('Edited world name.'),
     bounds: BoundsSchema,
@@ -147,7 +147,7 @@ export const FillRegionOutputSchema = z
   .strict()
   .describe('Completed or previewed region fill.');
 
-export const SetBlocksInputSchema = z
+const SetBlocksInputSchema = z
   .object({
     world: NonBlankStringSchema.describe('Exact name of an already loaded Paper world.'),
     changes: z
@@ -169,7 +169,7 @@ export const SetBlocksInputSchema = z
   .strict()
   .describe('One sparse, undoable block edit across explicitly listed positions.');
 
-export const SetBlocksOutputSchema = z
+const SetBlocksOutputSchema = z
   .object({
     world: z.string().min(1).describe('Edited world name.'),
     dryRun: z.boolean().describe('Whether the world was left unchanged.'),
@@ -180,14 +180,14 @@ export const SetBlocksOutputSchema = z
   .strict()
   .describe('Completed or previewed sparse block edit.');
 
-export const UndoLastDirtEditInputSchema = z
+const UndoLastDirtEditInputSchema = z
   .object({
     world: NonBlankStringSchema.describe('Exact name of the loaded world whose Dirt edit should be undone.'),
   })
   .strict()
   .describe('World-scoped Dirt edit history lookup.');
 
-export const UndoLastDirtEditOutputSchema = z
+const UndoLastDirtEditOutputSchema = z
   .object({
     world: z.string().min(1).describe('World in which the edit was undone.'),
     changedBlockCount: z.number().int().positive().describe('Blocks restored by the undo.'),

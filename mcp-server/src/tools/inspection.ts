@@ -14,7 +14,7 @@ import {
 import { executeToolCall, successResult } from './execution.ts';
 import { compactView } from './view-grid.ts';
 
-export const CountRegionBlockStatesInputSchema = z
+const CountRegionBlockStatesInputSchema = z
   .object({
     world: NonBlankStringSchema.describe('Exact name of an already loaded Paper world.'),
     min: BlockPositionSchema.describe('One inclusive corner; ordering relative to max does not matter.'),
@@ -23,7 +23,7 @@ export const CountRegionBlockStatesInputSchema = z
   .strict()
   .describe('Region whose canonical block states should be counted.');
 
-export const CountRegionBlockStatesOutputSchema = z
+const CountRegionBlockStatesOutputSchema = z
   .object({
     world: z.string().min(1).describe('Inspected world name.'),
     bounds: BoundsSchema,
@@ -93,7 +93,7 @@ const RegionBlocksOutputBase = {
   matchedBlockCount: z.number().int().nonnegative().describe('Total matching blocks represented by the response.'),
 };
 
-export const GetRegionBlocksOutputSchema = z
+const GetRegionBlocksOutputSchema = z
   .discriminatedUnion('format', [
     z
       .object({
@@ -133,7 +133,7 @@ export const GetRegionBlocksOutputSchema = z
   ])
   .describe('Exact matching block data; inspect format before reading blocks or runs.');
 
-export const OrthographicViewDirectionSchema = z
+const OrthographicViewDirectionSchema = z
   .enum(['north', 'east', 'south', 'west', 'up', 'down'])
   .describe('World-axis scan direction: north=-Z, east=+X, south=+Z, west=-X, up=+Y, down=-Y.');
 
@@ -212,7 +212,7 @@ const ViewMetadata = {
   visibleBlockCount: z.number().int().nonnegative().describe('Sightlines whose first non-air block was found.'),
 };
 
-export const ScanOrthographicViewBlocksOutputSchema = z
+const ScanOrthographicViewBlocksOutputSchema = z
   .object({
     ...ViewMetadata,
     format: z.literal('blocks').describe('Response contains explicit visible-block entries.'),
@@ -254,7 +254,7 @@ export const ScanOrthographicViewBlocksOutputSchema = z
   .strict()
   .describe('Orthographic scan with explicit block positions.');
 
-export const ScanOrthographicViewGridOutputSchema = z
+const ScanOrthographicViewGridOutputSchema = z
   .object({
     ...ViewMetadata,
     format: z.literal('grid').describe('Response contains compact palette and distance matrices.'),
@@ -271,7 +271,7 @@ export const ScanOrthographicViewGridOutputSchema = z
   .strict()
   .describe('Lossless compact orthographic scan.');
 
-export const ScanOrthographicViewOutputSchema = z
+const ScanOrthographicViewOutputSchema = z
   .discriminatedUnion('format', [ScanOrthographicViewBlocksOutputSchema, ScanOrthographicViewGridOutputSchema])
   .describe('Orthographic scan result; inspect format before reading blocks or grid fields.');
 

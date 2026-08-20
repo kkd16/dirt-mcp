@@ -18,7 +18,7 @@ Dirt MCP tracks the latest stable Paper release only. The current baseline is:
 - Paper 26.2;
 - FAWE 2.15.4;
 - Java 25;
-- Node.js 26.7.0 or newer;
+- Node.js 26 or newer;
 - pnpm 11.22.0 or newer.
 
 Older Paper or Minecraft versions are not supported.

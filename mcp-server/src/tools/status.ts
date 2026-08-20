@@ -5,14 +5,14 @@ import { BRIDGE_ROUTES } from '../bridge/contract.ts';
 import { BlockPositionSchema, EmptyInputSchema, READ_WORLD_ANNOTATIONS } from './common.ts';
 import { executeToolCall, successResult } from './execution.ts';
 
-export const PingServerOutputSchema = z
+const PingServerOutputSchema = z
   .object({
     status: z.literal('ok').describe('All Dirt, Paper, and FAWE health checks passed.'),
   })
   .strict()
   .describe('Successful end-to-end Dirt server health check.');
 
-export const LimitConfigurationSchema = z
+const LimitConfigurationSchema = z
   .object({
     maxRequestBytes: z.number().int().positive().describe('Maximum JSON request-body size accepted by the bridge.'),
     maxRegionVolume: z
@@ -60,7 +60,7 @@ export const LimitConfigurationSchema = z
   .strict()
   .describe('Active limits that constrain Dirt inspection and mutation tools.');
 
-export const DefaultConfigurationSchema = z
+const DefaultConfigurationSchema = z
   .object({
     regionBlocksIncludeAir: z.boolean().describe('Default air inclusion for get_region_blocks.'),
     regionBlocksFormat: z.enum(['blocks', 'runs']).describe('Default get_region_blocks format.'),
@@ -69,7 +69,7 @@ export const DefaultConfigurationSchema = z
   .strict()
   .describe('Active optional-argument defaults for Dirt tools.');
 
-export const ServerStatusSchema = z
+const ServerStatusSchema = z
   .object({
     builds: z
       .object({

@@ -57,13 +57,11 @@ export const BRIDGE_ERROR_CODES = [
   'world_unavailable',
 ] as const;
 
-export const BridgeErrorCodeSchema = z.enum(BRIDGE_ERROR_CODES);
-
 export const BridgeErrorResponseSchema = z
   .object({
     error: z
       .object({
-        code: BridgeErrorCodeSchema.describe('Stable machine-readable error code.'),
+        code: z.enum(BRIDGE_ERROR_CODES).describe('Stable machine-readable error code.'),
         message: z.string().min(1).describe('Human-readable explanation.'),
       })
       .strict(),

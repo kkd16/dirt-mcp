@@ -4,7 +4,7 @@ import { BridgeClient } from './bridge/client.ts';
 import type { BridgeConfig } from './config.ts';
 import { registerToolCatalog } from './tools/catalog.ts';
 
-export const SERVER_INSTRUCTIONS = [
+const SERVER_INSTRUCTIONS = [
   'Dirt operates on live, already-loaded Paper worlds and chunks.',
   'Coordinates are absolute Minecraft block coordinates (X east/west, Y up/down, Z south/north); region corners are inclusive and normalized automatically.',
   'Call get_server_status before large inspections or edits and keep request size, scan volume, result count, region volume, and changed blocks within its active limits.',
@@ -17,10 +17,7 @@ export const SERVER_INSTRUCTIONS = [
   'run_minecraft_commands dispatches ordered operator-level commands immediately through a non-player Paper sender; command effects are outside Dirt edit limits and undo history.',
 ].join(' ');
 
-export function createDirtServer(
-  config: BridgeConfig,
-  fetchImplementation: typeof globalThis.fetch = globalThis.fetch,
-): McpServer {
+export function createDirtServer(config: BridgeConfig): McpServer {
   const server = new McpServer(
     { name: 'dirt-mcp', version: packageMetadata.version },
     {
@@ -28,6 +25,6 @@ export function createDirtServer(
       capabilities: { tools: { listChanged: false } },
     },
   );
-  registerToolCatalog(server, new BridgeClient(config, fetchImplementation));
+  registerToolCatalog(server, new BridgeClient(config));
   return server;
 }

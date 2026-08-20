@@ -5,7 +5,7 @@ import { registerEditingTools } from './editing.ts';
 import { registerInspectionTools } from './inspection.ts';
 import { registerStatusTools } from './status.ts';
 
-export type ToolRegistrar = (server: McpServer, bridge: BridgeClient) => void;
+type ToolRegistrar = (server: McpServer, bridge: BridgeClient) => void;
 
 const TOOL_REGISTRARS: readonly ToolRegistrar[] = [
   registerStatusTools,

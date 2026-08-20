@@ -5,7 +5,7 @@ import { BRIDGE_ROUTES } from '../bridge/contract.ts';
 import { NON_IDEMPOTENT_MUTATION_ANNOTATIONS, NonBlankStringSchema } from './common.ts';
 import { executeToolCall } from './execution.ts';
 
-export const RunMinecraftCommandsInputSchema = z
+const RunMinecraftCommandsInputSchema = z
   .object({
     commands: z
       .array(NonBlankStringSchema)
@@ -15,9 +15,9 @@ export const RunMinecraftCommandsInputSchema = z
   .strict()
   .describe('An ordered batch of one or more commands to dispatch through Paper.');
 
-export const CommandOutcomeSchema = z.enum(['dispatched', 'not_found', 'dispatch_failed']);
+const CommandOutcomeSchema = z.enum(['dispatched', 'not_found', 'dispatch_failed']);
 
-export const RunMinecraftCommandsOutputSchema = z
+const RunMinecraftCommandsOutputSchema = z
   .object({
     sender: z
       .object({
