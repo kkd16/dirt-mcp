@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.world.edit;
 
+import ca.deliyannides.dirtmcp.paper.validation.UuidV4;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -17,14 +18,8 @@ public record EditRecord(
         String completedAt,
         EditStatus status) {
     public EditRecord {
-        Objects.requireNonNull(editId, "editId");
-        Objects.requireNonNull(callId, "callId");
-        if (editId.version() != 4 || editId.variant() != 2) {
-            throw new IllegalArgumentException("editId must be a UUID version 4");
-        }
-        if (callId.version() != 4 || callId.variant() != 2) {
-            throw new IllegalArgumentException("callId must be a UUID version 4");
-        }
+        UuidV4.require(editId, "editId");
+        UuidV4.require(callId, "callId");
         Objects.requireNonNull(operation, "operation");
         if (world == null || world.isBlank()) {
             throw new IllegalArgumentException("world must be a non-empty string");
@@ -64,10 +59,22 @@ public record EditRecord(
             BlockBounds bounds,
             long changedBlockCount) {
         Objects.requireNonNull(outcome, "outcome");
+        Objects.requireNonNull(operation, "operation");
+        if (world == null || world.isBlank()) {
+            throw new IllegalArgumentException("world must be a non-empty string");
+        }
+        Objects.requireNonNull(bounds, "bounds");
+        if (changedBlockCount < 0) {
+            throw new IllegalArgumentException("changedBlockCount must be non-negative");
+        }
         boolean committed = outcome == EditOutcome.COMMITTED;
         if (committed != (edit != null)) {
             throw new IllegalArgumentException(
                     "Only a committed edit outcome may contain edit metadata");
+        }
+        if ((committed && changedBlockCount == 0)
+                || (outcome == EditOutcome.NO_CHANGE && changedBlockCount != 0)) {
+            throw new IllegalArgumentException("Edit outcome does not match its change count");
         }
         if (edit != null
                 && (edit.operation() != operation

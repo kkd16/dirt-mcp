@@ -65,6 +65,7 @@ final class FaweEditExecutor {
                 enforceChangeLimit(expectedChanges);
                 changes = expectedChanges;
                 if (!dryRun && expectedChanges > 0) {
+                    requireNotInterrupted();
                     admission.beforeMutation();
                     requireNotInterrupted();
                     session.replaceBlocks(selection, sourceMask, edit.palette().pattern());
@@ -79,15 +80,13 @@ final class FaweEditExecutor {
             }
         } catch (MaxChangedBlocksException exception) {
             OperationException failure = changeLimit(exception);
-            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, undo, failure);
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, failure);
             throw failure;
         } catch (OperationException exception) {
-            rollbackAfterFailure(
-                    edit.paperWorld(), session, edit.chunks(), dryRun, undo, exception);
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
             throw exception;
         } catch (RuntimeException exception) {
-            rollbackAfterFailure(
-                    edit.paperWorld(), session, edit.chunks(), dryRun, undo, exception);
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
             throw exception;
         }
         return new EditPlatform.EditResult(matches, changes, undo);
@@ -117,6 +116,7 @@ final class FaweEditExecutor {
                 enforceChangeLimit(expectedChanges);
                 changes = expectedChanges;
                 if (!dryRun && expectedChanges > 0) {
+                    requireNotInterrupted();
                     admission.beforeMutation();
                     requireNotInterrupted();
                     session.setBlocks(
@@ -133,15 +133,13 @@ final class FaweEditExecutor {
             }
         } catch (MaxChangedBlocksException exception) {
             OperationException failure = changeLimit(exception);
-            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, undo, failure);
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, failure);
             throw failure;
         } catch (OperationException exception) {
-            rollbackAfterFailure(
-                    edit.paperWorld(), session, edit.chunks(), dryRun, undo, exception);
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
             throw exception;
         } catch (RuntimeException exception) {
-            rollbackAfterFailure(
-                    edit.paperWorld(), session, edit.chunks(), dryRun, undo, exception);
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
             throw exception;
         }
         return new EditPlatform.EditResult(0, changes, undo);
@@ -171,6 +169,7 @@ final class FaweEditExecutor {
                 expectedChanges = pending.size();
                 enforceChangeLimit(expectedChanges);
                 if (!dryRun && expectedChanges > 0) {
+                    requireNotInterrupted();
                     admission.beforeMutation();
                     requireNotInterrupted();
                     for (SetBlockChange change : pending) {
@@ -190,15 +189,13 @@ final class FaweEditExecutor {
             }
         } catch (MaxChangedBlocksException exception) {
             OperationException failure = changeLimit(exception);
-            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, undo, failure);
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, failure);
             throw failure;
         } catch (OperationException exception) {
-            rollbackAfterFailure(
-                    edit.paperWorld(), session, edit.chunks(), dryRun, undo, exception);
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
             throw exception;
         } catch (RuntimeException exception) {
-            rollbackAfterFailure(
-                    edit.paperWorld(), session, edit.chunks(), dryRun, undo, exception);
+            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
             throw exception;
         }
         return new EditPlatform.EditResult(0, changes, undo);
@@ -206,6 +203,27 @@ final class FaweEditExecutor {
 
     void undo(PaperEditPreparation.PaperWorld world, StoredUndo undo) throws OperationException {
         requireNotInterrupted();
+        applyUndo(world, undo);
+    }
+
+    void rollback(PaperEditPreparation.PaperWorld world, StoredUndo undo)
+            throws OperationException {
+        preserveInterruption(() -> applyUndo(world, undo));
+    }
+
+    static void preserveInterruption(Runnable recovery) {
+        Objects.requireNonNull(recovery, "recovery");
+        boolean interrupted = Thread.interrupted();
+        try {
+            recovery.run();
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private void applyUndo(PaperEditPreparation.PaperWorld world, StoredUndo undo) {
         try (EditSession session = newEditSession(world.worldEditWorld(), false)) {
             session.setBlocks(undo.changeSet(), ChangeSetExecutor.Type.UNDO);
         }
@@ -216,20 +234,13 @@ final class FaweEditExecutor {
             EditSession failedSession,
             List<ChunkPosition> chunks,
             boolean dryRun,
-            StoredUndo retainedRecovery,
             Throwable failure)
             throws EditRecoveryException {
-        long changes =
-                retainedRecovery == null
-                        ? (dryRun ? 0 : failedSession.getChangeSet().longSize())
-                        : retainedRecovery.changedBlockCount();
+        long changes = dryRun ? 0 : failedSession.getChangeSet().longSize();
         if (changes == 0) {
             return;
         }
-        StoredUndo recovery =
-                retainedRecovery == null
-                        ? retainedUndo(failedSession, changes, chunks)
-                        : retainedRecovery;
+        StoredUndo recovery = retainedUndo(failedSession, changes, chunks);
         boolean interrupted = Thread.interrupted();
         try {
             try (EditSession rollback = newEditSession(world.worldEditWorld(), false)) {

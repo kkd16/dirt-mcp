@@ -312,7 +312,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '413':
-          description: Region volume, touched chunks, or estimated changed-block count exceeds its configured limit
+          description: Region volume, touched chunks, or exact changed-block count exceeds its configured limit
           content:
             application/json:
               schema:
@@ -578,10 +578,11 @@ components:
                 - world_not_found
                 - world_unavailable
             editId:
-              description: Edit transaction associated with the failure when its mutation may remain or its undo record is retained.
+              description: Edit transaction associated with a failure that may need reconciliation against retained history; an absent history record means no undoable edit remains.
               $ref: '#/components/schemas/UuidV4'
             message:
               type: string
+              minLength: 1
     Uuid:
       type: string
       format: uuid
@@ -609,6 +610,7 @@ components:
     Bounds:
       type: object
       additionalProperties: false
+      description: Normalized inclusive bounds; every minimum coordinate is less than or equal to its maximum coordinate.
       required:
         - min
         - max
@@ -1046,6 +1048,7 @@ components:
     EditRecord:
       type: object
       additionalProperties: false
+      description: Identity and lifecycle metadata for one Dirt edit transaction.
       required:
         - editId
         - callId
@@ -1070,6 +1073,7 @@ components:
         world:
           type: string
           minLength: 1
+          pattern: '.*\S.*'
         worldId:
           $ref: '#/components/schemas/Uuid'
         bounds:
@@ -1082,8 +1086,10 @@ components:
         completedAt:
           type: string
           format: date-time
+          description: Timestamp recorded when the original edit completed or entered recovery; later undo attempts do not change it.
         status:
           type: string
+          description: Last retained state represented by this record. A successful undo returns the state immediately before consumption.
           enum:
             - committed
             - recovery_required
@@ -1125,10 +1131,10 @@ components:
         seed:
           type: integer
           format: int32
-          description: Omission generates a fresh seed returned in the response.
+          description: A supplied seed is echoed in the response; omission generates and returns a fresh seed.
         dryRun:
           type: boolean
-          description: Omission uses the configured replace default.
+          description: True requires a preview outcome, false excludes preview, and omission uses the configured replace default.
     ReplaceRegionBlocksResponse:
       type: object
       additionalProperties: false
@@ -1151,7 +1157,13 @@ components:
             changedBlockCount:
               minimum: 1
             edit:
-              $ref: '#/components/schemas/EditRecord'
+              allOf:
+                - $ref: '#/components/schemas/EditRecord'
+                - properties:
+                    operation:
+                      const: replace_region_blocks
+                    status:
+                      const: committed
       required:
         - world
         - bounds
@@ -1167,6 +1179,7 @@ components:
           type: string
           minLength: 1
         bounds:
+          description: Normalized inclusive bounds from the requested corners.
           $ref: '#/components/schemas/Bounds'
         sourceBlockStatePatterns:
           type: array
@@ -1186,8 +1199,10 @@ components:
         seed:
           type: integer
           format: int32
+          description: Supplied request seed, or the generated seed when the request omitted one.
         outcome:
           type: string
+          description: Explicit dryRun=true requires preview; false excludes preview.
           enum:
             - preview
             - no_change
@@ -1200,10 +1215,12 @@ components:
           type: integer
           format: int64
           minimum: 0
+          description: Blocks matching a source pattern; cannot exceed the inclusive bounds volume.
         changedBlockCount:
           type: integer
           format: int64
           minimum: 0
+          description: Blocks changed or that would change; cannot exceed matchedBlockCount.
     FillRegionRequest:
       type: object
       additionalProperties: false
@@ -1231,10 +1248,10 @@ components:
         seed:
           type: integer
           format: int32
-          description: Omission generates a fresh seed returned in the response.
+          description: A supplied seed is echoed in the response; omission generates and returns a fresh seed.
         dryRun:
           type: boolean
-          description: Omission uses the configured fill default.
+          description: True requires a preview outcome, false excludes preview, and omission uses the configured fill default.
     FillRegionResponse:
       type: object
       additionalProperties: false
@@ -1257,7 +1274,13 @@ components:
             changedBlockCount:
               minimum: 1
             edit:
-              $ref: '#/components/schemas/EditRecord'
+              allOf:
+                - $ref: '#/components/schemas/EditRecord'
+                - properties:
+                    operation:
+                      const: fill_region
+                    status:
+                      const: committed
       required:
         - world
         - bounds
@@ -1272,6 +1295,7 @@ components:
           type: string
           minLength: 1
         bounds:
+          description: Normalized inclusive bounds from the requested corners.
           $ref: '#/components/schemas/Bounds'
         destinationPalette:
           type: array
@@ -1282,8 +1306,10 @@ components:
         seed:
           type: integer
           format: int32
+          description: Supplied request seed, or the generated seed when the request omitted one.
         outcome:
           type: string
+          description: Explicit dryRun=true requires preview; false excludes preview.
           enum:
             - preview
             - no_change
@@ -1296,10 +1322,12 @@ components:
           type: integer
           format: int64
           minimum: 1
+          description: Exact inclusive volume of the requested normalized bounds.
         changedBlockCount:
           type: integer
           format: int64
           minimum: 0
+          description: Blocks changed or that would change; cannot exceed volume.
     PalettePlacement:
       type: array
       minItems: 4
@@ -1344,10 +1372,10 @@ components:
         seed:
           type: integer
           format: int32
-          description: Omission generates a fresh seed returned in the response.
+          description: A supplied seed is echoed in the response; omission generates and returns a fresh seed.
         dryRun:
           type: boolean
-          description: Omission uses the configured set-blocks default.
+          description: True requires a preview outcome, false excludes preview, and omission uses the configured set-blocks default.
     SetBlocksResponse:
       type: object
       additionalProperties: false
@@ -1370,7 +1398,13 @@ components:
             changedBlockCount:
               minimum: 1
             edit:
-              $ref: '#/components/schemas/EditRecord'
+              allOf:
+                - $ref: '#/components/schemas/EditRecord'
+                - properties:
+                    operation:
+                      const: set_blocks
+                    status:
+                      const: committed
       required:
         - world
         - bounds
@@ -1386,6 +1420,7 @@ components:
           type: string
           minLength: 1
         bounds:
+          description: Smallest inclusive bounds containing all requested resolved placements.
           $ref: '#/components/schemas/Bounds'
         palettes:
           type: array
@@ -1401,8 +1436,10 @@ components:
         seed:
           type: integer
           format: int32
+          description: Supplied request seed, or the generated seed when the request omitted one.
         outcome:
           type: string
+          description: Explicit dryRun=true requires preview; false excludes preview.
           enum:
             - preview
             - no_change
@@ -1415,14 +1452,17 @@ components:
           type: integer
           format: int64
           minimum: 1
+          description: Number of placements in the request.
         changedBlockCount:
           type: integer
           format: int64
           minimum: 0
+          description: Blocks changed or that would change; together with unchangedBlockCount equals blockCount.
         unchangedBlockCount:
           type: integer
           format: int64
           minimum: 0
+          description: Blocks already in their requested state; together with changedBlockCount equals blockCount.
     GetEditHistoryRequest:
       type: object
       additionalProperties: false
@@ -1445,7 +1485,8 @@ components:
           minLength: 1
         edits:
           type: array
-          description: Retained undoable edit records ordered newest first.
+          uniqueItems: true
+          description: Retained undoable edit records for one loaded world UUID, ordered newest first with distinct edit IDs.
           items:
             $ref: '#/components/schemas/EditRecord'
     UndoEditRequest:
@@ -1470,6 +1511,7 @@ components:
         - undoneAt
       properties:
         edit:
+          description: Edit record as retained immediately before the successful undo consumed it.
           $ref: '#/components/schemas/EditRecord'
         undoCallId:
           $ref: '#/components/schemas/UuidV4'
@@ -1547,7 +1589,7 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum retained undoable edits in one loaded world.
+          description: Maximum retained undoable edits in one loaded world; cannot exceed maxEntriesTotal.
         maxEntriesTotal:
           type: integer
           format: int32
@@ -1557,7 +1599,7 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum sum of changed-block counts across all retained undoable edits.
+          description: Maximum sum of changed-block counts across all retained undoable edits; must be at least LimitConfiguration.maxChangedBlocks.
     DefaultConfiguration:
       type: object
       additionalProperties: false

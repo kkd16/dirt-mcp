@@ -12,6 +12,9 @@ import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -19,6 +22,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 final class FaweWorldEditorTest {
@@ -140,6 +144,19 @@ final class FaweWorldEditorTest {
 
         assertEquals(OperationFailure.REGION_TOO_LARGE, exception.failure());
         assertEquals(0, platform.resolveCalls);
+        assertEquals(0, platform.prepareCalls);
+    }
+
+    @Test
+    void rejectsNoncanonicalWorldNamesBeforePreparation() {
+        FakePlatform platform = new FakePlatform();
+        platform.caseInsensitiveWorldLookup = true;
+        FaweWorldEditor editor = editor(platform, 3);
+
+        assertFailure(
+                OperationFailure.WORLD_NOT_FOUND, () -> fill(editor, fillRequest("WORLD", false)));
+
+        assertEquals(1, platform.resolveCalls);
         assertEquals(0, platform.prepareCalls);
     }
 
@@ -390,6 +407,77 @@ final class FaweWorldEditorTest {
     }
 
     @Test
+    void validatesPreparedMetadataBeforeMutation() {
+        FakePlatform metadataFailure = new FakePlatform();
+        metadataFailure.nextChanges = 1;
+        metadataFailure.failPreparedAccess = true;
+        FaweWorldEditor fillEditor = editor(metadataFailure, 3);
+
+        assertThrows(
+                IllegalStateException.class, () -> fill(fillEditor, fillRequest("world", false)));
+
+        assertEquals(0, metadataFailure.executeCalls);
+        assertNull(metadataFailure.lastUndo);
+        assertTrue(metadataFailure.lastPrepared.closed);
+
+        FakePlatform countMismatch = new FakePlatform();
+        countMismatch.nextChanges = 1;
+        countMismatch.preparedBlockCountDelta = 1;
+        FaweWorldEditor setEditor = editor(countMismatch, 3);
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> set(setEditor, setRequest("world", List.of(placement(0, 0, 0)), false)));
+
+        assertEquals(0, countMismatch.executeCalls);
+        assertNull(countMismatch.lastUndo);
+        assertTrue(countMismatch.lastPrepared.closed);
+    }
+
+    @Test
+    void rollsBackAndClosesUndoWhenHistoryTransferValidationFails() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        platform.nextChanges = 1;
+        platform.undoCountDelta = 1;
+        FaweWorldEditor editor = editor(platform, 3);
+
+        OperationException failure =
+                assertThrows(
+                        OperationException.class, () -> fill(editor, fillRequest("world", false)));
+
+        assertEquals(OperationFailure.INTERNAL_ERROR, failure.failure());
+        assertTrue(failure.editId().isPresent());
+        assertEquals(List.of(1), platform.undoneIds);
+        assertTrue(platform.lastUndo.closed);
+        assertTrue(history(editor, "world").isEmpty());
+    }
+
+    @Test
+    void retainsRecoveryWhenHistoryTransferAndInlineRollbackBothFail() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        platform.nextChanges = 1;
+        platform.undoCountDelta = 1;
+        platform.failUndo = true;
+        FaweWorldEditor editor = editor(platform, 3);
+
+        OperationException failure =
+                assertThrows(
+                        OperationException.class, () -> fill(editor, fillRequest("world", false)));
+
+        EditRecord recovery = history(editor, "world").getFirst();
+        assertEquals(OperationFailure.INTERNAL_ERROR, failure.failure());
+        assertEquals(java.util.Optional.of(recovery.editId()), failure.editId());
+        assertEquals(EditStatus.RECOVERY_REQUIRED, recovery.status());
+        assertEquals(2, recovery.changedBlockCount());
+        assertFalse(platform.lastUndo.closed);
+
+        platform.failUndo = false;
+        undo(editor, "world", recovery.editId());
+        assertTrue(platform.lastUndo.closed);
+        assertTrue(history(editor, "world").isEmpty());
+    }
+
+    @Test
     void retainsCommittedHistoryWhenPreparedResourceCleanupFails() throws Exception {
         FakePlatform platform = new FakePlatform();
         platform.nextChanges = 1;
@@ -427,6 +515,34 @@ final class FaweWorldEditorTest {
         UndoEdit.Result result = undo(editor, "world", recovery.editId());
         assertEquals(3, result.edit().changedBlockCount());
         assertEquals(3, fill(editor, fillRequest("world", false)).changedBlockCount());
+    }
+
+    @Test
+    void rollsBackRecoveryWhenItsHistoryMetadataCannotBeCreated() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        platform.nextChanges = 1;
+        platform.failWithRecovery = true;
+        FaweWorldEditor editor =
+                new FaweWorldEditor(
+                        platform,
+                        100,
+                        10,
+                        MAX_BLOCK_STATE_PATTERNS,
+                        100,
+                        history(3),
+                        failingClockAfter(0),
+                        UUID::randomUUID);
+
+        OperationException failure =
+                assertThrows(
+                        OperationException.class, () -> fill(editor, fillRequest("world", false)));
+
+        assertEquals(OperationFailure.INTERNAL_ERROR, failure.failure());
+        assertTrue(failure.editId().isPresent());
+        assertEquals(1, platform.preparedRollbackCalls);
+        assertEquals(List.of(1), platform.undoneIds);
+        assertTrue(platform.lastUndo.closed);
+        assertTrue(history(editor, "world").isEmpty());
     }
 
     @Test
@@ -519,6 +635,32 @@ final class FaweWorldEditorTest {
     }
 
     @Test
+    void undoFinalizationFailureReportsTheConsumedEditId() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        platform.nextChanges = 1;
+        FaweWorldEditor editor =
+                new FaweWorldEditor(
+                        platform,
+                        100,
+                        10,
+                        MAX_BLOCK_STATE_PATTERNS,
+                        100,
+                        history(3),
+                        failingClockAfter(1),
+                        UUID::randomUUID);
+        EditRecord edit = fill(editor, fillRequest("world", false)).edit();
+
+        OperationException failure =
+                assertThrows(OperationException.class, () -> undo(editor, "world", edit.editId()));
+
+        assertEquals(OperationFailure.INTERNAL_ERROR, failure.failure());
+        assertEquals(java.util.Optional.of(edit.editId()), failure.editId());
+        assertEquals(List.of(1), platform.undoneIds);
+        assertTrue(platform.lastUndo.closed);
+        assertTrue(history(editor, "world").isEmpty());
+    }
+
+    @Test
     void worldInvalidationClearsHistory() throws Exception {
         FakePlatform platform = new FakePlatform();
         platform.nextChanges = 1;
@@ -547,10 +689,40 @@ final class FaweWorldEditorTest {
                             assertThrows(java.util.concurrent.ExecutionException.class, edit::get)
                                     .getCause();
             assertEquals(OperationFailure.WORLD_UNAVAILABLE, failure.failure());
-            assertTrue(failure.editId().isEmpty());
+            assertTrue(failure.editId().isPresent());
             assertTrue(failure.getMessage().contains("was rolled back"));
+            assertTrue(failure.getMessage().contains(failure.editId().orElseThrow().toString()));
         }
 
+        assertEquals(List.of(1), platform.undoneIds);
+        assertTrue(platform.lastUndo.closed);
+        assertTrue(history(editor, "world").isEmpty());
+    }
+
+    @Test
+    void invalidationRetriesAnUnretainedRecoveryBeforeClosingIt() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        platform.nextChanges = 1;
+        platform.blockWorld = WORLD_ID;
+        platform.failWithRecovery = true;
+        FaweWorldEditor editor = editor(platform, 3);
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var edit = executor.submit(() -> fill(editor, fillRequest("world", false)));
+            platform.entered.await();
+            editor.invalidateWorld(WORLD_ID);
+            platform.release.countDown();
+            OperationException failure =
+                    (OperationException)
+                            assertThrows(java.util.concurrent.ExecutionException.class, edit::get)
+                                    .getCause();
+
+            assertEquals(OperationFailure.WORLD_UNAVAILABLE, failure.failure());
+            assertTrue(failure.editId().isPresent());
+            assertTrue(failure.getMessage().contains("unretained recovery was rolled back"));
+        }
+
+        assertEquals(1, platform.preparedRollbackCalls);
         assertEquals(List.of(1), platform.undoneIds);
         assertTrue(platform.lastUndo.closed);
         assertTrue(history(editor, "world").isEmpty());
@@ -637,9 +809,16 @@ final class FaweWorldEditorTest {
             assertFalse(platform.closed);
 
             platform.release.countDown();
-            assertThrows(java.util.concurrent.ExecutionException.class, edit::get);
+            OperationException failure =
+                    (OperationException)
+                            assertThrows(java.util.concurrent.ExecutionException.class, edit::get)
+                                    .getCause();
+            assertEquals(OperationFailure.WORLD_UNAVAILABLE, failure.failure());
         }
 
+        assertEquals(1, platform.preparedRollbackCalls);
+        assertEquals(List.of(1), platform.undoneIds);
+        assertTrue(platform.lastUndo.closed);
         assertTrue(editor.closeIfQuiescent());
         assertTrue(platform.closed);
     }
@@ -721,6 +900,29 @@ final class FaweWorldEditorTest {
         return new SetBlocks.Placement(0, x, y, z);
     }
 
+    private static Clock failingClockAfter(int successfulReads) {
+        AtomicInteger reads = new AtomicInteger();
+        return new Clock() {
+            @Override
+            public ZoneId getZone() {
+                return ZoneId.of("UTC");
+            }
+
+            @Override
+            public Clock withZone(ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                if (reads.getAndIncrement() < successfulReads) {
+                    return Instant.parse("2026-08-20T00:00:00Z");
+                }
+                throw new IllegalStateException("clock failed");
+            }
+        };
+    }
+
     private static BlockPosition position(int x, int y, int z) {
         return new BlockPosition(x, y, z);
     }
@@ -750,8 +952,14 @@ final class FaweWorldEditorTest {
         private boolean failWithRecovery;
         private boolean failClose;
         private boolean failUndo;
+        private boolean failPreparedAccess;
+        private boolean caseInsensitiveWorldLookup;
         private boolean stopping;
         private boolean closed;
+        private int executeCalls;
+        private int preparedBlockCountDelta;
+        private int preparedRollbackCalls;
+        private int undoCountDelta;
         private FakePrepared lastPrepared;
         private FakeUndo lastUndo;
 
@@ -764,6 +972,14 @@ final class FaweWorldEditorTest {
         public WorldHandle resolveWorld(String worldName) throws OperationException {
             this.resolveCalls++;
             FakeWorld world = this.worlds.get(worldName);
+            if (world == null && this.caseInsensitiveWorldLookup) {
+                world =
+                        this.worlds.entrySet().stream()
+                                .filter(entry -> entry.getKey().equalsIgnoreCase(worldName))
+                                .map(Map.Entry::getValue)
+                                .findFirst()
+                                .orElse(null);
+            }
             if (world == null) {
                 throw new OperationException(
                         OperationFailure.WORLD_NOT_FOUND, "World is not loaded: " + worldName);
@@ -822,6 +1038,7 @@ final class FaweWorldEditorTest {
         private EditResult execute(
                 FakePrepared prepared, boolean dryRun, MutationAdmission admission)
                 throws OperationException {
+            this.executeCalls++;
             prepared.executedBeforeClose = !prepared.closed;
             if (this.failExecution) {
                 throw new OperationException(OperationFailure.WORLD_UNAVAILABLE, "edit failed");
@@ -846,17 +1063,33 @@ final class FaweWorldEditorTest {
             }
             this.lastUndo =
                     this.nextChanges > 0 && !dryRun
-                            ? new FakeUndo(++this.nextUndoId, this.nextChanges)
+                            ? new FakeUndo(
+                                    ++this.nextUndoId, this.nextChanges + this.undoCountDelta)
                             : null;
             return new EditResult(this.nextMatches, this.nextChanges, this.lastUndo);
         }
 
         @Override
         public void undo(WorldHandle world, UndoToken undo) throws OperationException {
+            if (this.stopping) {
+                throw new OperationException(
+                        OperationFailure.WORLD_UNAVAILABLE, "world editing is stopping");
+            }
+            applyUndo(undo);
+        }
+
+        private void applyUndo(UndoToken undo) throws OperationException {
             if (this.failUndo) {
                 throw new OperationException(OperationFailure.WORLD_UNAVAILABLE, "undo failed");
             }
             this.undoneIds.add(((FakeUndo) undo).id());
+        }
+
+        @Override
+        public void rollbackPrepared(PreparedOperation prepared, UndoToken undo)
+                throws OperationException {
+            this.preparedRollbackCalls++;
+            this.applyUndo(undo);
         }
 
         @Override
@@ -885,22 +1118,26 @@ final class FaweWorldEditorTest {
 
             @Override
             public List<String> sourcePatterns() {
+                requirePreparedAccess();
                 return List.of("canonical:source");
             }
 
             @Override
             public List<DestinationPaletteEntry> destinationPalette() {
+                requirePreparedAccess();
                 return List.of(new DestinationPaletteEntry("canonical:destination", null));
             }
 
             @Override
             public List<List<DestinationPaletteEntry>> palettes() {
+                requirePreparedAccess();
                 return List.of(destinationPalette());
             }
 
             @Override
             public int blockCount() {
-                return this.count;
+                requirePreparedAccess();
+                return this.count + preparedBlockCountDelta;
             }
 
             @Override
@@ -909,6 +1146,12 @@ final class FaweWorldEditorTest {
                 if (failClose) {
                     throw new OperationException(
                             OperationFailure.WORLD_UNAVAILABLE, "close failed");
+                }
+            }
+
+            private void requirePreparedAccess() {
+                if (failPreparedAccess) {
+                    throw new IllegalStateException("prepared metadata failed");
                 }
             }
         }

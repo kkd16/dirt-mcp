@@ -29,13 +29,37 @@ const setMax = { x: 6, y: 0, z: 0 };
 const northStairs = 'minecraft:dark_oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]';
 const southStairs = 'minecraft:dark_oak_stairs[facing=south,half=bottom,shape=straight,waterlogged=false]';
 const baseUrl = `http://127.0.0.1:${bridgePort}`;
-const uuidV4Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const uuidV4Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const editIdsToUndo = [];
+const observedEditIds = new Set();
+const mutationCallIds = new Set();
 const editMutationPaths = new Set(['/v1/replace-region-blocks', '/v1/fill-region', '/v1/set-blocks']);
+const inspectionPaths = new Set([
+  '/v1/count-region-block-states',
+  '/v1/get-region-blocks',
+  '/v1/scan-orthographic-view',
+]);
+
+function bridgeTimeoutMilliseconds(path) {
+  if (editMutationPaths.has(path) || path === '/v1/undo-edit') return 120_000;
+  return inspectionPaths.has(path) ? 30_000 : 3_000;
+}
+
+function sameUuid(left, right) {
+  return typeof left === 'string' && typeof right === 'string' && left.toLowerCase() === right.toLowerCase();
+}
+
+function trackEditId(editId) {
+  if (typeof editId !== 'string' || !uuidV4Pattern.test(editId)) return;
+  observedEditIds.add(editId.toLowerCase());
+  if (!editIdsToUndo.some((retained) => sameUuid(retained, editId))) editIdsToUndo.push(editId);
+}
 
 async function bridgeGet(path) {
   const response = await fetch(`${baseUrl}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(bridgeTimeoutMilliseconds(path)),
   });
   assert.equal(response.status, 200);
   return response.json();
@@ -43,6 +67,7 @@ async function bridgeGet(path) {
 
 async function bridgeResponse(path, body) {
   const callId = randomUUID();
+  if (editMutationPaths.has(path)) mutationCallIds.add(callId);
   const response = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
     headers: {
@@ -51,16 +76,14 @@ async function bridgeResponse(path, body) {
       'X-Dirt-Call-Id': callId,
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(bridgeTimeoutMilliseconds(path)),
   });
   const text = await response.text();
   const document = JSON.parse(text);
-  if (response.ok && editMutationPaths.has(path) && document.outcome === 'committed') {
-    const editId = document.edit?.editId;
-    if (typeof editId === 'string' && uuidV4Pattern.test(editId)) {
-      editIdsToUndo.push(editId);
-    }
+  if (editMutationPaths.has(path)) {
+    trackEditId(response.ok && document.outcome === 'committed' ? document.edit?.editId : document.error?.editId);
   }
-  if (response.ok && path === '/v1/undo-edit' && editIdsToUndo.at(-1) === body.editId) {
+  if (response.ok && path === '/v1/undo-edit' && sameUuid(editIdsToUndo.at(-1), body.editId)) {
     editIdsToUndo.pop();
   }
   return { status: response.status, ok: response.ok, body: document, callId };
@@ -72,9 +95,9 @@ async function bridgeRequest(path, body) {
     throw new Error(`${path} returned ${response.status}: ${JSON.stringify(response.body)}`);
   }
   if (response.body.undoCallId !== undefined) {
-    assert.equal(response.body.undoCallId, response.callId);
+    assert.ok(sameUuid(response.body.undoCallId, response.callId));
   } else if (response.body.edit?.callId !== undefined) {
-    assert.equal(response.body.edit.callId, response.callId);
+    assert.ok(sameUuid(response.body.edit.callId, response.callId));
   }
   return response.body;
 }
@@ -83,6 +106,7 @@ async function paperCommand(command) {
   await new Promise((resolve, reject) => {
     const child = spawn(`${repositoryRoot}/scripts/dev-paper`, ['command', command], {
       stdio: 'inherit',
+      signal: AbortSignal.timeout(30_000),
     });
     child.once('error', reject);
     child.once('exit', (code) => {
@@ -100,7 +124,37 @@ async function restoreBlocks(blocks) {
     // Fixture restoration is deliberately serial through the managed Paper console.
     // oxlint-disable-next-line eslint/no-await-in-loop
     await paperCommand(`setblock ${position.x} ${position.y} ${position.z} ${blockState} replace`);
+    // The console helper only queues input. Observe the commanded state before sending the
+    // next command so restoration cannot race the exact snapshot checks that follow.
+    // oxlint-disable-next-line eslint/no-await-in-loop
+    await waitForRestoredBlock(position, blockState);
   }
+}
+
+async function waitForRestoredBlock(position, blockState) {
+  let observedState;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      // Restoration readiness retries are deliberately serial.
+      // oxlint-disable-next-line eslint/no-await-in-loop
+      const inspection = await bridgeRequest('/v1/get-region-blocks', {
+        world,
+        min: position,
+        max: position,
+        includeAir: true,
+        format: 'blocks',
+      });
+      observedState = inspection.blocks[0]?.blockState;
+      if (observedState === blockState) return;
+    } catch {
+      // A transient bridge failure is retried until the bounded deadline below.
+    }
+    // oxlint-disable-next-line eslint/no-await-in-loop
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(
+    `Paper did not restore ${position.x},${position.y},${position.z} to ${blockState}; observed ${String(observedState)}`,
+  );
 }
 
 async function waitForRegion(region) {
@@ -182,6 +236,7 @@ function retainEdit(result, operation) {
   assert.ok(result.edit);
   assert.match(result.edit.editId, uuidV4Pattern);
   assert.match(result.edit.callId, uuidV4Pattern);
+  assert.match(result.edit.worldId, uuidPattern);
   assert.equal(result.edit.operation, operation);
   assert.equal(result.edit.world, world);
   assert.deepEqual(result.edit.bounds, result.bounds);
@@ -192,24 +247,115 @@ function retainEdit(result, operation) {
 
 async function undoRetained(result) {
   const editId = editIdsToUndo.at(-1);
-  assert.equal(editId, result.edit.editId);
+  assert.ok(sameUuid(editId, result.edit.editId));
   const undone = await bridgeRequest('/v1/undo-edit', { world, editId });
-  assert.equal(undone.edit.editId, editId);
-  assert.equal(undone.edit.changedBlockCount, result.changedBlockCount);
+  assert.deepEqual(undone.edit, result.edit);
   assert.match(undone.undoCallId, uuidV4Pattern);
   assert.ok(!Number.isNaN(Date.parse(undone.undoneAt)));
   return undone;
 }
+
+async function assertEditHistory(expectedEdits) {
+  const history = await bridgeRequest('/v1/get-edit-history', { world });
+  assert.equal(history.world, world);
+  assert.deepEqual(history.edits, expectedEdits);
+}
+
+function ownsSmokeEdit(edit) {
+  return (
+    (typeof edit?.callId === 'string' && mutationCallIds.has(edit.callId.toLowerCase())) ||
+    (typeof edit?.editId === 'string' && observedEditIds.has(edit.editId.toLowerCase()))
+  );
+}
+
+async function cleanupRetainedEdits() {
+  let emptyObservations = 0;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    let historyResponse;
+    try {
+      // A timed-out mutation may still hold the world lock briefly while finishing its recovery path.
+      // oxlint-disable-next-line eslint/no-await-in-loop
+      historyResponse = await bridgeResponse('/v1/get-edit-history', { world });
+    } catch (error) {
+      if (attempt === 39) throw error;
+      // Cleanup readiness retries are deliberately serial.
+      // oxlint-disable-next-line eslint/no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
+
+    if (!historyResponse.ok) {
+      const code = historyResponse.body.error?.code;
+      if (code !== 'world_busy' && code !== 'bridge_busy' && code !== 'server_unavailable') {
+        throw new Error(`History cleanup returned ${historyResponse.status}: ${JSON.stringify(historyResponse.body)}`);
+      }
+      // Cleanup readiness retries are deliberately serial.
+      // oxlint-disable-next-line eslint/no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
+
+    assert.equal(historyResponse.body.world, world);
+    assert.ok(Array.isArray(historyResponse.body.edits));
+    const ownedEdits = historyResponse.body.edits.filter(ownsSmokeEdit);
+    editIdsToUndo.length = 0;
+    for (const edit of ownedEdits.toReversed()) trackEditId(edit.editId);
+    if (ownedEdits.length === 0) {
+      if (historyResponse.body.edits.length !== 0) {
+        throw new Error('A non-smoke edit is retained; refusing direct fixture restoration');
+      }
+      emptyObservations += 1;
+      if (emptyObservations === 2) return;
+      // Confirm emptiness after pending authenticated work has had a chance to acquire the lock.
+      // oxlint-disable-next-line eslint/no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
+
+    emptyObservations = 0;
+    const latest = historyResponse.body.edits[0];
+    if (!ownsSmokeEdit(latest)) {
+      throw new Error('A non-smoke edit is newer than a retained smoke-test edit; refusing to undo it');
+    }
+    // Undo is deliberately serial because every request consumes the previous history entry.
+    let undo;
+    try {
+      // oxlint-disable-next-line eslint/no-await-in-loop
+      undo = await bridgeResponse('/v1/undo-edit', { world, editId: latest.editId });
+    } catch {
+      // A transport failure is ambiguous: the undo may still be running. The next history
+      // request is an ordering fence and must settle before any direct fixture restoration.
+      // oxlint-disable-next-line eslint/no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
+    if (!undo.ok && undo.body.error?.code !== 'edit_not_found') {
+      if (undo.body.error?.code === 'world_busy' || undo.body.error?.code === 'bridge_busy') {
+        // Cleanup readiness retries are deliberately serial.
+        // oxlint-disable-next-line eslint/no-await-in-loop
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        continue;
+      }
+      throw new Error(`Undo cleanup returned ${undo.status}: ${JSON.stringify(undo.body)}`);
+    }
+  }
+  throw new Error('Timed out reconciling retained smoke-test edits');
+}
+
 let fixtureIsForceLoaded = false;
+let originalRegionFixture;
 let originalStairFixture;
 let originalSetFixture;
+let cleanupFailed = false;
+let smokeCompleted = false;
 try {
-  const unauthenticated = await fetch(`${baseUrl}/v1/ping`);
+  const unauthenticated = await fetch(`${baseUrl}/v1/ping`, { signal: AbortSignal.timeout(3_000) });
   assert.equal(unauthenticated.status, 401);
   assert.equal((await unauthenticated.json()).error.code, 'unauthorized');
 
   const unknownRoute = await fetch(`${baseUrl}/v1/ping/extra`, {
     headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(3_000),
   });
   assert.equal(unknownRoute.status, 404);
   assert.equal((await unknownRoute.json()).error.code, 'not_found');
@@ -229,6 +375,7 @@ try {
   assert.ok(serverStatus.editHistory.maxEntriesPerWorld > 0);
   assert.ok(serverStatus.editHistory.maxEntriesTotal >= serverStatus.editHistory.maxEntriesPerWorld);
   assert.ok(serverStatus.editHistory.maxRetainedChangedBlocks >= serverStatus.limits.maxChangedBlocks);
+  await assertEditHistory([]);
 
   const chunkHeavyRegion = await bridgeResponse('/v1/count-region-block-states', {
     world,
@@ -241,12 +388,19 @@ try {
   await paperCommand('forceload add 0 0');
   fixtureIsForceLoaded = true;
   const original = await waitForRegion(region);
+  originalRegionFixture = await bridgeRequest('/v1/get-region-blocks', {
+    ...region,
+    includeAir: true,
+    format: 'blocks',
+  });
+  assert.equal(originalRegionFixture.matchedBlockCount, original.volume);
 
   originalSetFixture = await bridgeRequest('/v1/get-region-blocks', {
     world,
     min: setMin,
     max: setMax,
     includeAir: true,
+    format: 'blocks',
   });
   assert.equal(originalSetFixture.matchedBlockCount, 2);
   const originalSetStates = new Map(
@@ -291,6 +445,7 @@ try {
   assert.equal(setPreview.blockCount, 2);
   assert.ok(setPreview.changedBlockCount === 1 || setPreview.changedBlockCount === 2);
   assert.equal(setPreview.unchangedBlockCount, 2 - setPreview.changedBlockCount);
+  await assertEditHistory([]);
 
   const duplicateSet = await bridgeResponse('/v1/set-blocks', {
     world,
@@ -344,9 +499,7 @@ try {
   assert.equal(setResult.blockCount, 2);
   assert.equal(setResult.changedBlockCount, setPreview.changedBlockCount);
   assert.equal(setResult.unchangedBlockCount, setPreview.unchangedBlockCount);
-  const setHistory = await bridgeRequest('/v1/get-edit-history', { world });
-  assert.equal(setHistory.world, world);
-  assert.deepEqual(setHistory.edits[0], setResult.edit);
+  await assertEditHistory([setResult.edit]);
   const afterSet = await bridgeRequest('/v1/get-region-blocks', {
     world,
     min: setMin,
@@ -358,6 +511,10 @@ try {
   assert.ok([firstOriginalState, firstSetState].includes(afterSetStates.get('5,0,0')));
   assert.equal(afterSetStates.get('6,0,0'), secondSetState);
   await undoRetained(setResult);
+  await assertEditHistory([]);
+  const consumedSetUndo = await bridgeResponse('/v1/undo-edit', { world, editId: setResult.edit.editId });
+  assert.equal(consumedSetUndo.status, 404);
+  assert.equal(consumedSetUndo.body.error.code, 'edit_not_found');
   const afterSetUndo = await bridgeRequest('/v1/get-region-blocks', {
     world,
     min: setMin,
@@ -385,6 +542,7 @@ try {
   assert.equal(preview.volume, original.volume);
   assert.equal(preview.changedBlockCount, original.volume - alreadyMatching);
   assert.ok(preview.changedBlockCount > 0, 'Smoke destination must change at least one block');
+  await assertEditHistory([]);
 
   const filled = await bridgeRequest('/v1/fill-region', {
     ...region,
@@ -396,6 +554,7 @@ try {
   assert.equal(filled.seed, preview.seed);
   assert.deepEqual(filled.destinationPalette, preview.destinationPalette);
   assert.equal(filled.changedBlockCount, preview.changedBlockCount);
+  await assertEditHistory([filled.edit]);
 
   const afterFill = await bridgeRequest('/v1/count-region-block-states', region);
   assert.deepEqual(afterFill.blockStateCounts, { [filledState]: filled.volume });
@@ -519,13 +678,16 @@ try {
   retainEdit(replaced, 'replace_region_blocks');
   assert.equal(replaced.matchedBlockCount, replacePreview.matchedBlockCount);
   assert.equal(replaced.changedBlockCount, replacePreview.changedBlockCount);
+  await assertEditHistory([replaced.edit, filled.edit]);
   assertExactBlocks(await bridgeRequest('/v1/get-region-blocks', region), replaced.destinationPalette[0].blockState);
 
   const nonLatestUndo = await bridgeResponse('/v1/undo-edit', { world, editId: filled.edit.editId });
   assert.equal(nonLatestUndo.status, 409);
   assert.equal(nonLatestUndo.body.error.code, 'edit_not_latest');
+  await assertEditHistory([replaced.edit, filled.edit]);
 
   await undoRetained(replaced);
+  await assertEditHistory([filled.edit]);
   assertExactBlocks(await bridgeRequest('/v1/get-region-blocks', region), filledState);
 
   const noOp = await bridgeRequest('/v1/fill-region', {
@@ -535,15 +697,25 @@ try {
   assert.equal(noOp.changedBlockCount, 0);
   assert.equal(noOp.outcome, 'no_change');
   assert.equal(noOp.edit, null);
+  await assertEditHistory([filled.edit]);
 
   await undoRetained(filled);
+  await assertEditHistory([]);
 
   const restored = await bridgeRequest('/v1/count-region-block-states', region);
   assert.deepEqual(normalizedJson(restored), normalizedJson(original));
+  const restoredBlocks = await bridgeRequest('/v1/get-region-blocks', {
+    ...region,
+    includeAir: true,
+    format: 'blocks',
+  });
+  assert.deepEqual(sortedBlockKeys(restoredBlocks.blocks), sortedBlockKeys(originalRegionFixture.blocks));
+  originalRegionFixture = undefined;
 
   originalStairFixture = await bridgeRequest('/v1/get-region-blocks', {
     ...stairRegion,
     includeAir: true,
+    format: 'blocks',
   });
   assert.equal(originalStairFixture.matchedBlockCount, 3);
   await restoreBlocks([
@@ -638,41 +810,51 @@ try {
   await undoRetained(propertyFill);
 
   await restoreBlocks(originalStairFixture.blocks);
+  const restoredStairFixture = await bridgeRequest('/v1/get-region-blocks', {
+    ...stairRegion,
+    includeAir: true,
+    format: 'blocks',
+  });
+  assert.deepEqual(sortedBlockKeys(restoredStairFixture.blocks), sortedBlockKeys(originalStairFixture.blocks));
   originalStairFixture = undefined;
-  process.stdout.write(`managed server smoke test passed in ${world}\n`);
+  await assertEditHistory([]);
+  smokeCompleted = true;
 } finally {
-  while (editIdsToUndo.length > 0) {
-    const editId = editIdsToUndo.at(-1);
+  let cleanupSettled = mutationCallIds.size === 0;
+  if (mutationCallIds.size > 0) {
     try {
-      // Undo is deliberately serial because every request consumes the previous history entry.
-      // oxlint-disable-next-line eslint/no-await-in-loop
-      const cleanup = await bridgeResponse('/v1/undo-edit', { world, editId });
-      if (!cleanup.ok && cleanup.body.error?.code === 'edit_not_found') {
-        editIdsToUndo.pop();
-      }
-      if (!cleanup.ok && cleanup.body.error?.code !== 'edit_not_found') {
-        process.stderr.write(
-          `Could not restore smoke-test edit: undo returned ${cleanup.status}: ${JSON.stringify(cleanup.body)}\n`,
-        );
-        break;
-      }
+      await cleanupRetainedEdits();
+      cleanupSettled = true;
     } catch (error) {
       process.stderr.write(`Could not restore smoke-test edit: ${error.message}\n`);
-      break;
+      cleanupFailed = true;
     }
   }
-  if (originalStairFixture) {
+  if (!cleanupSettled && (originalRegionFixture || originalStairFixture || originalSetFixture)) {
+    process.stderr.write('Skipping direct fixture restoration because bridge cleanup did not reach quiescence\n');
+  }
+  if (cleanupSettled && originalRegionFixture) {
+    try {
+      await restoreBlocks(originalRegionFixture.blocks);
+    } catch (error) {
+      process.stderr.write(`Could not restore region fixture: ${error.message}\n`);
+      cleanupFailed = true;
+    }
+  }
+  if (cleanupSettled && originalStairFixture) {
     try {
       await restoreBlocks(originalStairFixture.blocks);
     } catch (error) {
       process.stderr.write(`Could not restore stair fixture: ${error.message}\n`);
+      cleanupFailed = true;
     }
   }
-  if (originalSetFixture) {
+  if (cleanupSettled && originalSetFixture) {
     try {
       await restoreBlocks(originalSetFixture.blocks);
     } catch (error) {
       process.stderr.write(`Could not restore set-blocks fixture: ${error.message}\n`);
+      cleanupFailed = true;
     }
   }
   if (fixtureIsForceLoaded) {
@@ -680,6 +862,10 @@ try {
       await paperCommand('forceload remove 0 0');
     } catch (error) {
       process.stderr.write(`Could not release smoke-test chunk: ${error.message}\n`);
+      cleanupFailed = true;
     }
   }
+  if (cleanupFailed) process.exitCode = 1;
 }
+
+if (smokeCompleted && !cleanupFailed) process.stdout.write(`managed server smoke test passed in ${world}\n`);

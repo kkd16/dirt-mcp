@@ -46,6 +46,9 @@ dependencies {
     testImplementation("com.google.code.gson:gson:2.14.0")
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("com.tngtech.archunit:archunit-junit6:1.5.0")
+    testImplementation("com.fastasyncworldedit:FastAsyncWorldEdit-Core:$faweVersion") {
+        isTransitive = false
+    }
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

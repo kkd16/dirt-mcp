@@ -4,6 +4,7 @@ import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.platform.MainThread;
+import ca.deliyannides.dirtmcp.paper.validation.UuidV4;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
@@ -124,6 +125,8 @@ public final class FaweWorldEditor
             List<DestinationPaletteEntry> destinationPalette;
             try (EditPlatform.PreparedReplace prepared =
                     this.platform.prepareReplace(world, request, region)) {
+                sourcePatterns = List.copyOf(prepared.sourcePatterns());
+                destinationPalette = List.copyOf(prepared.destinationPalette());
                 try {
                     execution =
                             this.platform.replace(
@@ -136,8 +139,9 @@ public final class FaweWorldEditor
                                                             (long) this.maxChangedBlocks,
                                                             region.volume())));
                 } catch (EditRecoveryException failure) {
-                    rememberRecovery(
+                    retainOrRollbackRecovery(
                             lease,
+                            prepared,
                             world,
                             region.bounds(),
                             callId,
@@ -146,17 +150,17 @@ public final class FaweWorldEditor
                             failure);
                     throw recoveryFailure(failure, editId);
                 }
-                sourcePatterns = prepared.sourcePatterns();
-                destinationPalette = prepared.destinationPalette();
                 edit =
                         retainCommitted(
                                 lease,
+                                prepared,
                                 world,
                                 region.bounds(),
                                 callId,
                                 editId,
                                 EditOperation.REPLACE_REGION_BLOCKS,
                                 request.dryRun(),
+                                region.volume(),
                                 execution);
             } catch (OperationException failure) {
                 throw retainedFailure(failure, edit);
@@ -201,6 +205,7 @@ public final class FaweWorldEditor
             List<DestinationPaletteEntry> destinationPalette;
             try (EditPlatform.PreparedFill prepared =
                     this.platform.prepareFill(world, request, region)) {
+                destinationPalette = List.copyOf(prepared.destinationPalette());
                 try {
                     execution =
                             this.platform.fill(
@@ -213,8 +218,9 @@ public final class FaweWorldEditor
                                                             (long) this.maxChangedBlocks,
                                                             region.volume())));
                 } catch (EditRecoveryException failure) {
-                    rememberRecovery(
+                    retainOrRollbackRecovery(
                             lease,
+                            prepared,
                             world,
                             region.bounds(),
                             callId,
@@ -223,16 +229,17 @@ public final class FaweWorldEditor
                             failure);
                     throw recoveryFailure(failure, editId);
                 }
-                destinationPalette = prepared.destinationPalette();
                 edit =
                         retainCommitted(
                                 lease,
+                                prepared,
                                 world,
                                 region.bounds(),
                                 callId,
                                 editId,
                                 EditOperation.FILL_REGION,
                                 request.dryRun(),
+                                region.volume(),
                                 execution);
             } catch (OperationException failure) {
                 throw retainedFailure(failure, edit);
@@ -273,6 +280,12 @@ public final class FaweWorldEditor
             List<List<DestinationPaletteEntry>> palettes;
             try (EditPlatform.PreparedSet prepared =
                     this.platform.prepareSet(world, request, geometry.chunks())) {
+                blockCount = prepared.blockCount();
+                if (blockCount != request.placements().size()) {
+                    throw new IllegalStateException(
+                            "Prepared set-blocks count does not match its validated request");
+                }
+                palettes = immutablePalettes(prepared.palettes());
                 try {
                     execution =
                             this.platform.set(
@@ -284,8 +297,9 @@ public final class FaweWorldEditor
                                                             (long) this.maxChangedBlocks,
                                                             request.placements().size())));
                 } catch (EditRecoveryException failure) {
-                    rememberRecovery(
+                    retainOrRollbackRecovery(
                             lease,
+                            prepared,
                             world,
                             geometry.bounds(),
                             callId,
@@ -294,21 +308,17 @@ public final class FaweWorldEditor
                             failure);
                     throw recoveryFailure(failure, editId);
                 }
-                blockCount = prepared.blockCount();
-                palettes = prepared.palettes();
-                if (execution.changedBlockCount() > blockCount) {
-                    throw new IllegalStateException(
-                            "Edit backend returned an invalid change count");
-                }
                 edit =
                         retainCommitted(
                                 lease,
+                                prepared,
                                 world,
                                 geometry.bounds(),
                                 callId,
                                 editId,
                                 EditOperation.SET_BLOCKS,
                                 request.dryRun(),
+                                blockCount,
                                 execution);
             } catch (OperationException failure) {
                 throw retainedFailure(failure, edit);
@@ -382,19 +392,30 @@ public final class FaweWorldEditor
                         failure,
                         edit.record().editId());
             }
-            lease.removeLatest(edit);
-            return new UndoEdit.Result(edit.record(), callId, this.clock.instant().toString());
+            try {
+                lease.removeLatest(edit);
+                return new UndoEdit.Result(edit.record(), callId, this.clock.instant().toString());
+            } catch (RuntimeException failure) {
+                throw new OperationException(
+                        OperationFailure.INTERNAL_ERROR,
+                        "Undo completed but response finalization failed; edit ID: "
+                                + edit.record().editId(),
+                        failure,
+                        edit.record().editId());
+            }
         }
     }
 
     private EditRecord retainCommitted(
             EditCoordinator.Lease lease,
+            EditPlatform.PreparedOperation prepared,
             EditPlatform.WorldHandle world,
             BlockBounds bounds,
             UUID callId,
             UUID editId,
             EditOperation operation,
             boolean dryRun,
+            long maximumChangedBlockCount,
             EditPlatform.EditResult execution)
             throws OperationException {
         if (dryRun || execution.changedBlockCount() == 0) {
@@ -404,25 +425,50 @@ public final class FaweWorldEditor
             }
             return null;
         }
-        if (editId == null || execution.undo() == null) {
-            throw new IllegalStateException("A non-empty committed edit requires an ID and undo");
+        if (editId == null) {
+            throw new IllegalStateException("A non-empty committed edit requires an ID");
         }
-        EditRecord record =
-                editRecord(
-                        editId,
-                        callId,
-                        operation,
-                        world,
-                        bounds,
-                        execution.changedBlockCount(),
-                        EditStatus.COMMITTED);
-        RetainedEdit retained = new RetainedEdit(record, execution.undo());
-        if (lease.remember(retained)) {
-            return record;
+        EditPlatform.UndoToken undo = execution.undo();
+        if (undo == null) {
+            throw new OperationException(
+                    OperationFailure.INTERNAL_ERROR,
+                    "The edit completed without required undo data; edit ID: " + editId,
+                    null,
+                    editId);
+        }
+
+        final EditRecord record;
+        final RetainedEdit retained;
+        try {
+            if (execution.changedBlockCount() > maximumChangedBlockCount) {
+                throw new IllegalStateException("Edit backend returned an invalid change count");
+            }
+            record =
+                    editRecord(
+                            editId,
+                            callId,
+                            operation,
+                            world,
+                            bounds,
+                            execution.changedBlockCount(),
+                            EditStatus.COMMITTED);
+            retained = new RetainedEdit(record, undo);
+        } catch (RuntimeException failure) {
+            throw unretainedFailure(
+                    lease, prepared, world, bounds, callId, editId, operation, undo, failure);
         }
 
         try {
-            this.platform.undo(world, execution.undo());
+            if (lease.remember(retained)) {
+                return record;
+            }
+        } catch (RuntimeException failure) {
+            throw unretainedFailure(
+                    lease, prepared, world, bounds, callId, editId, operation, undo, failure);
+        }
+
+        try {
+            this.platform.rollbackPrepared(prepared, undo);
         } catch (OperationException | RuntimeException rollbackFailure) {
             throw new OperationException(
                     OperationFailure.WORLD_UNAVAILABLE,
@@ -432,35 +478,136 @@ public final class FaweWorldEditor
                     rollbackFailure,
                     editId);
         } finally {
-            execution.undo().close();
+            undo.close();
         }
         throw new OperationException(
                 OperationFailure.WORLD_UNAVAILABLE,
-                "The edit completed after its world became unavailable and was rolled back");
+                "The edit completed after its world became unavailable and was rolled back; edit "
+                        + "ID: "
+                        + editId,
+                null,
+                editId);
     }
 
-    private void rememberRecovery(
+    private OperationException unretainedFailure(
             EditCoordinator.Lease lease,
+            EditPlatform.PreparedOperation prepared,
             EditPlatform.WorldHandle world,
             BlockBounds bounds,
             UUID callId,
             UUID editId,
             EditOperation operation,
-            EditRecoveryException failure) {
+            EditPlatform.UndoToken undo,
+            RuntimeException failure) {
+        try {
+            this.platform.rollbackPrepared(prepared, undo);
+        } catch (OperationException | RuntimeException rollbackFailure) {
+            failure.addSuppressed(rollbackFailure);
+            try {
+                EditRecord recovery =
+                        editRecord(
+                                editId,
+                                callId,
+                                operation,
+                                world,
+                                bounds,
+                                undo.changedBlockCount(),
+                                EditStatus.RECOVERY_REQUIRED);
+                if (lease.rememberRecovery(new RetainedEdit(recovery, undo))) {
+                    return new OperationException(
+                            OperationFailure.INTERNAL_ERROR,
+                            "Undo-history finalization and automatic rollback failed; recovery "
+                                    + "edit ID: "
+                                    + editId,
+                            failure,
+                            editId);
+                }
+            } catch (RuntimeException retentionFailure) {
+                failure.addSuppressed(retentionFailure);
+            }
+            try {
+                this.platform.rollbackPrepared(prepared, undo);
+            } catch (OperationException | RuntimeException retryFailure) {
+                failure.addSuppressed(retryFailure);
+                undo.close();
+                return new OperationException(
+                        OperationFailure.INTERNAL_ERROR,
+                        "Undo-history finalization failed and recovery could not be retained or "
+                                + "rolled back; edit ID: "
+                                + editId,
+                        failure,
+                        editId);
+            }
+            undo.close();
+            return new OperationException(
+                    OperationFailure.INTERNAL_ERROR,
+                    "The edit was rolled back after undo-history finalization and its first "
+                            + "automatic rollback failed; edit ID: "
+                            + editId,
+                    failure,
+                    editId);
+        }
+        undo.close();
+        return new OperationException(
+                OperationFailure.INTERNAL_ERROR,
+                "The edit was rolled back after undo-history finalization failed; edit ID: "
+                        + editId,
+                failure,
+                editId);
+    }
+
+    private void retainOrRollbackRecovery(
+            EditCoordinator.Lease lease,
+            EditPlatform.PreparedOperation prepared,
+            EditPlatform.WorldHandle world,
+            BlockBounds bounds,
+            UUID callId,
+            UUID editId,
+            EditOperation operation,
+            EditRecoveryException failure)
+            throws OperationException {
+        EditPlatform.UndoToken recovery = failure.recovery();
         if (editId == null) {
-            failure.recovery().close();
+            recovery.close();
             throw new IllegalStateException("A dry run unexpectedly produced recovery history");
         }
-        EditRecord record =
-                editRecord(
-                        editId,
-                        callId,
-                        operation,
-                        world,
-                        bounds,
-                        failure.recovery().changedBlockCount(),
-                        EditStatus.RECOVERY_REQUIRED);
-        lease.rememberRecovery(new RetainedEdit(record, failure.recovery()));
+        boolean finalizationFailed = false;
+        try {
+            EditRecord record =
+                    editRecord(
+                            editId,
+                            callId,
+                            operation,
+                            world,
+                            bounds,
+                            recovery.changedBlockCount(),
+                            EditStatus.RECOVERY_REQUIRED);
+            if (lease.rememberRecovery(new RetainedEdit(record, recovery))) {
+                return;
+            }
+        } catch (RuntimeException retentionFailure) {
+            failure.addSuppressed(retentionFailure);
+            finalizationFailed = true;
+        }
+        try {
+            this.platform.rollbackPrepared(prepared, recovery);
+        } catch (OperationException | RuntimeException rollbackFailure) {
+            failure.addSuppressed(rollbackFailure);
+            recovery.close();
+            throw new OperationException(
+                    OperationFailure.WORLD_UNAVAILABLE,
+                    "The edit and its automatic rollback failed, recovery could not be retained, "
+                            + "and retry rollback failed; edit ID: "
+                            + editId,
+                    failure,
+                    editId);
+        }
+        recovery.close();
+        throw new OperationException(
+                finalizationFailed ? OperationFailure.INTERNAL_ERROR : failure.failure(),
+                "The edit failed, but its unretained recovery was rolled back; edit ID: " + editId,
+                failure,
+                editId);
     }
 
     private EditRecord editRecord(
@@ -488,8 +635,10 @@ public final class FaweWorldEditor
             return null;
         }
         UUID editId = Objects.requireNonNull(this.editIds.get(), "generated editId");
-        if (editId.version() != 4 || editId.variant() != 2) {
-            throw new IllegalStateException("Generated edit IDs must be UUID version 4");
+        try {
+            UuidV4.require(editId, "generated editId");
+        } catch (IllegalArgumentException failure) {
+            throw new IllegalStateException("Generated edit IDs must be UUID version 4", failure);
         }
         return editId;
     }
@@ -502,7 +651,9 @@ public final class FaweWorldEditor
     }
 
     private static void requireCallId(UUID callId) throws OperationException {
-        if (callId == null || callId.version() != 4 || callId.variant() != 2) {
+        try {
+            UuidV4.require(callId, "callId");
+        } catch (IllegalArgumentException | NullPointerException failure) {
             throw invalid("callId must be a UUID version 4");
         }
     }
@@ -592,6 +743,8 @@ public final class FaweWorldEditor
 
         Set<ChunkPosition> chunks = new LinkedHashSet<>();
         Set<BlockPosition> positions = new LinkedHashSet<>();
+        BlockPosition min = null;
+        BlockPosition max = null;
         if (request.placements().size() > this.maxRegionVolume) {
             throw new OperationException(
                     OperationFailure.REGION_TOO_LARGE,
@@ -615,18 +768,6 @@ public final class FaweWorldEditor
             if (!positions.add(position)) {
                 throw invalid(placementName + " resolves to a duplicate block position");
             }
-            chunks.add(ChunkPosition.containing(position.x(), position.z()));
-            if (chunks.size() > this.maxTouchedChunks) {
-                throw new OperationException(
-                        OperationFailure.REGION_TOO_LARGE,
-                        "Operation touches more than the maximum of "
-                                + this.maxTouchedChunks
-                                + " chunks");
-            }
-        }
-        BlockPosition min = null;
-        BlockPosition max = null;
-        for (BlockPosition position : positions) {
             min =
                     min == null
                             ? position
@@ -641,6 +782,14 @@ public final class FaweWorldEditor
                                     Math.max(max.x(), position.x()),
                                     Math.max(max.y(), position.y()),
                                     Math.max(max.z(), position.z()));
+            chunks.add(ChunkPosition.containing(position.x(), position.z()));
+            if (chunks.size() > this.maxTouchedChunks) {
+                throw new OperationException(
+                        OperationFailure.REGION_TOO_LARGE,
+                        "Operation touches more than the maximum of "
+                                + this.maxTouchedChunks
+                                + " chunks");
+            }
         }
         return new SetRequestGeometry(
                 List.copyOf(chunks),
@@ -668,6 +817,12 @@ public final class FaweWorldEditor
         }
     }
 
+    private static List<List<DestinationPaletteEntry>> immutablePalettes(
+            List<List<DestinationPaletteEntry>> palettes) {
+        Objects.requireNonNull(palettes, "prepared palettes");
+        return palettes.stream().map(List::copyOf).toList();
+    }
+
     private static BlockPosition resolvePosition(
             BlockPosition origin, SetBlocks.Placement placement, String field)
             throws OperationException {
@@ -685,7 +840,13 @@ public final class FaweWorldEditor
         if (worldName == null || worldName.isBlank()) {
             throw invalid("world must be a non-empty string");
         }
-        return this.platform.resolveWorld(worldName);
+        EditPlatform.WorldHandle world = this.platform.resolveWorld(worldName);
+        if (!worldName.equals(world.name())) {
+            throw new OperationException(
+                    OperationFailure.WORLD_NOT_FOUND,
+                    "World is not loaded with the exact name: " + worldName);
+        }
+        return world;
     }
 
     private void validatePalette(List<DestinationPaletteEntry> palette, String field)

@@ -131,8 +131,10 @@ not request Minecraft neighbor physics.
 Every block-edit response has an `outcome` and an `edit` field. A `committed`
 result contains an `EditRecord` with its generated `editId`, creating `callId`,
 operation, world name and UUID, normalized bounds, positive changed-block count,
-completion timestamp, and status. A `preview` or `no_change` result returns
-`edit: null` because there is no mutation to undo.
+original edit completion or recovery timestamp, and last retained status. A
+successful undo preserves the status immediately before it consumed the record.
+A `preview` or `no_change` result returns `edit: null` because there is no
+mutation to undo.
 
 `get_edit_history` returns the retained records for one loaded world, newest
 first. `undo_edit` requires both the world and the exact `editId` of the newest
@@ -153,11 +155,18 @@ or Paper restart. An undo may asynchronously reload its previously existing
 chunks without generating terrain and holds plugin chunk tickets only while it
 runs.
 
-Every MCP failure includes its generated `error.callId`. A bridge or MCP error
-also includes `error.editId` when the request leaves a committed or
-recovery-required history record, or rollback cannot be confirmed after the
-world becomes unavailable. Callers can reconcile that transaction through
-`get_edit_history`; an absent record means no retryable history remains.
+Every failure mapped by a Dirt tool handler includes its generated
+`error.callId`. Invalid tool names or arguments are rejected before Dirt creates
+a call ID; MCP SDK output-validation failures occur outside Dirt error mapping
+and do not carry a structured Dirt `error.callId`. A structured bridge edit
+error includes `error.editId` when the request leaves a committed or
+recovery-required record, or rollback cannot be confirmed after the world
+becomes unavailable. Transaction-finalization errors may also include the
+generated ID after a confirmed rollback. The MCP server preserves any received
+edit ID and salvages a valid nested ID from malformed success or non-2xx
+responses on edit and undo routes when possible. Callers can reconcile records
+returned by `get_edit_history` using `editId` or `callId`; an absent record means
+no retryable undo remains.
 
 ## Local development
 

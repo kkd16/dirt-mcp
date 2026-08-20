@@ -13,6 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.edit.DestinationPaletteEntry;
+import ca.deliyannides.dirtmcp.paper.world.edit.EditOperation;
+import ca.deliyannides.dirtmcp.paper.world.edit.EditRecord;
+import ca.deliyannides.dirtmcp.paper.world.edit.EditStatus;
 import ca.deliyannides.dirtmcp.paper.world.edit.FillRegion;
 import ca.deliyannides.dirtmcp.paper.world.edit.GetEditHistory;
 import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
@@ -21,6 +24,7 @@ import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -278,6 +282,118 @@ final class BridgeOperationEndpointsTest {
     }
 
     @Test
+    void serializesCompleteHistoryAndUndoResponses() throws Exception {
+        UUID recoveryEditId = UUID.fromString("423e4567-e89b-42d3-a456-426614174000");
+        EditRecord recovery =
+                new EditRecord(
+                        recoveryEditId,
+                        UUID.fromString("523e4567-e89b-42d3-a456-426614174000"),
+                        EditOperation.SET_BLOCKS,
+                        "world",
+                        BridgeTestFixture.WORLD_ID,
+                        new BlockBounds(new BlockPosition(-2, 64, 8), new BlockPosition(3, 70, 12)),
+                        7,
+                        "2026-08-19T12:02:03.120000000Z",
+                        EditStatus.RECOVERY_REQUIRED);
+        EditRecord committed =
+                new EditRecord(
+                        BridgeTestFixture.EDIT_ID,
+                        UUID.fromString("623e4567-e89b-42d3-a456-426614174000"),
+                        EditOperation.FILL_REGION,
+                        "world",
+                        BridgeTestFixture.WORLD_ID,
+                        new BlockBounds(new BlockPosition(0, 60, 0), new BlockPosition(1, 61, 1)),
+                        3,
+                        "2026-08-19T12:00:00.000Z",
+                        EditStatus.COMMITTED);
+        BridgeTestFixture.TestOperations operations =
+                new BridgeTestFixture.TestOperations() {
+                    @Override
+                    public GetEditHistory.Result getEditHistory(GetEditHistory.Request request) {
+                        return new GetEditHistory.Result(
+                                request.world(), List.of(recovery, committed));
+                    }
+
+                    @Override
+                    public UndoEdit.Result undoEdit(UndoEdit.Request request, UUID callId) {
+                        return new UndoEdit.Result(recovery, callId, "2026-08-19T12:05:00.000000Z");
+                    }
+                };
+        try (BridgeServer bridge = server(config(availablePort(), 4), operations);
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+
+            HttpResponse<String> history =
+                    send(client, post(bridge, "/v1/get-edit-history", "{\"world\":\"world\"}"));
+            HttpResponse<String> undo =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/undo-edit",
+                                    "{\"world\":\"world\",\"editId\":\"" + recoveryEditId + "\"}"));
+
+            assertEquals(200, history.statusCode());
+            assertEquals(
+                    json(
+                            """
+                            {
+                              "world":"world",
+                              "edits":[
+                                {
+                                  "editId":"423e4567-e89b-42d3-a456-426614174000",
+                                  "callId":"523e4567-e89b-42d3-a456-426614174000",
+                                  "operation":"set_blocks",
+                                  "world":"world",
+                                  "worldId":"323e4567-e89b-42d3-a456-426614174000",
+                                  "bounds":{"min":{"x":-2,"y":64,"z":8},
+                                            "max":{"x":3,"y":70,"z":12}},
+                                  "changedBlockCount":7,
+                                  "completedAt":"2026-08-19T12:02:03.120Z",
+                                  "status":"recovery_required"
+                                },
+                                {
+                                  "editId":"223e4567-e89b-42d3-a456-426614174000",
+                                  "callId":"623e4567-e89b-42d3-a456-426614174000",
+                                  "operation":"fill_region",
+                                  "world":"world",
+                                  "worldId":"323e4567-e89b-42d3-a456-426614174000",
+                                  "bounds":{"min":{"x":0,"y":60,"z":0},
+                                            "max":{"x":1,"y":61,"z":1}},
+                                  "changedBlockCount":3,
+                                  "completedAt":"2026-08-19T12:00:00Z",
+                                  "status":"committed"
+                                }
+                              ]
+                            }
+                            """),
+                    json(history.body()));
+            assertEquals(200, undo.statusCode());
+            assertEquals(
+                    json(
+                            """
+                            {
+                              "edit":{
+                                "editId":"423e4567-e89b-42d3-a456-426614174000",
+                                "callId":"523e4567-e89b-42d3-a456-426614174000",
+                                "operation":"set_blocks",
+                                "world":"world",
+                                "worldId":"323e4567-e89b-42d3-a456-426614174000",
+                                "bounds":{"min":{"x":-2,"y":64,"z":8},
+                                          "max":{"x":3,"y":70,"z":12}},
+                                "changedBlockCount":7,
+                                "completedAt":"2026-08-19T12:02:03.120Z",
+                                "status":"recovery_required"
+                              },
+                              "undoCallId":"123e4567-e89b-42d3-a456-426614174000",
+                              "undoneAt":"2026-08-19T12:05:00Z"
+                            }
+                            """),
+                    json(undo.body()));
+        }
+    }
+
+    @Test
     void appliesConfiguredDefaultsAndGeneratesSeedsWhenOmitted() throws Exception {
         int port = availablePort();
         DirtConfig standard = config(port, 4);
@@ -472,6 +588,24 @@ final class BridgeOperationEndpointsTest {
                                     .header("X-Dirt-Call-Id", "not-a-uuid")
                                     .POST(HttpRequest.BodyPublishers.ofString(fill))
                                     .build());
+            HttpResponse<String> nonCanonicalCallId =
+                    send(
+                            client,
+                            authorized(bridge, "/v1/fill-region")
+                                    .header("Content-Type", "application/json")
+                                    .header("X-Dirt-Call-Id", "1-1-4000-8000-1")
+                                    .POST(HttpRequest.BodyPublishers.ofString(fill))
+                                    .build());
+            HttpResponse<String> wrongVersionCallId =
+                    send(
+                            client,
+                            authorized(bridge, "/v1/fill-region")
+                                    .header("Content-Type", "application/json")
+                                    .header(
+                                            "X-Dirt-Call-Id",
+                                            "123e4567-e89b-12d3-a456-426614174000")
+                                    .POST(HttpRequest.BodyPublishers.ofString(fill))
+                                    .build());
             HttpResponse<String> invalidEditId =
                     send(
                             client,
@@ -479,11 +613,29 @@ final class BridgeOperationEndpointsTest {
                                     bridge,
                                     "/v1/undo-edit",
                                     "{\"world\":\"world\",\"editId\":\"not-a-uuid\"}"));
+            HttpResponse<String> nonCanonicalEditId =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/undo-edit",
+                                    "{\"world\":\"world\",\"editId\":\"1-1-4000-8000-1\"}"));
+            HttpResponse<String> wrongVersionEditId =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/undo-edit",
+                                    "{\"world\":\"world\",\"editId\":\"123e4567-e89b-12d3-a456-426614174000\"}"));
             HttpResponse<String> valid = send(client, post(bridge, "/v1/fill-region", fill));
 
             assertError(missingCallId, "X-Dirt-Call-Id must be a UUID version 4");
             assertError(invalidCallId, "X-Dirt-Call-Id must be a UUID version 4");
+            assertError(nonCanonicalCallId, "X-Dirt-Call-Id must be a UUID version 4");
+            assertError(wrongVersionCallId, "X-Dirt-Call-Id must be a UUID version 4");
             assertError(invalidEditId, "editId must be a UUID version 4");
+            assertError(nonCanonicalEditId, "editId must be a UUID version 4");
+            assertError(wrongVersionEditId, "editId must be a UUID version 4");
             assertEquals(200, valid.statusCode());
             assertEquals(
                     BridgeTestFixture.CALL_ID,

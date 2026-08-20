@@ -137,8 +137,11 @@ Every block-edit response has an `outcome`: `preview`, `no_change`, or
 `committed`. Its `edit` field is null for previews and no-ops. A committed result
 has a positive changed count and an `EditRecord` containing `editId`, the
 creating `callId`, operation, world name, stable `worldId`, normalized inclusive
-bounds, `changedBlockCount`, ISO-8601 `completedAt`, and status. Set-block bounds
-are the smallest cuboid containing all resolved positions.
+bounds, `changedBlockCount`, ISO-8601 `completedAt` for the original edit's
+completion or recovery, and last retained status. A later failed undo can change
+the status without changing that timestamp; a successful retry returns that
+pre-consumption status. Set-block bounds are the smallest cuboid containing all
+resolved positions.
 
 Only records backed by live undo data enter history. `get_edit_history` returns
 one loaded world's records newest first. `undo_edit` requires the caller to echo
@@ -154,8 +157,8 @@ least one maximum-sized edit. After a live request's scan finds a non-zero
 change, but before FAWE first mutates the world, Dirt atomically reserves one
 entry and the operation's worst-case changed-block budget. Reservation evicts
 the oldest committed entries when necessary and accounts for simultaneous edits
-in other worlds. `recovery_required` entries and history belonging to an undo in
-progress are protected. If no bounded reservation is possible, the request fails
+in other worlds. `recovery_required` entries and the newest entry currently being
+undone are protected. If no bounded reservation is possible, the request fails
 with `history_capacity_exceeded` before changing blocks, so all three limits
 remain hard even during recovery failures.
 
@@ -167,12 +170,18 @@ world stay blocked, but `get_edit_history` remains available and `undo_edit` may
 retry the same newest ID until it succeeds. If protected recovery records leave
 no capacity for another edit, its reservation fails before mutation.
 
-Any bridge error that leaves a retained committed or recovery-required record,
-or cannot confirm rollback after the world becomes unavailable, contains the
-transaction UUIDv4 as `error.editId`. The MCP error preserves that field and
-every MCP failure includes its generated `error.callId`, allowing the caller to
-reconcile an ambiguous cleanup or rollback result against `get_edit_history`
-without parsing prose.
+A structured bridge error that leaves a retained committed or
+recovery-required record, or cannot confirm rollback after the world becomes
+unavailable, contains the transaction UUIDv4 as `error.editId`. A transaction
+finalization error may also carry that generated ID after confirmed rollback.
+The MCP error preserves any received edit ID and recovers a valid nested ID from
+malformed success or non-2xx responses on edit and undo routes when possible.
+Every failure mapped by a Dirt tool handler includes its generated
+`error.callId`, allowing the caller to reconcile records returned by
+`get_edit_history` using either identifier without parsing prose. An absent
+record means no undoable edit remains. Invalid tool names or arguments fail
+before Dirt generates a call ID. MCP SDK output-validation failures occur
+outside Dirt error mapping and do not carry a structured Dirt `error.callId`.
 
 Retained undo state is deliberately minimal: Dirt keeps the `EditRecord`, touched
 chunk coordinates, and FAWE `ChangeSet`, not an open `EditSession` or a world

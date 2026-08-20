@@ -533,6 +533,22 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     }),
   );
 
+  const requestCountBeforeInvalidUndo = requests.length;
+  send(child, {
+    jsonrpc: '2.0',
+    id: 9,
+    method: 'tools/call',
+    params: modernParams({ name: 'undo_edit', arguments: { world: 'world', editId: 'not-a-uuid' } }),
+  });
+  const invalidUndo = await waitFor(messages, 9);
+  assert.equal(invalidUndo.result.isError, true);
+  assert.equal(invalidUndo.result.structuredContent, undefined);
+  assert.match(
+    invalidUndo.result.content?.[0]?.text ?? '',
+    /Input validation error: Invalid arguments for tool undo_edit/,
+  );
+  assert.equal(requests.length, requestCountBeforeInvalidUndo);
+
   send(child, {
     jsonrpc: '2.0',
     id: 10,

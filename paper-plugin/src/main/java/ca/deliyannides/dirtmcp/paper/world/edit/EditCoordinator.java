@@ -24,6 +24,7 @@ final class EditCoordinator implements AutoCloseable {
     private long retainedChangedBlocks;
     private int reservedHistoryEntries;
     private long reservedHistoryChangedBlocks;
+    private int pendingDisposals;
 
     EditCoordinator(int maxEntriesPerWorld, int maxEntriesTotal, long maxRetainedChangedBlocks) {
         if (maxEntriesPerWorld < 1
@@ -69,33 +70,38 @@ final class EditCoordinator implements AutoCloseable {
             releaseReservation(worldId, state);
             throw busy(worldName);
         }
+        boolean unavailable;
         synchronized (this.worlds) {
-            if (this.closed.get() || state.invalidated || generation != state.generation) {
-                state.lock.unlock();
-                releaseReservation(worldId, state);
-                throw unavailable(worldName);
-            }
-            if (access == Access.UNDO) {
+            unavailable = this.closed.get() || state.invalidated || generation != state.generation;
+            if (!unavailable && access == Access.UNDO) {
                 state.undoActive = true;
             }
+        }
+        if (unavailable) {
+            state.lock.unlock();
+            releaseReservation(worldId, state);
+            throw unavailable(worldName);
         }
         return new Lease(worldId, state, generation, access);
     }
 
     void invalidate(UUID worldId) {
+        List<RetainedEdit> discarded = List.of();
         synchronized (this.worlds) {
             WorldState state = this.worlds.get(worldId);
             if (state != null) {
                 state.generation++;
                 state.invalidated = true;
-                pruneInvalidated(worldId, state);
+                discarded = pruneIdle(worldId, state);
             }
         }
+        closeDetached(discarded);
     }
 
     @Override
     public void close() {
         if (this.closed.compareAndSet(false, true)) {
+            List<RetainedEdit> discarded = new ArrayList<>();
             synchronized (this.worlds) {
                 var iterator = this.worlds.entrySet().iterator();
                 while (iterator.hasNext()) {
@@ -103,17 +109,19 @@ final class EditCoordinator implements AutoCloseable {
                     state.generation++;
                     state.invalidated = true;
                     if (state.reservations == 0) {
-                        discardHistory(state);
+                        discarded.addAll(detachHistory(state));
                         iterator.remove();
                     }
                 }
             }
+            closeDetached(discarded);
         }
     }
 
     boolean isQuiescent() {
         synchronized (this.worlds) {
-            return this.worlds.values().stream().allMatch(state -> state.reservations == 0);
+            return this.pendingDisposals == 0
+                    && this.worlds.values().stream().allMatch(state -> state.reservations == 0);
         }
     }
 
@@ -136,26 +144,42 @@ final class EditCoordinator implements AutoCloseable {
     }
 
     private void releaseReservation(UUID worldId, WorldState state) {
+        List<RetainedEdit> discarded;
         synchronized (this.worlds) {
             state.reservations--;
-            pruneInvalidated(worldId, state);
+            discarded = pruneIdle(worldId, state);
         }
+        closeDetached(discarded);
     }
 
-    private void pruneInvalidated(UUID worldId, WorldState state) {
-        if (state.invalidated && state.reservations == 0) {
-            discardHistory(state);
+    private List<RetainedEdit> pruneIdle(UUID worldId, WorldState state) {
+        if (state.reservations != 0) {
+            return List.of();
+        }
+        List<RetainedEdit> discarded = List.of();
+        if (state.invalidated) {
+            discarded = detachHistory(state);
+        }
+        if (state.history.isEmpty()) {
             this.worlds.remove(worldId, state);
         }
+        return discarded;
     }
 
-    private void discardHistory(WorldState state) {
-        while (!state.history.isEmpty()) {
-            evict(state.history.peekFirst(), true);
+    private List<RetainedEdit> detachHistory(WorldState state) {
+        List<RetainedEdit> detached = new ArrayList<>(state.history.size());
+        detached.addAll(state.history);
+        state.history.clear();
+        for (RetainedEdit edit : detached) {
+            if (this.retained.remove(edit.record().editId(), edit)) {
+                this.retainedChangedBlocks -= edit.record().changedBlockCount();
+            }
         }
+        this.pendingDisposals += detached.size();
+        return detached;
     }
 
-    private void reserveHistory(WorldState state, long maximumChangedBlocks)
+    private List<RetainedEdit> reserveHistory(WorldState state, long maximumChangedBlocks)
             throws OperationException {
         if (maximumChangedBlocks < 1 || maximumChangedBlocks > this.maxRetainedChangedBlocks) {
             throw historyCapacity();
@@ -189,11 +213,12 @@ final class EditCoordinator implements AutoCloseable {
         }
 
         for (RetainedEdit eviction : evictions) {
-            evict(eviction, true);
+            detach(eviction);
         }
         state.historyReservations++;
         this.reservedHistoryEntries++;
         this.reservedHistoryChangedBlocks += maximumChangedBlocks;
+        return List.copyOf(evictions);
     }
 
     private void retainReserved(WorldState state, RetainedEdit edit, long reservedChangedBlocks) {
@@ -201,21 +226,37 @@ final class EditCoordinator implements AutoCloseable {
         if (this.retained.containsKey(editId)) {
             throw new IllegalArgumentException("Duplicate edit ID: " + editId);
         }
-        if (reservedChangedBlocks < edit.record().changedBlockCount()
+        long changedBlocks = edit.record().changedBlockCount();
+        if (reservedChangedBlocks < changedBlocks
                 || state.historyReservations < 1
                 || this.reservedHistoryEntries < 1
                 || this.reservedHistoryChangedBlocks < reservedChangedBlocks) {
             throw new IllegalStateException("Edit exceeds its retained-history reservation");
         }
+
+        long projectedWorldEntries = (long) state.history.size() + 1;
+        long projectedWorldReservations = (long) state.historyReservations - 1;
+        long projectedRetainedEntries = (long) this.retained.size() + 1;
+        long projectedGlobalReservations = (long) this.reservedHistoryEntries - 1;
+        long projectedReservedChangedBlocks =
+                this.reservedHistoryChangedBlocks - reservedChangedBlocks;
+        if (projectedWorldEntries > this.maxEntriesPerWorld
+                || projectedWorldEntries + projectedWorldReservations > this.maxEntriesPerWorld
+                || projectedRetainedEntries > this.maxEntriesTotal
+                || projectedRetainedEntries + projectedGlobalReservations > this.maxEntriesTotal
+                || this.retainedChangedBlocks > this.maxRetainedChangedBlocks - changedBlocks) {
+            throw new IllegalStateException("Retained edit exceeds bounded history capacity");
+        }
+        long projectedRetainedChangedBlocks = this.retainedChangedBlocks + changedBlocks;
+        if (projectedReservedChangedBlocks
+                > this.maxRetainedChangedBlocks - projectedRetainedChangedBlocks) {
+            throw new IllegalStateException("Retained edit exceeds bounded history capacity");
+        }
+
         releaseHistoryReservation(state, reservedChangedBlocks);
         state.history.addLast(edit);
         this.retained.put(editId, edit);
-        this.retainedChangedBlocks += edit.record().changedBlockCount();
-        if (state.history.size() > this.maxEntriesPerWorld
-                || this.retained.size() > this.maxEntriesTotal
-                || this.retainedChangedBlocks > this.maxRetainedChangedBlocks) {
-            throw new IllegalStateException("Retained edit exceeded its bounded reservation");
-        }
+        this.retainedChangedBlocks = projectedRetainedChangedBlocks;
     }
 
     private void releaseHistoryReservation(WorldState state, long changedBlocks) {
@@ -234,10 +275,40 @@ final class EditCoordinator implements AutoCloseable {
         }
     }
 
-    private void evict(RetainedEdit edit, boolean closeToken) {
+    private void detach(RetainedEdit edit) {
         removeWithoutClosing(edit);
-        if (closeToken) {
-            edit.undo().close();
+        this.pendingDisposals++;
+        WorldState owner = this.worlds.get(edit.record().worldId());
+        if (owner != null
+                && !owner.invalidated
+                && owner.reservations == 0
+                && owner.history.isEmpty()) {
+            this.worlds.remove(edit.record().worldId(), owner);
+        }
+    }
+
+    private void closeDetached(Iterable<RetainedEdit> detached) {
+        Throwable failure = null;
+        for (RetainedEdit edit : detached) {
+            try {
+                edit.undo().close();
+            } catch (RuntimeException | Error closeFailure) {
+                if (failure == null) {
+                    failure = closeFailure;
+                } else if (failure != closeFailure) {
+                    failure.addSuppressed(closeFailure);
+                }
+            } finally {
+                synchronized (this.worlds) {
+                    this.pendingDisposals--;
+                }
+            }
+        }
+        if (failure instanceof RuntimeException runtimeFailure) {
+            throw runtimeFailure;
+        }
+        if (failure instanceof Error error) {
+            throw error;
         }
     }
 
@@ -247,7 +318,9 @@ final class EditCoordinator implements AutoCloseable {
             WorldState owner = this.worlds.get(candidate.record().worldId());
             if (!excluded.contains(candidate)
                     && candidate.record().status() == EditStatus.COMMITTED
-                    && (owner == null || !owner.undoActive)) {
+                    && (owner == null
+                            || !owner.undoActive
+                            || owner.history.peekLast() != candidate)) {
                 return candidate;
             }
         }
@@ -303,6 +376,7 @@ final class EditCoordinator implements AutoCloseable {
         }
 
         void reserveHistory(long maximumChangedBlocks) throws OperationException {
+            List<RetainedEdit> evictions;
             synchronized (worlds) {
                 if (this.access != Access.MUTATION
                         || this.historyReservation != 0
@@ -315,9 +389,10 @@ final class EditCoordinator implements AutoCloseable {
                         || closed.get()) {
                     throw unavailable();
                 }
-                EditCoordinator.this.reserveHistory(this.state, maximumChangedBlocks);
+                evictions = EditCoordinator.this.reserveHistory(this.state, maximumChangedBlocks);
                 this.historyReservation = maximumChangedBlocks;
             }
+            closeDetached(evictions);
         }
 
         boolean remember(RetainedEdit edit) {
@@ -332,15 +407,15 @@ final class EditCoordinator implements AutoCloseable {
             }
         }
 
-        void rememberRecovery(RetainedEdit edit) {
+        boolean rememberRecovery(RetainedEdit edit) {
             synchronized (worlds) {
                 if (isCurrent(edit)) {
                     requireHistoryReservation();
                     retainReserved(this.state, edit.requireRecovery(), this.historyReservation);
                     this.historyReservation = 0;
-                } else {
-                    edit.undo().close();
+                    return true;
                 }
+                return false;
             }
         }
 
@@ -390,11 +465,16 @@ final class EditCoordinator implements AutoCloseable {
         }
 
         void removeLatest(RetainedEdit expected) {
+            boolean close = false;
             synchronized (worlds) {
                 if (this.generation == this.state.generation
                         && this.state.history.peekLast() == expected) {
-                    evict(expected, true);
+                    detach(expected);
+                    close = true;
                 }
+            }
+            if (close) {
+                closeDetached(List.of(expected));
             }
         }
 

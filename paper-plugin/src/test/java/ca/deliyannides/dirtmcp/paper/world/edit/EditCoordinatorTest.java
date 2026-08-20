@@ -11,6 +11,9 @@ import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 @SuppressWarnings("try")
@@ -18,22 +21,34 @@ final class EditCoordinatorTest {
     private static final UUID WORLD_ID = UUID.fromString("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
     private static final UUID OTHER_WORLD_ID =
             UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd");
+    private static final UUID THIRD_WORLD_ID =
+            UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc");
     private static final UUID CALL_ID = UUID.fromString("123e4567-e89b-42d3-a456-426614174000");
 
     @Test
     void invalidatingIdleWorldDisposesHistoryAndPrunesState() throws OperationException {
-        EditCoordinator coordinator = new EditCoordinator(2, 4, 10);
-        TestUndo undo = new TestUndo(2);
-        try (EditCoordinator.Lease lease = coordinator.enterMutation(WORLD_ID, "world")) {
-            lease.reserveHistory(undo.changedBlockCount());
-            assertTrue(lease.remember(edit(WORLD_ID, "world", undo, EditStatus.COMMITTED)));
-        }
+        EditCoordinator coordinator = new EditCoordinator(3, 4, 10);
+        TestUndo first = new TestUndo(2);
+        TestUndo second = new TestUndo(3);
+        TestUndo other = new TestUndo(4);
+        remember(coordinator, edit(WORLD_ID, "world", first, EditStatus.COMMITTED));
+        remember(coordinator, edit(WORLD_ID, "world", second, EditStatus.COMMITTED));
+        RetainedEdit otherEdit = edit(OTHER_WORLD_ID, "other", other, EditStatus.COMMITTED);
+        remember(coordinator, otherEdit);
 
         coordinator.invalidate(WORLD_ID);
 
-        assertTrue(undo.closed);
-        assertEquals(0, coordinator.trackedWorldCount());
-        assertEquals(0, coordinator.retainedEditCount());
+        assertTrue(first.closed);
+        assertTrue(second.closed);
+        assertFalse(other.closed);
+        assertEquals(1, coordinator.trackedWorldCount());
+        assertEquals(1, coordinator.retainedEditCount());
+        assertEquals(4, coordinator.retainedChangedBlockCount());
+        try (EditCoordinator.Lease history = coordinator.enterHistory(OTHER_WORLD_ID, "other")) {
+            assertEquals(java.util.List.of(otherEdit.record()), history.history());
+        }
+        coordinator.close();
+        assertTrue(other.closed);
     }
 
     @Test
@@ -76,11 +91,252 @@ final class EditCoordinatorTest {
         assertTrue(first.closed);
         assertTrue(second.closed);
         assertFalse(third.closed);
+        assertEquals(1, coordinator.trackedWorldCount());
         assertEquals(1, coordinator.retainedEditCount());
         assertEquals(2, coordinator.retainedChangedBlockCount());
         try (EditCoordinator.Lease history = coordinator.enterHistory(WORLD_ID, "world")) {
             assertEquals(java.util.List.of(thirdEdit.record()), history.history());
         }
+    }
+
+    @Test
+    void globalAdmissionProtectsOnlyTheEditBeingUndone() throws OperationException {
+        EditCoordinator coordinator = new EditCoordinator(2, 2, 2);
+        TestUndo olderUndo = new TestUndo(1);
+        TestUndo newestUndo = new TestUndo(1);
+        RetainedEdit older = edit(WORLD_ID, "world", olderUndo, EditStatus.COMMITTED);
+        RetainedEdit newest = edit(WORLD_ID, "world", newestUndo, EditStatus.COMMITTED);
+        remember(coordinator, older);
+        remember(coordinator, newest);
+
+        try (EditCoordinator.Lease undo = coordinator.enterUndo(WORLD_ID, "world");
+                EditCoordinator.Lease other = coordinator.enterMutation(OTHER_WORLD_ID, "other")) {
+            other.reserveHistory(1);
+
+            assertTrue(olderUndo.closed);
+            assertFalse(newestUndo.closed);
+            assertEquals(java.util.List.of(newest.record()), undo.history());
+        }
+
+        coordinator.close();
+        assertTrue(newestUndo.closed);
+    }
+
+    @Test
+    void evictionDisposesOutsideMonitorWhileKeepingReplacementCapacityReserved() throws Exception {
+        EditCoordinator coordinator = new EditCoordinator(1, 1, 1);
+        BlockingUndo evictedUndo = new BlockingUndo(1);
+        RetainedEdit evicted = edit(WORLD_ID, "world", evictedUndo, EditStatus.COMMITTED);
+        remember(coordinator, evicted);
+        TestUndo replacementUndo = new TestUndo(1);
+        RetainedEdit replacement =
+                edit(OTHER_WORLD_ID, "other", replacementUndo, EditStatus.COMMITTED);
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var replacementTask =
+                    executor.submit(
+                            () -> {
+                                remember(coordinator, replacement);
+                                return null;
+                            });
+            try {
+                assertTrue(evictedUndo.closeStarted.await(2, TimeUnit.SECONDS));
+
+                var otherWorldAdmission =
+                        executor.submit(
+                                () -> {
+                                    try (EditCoordinator.Lease lease =
+                                            coordinator.enterMutation(THIRD_WORLD_ID, "third")) {
+                                        try {
+                                            lease.reserveHistory(1);
+                                            return null;
+                                        } catch (OperationException failure) {
+                                            return failure.failure();
+                                        }
+                                    }
+                                });
+                assertEquals(
+                        OperationFailure.HISTORY_CAPACITY_EXCEEDED,
+                        otherWorldAdmission.get(2, TimeUnit.SECONDS));
+                assertFalse(replacementTask.isDone());
+                assertEquals(1, coordinator.trackedWorldCount());
+                assertEquals(0, coordinator.retainedEditCount());
+                assertEquals(0, coordinator.retainedChangedBlockCount());
+            } finally {
+                evictedUndo.allowClose.countDown();
+            }
+            replacementTask.get(2, TimeUnit.SECONDS);
+        }
+
+        assertTrue(evictedUndo.closed);
+        assertFalse(replacementUndo.closed);
+        assertEquals(1, coordinator.trackedWorldCount());
+        assertEquals(1, coordinator.retainedEditCount());
+        assertEquals(1, coordinator.retainedChangedBlockCount());
+        coordinator.close();
+        assertTrue(replacementUndo.closed);
+    }
+
+    @Test
+    void invalidationDisposesOutsideMonitorAndCompletesBeforeReturning() throws Exception {
+        EditCoordinator coordinator = new EditCoordinator(2, 4, 10);
+        BlockingUndo undo = new BlockingUndo(1);
+        remember(coordinator, edit(WORLD_ID, "world", undo, EditStatus.COMMITTED));
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var invalidation =
+                    executor.submit(
+                            () -> {
+                                coordinator.invalidate(WORLD_ID);
+                                return null;
+                            });
+            try {
+                assertTrue(undo.closeStarted.await(2, TimeUnit.SECONDS));
+                var otherWorldHistory =
+                        executor.submit(
+                                () -> {
+                                    try (EditCoordinator.Lease lease =
+                                            coordinator.enterHistory(OTHER_WORLD_ID, "other")) {
+                                        return lease.history();
+                                    }
+                                });
+
+                assertTrue(otherWorldHistory.get(2, TimeUnit.SECONDS).isEmpty());
+                assertFalse(invalidation.isDone());
+                assertFalse(coordinator.isQuiescent());
+                assertEquals(0, coordinator.trackedWorldCount());
+                assertEquals(0, coordinator.retainedEditCount());
+            } finally {
+                undo.allowClose.countDown();
+            }
+            invalidation.get(2, TimeUnit.SECONDS);
+        }
+
+        assertTrue(undo.closed);
+        assertTrue(coordinator.isQuiescent());
+    }
+
+    @Test
+    void shutdownDisposesOutsideMonitorAndCompletesBeforeReturning() throws Exception {
+        EditCoordinator coordinator = new EditCoordinator(2, 4, 10);
+        BlockingUndo undo = new BlockingUndo(1);
+        remember(coordinator, edit(WORLD_ID, "world", undo, EditStatus.COMMITTED));
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var shutdown =
+                    executor.submit(
+                            () -> {
+                                coordinator.close();
+                                return null;
+                            });
+            try {
+                assertTrue(undo.closeStarted.await(2, TimeUnit.SECONDS));
+                var rejectedCoordination =
+                        executor.submit(
+                                () -> {
+                                    try (EditCoordinator.Lease ignored =
+                                            coordinator.enterHistory(OTHER_WORLD_ID, "other")) {
+                                        return null;
+                                    } catch (OperationException failure) {
+                                        return failure.failure();
+                                    }
+                                });
+
+                assertEquals(
+                        OperationFailure.WORLD_UNAVAILABLE,
+                        rejectedCoordination.get(2, TimeUnit.SECONDS));
+                assertFalse(shutdown.isDone());
+                assertFalse(coordinator.isQuiescent());
+                assertEquals(0, coordinator.trackedWorldCount());
+                assertEquals(0, coordinator.retainedEditCount());
+            } finally {
+                undo.allowClose.countDown();
+            }
+            shutdown.get(2, TimeUnit.SECONDS);
+        }
+
+        assertTrue(undo.closed);
+        assertTrue(coordinator.isQuiescent());
+    }
+
+    @Test
+    void shutdownAttemptsEveryDisposalAndRestoresQuiescenceAfterCloseFailure()
+            throws OperationException {
+        EditCoordinator coordinator = new EditCoordinator(2, 2, 2);
+        ThrowingUndo first = new ThrowingUndo(1);
+        TestUndo second = new TestUndo(1);
+        remember(coordinator, edit(WORLD_ID, "world", first, EditStatus.COMMITTED));
+        remember(coordinator, edit(WORLD_ID, "world", second, EditStatus.COMMITTED));
+
+        IllegalStateException failure =
+                assertThrows(IllegalStateException.class, coordinator::close);
+
+        assertEquals("test close failure", failure.getMessage());
+        assertTrue(first.closeAttempted);
+        assertTrue(second.closed);
+        assertTrue(coordinator.isQuiescent());
+        assertEquals(0, coordinator.trackedWorldCount());
+        assertEquals(0, coordinator.retainedEditCount());
+    }
+
+    @Test
+    void successfulUndoDisposesOutsideMonitorAndCompletesBeforeReturning() throws Exception {
+        EditCoordinator coordinator = new EditCoordinator(2, 4, 10);
+        BlockingUndo undo = new BlockingUndo(1);
+        RetainedEdit retained = edit(WORLD_ID, "world", undo, EditStatus.COMMITTED);
+        remember(coordinator, retained);
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var removal =
+                    executor.submit(
+                            () -> {
+                                try (EditCoordinator.Lease lease =
+                                        coordinator.enterUndo(WORLD_ID, "world")) {
+                                    lease.removeLatest(retained);
+                                }
+                                return null;
+                            });
+            try {
+                assertTrue(undo.closeStarted.await(2, TimeUnit.SECONDS));
+                var otherWorldHistory =
+                        executor.submit(
+                                () -> {
+                                    try (EditCoordinator.Lease lease =
+                                            coordinator.enterHistory(OTHER_WORLD_ID, "other")) {
+                                        return lease.history();
+                                    }
+                                });
+
+                assertTrue(otherWorldHistory.get(2, TimeUnit.SECONDS).isEmpty());
+                assertFalse(removal.isDone());
+                assertEquals(0, coordinator.retainedEditCount());
+            } finally {
+                undo.allowClose.countDown();
+            }
+            removal.get(2, TimeUnit.SECONDS);
+        }
+
+        assertTrue(undo.closed);
+        assertEquals(0, coordinator.trackedWorldCount());
+    }
+
+    @Test
+    void emptyIdleWorldStatesArePruned() throws OperationException {
+        EditCoordinator coordinator = new EditCoordinator(2, 4, 10);
+
+        try (EditCoordinator.Lease history = coordinator.enterHistory(WORLD_ID, "world")) {
+            assertEquals(1, coordinator.trackedWorldCount());
+            assertTrue(history.history().isEmpty());
+        }
+        assertEquals(0, coordinator.trackedWorldCount());
+
+        try (EditCoordinator.Lease mutation = coordinator.enterMutation(WORLD_ID, "world")) {
+            mutation.reserveHistory(2);
+            assertEquals(1, coordinator.trackedWorldCount());
+        }
+        assertEquals(0, coordinator.trackedWorldCount());
+        assertEquals(0, coordinator.retainedEditCount());
+        assertEquals(0, coordinator.retainedChangedBlockCount());
     }
 
     @Test
@@ -90,7 +346,7 @@ final class EditCoordinatorTest {
         RetainedEdit recovery = edit(WORLD_ID, "world", undo, EditStatus.RECOVERY_REQUIRED);
         try (EditCoordinator.Lease lease = coordinator.enterMutation(WORLD_ID, "world")) {
             lease.reserveHistory(undo.changedBlockCount());
-            lease.rememberRecovery(recovery);
+            assertTrue(lease.rememberRecovery(recovery));
         }
 
         assertEquals(1, coordinator.retainedEditCount());
@@ -209,10 +465,12 @@ final class EditCoordinatorTest {
         assertTrue(stale.history().isEmpty());
         stale.markRecoveryRequired(recovery);
         stale.removeLatest(recovery);
-        stale.rememberRecovery(recovery);
+        assertFalse(stale.rememberRecovery(recovery));
+        assertFalse(undo.closed);
+        stale.close();
+        stale.close();
+        undo.close();
         assertTrue(undo.closed);
-        stale.close();
-        stale.close();
         assertEquals(0, coordinator.trackedWorldCount());
         assertEquals(0, coordinator.retainedEditCount());
     }
@@ -242,6 +500,32 @@ final class EditCoordinatorTest {
         assertThrows(IllegalStateException.class, () -> released.reserveHistory(1));
     }
 
+    @Test
+    void retentionPrevalidationLeavesCandidateUnownedAndHistoryUnchanged()
+            throws OperationException {
+        EditCoordinator coordinator = new EditCoordinator(2, 4, 10);
+        TestUndo existingUndo = new TestUndo(1);
+        RetainedEdit existing = edit(WORLD_ID, "world", existingUndo, EditStatus.COMMITTED);
+        remember(coordinator, existing);
+
+        TestUndo candidateUndo = new TestUndo(2);
+        RetainedEdit candidate = edit(WORLD_ID, "world", candidateUndo, EditStatus.COMMITTED);
+        try (EditCoordinator.Lease lease = coordinator.enterMutation(WORLD_ID, "world")) {
+            lease.reserveHistory(1);
+
+            assertThrows(IllegalStateException.class, () -> lease.remember(candidate));
+            assertEquals(java.util.List.of(existing.record()), lease.history());
+            assertEquals(1, coordinator.retainedEditCount());
+            assertEquals(1, coordinator.retainedChangedBlockCount());
+            assertFalse(candidateUndo.closed);
+        }
+
+        coordinator.close();
+        assertTrue(existingUndo.closed);
+        assertFalse(candidateUndo.closed);
+        candidateUndo.close();
+    }
+
     private static void remember(EditCoordinator coordinator, RetainedEdit edit)
             throws OperationException {
         try (EditCoordinator.Lease lease =
@@ -251,7 +535,8 @@ final class EditCoordinatorTest {
         }
     }
 
-    private static RetainedEdit edit(UUID worldId, String world, TestUndo undo, EditStatus status) {
+    private static RetainedEdit edit(
+            UUID worldId, String world, EditPlatform.UndoToken undo, EditStatus status) {
         BlockPosition position = new BlockPosition(1, 2, 3);
         return new RetainedEdit(
                 new EditRecord(
@@ -283,6 +568,54 @@ final class EditCoordinatorTest {
         @Override
         public void close() {
             this.closed = true;
+        }
+    }
+
+    private static final class BlockingUndo implements EditPlatform.UndoToken {
+        private final long changedBlockCount;
+        private final CountDownLatch closeStarted = new CountDownLatch(1);
+        private final CountDownLatch allowClose = new CountDownLatch(1);
+        private volatile boolean closed;
+
+        private BlockingUndo(long changedBlockCount) {
+            this.changedBlockCount = changedBlockCount;
+        }
+
+        @Override
+        public long changedBlockCount() {
+            return this.changedBlockCount;
+        }
+
+        @Override
+        public void close() {
+            this.closeStarted.countDown();
+            try {
+                this.allowClose.await();
+            } catch (InterruptedException failure) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while closing test undo", failure);
+            }
+            this.closed = true;
+        }
+    }
+
+    private static final class ThrowingUndo implements EditPlatform.UndoToken {
+        private final long changedBlockCount;
+        private boolean closeAttempted;
+
+        private ThrowingUndo(long changedBlockCount) {
+            this.changedBlockCount = changedBlockCount;
+        }
+
+        @Override
+        public long changedBlockCount() {
+            return this.changedBlockCount;
+        }
+
+        @Override
+        public void close() {
+            this.closeAttempted = true;
+            throw new IllegalStateException("test close failure");
         }
     }
 }

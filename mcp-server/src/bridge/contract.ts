@@ -67,7 +67,9 @@ export const BridgeErrorResponseSchema = z
         editId: z
           .uuidv4()
           .optional()
-          .describe('Edit transaction associated with this failure when its mutation may remain or is undoable.'),
+          .describe(
+            'Edit transaction associated with a failure that may need reconciliation against retained history.',
+          ),
         message: z.string().min(1).describe('Human-readable explanation.'),
       })
       .strict(),

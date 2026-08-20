@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.operation;
 
+import ca.deliyannides.dirtmcp.paper.validation.UuidV4;
 import java.io.Serial;
 import java.util.Objects;
 import java.util.Optional;
@@ -23,8 +24,8 @@ public class OperationException extends Exception {
             OperationFailure failure, String message, Throwable cause, UUID editId) {
         super(message, cause);
         this.failure = Objects.requireNonNull(failure, "failure");
-        if (editId != null && (editId.version() != 4 || editId.variant() != 2)) {
-            throw new IllegalArgumentException("editId must be a UUID version 4");
+        if (editId != null) {
+            UuidV4.require(editId, "editId");
         }
         this.editId = editId;
     }

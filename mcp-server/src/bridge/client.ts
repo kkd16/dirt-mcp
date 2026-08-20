@@ -1,7 +1,30 @@
 import type { BridgeConfig } from '../config.ts';
 import * as z from 'zod/v4';
-import { BridgeErrorResponseSchema, type BridgeRoute } from './contract.ts';
+import { BRIDGE_ROUTES, BridgeErrorResponseSchema, type BridgeRoute } from './contract.ts';
 import { ToolFailure } from './errors.ts';
+
+const EDIT_RESPONSE_PATHS = new Set<BridgeRoute['path']>([
+  BRIDGE_ROUTES.replaceRegionBlocks.path,
+  BRIDGE_ROUTES.fillRegion.path,
+  BRIDGE_ROUTES.setBlocks.path,
+  BRIDGE_ROUTES.undoEdit.path,
+]);
+
+const EditIdContainerSchema = z.object({ editId: z.uuidv4() }).passthrough();
+const EditIdEnvelopeSchema = z.object({ edit: z.unknown().optional(), error: z.unknown().optional() }).passthrough();
+
+function salvageEditId(route: BridgeRoute, body: unknown): string | undefined {
+  if (!EDIT_RESPONSE_PATHS.has(route.path)) return undefined;
+
+  const envelope = EditIdEnvelopeSchema.safeParse(body);
+  if (!envelope.success) return undefined;
+  const edit = EditIdContainerSchema.safeParse(envelope.data.edit);
+  const error = EditIdContainerSchema.safeParse(envelope.data.error);
+  const candidates = [edit, error].flatMap((candidate) => (candidate.success ? [candidate.data.editId] : []));
+  if (candidates.length === 0) return undefined;
+  const first = candidates[0]!;
+  return candidates.every((candidate) => candidate.toLowerCase() === first.toLowerCase()) ? first : undefined;
+}
 
 export class BridgeClient {
   readonly #fetch: typeof globalThis.fetch;
@@ -45,15 +68,16 @@ export class BridgeClient {
     }
 
     if (!response.ok) {
-      if (response.status === 401) {
-        throw new ToolFailure('bridge_unauthorized', 'Paper bridge rejected DIRT_MCP_BRIDGE_TOKEN.');
-      }
       const body: unknown = await response.json().catch(() => undefined);
+      const editId = salvageEditId(route, body);
+      if (response.status === 401) {
+        throw new ToolFailure('bridge_unauthorized', 'Paper bridge rejected DIRT_MCP_BRIDGE_TOKEN.', editId);
+      }
       const detail = BridgeErrorResponseSchema.safeParse(body);
       if (detail.success) {
         throw new ToolFailure(detail.data.error.code, detail.data.error.message, detail.data.error.editId);
       }
-      throw new ToolFailure('bridge_http_error', `Paper bridge returned unstructured HTTP ${response.status}.`);
+      throw new ToolFailure('bridge_http_error', `Paper bridge returned unstructured HTTP ${response.status}.`, editId);
     }
 
     let body: unknown;
@@ -64,7 +88,11 @@ export class BridgeClient {
     }
     const parsed = responseSchema.safeParse(body);
     if (!parsed.success) {
-      throw new ToolFailure('bridge_invalid_response', 'Paper bridge response did not match the documented schema.');
+      throw new ToolFailure(
+        'bridge_invalid_response',
+        'Paper bridge response did not match the documented schema.',
+        salvageEditId(route, body),
+      );
     }
     return parsed.data;
   }

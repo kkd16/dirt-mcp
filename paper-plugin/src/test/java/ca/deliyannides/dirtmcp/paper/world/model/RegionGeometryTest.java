@@ -84,4 +84,19 @@ final class RegionGeometryTest {
                                 new BlockPosition(
                                         Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE)));
     }
+
+    @Test
+    void blockBoundsRejectReversedAxes() {
+        BlockPosition origin = new BlockPosition(0, 0, 0);
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new BlockBounds(new BlockPosition(1, 0, 0), origin));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new BlockBounds(new BlockPosition(0, 1, 0), origin));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new BlockBounds(new BlockPosition(0, 0, 1), origin));
+    }
 }

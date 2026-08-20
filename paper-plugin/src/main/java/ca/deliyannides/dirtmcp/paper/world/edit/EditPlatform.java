@@ -32,6 +32,13 @@ interface EditPlatform extends AutoCloseable {
 
     void undo(WorldHandle world, UndoToken undo) throws OperationException;
 
+    /**
+     * Rolls back an edit while its prepared operation, including its chunk-ticket lease, remains
+     * open. This path must not reacquire chunks or reject recovery solely because shutdown has
+     * begun.
+     */
+    void rollbackPrepared(PreparedOperation prepared, UndoToken undo) throws OperationException;
+
     void beginStopping();
 
     @Override

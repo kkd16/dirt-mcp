@@ -2,8 +2,10 @@ import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { BridgeClient } from '../bridge/client.ts';
 import { BRIDGE_ROUTES } from '../bridge/contract.ts';
-import { BlockPositionSchema, EmptyInputSchema, READ_WORLD_ANNOTATIONS } from './common.ts';
+import { BlockPositionSchema, EmptyInputSchema, INT32_MAX, READ_WORLD_ANNOTATIONS } from './common.ts';
 import { executeToolCall, successResult } from './execution.ts';
+
+const PositiveInt32Schema = z.number().int().min(1).max(INT32_MAX);
 
 const PingServerOutputSchema = z
   .object({
@@ -53,17 +55,19 @@ const LimitConfigurationSchema = z
   .strict()
   .describe('Active limits that constrain Dirt inspection and mutation tools.');
 
-const EditHistoryConfigurationSchema = z
+export const EditHistoryConfigurationSchema = z
   .object({
-    maxEntriesPerWorld: z.number().int().positive().describe('Maximum retained undoable edits in one loaded world.'),
-    maxEntriesTotal: z.number().int().positive().describe('Maximum retained undoable edits across all loaded worlds.'),
-    maxRetainedChangedBlocks: z
-      .number()
-      .int()
-      .positive()
-      .describe('Maximum sum of changed-block counts across all retained undoable edits.'),
+    maxEntriesPerWorld: PositiveInt32Schema.describe('Maximum retained undoable edits in one loaded world.'),
+    maxEntriesTotal: PositiveInt32Schema.describe('Maximum retained undoable edits across all loaded worlds.'),
+    maxRetainedChangedBlocks: PositiveInt32Schema.describe(
+      'Maximum sum of changed-block counts across all retained undoable edits; at least maxChangedBlocks.',
+    ),
   })
   .strict()
+  .refine(
+    (history) => history.maxEntriesPerWorld <= history.maxEntriesTotal,
+    'maxEntriesPerWorld must not exceed maxEntriesTotal.',
+  )
   .describe('Active bounded in-memory edit-history retention settings.');
 
 const DefaultConfigurationSchema = z
@@ -75,7 +79,7 @@ const DefaultConfigurationSchema = z
   .strict()
   .describe('Active optional-argument defaults for Dirt tools.');
 
-const ServerStatusSchema = z
+export const ServerStatusSchema = z
   .object({
     builds: z
       .object({
@@ -137,6 +141,10 @@ const ServerStatusSchema = z
     defaults: DefaultConfigurationSchema,
   })
   .strict()
+  .refine((status) => status.editHistory.maxRetainedChangedBlocks >= status.limits.maxChangedBlocks, {
+    message: 'maxRetainedChangedBlocks must be at least maxChangedBlocks.',
+    path: ['editHistory', 'maxRetainedChangedBlocks'],
+  })
   .describe(
     'Current lightweight Paper context, limits, and edit-history retention for grounding subsequent Dirt calls.',
   );

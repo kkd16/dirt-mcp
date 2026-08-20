@@ -95,9 +95,12 @@ are:
 
 An `EditRecord` contains the generated `editId`, creating `callId`, operation,
 world name, Paper `worldId`, normalized inclusive bounds, positive
-`changedBlockCount`, ISO-8601 `completedAt`, and `status` (`committed` or
-`recovery_required`). Set-block records use the smallest bounds containing all
-resolved placements. History stores the operation name, not the full request.
+`changedBlockCount`, ISO-8601 `completedAt` for the original edit's completion
+or recovery, and last retained `status` (`committed` or `recovery_required`). A
+later failed undo can change the status without changing that timestamp; a
+successful retry returns that pre-consumption status. Set-block records use the
+smallest bounds containing all resolved placements. History stores the operation
+name, not the full request.
 
 Committed success is reported only after a live FAWE `ChangeSet` is retained.
 Dirt stores that minimal change set with its touched chunks and metadata, not an
@@ -133,10 +136,16 @@ configured limits therefore remain hard.
 
 When a request fails after leaving a committed or recovery-required record, or
 when rollback cannot be confirmed after its world becomes unavailable, its
-bridge and MCP error includes `error.editId`. Callers can use that ID with
-`get_edit_history` instead of parsing an error message; an absent record means no
-retryable history remains. Every MCP failure also includes its generated
-`error.callId` for request correlation.
+structured bridge error includes `error.editId`. A transaction-finalization
+error may also include the generated ID after confirmed rollback. The MCP server
+preserves any received edit ID and recovers a valid nested ID from malformed
+success or non-2xx responses on edit and undo routes when possible. Callers can
+reconcile records returned by `get_edit_history` using `editId` or the record's
+creating `callId`; an absent record means no retryable history remains. Every
+failure mapped by a Dirt tool handler also includes its generated `error.callId`
+for request correlation. Invalid tool names or arguments fail before Dirt
+generates a call ID. MCP SDK output-validation failures occur outside Dirt error
+mapping and do not carry a structured Dirt `error.callId`.
 
 Ordinary edits still require already-loaded chunks. Retained history does not
 keep chunks loaded, so undo uses Paper's asynchronous existing-chunk load with

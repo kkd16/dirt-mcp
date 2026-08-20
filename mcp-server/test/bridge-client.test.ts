@@ -8,6 +8,7 @@ import { ToolFailure } from '../dist/bridge/errors.js';
 const ResponseSchema = z.object({ value: z.string() }).strict();
 const CALL_ID = '11111111-1111-4111-8111-111111111111';
 const EDIT_ID = '22222222-2222-4222-8222-222222222222';
+const OTHER_EDIT_ID = '33333333-3333-4333-8333-333333333333';
 
 test('sends an authenticated exact bridge request through the injected fetch function', async () => {
   let requestedUrl: URL | undefined;
@@ -90,5 +91,100 @@ test('accepts only optional UUIDv4 edit IDs in structured bridge failures', () =
       error: { code: 'world_busy', editId: '22222222-2222-1222-8222-222222222222', message: 'World is busy' },
     }).success,
     false,
+  );
+  assert.equal(BridgeErrorResponseSchema.safeParse({ error: { code: 'world_busy', message: '' } }).success, false);
+});
+
+test('salvages a valid edit ID from a malformed successful mutation response', async () => {
+  const malformed = new BridgeClient({ origin: 'http://127.0.0.1', token: 'token' }, async () =>
+    Response.json({ edit: { editId: EDIT_ID }, unexpected: true }),
+  );
+
+  await Promise.all(
+    [BRIDGE_ROUTES.setBlocks, BRIDGE_ROUTES.undoEdit].map((route) =>
+      assert.rejects(
+        malformed.request(route, CALL_ID, ResponseSchema, { world: 'world' }),
+        (error: unknown) =>
+          error instanceof ToolFailure && error.code === 'bridge_invalid_response' && error.editId === EDIT_ID,
+      ),
+    ),
+  );
+
+  await assert.rejects(
+    malformed.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema),
+    (error: unknown) =>
+      error instanceof ToolFailure && error.code === 'bridge_invalid_response' && error.editId === undefined,
+  );
+});
+
+test('salvages a valid edit ID from a malformed mutation error response', async () => {
+  const malformed = new BridgeClient({ origin: 'http://127.0.0.1', token: 'token' }, async () =>
+    Response.json({ error: { editId: EDIT_ID, message: 'Malformed failure' } }, { status: 500 }),
+  );
+
+  await Promise.all(
+    [BRIDGE_ROUTES.replaceRegionBlocks, BRIDGE_ROUTES.fillRegion, BRIDGE_ROUTES.setBlocks, BRIDGE_ROUTES.undoEdit].map(
+      (route) =>
+        assert.rejects(
+          malformed.request(route, CALL_ID, ResponseSchema, { world: 'world' }),
+          (error: unknown) =>
+            error instanceof ToolFailure && error.code === 'bridge_http_error' && error.editId === EDIT_ID,
+        ),
+    ),
+  );
+
+  await assert.rejects(
+    malformed.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema),
+    (error: unknown) =>
+      error instanceof ToolFailure && error.code === 'bridge_http_error' && error.editId === undefined,
+  );
+
+  const unauthorized = new BridgeClient({ origin: 'http://127.0.0.1', token: 'token' }, async () =>
+    Response.json({ error: { editId: EDIT_ID } }, { status: 401 }),
+  );
+  await assert.rejects(
+    unauthorized.request(BRIDGE_ROUTES.undoEdit, CALL_ID, ResponseSchema, { world: 'world' }),
+    (error: unknown) =>
+      error instanceof ToolFailure && error.code === 'bridge_unauthorized' && error.editId === EDIT_ID,
+  );
+
+  const invalidId = new BridgeClient({ origin: 'http://127.0.0.1', token: 'token' }, async () =>
+    Response.json({ error: { editId: 'not-a-uuid' } }, { status: 500 }),
+  );
+  await assert.rejects(
+    invalidId.request(BRIDGE_ROUTES.setBlocks, CALL_ID, ResponseSchema, { world: 'world' }),
+    (error: unknown) =>
+      error instanceof ToolFailure && error.code === 'bridge_http_error' && error.editId === undefined,
+  );
+});
+
+test('salvages edit IDs from mutation envelopes with the wrong HTTP shape', async () => {
+  const successWithError = new BridgeClient({ origin: 'http://127.0.0.1', token: 'token' }, async () =>
+    Response.json({ error: { editId: EDIT_ID } }),
+  );
+  await assert.rejects(
+    successWithError.request(BRIDGE_ROUTES.setBlocks, CALL_ID, ResponseSchema, { world: 'world' }),
+    (error: unknown) =>
+      error instanceof ToolFailure && error.code === 'bridge_invalid_response' && error.editId === EDIT_ID,
+  );
+
+  const failureWithEdit = new BridgeClient({ origin: 'http://127.0.0.1', token: 'token' }, async () =>
+    Response.json({ edit: { editId: EDIT_ID } }, { status: 500 }),
+  );
+  await assert.rejects(
+    failureWithEdit.request(BRIDGE_ROUTES.fillRegion, CALL_ID, ResponseSchema, { world: 'world' }),
+    (error: unknown) => error instanceof ToolFailure && error.code === 'bridge_http_error' && error.editId === EDIT_ID,
+  );
+});
+
+test('does not salvage an ambiguous edit ID from conflicting mutation envelopes', async () => {
+  const conflicting = new BridgeClient({ origin: 'http://127.0.0.1', token: 'token' }, async () =>
+    Response.json({ edit: { editId: EDIT_ID }, error: { editId: OTHER_EDIT_ID } }),
+  );
+
+  await assert.rejects(
+    conflicting.request(BRIDGE_ROUTES.undoEdit, CALL_ID, ResponseSchema, { world: 'world' }),
+    (error: unknown) =>
+      error instanceof ToolFailure && error.code === 'bridge_invalid_response' && error.editId === undefined,
   );
 });

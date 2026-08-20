@@ -75,6 +75,12 @@ final class PaperFaweEditPlatform implements EditPlatform {
     }
 
     @Override
+    public void rollbackPrepared(PreparedOperation prepared, UndoToken undo)
+            throws OperationException {
+        this.executor.rollback(requirePreparedWorld(prepared), requireUndo(undo));
+    }
+
+    @Override
     public void beginStopping() {
         this.preparation.beginStopping();
     }
@@ -117,5 +123,17 @@ final class PaperFaweEditPlatform implements EditPlatform {
             return stored;
         }
         throw new IllegalArgumentException("Undo token was not created by this edit platform");
+    }
+
+    private static PaperEditPreparation.PaperWorld requirePreparedWorld(
+            PreparedOperation prepared) {
+        return switch (prepared) {
+            case PaperEditPreparation.PreparedReplace edit -> edit.paperWorld();
+            case PaperEditPreparation.PreparedFill edit -> edit.paperWorld();
+            case PaperEditPreparation.PreparedSet edit -> edit.paperWorld();
+            default ->
+                    throw new IllegalArgumentException(
+                            "Prepared edit was not created by this edit platform");
+        };
     }
 }

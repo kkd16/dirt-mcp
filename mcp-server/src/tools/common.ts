@@ -26,6 +26,17 @@ export const BoundsSchema = z
     max: BlockPositionSchema.describe('Inclusive maximum corner after coordinate normalization.'),
   })
   .strict()
+  .superRefine((bounds, context) => {
+    for (const axis of ['x', 'y', 'z'] as const) {
+      if (bounds.min[axis] > bounds.max[axis]) {
+        context.addIssue({
+          code: 'custom',
+          path: ['max', axis],
+          message: `Normalized maximum ${axis.toUpperCase()} must not be less than minimum ${axis.toUpperCase()}.`,
+        });
+      }
+    }
+  })
   .describe('Normalized inclusive region bounds.');
 
 export const DimensionsSchema = z
@@ -40,13 +51,6 @@ export const DimensionsSchema = z
 export const READ_WORLD_ANNOTATIONS: ToolAnnotations = {
   readOnlyHint: true,
   destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: true,
-};
-
-export const MUTATION_ANNOTATIONS: ToolAnnotations = {
-  readOnlyHint: false,
-  destructiveHint: true,
   idempotentHint: true,
   openWorldHint: true,
 };

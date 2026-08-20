@@ -39,6 +39,10 @@ public interface ReplaceRegionBlocks {
         public Result {
             sourceBlockStatePatterns = List.copyOf(sourceBlockStatePatterns);
             destinationPalette = List.copyOf(destinationPalette);
+            if (matchedBlockCount < 0 || changedBlockCount > matchedBlockCount) {
+                throw new IllegalArgumentException(
+                        "changedBlockCount must not exceed matchedBlockCount");
+            }
             EditRecord.validateResult(
                     outcome,
                     edit,

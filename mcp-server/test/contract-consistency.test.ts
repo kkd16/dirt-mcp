@@ -14,6 +14,15 @@ function openapiPath(openapi: string, path: string): string {
   return openapi.slice(start, end === -1 ? openapi.length : end);
 }
 
+function openapiSchema(openapi: string, name: string): string {
+  const marker = `    ${name}:\n`;
+  const start = openapi.indexOf(marker);
+  assert.notEqual(start, -1);
+  const following = openapi.slice(start + marker.length);
+  const relativeEnd = following.search(/\n    [A-Z][A-Za-z0-9]+:\n/);
+  return openapi.slice(start, relativeEnd === -1 ? openapi.length : start + marker.length + relativeEnd);
+}
+
 test('Java endpoints, OpenAPI operations, and MCP routes stay synchronized', () => {
   const openapi = read('../../protocol/openapi.yaml');
   const endpointDirectory = new URL(
@@ -91,5 +100,24 @@ test('requires a UUIDv4 call ID on edits and undo but not history lookup', () =>
     assert.match(openapiPath(openapi, path), /#\/components\/parameters\/DirtCallId/);
   }
   assert.doesNotMatch(openapiPath(openapi, '/v1/get-edit-history'), /#\/components\/parameters\/DirtCallId/);
-  assert.match(openapi, /name: X-Dirt-Call-Id[\s\S]*?pattern: '\^\[0-9A-Fa-f\]\{8\}.*\$'/);
+  const uuidV4Pattern = /^    UuidV4:\n(?:      .*\n)*?      pattern: '([^']+)'$/m.exec(openapi)?.[1];
+  assert.ok(uuidV4Pattern);
+  const uuidV4 = new RegExp(uuidV4Pattern);
+  assert.match('123E4567-E89B-42D3-A456-426614174000', uuidV4);
+  assert.match('123e4567-e89b-42d3-a456-426614174000', uuidV4);
+  assert.doesNotMatch('123e4567-e89b-12d3-a456-426614174000', uuidV4);
+  assert.doesNotMatch('123e4567-e89b-42d3-7456-426614174000', uuidV4);
+});
+
+test('pins every committed edit response to its operation and committed status', () => {
+  const openapi = read('../../protocol/openapi.yaml');
+  for (const [schemaName, operation] of [
+    ['ReplaceRegionBlocksResponse', 'replace_region_blocks'],
+    ['FillRegionResponse', 'fill_region'],
+    ['SetBlocksResponse', 'set_blocks'],
+  ] as const) {
+    const schema = openapiSchema(openapi, schemaName);
+    assert.match(schema, new RegExp(`const: ${operation}`));
+    assert.match(schema, /status:\n\s+const: committed/);
+  }
 });

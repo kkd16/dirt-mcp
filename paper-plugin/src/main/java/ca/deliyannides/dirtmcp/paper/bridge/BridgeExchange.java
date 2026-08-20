@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.bridge;
 
+import ca.deliyannides.dirtmcp.paper.validation.UuidV4;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
@@ -89,19 +90,10 @@ public final class BridgeExchange {
 
     public UUID requiredCallId() throws InvalidRequestException {
         String value = this.exchange.getRequestHeaders().getFirst("X-Dirt-Call-Id");
-        if (value == null) {
-            throw new InvalidRequestException("X-Dirt-Call-Id must be a UUID version 4");
-        }
         try {
-            UUID callId = UUID.fromString(value);
-            if (callId.version() != 4
-                    || callId.variant() != 2
-                    || !callId.toString().equals(value.toLowerCase(Locale.ROOT))) {
-                throw new IllegalArgumentException("not a canonical UUID version 4");
-            }
-            return callId;
+            return UuidV4.parseCanonical(value, "X-Dirt-Call-Id");
         } catch (IllegalArgumentException exception) {
-            throw new InvalidRequestException("X-Dirt-Call-Id must be a UUID version 4");
+            throw new InvalidRequestException(exception.getMessage());
         }
     }
 

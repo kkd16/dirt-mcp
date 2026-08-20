@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { BridgeClient } from '../bridge/client.ts';
 import { BRIDGE_ROUTES } from '../bridge/contract.ts';
+import { ToolFailure } from '../bridge/errors.ts';
 import {
   BlockPositionSchema,
   BoundsSchema,
@@ -85,43 +86,123 @@ const SeedSchema = z
   .max(INT32_MAX)
   .describe('Signed 32-bit seed for reproducible per-coordinate palette choices.');
 
+const EditOperationSchema = z.enum(['replace_region_blocks', 'fill_region', 'set_blocks']);
+
 export const EditRecordSchema = z
   .object({
-    editId: z.uuidv4().describe('Stable identifier for this retained undoable edit.'),
+    editId: z.uuidv4().describe('Stable identifier for this edit transaction.'),
     callId: z.uuidv4().describe('Bridge call identifier that created this edit.'),
-    operation: z
-      .enum(['replace_region_blocks', 'fill_region', 'set_blocks'])
-      .describe('Dirt edit operation that created this history entry.'),
-    world: z.string().min(1).describe('Loaded world name at edit completion.'),
-    worldId: z.uuid().describe('Paper world UUID used to scope the retained edit.'),
+    operation: EditOperationSchema.describe('Dirt operation that performed this edit.'),
+    world: NonBlankStringSchema.describe('Loaded world name associated with this edit.'),
+    worldId: z.uuid().describe('Paper world UUID associated with this edit.'),
     bounds: BoundsSchema.describe('Normalized inclusive bounds targeted by the edit.'),
-    changedBlockCount: z.number().int().positive().describe('Blocks changed by the retained edit.'),
+    changedBlockCount: z.number().int().positive().describe('Blocks changed by this edit.'),
     completedAt: z.iso
       .datetime({ offset: true })
-      .describe('Timestamp at which the edit and history retention completed.'),
+      .describe(
+        'Timestamp recorded when the original edit completed or entered recovery; later undo attempts do not change it.',
+      ),
     status: z
       .enum(['committed', 'recovery_required'])
-      .describe('Whether this is a completed edit or a failed edit retained for recovery undo.'),
+      .describe(
+        'Last retained state represented by this record. A successful undo returns the state immediately before consumption.',
+      ),
   })
   .strict()
-  .describe('One retained Dirt edit backed by a live undo record.');
+  .describe('Identity and lifecycle metadata for one Dirt edit transaction.');
 
 const EditOutcomeSchema = z
   .enum(['preview', 'no_change', 'committed'])
   .describe('Whether the request previewed, made no changes, or committed an undoable edit.');
 
-function hasConsistentEditOutcome(result: {
+interface EditResultMetadata {
+  readonly bounds: z.infer<typeof BoundsSchema>;
   readonly changedBlockCount: number;
   readonly edit: z.infer<typeof EditRecordSchema> | null;
   readonly outcome: z.infer<typeof EditOutcomeSchema>;
-}): boolean {
-  if (result.outcome === 'committed') return result.edit !== null && result.changedBlockCount > 0;
+  readonly world: string;
+}
+
+function hasConsistentEditResult(
+  result: EditResultMetadata,
+  expectedOperation: z.infer<typeof EditOperationSchema>,
+): boolean {
+  if (result.outcome === 'committed') {
+    const edit = result.edit;
+    return (
+      edit !== null &&
+      result.changedBlockCount > 0 &&
+      edit.status === 'committed' &&
+      edit.operation === expectedOperation &&
+      edit.world === result.world &&
+      edit.changedBlockCount === result.changedBlockCount &&
+      sameBounds(edit.bounds, result.bounds)
+    );
+  }
   if (result.outcome === 'no_change') return result.edit === null && result.changedBlockCount === 0;
   return result.edit === null;
 }
 
-const EditOutcomeMessage =
-  'Committed outcomes require a non-null edit and positive changedBlockCount; preview and no_change outcomes require a null edit.';
+function sameBounds(left: z.infer<typeof BoundsSchema>, right: z.infer<typeof BoundsSchema>): boolean {
+  return (
+    left.min.x === right.min.x &&
+    left.min.y === right.min.y &&
+    left.min.z === right.min.z &&
+    left.max.x === right.max.x &&
+    left.max.y === right.max.y &&
+    left.max.z === right.max.z
+  );
+}
+
+const EditResultMessage =
+  'Committed outcomes require matching committed edit metadata and a positive changedBlockCount; preview and no_change outcomes require a null edit.';
+
+export function requireMatchingCallId(expected: string, actual: string, editId: string): void {
+  if (actual.toLowerCase() !== expected.toLowerCase()) {
+    throw new ToolFailure(
+      'bridge_invalid_response',
+      'Paper bridge response call ID did not match the request.',
+      editId,
+    );
+  }
+}
+
+export function requireMatchingEditIdentity(
+  expectedWorld: string,
+  expectedBounds: z.infer<typeof BoundsSchema>,
+  expectedCallId: string,
+  actual: EditResultMetadata,
+): void {
+  const editId = actual.edit?.editId;
+  if (actual.world !== expectedWorld || !sameBounds(actual.bounds, expectedBounds)) {
+    throw new ToolFailure(
+      'bridge_invalid_response',
+      'Paper bridge edit result did not match the requested world and bounds.',
+      editId,
+    );
+  }
+  if (actual.edit !== null) requireMatchingCallId(expectedCallId, actual.edit.callId, actual.edit.editId);
+}
+
+export function requireMatchingWorld(expected: string, actual: string): void {
+  if (actual !== expected) {
+    throw new ToolFailure('bridge_invalid_response', 'Paper bridge response world did not match the request.');
+  }
+}
+
+export function requireMatchingUndoIdentity(
+  expectedWorld: string,
+  expectedEditId: string,
+  actual: z.infer<typeof EditRecordSchema>,
+): void {
+  if (actual.world !== expectedWorld || actual.editId.toLowerCase() !== expectedEditId.toLowerCase()) {
+    throw new ToolFailure(
+      'bridge_invalid_response',
+      'Paper bridge undo result did not match the requested edit.',
+      actual.editId,
+    );
+  }
+}
 
 const ReplaceRegionBlocksInputSchema = z
   .object({
@@ -136,7 +217,7 @@ const ReplaceRegionBlocksInputSchema = z
     dryRun: z
       .boolean()
       .optional()
-      .describe('Preview counts without mutating the world; omission uses the Paper plugin default.'),
+      .describe('True previews without mutation, false executes the edit, and omission uses the plugin default.'),
   })
   .strict()
   .describe('Property-aware block-state replacement with a weighted destination palette.');
@@ -144,17 +225,25 @@ const ReplaceRegionBlocksInputSchema = z
 export const ReplaceRegionBlocksOutputSchema = z
   .object({
     world: z.string().min(1).describe('Edited world name.'),
-    bounds: BoundsSchema,
+    bounds: BoundsSchema.describe('Normalized inclusive bounds from the requested corners.'),
     sourceBlockStatePatterns: SourceBlockStatePatternsSchema,
     destinationPalette: DestinationPaletteSchema,
-    seed: SeedSchema.describe('Resolved seed used for per-coordinate palette choices.'),
-    outcome: EditOutcomeSchema,
+    seed: SeedSchema.describe('Supplied request seed, or the generated seed when the request omitted one.'),
+    outcome: EditOutcomeSchema.describe('Explicit dryRun=true requires preview; false excludes preview.'),
     edit: EditRecordSchema.nullable().describe('Retained edit metadata, present only for a committed outcome.'),
-    matchedBlockCount: z.number().int().nonnegative().describe('Blocks matching any sourceBlockStatePatterns entry.'),
+    matchedBlockCount: z
+      .number()
+      .int()
+      .nonnegative()
+      .describe('Blocks matching any source pattern; never greater than the inclusive bounds volume.'),
     changedBlockCount: z.number().int().nonnegative().describe('Blocks changed, or that would change in a dry run.'),
   })
   .strict()
-  .refine(hasConsistentEditOutcome, EditOutcomeMessage)
+  .refine((result) => hasConsistentEditResult(result, 'replace_region_blocks'), EditResultMessage)
+  .refine(
+    (result) => result.changedBlockCount <= result.matchedBlockCount,
+    'changedBlockCount must not exceed matchedBlockCount.',
+  )
   .describe('Completed or previewed property-aware block-state replacement.');
 
 const FillRegionInputSchema = z
@@ -169,7 +258,7 @@ const FillRegionInputSchema = z
     dryRun: z
       .boolean()
       .optional()
-      .describe('Preview counts without mutating the world; omission uses the Paper plugin default.'),
+      .describe('True previews without mutation, false executes the edit, and omission uses the plugin default.'),
   })
   .strict()
   .describe('Weighted block-state palette fill of an inclusive region.');
@@ -177,16 +266,17 @@ const FillRegionInputSchema = z
 export const FillRegionOutputSchema = z
   .object({
     world: z.string().min(1).describe('Edited world name.'),
-    bounds: BoundsSchema,
+    bounds: BoundsSchema.describe('Normalized inclusive bounds from the requested corners.'),
     destinationPalette: DestinationPaletteSchema,
-    seed: SeedSchema.describe('Resolved seed used for per-coordinate palette choices.'),
-    outcome: EditOutcomeSchema,
+    seed: SeedSchema.describe('Supplied request seed, or the generated seed when the request omitted one.'),
+    outcome: EditOutcomeSchema.describe('Explicit dryRun=true requires preview; false excludes preview.'),
     edit: EditRecordSchema.nullable().describe('Retained edit metadata, present only for a committed outcome.'),
-    volume: z.number().int().positive().describe('Total blocks in the region.'),
+    volume: z.number().int().positive().describe('Exact inclusive volume of the requested normalized bounds.'),
     changedBlockCount: z.number().int().nonnegative().describe('Blocks changed, or that would change in a dry run.'),
   })
   .strict()
-  .refine(hasConsistentEditOutcome, EditOutcomeMessage)
+  .refine((result) => hasConsistentEditResult(result, 'fill_region'), EditResultMessage)
+  .refine((result) => result.changedBlockCount <= result.volume, 'changedBlockCount must not exceed volume.')
   .describe('Completed or previewed region fill.');
 
 const SetBlocksPlacementSchema = z
@@ -218,7 +308,7 @@ export const SetBlocksInputSchema = z
     dryRun: z
       .boolean()
       .optional()
-      .describe('Preview exact counts without mutating the world; omission uses the Paper plugin default.'),
+      .describe('True previews without mutation, false executes the edit, and omission uses the plugin default.'),
   })
   .strict()
   .superRefine((input, context) => {
@@ -259,15 +349,19 @@ export const SetBlocksOutputSchema = z
     world: z.string().min(1).describe('Edited world name.'),
     bounds: BoundsSchema.describe('Smallest inclusive bounds containing every requested position.'),
     palettes: SetBlocksPalettesSchema.describe('Canonical palettes used by the edit.'),
-    seed: SeedSchema.describe('Resolved seed used for per-coordinate palette choices.'),
-    outcome: EditOutcomeSchema,
+    seed: SeedSchema.describe('Supplied request seed, or the generated seed when the request omitted one.'),
+    outcome: EditOutcomeSchema.describe('Explicit dryRun=true requires preview; false excludes preview.'),
     edit: EditRecordSchema.nullable().describe('Retained edit metadata, present only for a committed outcome.'),
-    blockCount: z.number().int().positive().describe('Distinct positions in the request.'),
+    blockCount: z.number().int().positive().describe('Number of requested placements.'),
     changedBlockCount: z.number().int().nonnegative().describe('Blocks changed, or that would change in a dry run.'),
     unchangedBlockCount: z.number().int().nonnegative().describe('Blocks already in their requested state.'),
   })
   .strict()
-  .refine(hasConsistentEditOutcome, EditOutcomeMessage)
+  .refine((result) => hasConsistentEditResult(result, 'set_blocks'), EditResultMessage)
+  .refine(
+    (result) => result.changedBlockCount + result.unchangedBlockCount === result.blockCount,
+    'changedBlockCount and unchangedBlockCount must sum to blockCount.',
+  )
   .describe('Completed or previewed palette-based block edit.');
 
 const GetEditHistoryInputSchema = z
@@ -277,13 +371,132 @@ const GetEditHistoryInputSchema = z
   .strict()
   .describe('Loaded-world edit history lookup.');
 
-export const GetEditHistoryOutputSchema = z
+const GetEditHistoryOutputShapeSchema = z
   .object({
     world: z.string().min(1).describe('Loaded world whose retained history was returned.'),
     edits: z.array(EditRecordSchema).describe('Retained undoable edits ordered newest first.'),
   })
-  .strict()
-  .describe('Current bounded undoable edit history for one loaded world.');
+  .strict();
+
+function hasConsistentHistory(result: z.infer<typeof GetEditHistoryOutputShapeSchema>): boolean {
+  const editIds = new Set<string>();
+  let worldId: string | undefined;
+  for (const edit of result.edits) {
+    const normalizedEditId = edit.editId.toLowerCase();
+    const normalizedWorldId = edit.worldId.toLowerCase();
+    if (
+      edit.world !== result.world ||
+      editIds.has(normalizedEditId) ||
+      (worldId !== undefined && normalizedWorldId !== worldId)
+    ) {
+      return false;
+    }
+    editIds.add(normalizedEditId);
+    worldId = normalizedWorldId;
+  }
+  return true;
+}
+
+export const GetEditHistoryOutputSchema = GetEditHistoryOutputShapeSchema.refine(
+  hasConsistentHistory,
+  'History records must belong to one loaded world and have distinct editIds.',
+).describe('Current bounded undoable edit history for one loaded world.');
+
+function normalizedBounds(
+  first: z.infer<typeof BlockPositionSchema>,
+  second: z.infer<typeof BlockPositionSchema>,
+): z.infer<typeof BoundsSchema> {
+  return {
+    min: {
+      x: Math.min(first.x, second.x),
+      y: Math.min(first.y, second.y),
+      z: Math.min(first.z, second.z),
+    },
+    max: {
+      x: Math.max(first.x, second.x),
+      y: Math.max(first.y, second.y),
+      z: Math.max(first.z, second.z),
+    },
+  };
+}
+
+function invalidEditResult(actual: EditResultMetadata, message: string): never {
+  throw new ToolFailure('bridge_invalid_response', message, actual.edit?.editId);
+}
+
+function inclusiveBlockVolume(bounds: z.infer<typeof BoundsSchema>): bigint {
+  const xSize = BigInt(bounds.max.x) - BigInt(bounds.min.x) + 1n;
+  const ySize = BigInt(bounds.max.y) - BigInt(bounds.min.y) + 1n;
+  const zSize = BigInt(bounds.max.z) - BigInt(bounds.min.z) + 1n;
+  return xSize * ySize * zSize;
+}
+
+export function requireMatchingEditOptions(
+  expectedSeed: number | undefined,
+  expectedDryRun: boolean | undefined,
+  actual: EditResultMetadata & { readonly seed: number },
+): void {
+  if (expectedSeed !== undefined && actual.seed !== expectedSeed) {
+    invalidEditResult(actual, 'Paper bridge edit result seed did not match the request.');
+  }
+  if (
+    (expectedDryRun === true && actual.outcome !== 'preview') ||
+    (expectedDryRun === false && actual.outcome === 'preview')
+  ) {
+    invalidEditResult(actual, 'Paper bridge edit outcome did not match the explicit dryRun request.');
+  }
+}
+
+export function requireReplaceCountsWithinBounds(
+  expectedBounds: z.infer<typeof BoundsSchema>,
+  actual: EditResultMetadata & { readonly matchedBlockCount: number },
+): void {
+  if (BigInt(actual.matchedBlockCount) > inclusiveBlockVolume(expectedBounds)) {
+    invalidEditResult(actual, 'Paper bridge replacement count exceeded the requested inclusive region volume.');
+  }
+}
+
+export function requireMatchingFillVolume(
+  expectedBounds: z.infer<typeof BoundsSchema>,
+  actual: EditResultMetadata & { readonly volume: number },
+): void {
+  if (BigInt(actual.volume) !== inclusiveBlockVolume(expectedBounds)) {
+    invalidEditResult(actual, 'Paper bridge fill volume did not match the requested inclusive region volume.');
+  }
+}
+
+export function requireMatchingSetBlockCount(
+  expectedCount: number,
+  actual: EditResultMetadata & {
+    readonly blockCount: number;
+  },
+): void {
+  if (actual.blockCount !== expectedCount) {
+    invalidEditResult(actual, 'Paper bridge blockCount did not match the number of requested placements.');
+  }
+}
+
+function setBlocksBounds(input: z.infer<typeof SetBlocksInputSchema>): z.infer<typeof BoundsSchema> {
+  const first = input.placements[0]!;
+  const initial = {
+    x: input.origin.x + first[1]!,
+    y: input.origin.y + first[2]!,
+    z: input.origin.z + first[3]!,
+  };
+  const bounds = { min: { ...initial }, max: { ...initial } };
+  for (const placement of input.placements.slice(1)) {
+    const position = {
+      x: input.origin.x + placement[1]!,
+      y: input.origin.y + placement[2]!,
+      z: input.origin.z + placement[3]!,
+    };
+    for (const axis of ['x', 'y', 'z'] as const) {
+      bounds.min[axis] = Math.min(bounds.min[axis], position[axis]);
+      bounds.max[axis] = Math.max(bounds.max[axis], position[axis]);
+    }
+  }
+  return bounds;
+}
 
 const UndoEditInputSchema = z
   .object({
@@ -295,7 +508,7 @@ const UndoEditInputSchema = z
 
 export const UndoEditOutputSchema = z
   .object({
-    edit: EditRecordSchema.describe('Retained edit that was successfully undone and consumed.'),
+    edit: EditRecordSchema.describe('Edit record as retained immediately before the successful undo consumed it.'),
     undoCallId: z.uuidv4().describe('Bridge call identifier that performed the undo.'),
     undoneAt: z.iso.datetime({ offset: true }).describe('Timestamp at which the undo completed.'),
   })
@@ -328,6 +541,10 @@ export function registerEditingTools(server: McpServer, bridge: BridgeClient): v
             ReplaceRegionBlocksOutputSchema,
             input,
           );
+          const bounds = normalizedBounds(input.min, input.max);
+          requireMatchingEditIdentity(input.world, bounds, callId, result);
+          requireMatchingEditOptions(input.seed, input.dryRun, result);
+          requireReplaceCountsWithinBounds(bounds, result);
           const verb = result.outcome === 'preview' ? 'Would change' : 'Changed';
           const editSummary = result.edit === null ? '' : ` Edit ID: ${result.edit.editId}.`;
           return successResult(
@@ -353,6 +570,10 @@ export function registerEditingTools(server: McpServer, bridge: BridgeClient): v
         { tool: 'fill_region', world: input.world, context, failureContext: 'Could not fill the region' },
         async (callId) => {
           const result = await bridge.request(BRIDGE_ROUTES.fillRegion, callId, FillRegionOutputSchema, input);
+          const bounds = normalizedBounds(input.min, input.max);
+          requireMatchingEditIdentity(input.world, bounds, callId, result);
+          requireMatchingEditOptions(input.seed, input.dryRun, result);
+          requireMatchingFillVolume(bounds, result);
           const verb = result.outcome === 'preview' ? 'Would change' : 'Changed';
           const editSummary = result.edit === null ? '' : ` Edit ID: ${result.edit.editId}.`;
           return successResult(
@@ -378,6 +599,9 @@ export function registerEditingTools(server: McpServer, bridge: BridgeClient): v
         { tool: 'set_blocks', world: input.world, context, failureContext: 'Could not set blocks' },
         async (callId) => {
           const result = await bridge.request(BRIDGE_ROUTES.setBlocks, callId, SetBlocksOutputSchema, input);
+          requireMatchingEditIdentity(input.world, setBlocksBounds(input), callId, result);
+          requireMatchingEditOptions(input.seed, input.dryRun, result);
+          requireMatchingSetBlockCount(input.placements.length, result);
           const verb = result.outcome === 'preview' ? 'Would change' : 'Changed';
           const editSummary = result.edit === null ? '' : ` Edit ID: ${result.edit.editId}.`;
           return successResult(
@@ -408,6 +632,7 @@ export function registerEditingTools(server: McpServer, bridge: BridgeClient): v
         },
         async (callId) => {
           const result = await bridge.request(BRIDGE_ROUTES.getEditHistory, callId, GetEditHistoryOutputSchema, input);
+          requireMatchingWorld(input.world, result.world);
           const noun = result.edits.length === 1 ? 'edit' : 'edits';
           return successResult(result, `Found ${result.edits.length} retained undoable ${noun} in ${result.world}.`);
         },
@@ -434,6 +659,8 @@ export function registerEditingTools(server: McpServer, bridge: BridgeClient): v
         },
         async (callId) => {
           const result = await bridge.request(BRIDGE_ROUTES.undoEdit, callId, UndoEditOutputSchema, input);
+          requireMatchingCallId(callId, result.undoCallId, result.edit.editId);
+          requireMatchingUndoIdentity(input.world, input.editId, result.edit);
           return successResult(
             result,
             `Undid edit ${result.edit.editId} in ${result.edit.world}, restoring ${result.edit.changedBlockCount} blocks.`,
