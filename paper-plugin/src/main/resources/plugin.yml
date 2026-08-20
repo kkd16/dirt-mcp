@@ -8,5 +8,5 @@ api-version: '${paperVersion}'
 depend: [FastAsyncWorldEdit]
 permissions:
   dirtmcp.command:
-    description: View Dirt MCP status and active configuration
+    description: View Dirt MCP status, active configuration, and MCP tool catalog
     default: op

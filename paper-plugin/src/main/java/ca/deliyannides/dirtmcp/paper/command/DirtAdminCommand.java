@@ -7,6 +7,7 @@ import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus;
 import com.mojang.brigadier.Command;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
@@ -64,7 +65,20 @@ public final class DirtAdminCommand {
                 .then(
                         Commands.literal("config")
                                 .executes(context -> showConfig(context.getSource().getSender())))
+                .then(toolsCommand())
                 .build();
+    }
+
+    private LiteralArgumentBuilder<CommandSourceStack> toolsCommand() {
+        LiteralArgumentBuilder<CommandSourceStack> tools =
+                Commands.literal("tools")
+                        .executes(context -> showTools(context.getSource().getSender()));
+        for (McpTool tool : McpTool.values()) {
+            tools.then(
+                    Commands.literal(tool.id())
+                            .executes(context -> showTool(context.getSource().getSender(), tool)));
+        }
+        return tools;
     }
 
     private int showHelp(CommandSender sender) {
@@ -74,6 +88,7 @@ public final class DirtAdminCommand {
         message.append(Component.newline()).append(Component.newline());
         appendCommand(message, "/dirt status", "View live server and bridge status");
         appendCommand(message, "/dirt config", "Inspect the active configuration");
+        appendCommand(message, "/dirt tools", "Browse MCP tool inputs and results");
         appendCommand(message, "/dirt version", "Show plugin version information");
         sender.sendMessage(message.build());
         return Command.SINGLE_SUCCESS;
@@ -194,6 +209,107 @@ public final class DirtAdminCommand {
         return Command.SINGLE_SUCCESS;
     }
 
+    private int showTools(CommandSender sender) {
+        int enabledCount = 0;
+        for (McpTool tool : McpTool.values()) {
+            if (this.config.tools().isEnabled(tool)) {
+                enabledCount++;
+            }
+        }
+
+        TextComponent.Builder message = panel("MCP Tools");
+        message.append(Component.newline());
+        message.append(
+                Component.text(
+                        "Paper startup snapshot  •  "
+                                + enabledCount
+                                + " of "
+                                + McpTool.values().length
+                                + " configured ON",
+                        NamedTextColor.DARK_GRAY));
+        message.append(Component.newline());
+        for (McpTool tool : McpTool.values()) {
+            McpToolHelp.ToolSpec spec = McpToolHelp.spec(tool);
+            boolean enabled = this.config.tools().isEnabled(tool);
+            String command = "/dirt tools " + tool.id();
+            Component toolName =
+                    Component.text(tool.id(), SECONDARY_ACCENT, TextDecoration.BOLD)
+                            .clickEvent(ClickEvent.runCommand(command))
+                            .hoverEvent(
+                                    HoverEvent.showText(
+                                            Component.text(
+                                                    "View " + spec.title(), NamedTextColor.GRAY)));
+            message.append(Component.newline());
+            message.append(
+                    Component.text(
+                            enabled ? "  ● ON   " : "  ○ OFF  ",
+                            enabled ? NamedTextColor.GREEN : NamedTextColor.RED,
+                            TextDecoration.BOLD));
+            message.append(toolName);
+            message.append(Component.text("  " + spec.purpose(), NamedTextColor.GRAY));
+        }
+        message.append(Component.newline()).append(Component.newline());
+        message.append(
+                Component.text(
+                        "Click a tool for details. OFF tools are absent from a newly started MCP "
+                                + "catalog; restart Paper, then the MCP host, after config changes.",
+                        NamedTextColor.DARK_GRAY));
+        sender.sendMessage(message.build());
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private int showTool(CommandSender sender, McpTool tool) {
+        McpToolHelp.ToolSpec spec = McpToolHelp.spec(tool);
+        boolean enabled = this.config.tools().isEnabled(tool);
+        TextComponent.Builder message = panel("MCP Tool");
+        message.append(Component.newline());
+        message.append(Component.text(tool.id(), SECONDARY_ACCENT, TextDecoration.BOLD));
+        message.append(Component.text("  /  " + spec.title(), NamedTextColor.WHITE));
+        message.append(Component.newline());
+        message.append(
+                Component.text(
+                        enabled ? "● CONFIGURED ON" : "○ CONFIGURED OFF",
+                        enabled ? NamedTextColor.GREEN : NamedTextColor.RED,
+                        TextDecoration.BOLD));
+        message.append(Component.text("  •  Paper startup snapshot", NamedTextColor.DARK_GRAY));
+        appendValue(message, "Type", spec.kind().label());
+
+        appendSection(message, "Purpose");
+        appendParagraph(message, spec.purpose());
+        appendSection(message, "Arguments");
+        appendParagraph(message, spec.arguments());
+        appendSection(message, "Returns");
+        appendParagraph(message, spec.returns());
+        appendSection(message, "Behavior");
+        appendParagraph(message, spec.notes());
+        if (spec.usesEditRecords()) {
+            appendParagraph(
+                    message,
+                    "EditRecord fields: editId, callId, operation, world, worldId, bounds, "
+                            + "changedBlockCount, completedAt, and status.");
+        }
+        appendParagraph(
+                message,
+                "Canonical results are in structuredContent; text content is only a summary. "
+                        + "Dirt-mapped failures use structuredContent.error.code, "
+                        + "structuredContent.error.message, and structuredContent.error.callId, "
+                        + "and may add structuredContent.error.editId for reconciliation. Invalid "
+                        + "tool names or arguments fail before Dirt creates a callId; MCP SDK output "
+                        + "validation occurs outside this mapping.");
+
+        message.append(Component.newline()).append(Component.newline());
+        message.append(
+                Component.text("‹ Back to /dirt tools", SECONDARY_ACCENT)
+                        .clickEvent(ClickEvent.runCommand("/dirt tools"))
+                        .hoverEvent(
+                                HoverEvent.showText(
+                                        Component.text(
+                                                "Open the MCP tool catalog",
+                                                NamedTextColor.GRAY))));
+        sender.sendMessage(message.build());
+        return Command.SINGLE_SUCCESS;
+    }
+
     private static TextComponent.Builder panel(String title) {
         return Component.text()
                 .append(Component.text("◆ ", ACCENT))
@@ -220,6 +336,11 @@ public final class DirtAdminCommand {
         message.append(Component.newline()).append(Component.newline());
         message.append(
                 Component.text(section.toUpperCase(Locale.ROOT), ACCENT, TextDecoration.BOLD));
+    }
+
+    private static void appendParagraph(TextComponent.Builder message, String text) {
+        message.append(Component.newline());
+        message.append(Component.text("  " + text, NamedTextColor.WHITE));
     }
 
     private static void appendValue(TextComponent.Builder message, String label, Object value) {

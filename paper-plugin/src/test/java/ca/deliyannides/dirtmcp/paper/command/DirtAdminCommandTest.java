@@ -28,6 +28,7 @@ import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Location;
 import org.bukkit.command.CommandSender;
@@ -54,6 +55,7 @@ final class DirtAdminCommandTest {
             assertTrue(plain.contains("DIRT MCP  /  Command Center"));
             assertTrue(plain.contains("/dirt status"));
             assertTrue(plain.contains("/dirt config"));
+            assertTrue(plain.contains("/dirt tools"));
             assertTrue(plain.contains("/dirt version"));
             assertTrue(containsClickEvent(message));
         }
@@ -173,14 +175,130 @@ final class DirtAdminCommandTest {
     }
 
     @Test
+    void toolsRendersEveryConfiguredStateAndClickablePurpose() throws Exception {
+        var fixture = fixture(true, status());
+
+        assertEquals(1, fixture.execute("dirt tools"));
+
+        Component message = fixture.messages.getFirst();
+        String plain = PLAIN.serialize(message);
+        assertTrue(plain.contains("DIRT MCP  /  MCP Tools"));
+        assertTrue(plain.contains("Paper startup snapshot  •  5 of 10 configured ON"));
+        assertTrue(plain.contains("restart Paper, then the MCP host"));
+        Set<String> expectedCommands = new HashSet<>();
+        for (McpTool tool : McpTool.values()) {
+            expectedCommands.add("/dirt tools " + tool.id());
+        }
+        assertEquals(expectedCommands, runCommands(message));
+        DirtConfig activeConfig = config();
+        for (McpTool tool : McpTool.values()) {
+            McpToolHelp.ToolSpec spec = McpToolHelp.spec(tool);
+            String state = activeConfig.tools().isEnabled(tool) ? "● ON   " : "○ OFF  ";
+            assertEquals(
+                    1, plain.lines().filter(line -> line.contains(tool.id())).count(), tool.id());
+            assertTrue(plain.contains(state + tool.id()), tool.id());
+            assertTrue(plain.contains(spec.purpose()), tool.id());
+        }
+    }
+
+    @Test
+    void everyToolHasACompleteDetailViewEvenWhenConfiguredOff() throws Exception {
+        var fixture = fixture(true, status());
+        DirtConfig activeConfig = config();
+
+        for (McpTool tool : McpTool.values()) {
+            assertEquals(1, fixture.execute("dirt tools " + tool.id()));
+
+            McpToolHelp.ToolSpec spec = McpToolHelp.spec(tool);
+            assertFalse(spec.title().isBlank());
+            assertFalse(spec.purpose().isBlank());
+            assertFalse(spec.arguments().isBlank());
+            assertFalse(spec.returns().isBlank());
+            assertFalse(spec.notes().isBlank());
+            Component message = fixture.messages.getLast();
+            String plain = PLAIN.serialize(message);
+            assertTrue(plain.contains("DIRT MCP  /  MCP Tool"), tool.id());
+            assertTrue(plain.contains(tool.id() + "  /  " + spec.title()), tool.id());
+            assertTrue(
+                    plain.contains(
+                            activeConfig.tools().isEnabled(tool)
+                                    ? "● CONFIGURED ON"
+                                    : "○ CONFIGURED OFF"),
+                    tool.id());
+            assertTrue(plain.contains("Paper startup snapshot"), tool.id());
+            assertTrue(plain.contains("Type  " + spec.kind().label()), tool.id());
+            assertTrue(plain.contains("PURPOSE"), tool.id());
+            assertTrue(plain.contains("ARGUMENTS"), tool.id());
+            assertTrue(plain.contains("RETURNS"), tool.id());
+            assertTrue(plain.contains("BEHAVIOR"), tool.id());
+            assertTrue(plain.contains(spec.arguments()), tool.id());
+            assertTrue(plain.contains(spec.returns()), tool.id());
+            assertEquals(Set.of("/dirt tools"), runCommands(message), tool.id());
+        }
+    }
+
+    @Test
+    void toolDetailsCoverInspectionMutationAndUndoSemantics() throws Exception {
+        var fixture = fixture(true, status());
+
+        assertEquals(1, fixture.execute("dirt tools get_region_blocks"));
+        String inspection = PLAIN.serialize(fixture.messages.getLast());
+        assertTrue(inspection.contains("includeBlockStatePatterns"));
+        assertTrue(inspection.contains("blocks|runs"));
+        assertTrue(inspection.contains("Pattern lists default empty"));
+        assertTrue(inspection.contains("fail the call rather than truncate"));
+        assertTrue(inspection.contains("Canonical results are in structuredContent"));
+
+        assertEquals(1, fixture.execute("dirt tools scan_orthographic_view"));
+        String scan = PLAIN.serialize(fixture.messages.getLast());
+        assertTrue(scan.contains("depth defaults to 0"));
+        assertTrue(scan.contains("format to blocks"));
+        assertTrue(scan.contains("scannedVolume"));
+        assertTrue(scan.contains("fail the call rather than truncate"));
+
+        assertEquals(1, fixture.execute("dirt tools set_blocks"));
+        String mutation = PLAIN.serialize(fixture.messages.getLast());
+        assertTrue(mutation.contains("placements = [paletteIndex,xOffset,yOffset,zOffset]"));
+        assertTrue(mutation.contains("omitted seed is generated and returned"));
+        assertTrue(mutation.contains("dryRun uses the Paper default"));
+        assertTrue(mutation.contains("does not trigger neighbor physics"));
+        assertTrue(mutation.contains("recovery_required"));
+        assertTrue(mutation.contains("EditRecord fields: editId, callId"));
+
+        assertEquals(1, fixture.execute("dirt tools undo_edit"));
+        String undo = PLAIN.serialize(fixture.messages.getLast());
+        assertTrue(undo.contains("newest retained edit"));
+        assertTrue(undo.contains("edit (the consumed pre-undo EditRecord)"));
+        assertTrue(undo.contains("undoCallId"));
+
+        assertEquals(1, fixture.execute("dirt tools get_edit_history"));
+        assertTrue(
+                PLAIN.serialize(fixture.messages.getLast())
+                        .contains("history clears on world unload or Paper restart"));
+
+        assertEquals(1, fixture.execute("dirt tools ping_server"));
+        assertTrue(PLAIN.serialize(fixture.messages.getLast()).contains("Ping Dirt server"));
+        assertEquals(1, fixture.execute("dirt tools get_server_status"));
+        assertTrue(PLAIN.serialize(fixture.messages.getLast()).contains("Get Dirt server status"));
+    }
+
+    @Test
     void permissionControlsVisibilityExecutionAndSubcommandSuggestions() throws Exception {
         var allowed = fixture(true, status());
         var denied = fixture(false, status());
 
-        assertEquals(Set.of("config", "help", "status", "version"), allowed.suggestions("dirt "));
+        assertEquals(
+                Set.of("config", "help", "status", "tools", "version"),
+                allowed.suggestions("dirt "));
+        Set<String> toolSuggestions = new HashSet<>();
+        for (McpTool tool : McpTool.values()) {
+            toolSuggestions.add(tool.id());
+        }
+        assertEquals(toolSuggestions, allowed.suggestions("dirt tools "));
         assertFalse(denied.canUseRoot());
         assertThrows(CommandSyntaxException.class, () -> denied.execute("dirt"));
         assertThrows(CommandSyntaxException.class, () -> allowed.execute("dirt unknown"));
+        assertThrows(CommandSyntaxException.class, () -> allowed.execute("dirt tools not_a_tool"));
         assertTrue(denied.messages.isEmpty());
     }
 
@@ -191,6 +309,9 @@ final class DirtAdminCommandTest {
         assertEquals(
                 "op",
                 metadata.getString("permissions." + DirtAdminCommand.PERMISSION + ".default"));
+        assertTrue(
+                metadata.getString("permissions." + DirtAdminCommand.PERMISSION + ".description")
+                        .contains("tool catalog"));
     }
 
     private static CommandFixture fixture(boolean allowed, GetServerStatus status) {
@@ -297,6 +418,20 @@ final class DirtAdminCommandTest {
             return true;
         }
         return component.children().stream().anyMatch(DirtAdminCommandTest::containsClickEvent);
+    }
+
+    private static Set<String> runCommands(Component component) {
+        Set<String> commands = new HashSet<>();
+        ClickEvent<?> clickEvent = component.clickEvent();
+        if (clickEvent != null
+                && clickEvent.action() == ClickEvent.Action.RUN_COMMAND
+                && clickEvent.payload() instanceof ClickEvent.Payload.Text text) {
+            commands.add(text.value());
+        }
+        for (Component child : component.children()) {
+            commands.addAll(runCommands(child));
+        }
+        return commands;
     }
 
     private static final class CommandFixture {

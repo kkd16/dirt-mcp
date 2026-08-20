@@ -159,7 +159,7 @@ public final class DirtRuntime implements AutoCloseable {
                                 event.registrar()
                                         .register(
                                                 adminCommand.command(),
-                                                "Inspect Dirt MCP status and configuration"));
+                                                "Inspect Dirt MCP status, configuration, and tools"));
     }
 
     @Override

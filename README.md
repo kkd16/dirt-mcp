@@ -91,9 +91,11 @@ Operators can inspect the running plugin with `/dirt`. Running it without a
 subcommand displays its formatted help menu; `/dirt version` shows the packaged
 plugin version, `/dirt status` gives a compact server and bridge summary, and
 `/dirt config` lists the active startup-snapshotted configuration, including
-every resolved per-tool flag. The config view reflects the
-`DIRT_MCP_BRIDGE_PORT` override when present. Restart Paper to apply
-configuration file changes.
+every resolved per-tool flag. `/dirt tools` lists every supported MCP tool with
+its configured ON/OFF state; select one or run `/dirt tools <tool_id>` for a
+concise view of its purpose, arguments, structured return values, and important
+behavior. The config view reflects the `DIRT_MCP_BRIDGE_PORT` override when
+present. Restart Paper to apply configuration file changes.
 
 The command requires `dirtmcp.command`, which is granted to operators by
 default and may be assigned explicitly through a permission plugin.
