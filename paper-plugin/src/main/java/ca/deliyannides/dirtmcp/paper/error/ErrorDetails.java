@@ -5,6 +5,7 @@ import java.io.Serializable;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /** Strict, implementation-neutral context for a correctable bridge failure. */
@@ -47,32 +48,32 @@ public sealed interface ErrorDetails extends Serializable {
 
         record Missing(String field) implements InvalidRequest {
             public Missing {
-                field = requireField(field);
+                field = requireNonBlank(field, "field");
             }
         }
 
         record InvalidValue(String field) implements InvalidRequest {
             public InvalidValue {
-                field = requireField(field);
+                field = requireNonBlank(field, "field");
             }
         }
 
         record Duplicate(String field) implements InvalidRequest {
             public Duplicate {
-                field = requireField(field);
+                field = requireNonBlank(field, "field");
             }
         }
 
         record UnknownFields(String field) implements InvalidRequest {
             public UnknownFields {
-                field = requireField(field);
+                field = requireNonBlank(field, "field");
             }
         }
 
         record OutOfRange(String target, long value, long minimum, long maximum)
                 implements InvalidRequest {
             public OutOfRange {
-                target = requireField(target);
+                target = requireNonBlank(target, "target");
                 requireSafeInteger(value, "value");
                 requireSafeInteger(minimum, "minimum");
                 requireSafeInteger(maximum, "maximum");
@@ -88,20 +89,20 @@ public sealed interface ErrorDetails extends Serializable {
         record UnsupportedValue(String target, List<String> allowedValues)
                 implements InvalidRequest {
             public UnsupportedValue {
-                target = requireField(target);
+                target = requireNonBlank(target, "target");
                 allowedValues = requireDistinctNonBlank(allowedValues, "allowedValues");
             }
         }
 
         record PaletteWeightsMixed(String field) implements InvalidRequest {
             public PaletteWeightsMixed {
-                field = requireField(field);
+                field = requireNonBlank(field, "field");
             }
         }
 
         record PaletteWeightTotal(String field, long requested) implements InvalidRequest {
             public PaletteWeightTotal {
-                field = requireField(field);
+                field = requireNonBlank(field, "field");
                 requirePositive(requested, "requested");
                 if (requested == 100) {
                     throw new IllegalArgumentException("requested must differ from required");
@@ -125,7 +126,7 @@ public sealed interface ErrorDetails extends Serializable {
 
     record EditNotFound(String world, UUID requestedEditId) implements ErrorDetails {
         public EditNotFound {
-            world = requireWorld(world);
+            world = requireNonBlank(world, "world");
             UuidV4.require(requestedEditId, "requestedEditId");
         }
     }
@@ -133,11 +134,77 @@ public sealed interface ErrorDetails extends Serializable {
     record EditNotLatest(String world, UUID requestedEditId, UUID newestEditId)
             implements ErrorDetails {
         public EditNotLatest {
-            world = requireWorld(world);
+            world = requireNonBlank(world, "world");
             UuidV4.require(requestedEditId, "requestedEditId");
             UuidV4.require(newestEditId, "newestEditId");
             if (requestedEditId.equals(newestEditId)) {
                 throw new IllegalArgumentException("requestedEditId must differ from newestEditId");
+            }
+        }
+    }
+
+    record PlayerNotFound(String player) implements ErrorDetails {
+        public PlayerNotFound {
+            player = requirePlayerSelector(player);
+        }
+    }
+
+    sealed interface PlayerUnavailable extends ErrorDetails {
+        record SpectatingEntity(String player) implements PlayerUnavailable {
+            public SpectatingEntity {
+                player = requirePlayerSelector(player);
+            }
+        }
+
+        record NonFiniteState(String player, String field) implements PlayerUnavailable {
+            private static final Set<String> FIELDS =
+                    Set.of(
+                            "feetPosition.x",
+                            "feetPosition.y",
+                            "feetPosition.z",
+                            "eyePosition.x",
+                            "eyePosition.y",
+                            "eyePosition.z",
+                            "rotation.yaw",
+                            "rotation.pitch",
+                            "vitals.health",
+                            "vitals.maxHealth",
+                            "vitals.absorptionAmount",
+                            "vitals.saturation",
+                            "vitals.exhaustion",
+                            "vitals.experienceProgress",
+                            "movement.velocity.x",
+                            "movement.velocity.y",
+                            "movement.velocity.z",
+                            "movement.fallDistance");
+
+            public NonFiniteState {
+                player = requirePlayerSelector(player);
+                if (!FIELDS.contains(field)) {
+                    throw new IllegalArgumentException("Unsupported non-finite player state field");
+                }
+            }
+        }
+
+        record PositionOutOfRange(String player, String field) implements PlayerUnavailable {
+            private static final Set<String> FIELDS =
+                    Set.of(
+                            "feetPosition.x",
+                            "feetPosition.y",
+                            "feetPosition.z",
+                            "eyePosition.x",
+                            "eyePosition.y",
+                            "eyePosition.z",
+                            "view.endpoint.x",
+                            "view.endpoint.y",
+                            "view.endpoint.z");
+
+            public PositionOutOfRange {
+                player = requirePlayerSelector(player);
+                if (!FIELDS.contains(field)) {
+                    throw new IllegalArgumentException(
+                            "Unsupported out-of-range player position field");
+                }
             }
         }
     }
@@ -187,6 +254,16 @@ public sealed interface ErrorDetails extends Serializable {
             }
         }
 
+        record ViewChunks(int requested, int maximum) implements RegionTooLarge {
+            public ViewChunks {
+                requirePositive(requested, "requested");
+                requirePositive(maximum, "maximum");
+                if (requested <= maximum) {
+                    throw new IllegalArgumentException("requested must exceed maximum");
+                }
+            }
+        }
+
         record BlockCount(int requested, int maximum) implements RegionTooLarge {
             public BlockCount {
                 requirePositive(requested, "requested");
@@ -217,6 +294,18 @@ public sealed interface ErrorDetails extends Serializable {
 
         record VisibleBlocks(long minimumRequired, int maximum) implements ResultTooLarge {
             public VisibleBlocks {
+                validateResultLimit(minimumRequired, maximum);
+            }
+        }
+
+        record ViewRays(long minimumRequired, int maximum) implements ResultTooLarge {
+            public ViewRays {
+                validateResultLimit(minimumRequired, maximum);
+            }
+        }
+
+        record ViewRayDistance(long minimumRequired, int maximum) implements ResultTooLarge {
+            public ViewRayDistance {
                 validateResultLimit(minimumRequired, maximum);
             }
         }
@@ -251,13 +340,13 @@ public sealed interface ErrorDetails extends Serializable {
 
         record OperationInProgress(String world) implements WorldBusy {
             public OperationInProgress {
-                world = requireWorld(world);
+                world = requireNonBlank(world, "world");
             }
         }
 
         record RecoveryRequired(String world, UUID newestEditId) implements WorldBusy {
             public RecoveryRequired {
-                world = requireWorld(world);
+                world = requireNonBlank(world, "world");
                 UuidV4.require(newestEditId, "newestEditId");
             }
         }
@@ -265,7 +354,7 @@ public sealed interface ErrorDetails extends Serializable {
 
     record WorldNotFound(String world) implements ErrorDetails {
         public WorldNotFound {
-            world = requireWorld(world);
+            world = requireNonBlank(world, "world");
         }
     }
 
@@ -284,20 +373,20 @@ public sealed interface ErrorDetails extends Serializable {
 
         record WorldUnloaded(String world) implements WorldUnavailable {
             public WorldUnloaded {
-                world = requireWorld(world);
+                world = requireNonBlank(world, "world");
             }
         }
 
         record ChunkUnloaded(String world, Chunk chunk) implements WorldUnavailable {
             public ChunkUnloaded {
-                world = requireWorld(world);
+                world = requireNonBlank(world, "world");
                 Objects.requireNonNull(chunk, "chunk");
             }
         }
 
         record ChunkLoadFailed(String world, Chunk chunk) implements WorldUnavailable {
             public ChunkLoadFailed {
-                world = requireWorld(world);
+                world = requireNonBlank(world, "world");
                 Objects.requireNonNull(chunk, "chunk");
             }
         }
@@ -313,18 +402,19 @@ public sealed interface ErrorDetails extends Serializable {
 
     record Chunk(int x, int z) implements Serializable {}
 
-    private static String requireField(String value) {
+    private static String requireNonBlank(String value, String name) {
         if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("field must not be blank");
+            throw new IllegalArgumentException(name + " must not be blank");
         }
         return value;
     }
 
-    private static String requireWorld(String value) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("world must not be blank");
+    private static String requirePlayerSelector(String value) {
+        String selector = requireNonBlank(value, "player");
+        if (selector.length() > 36) {
+            throw new IllegalArgumentException("player must contain at most 36 characters");
         }
-        return value;
+        return selector;
     }
 
     private static List<String> requireDistinctNonBlank(List<String> values, String name) {

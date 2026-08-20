@@ -47,6 +47,28 @@ final class ErrorDetailsJsonTest {
                 failure.details().orElseThrow());
     }
 
+    @Test
+    void rejectsUnknownNonFinitePlayerStateFields() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new ErrorDetails.PlayerUnavailable.NonFiniteState(
+                                "Builder", "vitals.unknown"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new ErrorDetails.PlayerUnavailable.PositionOutOfRange(
+                                "Builder", "view.endpoint.unknown"));
+    }
+
+    @Test
+    void boundsPlayerSelectorsInOutboundErrorDetails() {
+        assertEquals("x".repeat(36), new ErrorDetails.PlayerNotFound("x".repeat(36)).player());
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new ErrorDetails.PlayerNotFound("x".repeat(37)));
+    }
+
     private static Stream<Arguments> details() {
         return Stream.of(
                 detail(new ErrorDetails.Unauthorized(), "{reason:'authentication_failed'}"),
@@ -124,6 +146,9 @@ final class ErrorDetailsJsonTest {
                         new ErrorDetails.RegionTooLarge.TouchedChunks(9, 8),
                         "{reason:'touched_chunks',minimumRequired:9,maximum:8}"),
                 detail(
+                        new ErrorDetails.RegionTooLarge.ViewChunks(9, 8),
+                        "{reason:'view_chunks',requested:9,maximum:8}"),
+                detail(
                         new ErrorDetails.RegionTooLarge.BlockCount(9, 8),
                         "{reason:'block_count',requested:9,maximum:8}"),
                 detail(
@@ -135,6 +160,24 @@ final class ErrorDetailsJsonTest {
                 detail(
                         new ErrorDetails.ResultTooLarge.VisibleBlocks(9, 8),
                         "{reason:'visible_blocks',minimumRequired:9,maximum:8}"),
+                detail(
+                        new ErrorDetails.ResultTooLarge.ViewRays(9, 8),
+                        "{reason:'view_rays',minimumRequired:9,maximum:8}"),
+                detail(
+                        new ErrorDetails.ResultTooLarge.ViewRayDistance(9, 8),
+                        "{reason:'view_ray_distance',minimumRequired:9,maximum:8}"),
+                detail(new ErrorDetails.PlayerNotFound("Builder"), "{player:'Builder'}"),
+                detail(
+                        new ErrorDetails.PlayerUnavailable.SpectatingEntity("Builder"),
+                        "{reason:'spectating_entity',player:'Builder'}"),
+                detail(
+                        new ErrorDetails.PlayerUnavailable.NonFiniteState(
+                                "Builder", "vitals.saturation"),
+                        "{reason:'non_finite_state',player:'Builder',field:'vitals.saturation'}"),
+                detail(
+                        new ErrorDetails.PlayerUnavailable.PositionOutOfRange(
+                                "Builder", "view.endpoint.x"),
+                        "{reason:'position_out_of_range',player:'Builder',field:'view.endpoint.x'}"),
                 detail(
                         new ErrorDetails.ServerUnavailable.DependencyUnavailable(),
                         "{reason:'dependency_unavailable'}"),
@@ -206,6 +249,18 @@ final class ErrorDetailsJsonTest {
                 Arguments.of(
                         new ErrorDetails.HistoryCapacityExceeded.EntriesPerWorld(1),
                         "history_capacity_exceeded"),
+                Arguments.of(new ErrorDetails.PlayerNotFound("Builder"), "player_not_found"),
+                Arguments.of(
+                        new ErrorDetails.PlayerUnavailable.SpectatingEntity("Builder"),
+                        "player_unavailable"),
+                Arguments.of(
+                        new ErrorDetails.PlayerUnavailable.NonFiniteState(
+                                "Builder", "movement.fallDistance"),
+                        "player_unavailable"),
+                Arguments.of(
+                        new ErrorDetails.PlayerUnavailable.PositionOutOfRange(
+                                "Builder", "feetPosition.x"),
+                        "player_unavailable"),
                 Arguments.of(new ErrorDetails.RegionTooLarge.BlockCount(2, 1), "region_too_large"),
                 Arguments.of(new ErrorDetails.ResultTooLarge.Blocks(2, 1), "result_too_large"),
                 Arguments.of(

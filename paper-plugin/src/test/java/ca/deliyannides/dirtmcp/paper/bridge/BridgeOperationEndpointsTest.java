@@ -23,6 +23,7 @@ import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
+import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
@@ -164,6 +165,120 @@ final class BridgeOperationEndpointsTest {
             assertEquals(2, viewRequest.get().depth());
             assertEquals(40, viewRequest.get().maxResults());
             assertEquals(200, view.statusCode());
+        }
+    }
+
+    @Test
+    void parsesPlayerContextDefaultsAndGranularIncludes() throws Exception {
+        AtomicReference<GetPlayerContext.Request> playerRequest = new AtomicReference<>();
+        BridgeTestFixture.TestOperations operations =
+                new BridgeTestFixture.TestOperations() {
+                    @Override
+                    public GetPlayerContext.Result getPlayerContext(
+                            GetPlayerContext.Request request) throws OperationException {
+                        playerRequest.set(request);
+                        return super.getPlayerContext(request);
+                    }
+                };
+        try (BridgeServer bridge = server(config(availablePort(), 4), operations);
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+
+            HttpResponse<String> defaults =
+                    send(
+                            client,
+                            post(bridge, "/v1/get-player-context", "{\"player\":\"Builder\"}"));
+
+            assertEquals(200, defaults.statusCode());
+            assertEquals(
+                    new GetPlayerContext.Includes(
+                            true, true, false, false, false, false, false, false),
+                    playerRequest.get().include());
+            assertEquals(21, playerRequest.get().view().width());
+            assertEquals(13, playerRequest.get().view().height());
+            assertEquals(70, playerRequest.get().view().verticalFieldOfViewDegrees());
+            assertEquals(32, playerRequest.get().view().maxDistance());
+            assertEquals(
+                    GetPlayerContext.FluidCollision.NEVER,
+                    playerRequest.get().view().fluidCollision());
+            var defaultBody = json(defaults.body()).getAsJsonObject();
+            var defaultView = defaultBody.getAsJsonObject("view");
+            assertEquals(1, defaultView.get("checkedChunkCount").getAsInt());
+            assertFalse(defaultBody.has("included"));
+            assertFalse(defaultView.has("rayCount"));
+            assertFalse(defaultView.has("rayDistanceBudget"));
+            assertFalse(defaultView.has("hitCount"));
+            assertTrue(defaultBody.has("equipment"));
+            assertTrue(defaultBody.get("inventory").isJsonNull());
+
+            HttpResponse<String> granular =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/get-player-context",
+                                    """
+                                    {"player":"Builder","include":{"view":false,
+                                     "equipment":false,"inventory":true,"enderChest":true,
+                                     "vitals":true,"movement":true,"client":true,"effects":true}}
+                                    """));
+
+            assertEquals(200, granular.statusCode());
+            assertEquals(
+                    new GetPlayerContext.Includes(false, false, true, true, true, true, true, true),
+                    playerRequest.get().include());
+            assertEquals(null, playerRequest.get().view());
+            var granularBody = json(granular.body()).getAsJsonObject();
+            assertTrue(granularBody.get("view").isJsonNull());
+            assertEquals(36, granularBody.getAsJsonObject("inventory").get("size").getAsInt());
+            assertEquals(27, granularBody.getAsJsonObject("enderChest").get("size").getAsInt());
+            assertEquals(
+                    40,
+                    granularBody
+                            .getAsJsonObject("vitals")
+                            .get("calculatedExperiencePoints")
+                            .getAsInt());
+            assertEquals(
+                    "en-US", granularBody.getAsJsonObject("client").get("locale").getAsString());
+
+            HttpResponse<String> malformedSelector =
+                    send(client, post(bridge, "/v1/get-player-context", "{\"player\":\" \"}"));
+            assertEquals(400, malformedSelector.statusCode());
+            assertEquals(
+                    "player",
+                    json(malformedSelector.body())
+                            .getAsJsonObject()
+                            .getAsJsonObject("error")
+                            .getAsJsonObject("details")
+                            .get("field")
+                            .getAsString());
+
+            HttpResponse<String> oversizedSelector =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/get-player-context",
+                                    "{\"player\":\"" + "x".repeat(37) + "\"}"));
+            assertEquals(400, oversizedSelector.statusCode());
+            var oversizedDetails =
+                    json(oversizedSelector.body())
+                            .getAsJsonObject()
+                            .getAsJsonObject("error")
+                            .getAsJsonObject("details");
+            assertEquals("out_of_range", oversizedDetails.get("reason").getAsString());
+            assertEquals("player.length", oversizedDetails.get("target").getAsString());
+            assertEquals(37, oversizedDetails.get("value").getAsInt());
+            assertEquals(36, oversizedDetails.get("maximum").getAsInt());
+
+            HttpResponse<String> conflictingView =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/get-player-context",
+                                    "{\"player\":\"Builder\",\"include\":{\"view\":false},\"view\":{}}"));
+            assertEquals(400, conflictingView.statusCode());
         }
     }
 

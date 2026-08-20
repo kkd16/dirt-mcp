@@ -15,7 +15,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.Semaphore;
 
 public final class RegionInspectionService
         implements CountRegionBlockStates, GetRegionBlocks, ScanOrthographicView {
@@ -25,8 +24,7 @@ public final class RegionInspectionService
     private final int maxInspectionResults;
     private final int maxTouchedChunks;
     private final int maxBlockStatePatterns;
-    private final Semaphore admissions;
-    private final int maximumConcurrentInspections;
+    private final InspectionAdmission admission;
 
     public RegionInspectionService(
             RegionSnapshotSource snapshots,
@@ -35,14 +33,13 @@ public final class RegionInspectionService
             int maxInspectionResults,
             int maxTouchedChunks,
             int maxBlockStatePatterns,
-            int maxConcurrentInspections) {
+            InspectionAdmission admission) {
         if (maxRegionVolume < 1
                 || maxInspectionVolume < 1
                 || maxInspectionVolume > maxRegionVolume
                 || maxInspectionResults < 1
                 || maxTouchedChunks < 1
-                || maxBlockStatePatterns < 1
-                || maxConcurrentInspections < 1) {
+                || maxBlockStatePatterns < 1) {
             throw new IllegalArgumentException("Inspection limits are invalid");
         }
         this.snapshots = Objects.requireNonNull(snapshots, "snapshots");
@@ -51,8 +48,7 @@ public final class RegionInspectionService
         this.maxInspectionResults = maxInspectionResults;
         this.maxTouchedChunks = maxTouchedChunks;
         this.maxBlockStatePatterns = maxBlockStatePatterns;
-        this.admissions = new Semaphore(maxConcurrentInspections);
-        this.maximumConcurrentInspections = maxConcurrentInspections;
+        this.admission = Objects.requireNonNull(admission, "admission");
     }
 
     @Override
@@ -64,7 +60,7 @@ public final class RegionInspectionService
                     new ErrorDetails.InvalidRequest.Missing(missingRegionField(request)));
         }
         validateWorld(request.world());
-        return admitted(
+        return this.admission.execute(
                 () -> {
                     Cuboid region =
                             RegionGeometry.normalize(
@@ -101,7 +97,7 @@ public final class RegionInspectionService
                             List.of("includeBlockStatePatterns", "excludeBlockStatePatterns"),
                             this.maxBlockStatePatterns));
         }
-        return admitted(
+        return this.admission.execute(
                 () -> {
                     Cuboid region =
                             RegionGeometry.normalize(
@@ -148,7 +144,7 @@ public final class RegionInspectionService
         }
         validateWorld(request.world());
         validateMaxResults(request.maxResults());
-        return admitted(
+        return this.admission.execute(
                 () -> {
                     OrthographicViewAlgorithms.ViewGeometry geometry =
                             OrthographicViewAlgorithms.geometry(request, this.maxInspectionVolume);
@@ -189,21 +185,6 @@ public final class RegionInspectionService
 
     private void enforceChunkLimit(Cuboid region) throws OperationException {
         RegionGeometry.touchedChunks(region, this.maxTouchedChunks);
-    }
-
-    private <T> T admitted(Inspection<T> inspection) throws OperationException {
-        if (!this.admissions.tryAcquire()) {
-            throw new OperationException(
-                    OperationFailure.SERVER_UNAVAILABLE,
-                    "The server is handling too many region inspections",
-                    new ErrorDetails.ServerUnavailable.InspectionBusy(
-                            this.maximumConcurrentInspections));
-        }
-        try {
-            return inspection.run();
-        } finally {
-            this.admissions.release();
-        }
     }
 
     private void validateDetailedRequest(GetRegionBlocks.Request request)
@@ -269,10 +250,5 @@ public final class RegionInspectionService
 
     private static OperationException invalid(String message, ErrorDetails.InvalidRequest details) {
         return new OperationException(OperationFailure.INVALID_REQUEST, message, details);
-    }
-
-    @FunctionalInterface
-    private interface Inspection<T> {
-        T run() throws OperationException;
     }
 }

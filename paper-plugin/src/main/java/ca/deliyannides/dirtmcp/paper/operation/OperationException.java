@@ -62,6 +62,8 @@ public class OperationException extends Exception {
                     case EDIT_NOT_LATEST -> details instanceof ErrorDetails.EditNotLatest;
                     case HISTORY_CAPACITY_EXCEEDED ->
                             details instanceof ErrorDetails.HistoryCapacityExceeded;
+                    case PLAYER_NOT_FOUND -> details instanceof ErrorDetails.PlayerNotFound;
+                    case PLAYER_UNAVAILABLE -> details instanceof ErrorDetails.PlayerUnavailable;
                     case REGION_TOO_LARGE -> details instanceof ErrorDetails.RegionTooLarge;
                     case RESULT_TOO_LARGE -> details instanceof ErrorDetails.ResultTooLarge;
                     case SERVER_UNAVAILABLE -> details instanceof ErrorDetails.ServerUnavailable;

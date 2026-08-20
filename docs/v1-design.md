@@ -15,6 +15,7 @@ behavior that matters when choosing and combining tools.
 | `count_region_block_states` | `POST /v1/count-region-block-states` | Count canonical block states in an inclusive region.                  |
 | `get_region_blocks`         | `POST /v1/get-region-blocks`         | Return filtered exact blocks or lossless axis-aligned runs.           |
 | `scan_orthographic_view`    | `POST /v1/scan-orthographic-view`    | Find a selected non-air depth on each bounded world-axis sightline.   |
+| `get_player_context`        | `POST /v1/get-player-context`        | Capture player pose, selected state, and a sampled perspective view.  |
 | `replace_region_blocks`     | `POST /v1/replace-region-blocks`     | Replace a union of block-state patterns with a destination palette.   |
 | `fill_region`               | `POST /v1/fill-region`               | Fill a region from a destination palette.                             |
 | `set_blocks`                | `POST /v1/set-blocks`                | Place weighted-palette states at relative offsets as one edit.        |
@@ -38,10 +39,10 @@ normalized independently on each axis.
 
 ## Inspection
 
-Inspection never loads or generates terrain. Dirt rejects a request unless its
-world, height range, and every intersecting chunk are already available. Paper
-captures thread-safe chunk snapshots on its main thread; counting and extraction
-then run off-thread.
+Region and block-view inspection never loads or generates terrain. Dirt rejects
+a request unless its world, height range, and every required chunk are already
+available. Paper captures region chunk snapshots on its main thread; counting
+and extraction then run off-thread.
 
 `count_region_block_states` returns a complete histogram, including air.
 `get_region_blocks` returns geometry and defaults to non-air `blocks`. Its
@@ -59,8 +60,49 @@ explicit blocks; the MCP-only `grid` format converts them to a one-based
 `blockStatePalette` with aligned state-index and distance rows. Zero denotes an
 empty sightline.
 
+`get_player_context` selects one online player by exact case-insensitive name or
+canonical UUID. One main-thread capture always returns its identity, world,
+timestamp, game mode, exact feet and eye positions, block position, yaw, pitch,
+look direction, pose, and on-ground state. Independent `include` flags gate the
+perspective `view`, `equipment`, sparse storage `inventory`, sparse `enderChest`,
+`vitals`, `movement`, client/session settings, and active `effects`. View and
+equipment default on; every other section defaults off. Item output is bounded
+to type, count, stack and durability values, unbreakable state, and sorted
+enchantments; it excludes names, lore, raw NBT/data components, and nested
+contents. The result is point-in-time at `capturedAt`; recapture before a
+POV-dependent edit whenever the player may have moved.
+
+Unrepresentable numeric state returns `player_unavailable` with the exact field
+in `details`. `non_finite_state` identifies a non-finite value;
+`position_out_of_range` identifies a feet, eye, or view-endpoint coordinate
+whose floored block position cannot fit signed int32. Correct the server state,
+reduce or disable the view when its endpoint is affected, or omit an affected
+optional section before retrying.
+
+The view is an odd-sized perspective ray grid sampled at cell centers from the
+player's captured eye pose. Defaults are 21 by 13 rays, 70 degrees vertical FOV,
+and 32 blocks. Paper collision shapes determine each first block hit; callers
+can independently select fluid collision and whether passable blocks are
+ignored. The response is a sparse row-major hit list with a first-appearance
+block-state palette and an explicit center-ray `crosshairHitIndex`. Use a 1-by-1
+view for a single crosshair ray, or disable `include.view` for state-only
+context.
+
+This is exact for the documented server projection, not a reconstruction of the
+client framebuffer. It cannot observe client aspect or dynamic FOV, third-person
+camera state, entities, particles, lighting, fog, resource packs, or client-only
+blocks. A player spectating another entity is rejected when view capture is on;
+the caller may set `include.view` false to retrieve the other server state.
+Before tracing, Dirt verifies a conservative loaded-chunk preflight for the
+sampled rays. Viewport dimensions determine the ray count; that count, its
+configured max-distance product, and checked chunks use the active inspection
+result, volume, and chunk ceilings. Every player-context call also shares the
+concurrent-inspection admission limit.
+
 Inspection result caps never truncate data. Dirt returns `result_too_large`
-when exact blocks, runs, or visible blocks exceed the applicable cap.
+when exact blocks, runs, visible blocks, player-view rays, or player-view
+ray-distance budget exceed the applicable cap. An oversized player-view chunk
+set reports `region_too_large` with reason `view_chunks`.
 
 ## Edits, history, and undo
 
@@ -213,9 +255,10 @@ or complete block payloads.
 
 ## Limits and security
 
-Startup-validated limits bound region volume, touched and snapshotted chunks,
-changed blocks, detailed scans, result sizes, request bodies, concurrent bridge
-and inspection work, and retained history. Active operation
+Startup-validated limits bound region volume, touched, snapshotted, and
+player-view checked chunks, changed blocks, detailed scans and player-view ray
+budgets, result sizes and ray counts, request bodies, concurrent bridge and
+inspection work, and retained history. Active operation
 limits, the separate `editHistory` object, `logging` configuration, and every
 resolved per-tool boolean in `tools` are available through `get_server_status`;
 the history fields are

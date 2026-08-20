@@ -547,6 +547,11 @@ final class BridgeServerProtocolTest {
                         "world_not_found",
                         new ErrorDetails.WorldNotFound("world")),
                 Arguments.of(
+                        OperationFailure.PLAYER_NOT_FOUND,
+                        404,
+                        "player_not_found",
+                        new ErrorDetails.PlayerNotFound("Builder")),
+                Arguments.of(
                         OperationFailure.EDIT_NOT_LATEST,
                         409,
                         "edit_not_latest",
@@ -556,6 +561,11 @@ final class BridgeServerProtocolTest {
                         409,
                         "world_busy",
                         new ErrorDetails.WorldBusy.OperationInProgress("world")),
+                Arguments.of(
+                        OperationFailure.PLAYER_UNAVAILABLE,
+                        409,
+                        "player_unavailable",
+                        new ErrorDetails.PlayerUnavailable.SpectatingEntity("Builder")),
                 Arguments.of(
                         OperationFailure.CHANGE_LIMIT_EXCEEDED,
                         413,

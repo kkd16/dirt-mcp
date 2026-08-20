@@ -237,6 +237,74 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       [0, 0, 0],
     ],
   };
+  const perspectiveHorizontalFov = (2 * Math.atan(Math.tan((70 * Math.PI) / 360) * (21 / 13)) * 180) / Math.PI;
+  const playerContext = {
+    capturedAt: '2026-08-20T20:15:30Z',
+    player: { name: 'Builder', uuid: '55555555-5555-4555-8555-555555555555' },
+    world: 'world',
+    worldId: '22222222-2222-4222-8222-222222222222',
+    gameMode: 'creative',
+    feetPosition: { x: 12.25, y: 70, z: -3.5 },
+    blockPosition: { x: 12, y: 70, z: -4 },
+    eyePosition: { x: 12.25, y: 71.62, z: -3.5 },
+    rotation: { yaw: 0, pitch: 0 },
+    lookDirection: { x: 0, y: 0, z: 1 },
+    pose: 'standing',
+    onGround: true,
+    view: {
+      basis: {
+        forward: { x: 0, y: 0, z: 1 },
+        right: { x: -1, y: 0, z: 0 },
+        up: { x: 0, y: 1, z: 0 },
+      },
+      viewport: {
+        width: 21,
+        height: 13,
+        verticalFieldOfViewDegrees: 70,
+        horizontalFieldOfViewDegrees: perspectiveHorizontalFov,
+        maxDistance: 32,
+        fluidCollision: 'never',
+        ignorePassableBlocks: false,
+      },
+      checkedChunkCount: 4,
+      blockStatePalette: ['minecraft:stone'],
+      hits: [
+        {
+          row: 6,
+          column: 10,
+          blockStateIndex: 1,
+          blockPosition: { x: 12, y: 71, z: 5 },
+          hitPosition: { x: 12.25, y: 71.62, z: 5 },
+          face: 'north',
+          distance: 8.5,
+        },
+      ],
+      crosshairHitIndex: 0,
+    },
+    equipment: {
+      selectedHotbarSlot: 0,
+      mainHand: {
+        type: 'minecraft:diamond_pickaxe',
+        amount: 1,
+        maxStackSize: 1,
+        damage: 12,
+        maxDamage: 1_561,
+        unbreakable: false,
+        enchantments: [{ type: 'minecraft:efficiency', level: 5 }],
+      },
+      offHand: null,
+      helmet: null,
+      chestplate: null,
+      leggings: null,
+      boots: null,
+    },
+    inventory: null,
+    enderChest: null,
+    vitals: null,
+    movement: null,
+    client: null,
+    effects: null,
+  };
   const setBlocks = {
     world: 'world',
     bounds: { min: { x: 1, y: 2, z: 3 }, max: { x: 5, y: 2, z: 3 } },
@@ -292,6 +360,8 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       response.end(JSON.stringify(regionBlocks));
     } else if (request.url === '/v1/scan-orthographic-view') {
       response.end(JSON.stringify(view));
+    } else if (request.url === '/v1/get-player-context') {
+      response.end(JSON.stringify(playerContext));
     } else if (request.url === '/v1/fill-region') {
       response.statusCode = 413;
       response.end(
@@ -370,6 +440,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { name: 'count_region_block_states', annotations: readAnnotations() },
       { name: 'get_region_blocks', annotations: readAnnotations() },
       { name: 'scan_orthographic_view', annotations: readAnnotations() },
+      { name: 'get_player_context', annotations: readAnnotations() },
       { name: 'replace_region_blocks', annotations: mutationAnnotations(false) },
       { name: 'fill_region', annotations: mutationAnnotations(false) },
       { name: 'set_blocks', annotations: mutationAnnotations(false) },
@@ -396,7 +467,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     };
   });
   const outputSchemaBytes = advertisedSchemas.reduce((total, advertised) => total + advertised.bytes, 0);
-  assert.ok(outputSchemaBytes < 100_000, `Tool output catalog grew to ${outputSchemaBytes} bytes`);
+  assert.ok(outputSchemaBytes < 120_000, `Tool output catalog grew to ${outputSchemaBytes} bytes`);
   await Promise.all(
     advertisedSchemas.map(async (advertised) => {
       const schema = fromJsonSchema(advertised.schema);
@@ -439,6 +510,9 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     maxItems: 4,
     description: 'Exact [paletteIndex, x, y, z] tuple; x, y, and z are signed offsets from the origin.',
   });
+  const listedPlayerContext = listedTools.find((tool) => tool.name === 'get_player_context');
+  assert.ok(listedPlayerContext);
+  assert.match(String(listedPlayerContext.description ?? ''), /not a client framebuffer/);
 
   send(child, {
     jsonrpc: '2.0',
@@ -722,6 +796,26 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     }),
   );
 
+  send(child, {
+    jsonrpc: '2.0',
+    id: 14,
+    method: 'tools/call',
+    params: requestParams({ name: 'get_player_context', arguments: { player: 'Builder' } }),
+  });
+  const player = await waitFor(messages, 14);
+  assert.deepEqual(
+    player.result,
+    completeResult({
+      content: [
+        {
+          type: 'text',
+          text: 'Builder in world at 12.25, 70, -3.5; 1/273 view rays hit blocks.',
+        },
+      ],
+      structuredContent: playerContext,
+    }),
+  );
+
   assert.deepEqual(
     requests.map(({ method, path }) => ({ method, path })),
     [
@@ -737,6 +831,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { method: 'POST', path: '/v1/replace-region-blocks' },
       { method: 'POST', path: '/v1/get-edit-history' },
       { method: 'POST', path: '/v1/undo-edit' },
+      { method: 'POST', path: '/v1/get-player-context' },
     ],
   );
   for (const request of requests) {
@@ -751,7 +846,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     assert.equal(typeof callId, 'string');
     return callId;
   });
-  assert.equal(new Set(callIds).size, 12);
+  assert.equal(new Set(callIds).size, 13);
   const toolCallIds = callIds.slice(1);
   assert.equal(failedFillCallId, toolCallIds[4]);
   assert.equal(setBlocks.edit.callId, toolCallIds[6]);
@@ -786,6 +881,19 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     world: 'world',
     editId: '11111111-1111-4111-8111-111111111111',
   });
+  assert.deepEqual(requestAt(requests, 12).body, {
+    player: 'Builder',
+    include: {
+      view: true,
+      equipment: true,
+      inventory: false,
+      enderChest: false,
+      vitals: false,
+      movement: false,
+      client: false,
+      effects: false,
+    },
+  });
 
   const auditRecords = logs.values.filter((record) => record.event === 'tool.completed');
   const expectedAudits: readonly (readonly [string, number, boolean, boolean])[] = [
@@ -800,6 +908,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     ['replace_region_blocks', 11, true, true],
     ['get_edit_history', 12, true, true],
     ['undo_edit', 13, true, true],
+    ['get_player_context', 14, false, true],
   ];
   assert.equal(auditRecords.length, expectedAudits.length);
   expectedAudits.forEach(([operation, requestId, includesWorld, success], index) => {

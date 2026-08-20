@@ -5,8 +5,9 @@ Paper plugin. [`openapi.yaml`](openapi.yaml) uses OpenAPI 3.2 and contains only
 implemented behavior.
 
 The bridge is authenticated and loopback-only. It covers runtime status,
-bounded inspection, FAWE-backed cuboid and palette-based edits, bounded retained
-edit history, newest-first history lookup, and identity-checked undo.
+bounded region and online-player inspection, server-authoritative perspective
+block views, FAWE-backed cuboid and palette-based edits, bounded retained edit
+history, newest-first history lookup, and identity-checked undo.
 Unimplemented operations are not included. Server status reports every resolved
 MCP tool boolean in `tools` and the active console and detail-log settings in
 `logging`; the local MCP process uses the tool snapshot to omit disabled tools

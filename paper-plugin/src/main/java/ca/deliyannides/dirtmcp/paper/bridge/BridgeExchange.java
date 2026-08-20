@@ -11,6 +11,7 @@ import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
+import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
@@ -291,6 +292,11 @@ public final class BridgeExchange {
             case ScanOrthographicView.Result result -> {
                 this.bounds = bounds(result.bounds());
                 this.resultCount = result.visibleBlockCount();
+            }
+            case GetPlayerContext.Result result -> {
+                if (result.view() != null) {
+                    this.resultCount = (long) result.view().hits().size();
+                }
             }
             default -> {
                 // Ping, status, and error envelopes do not add result metadata.

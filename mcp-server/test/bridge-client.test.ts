@@ -208,6 +208,12 @@ test('accepts one strict details variant for every bridge error code', () => {
     },
     { code: 'method_not_allowed', message: 'Wrong method', details: { allowedMethod: 'POST' } },
     { code: 'not_found', message: 'Unknown route', details: { reason: 'route_not_found' } },
+    { code: 'player_not_found', message: 'Player not found', details: { player: 'Builder' } },
+    {
+      code: 'player_unavailable',
+      message: 'Player camera unavailable',
+      details: { reason: 'spectating_entity', player: 'Builder' },
+    },
     {
       code: 'region_too_large',
       message: 'Region too large',
@@ -263,15 +269,24 @@ test('accepts every reason-discriminated bridge detail variant', () => {
       { reason: 'palette_weights_mixed', field: 'palette' },
       { reason: 'palette_weight_total', field: 'palette', requested: 99, required: 100 },
     ],
+    player_unavailable: [
+      { reason: 'spectating_entity', player: 'Builder' },
+      { reason: 'non_finite_state', player: 'Builder', field: 'feetPosition.x' },
+      { reason: 'non_finite_state', player: 'Builder', field: 'movement.velocity.x' },
+      { reason: 'position_out_of_range', player: 'Builder', field: 'view.endpoint.z' },
+    ],
     region_too_large: [
       { reason: 'volume', dimensions: { x: 10, y: 20, z: 30 }, maximum: 5_000 },
       { reason: 'touched_chunks', minimumRequired: 101, maximum: 100 },
+      { reason: 'view_chunks', requested: 101, maximum: 100 },
       { reason: 'block_count', requested: 101, maximum: 100 },
     ],
     result_too_large: [
       { reason: 'blocks', minimumRequired: 101, maximum: 100 },
       { reason: 'runs', minimumRequired: 101, maximum: 100 },
       { reason: 'visible_blocks', minimumRequired: 101, maximum: 100 },
+      { reason: 'view_rays', minimumRequired: 101, maximum: 100 },
+      { reason: 'view_ray_distance', minimumRequired: 101, maximum: 100 },
     ],
     history_capacity_exceeded: [
       { reason: 'entries_per_world', maximum: 100 },
@@ -376,6 +391,10 @@ test('enforces Java-aligned numeric ranges and cross-field invariants', () => {
     },
     {
       code: 'region_too_large',
+      details: { reason: 'view_chunks', requested: INT32_MAX, maximum: INT32_MAX - 1 },
+    },
+    {
+      code: 'region_too_large',
       details: { reason: 'block_count', requested: INT32_MAX, maximum: INT32_MAX - 1 },
     },
     {
@@ -428,6 +447,22 @@ test('enforces Java-aligned numeric ranges and cross-field invariants', () => {
     {
       code: 'world_unavailable',
       details: { reason: 'chunk_unloaded', world: 'world', chunk: { x: INT32_MIN - 1, z: 0 } },
+    },
+    {
+      code: 'player_unavailable',
+      details: { reason: 'non_finite_state', player: 'Builder', field: 'vitals.unknown' },
+    },
+    {
+      code: 'player_unavailable',
+      details: { reason: 'position_out_of_range', player: 'Builder', field: 'rotation.yaw' },
+    },
+    {
+      code: 'player_unavailable',
+      details: { reason: 'spectating_entity', player: 'Builder', field: 'vitals.health' },
+    },
+    {
+      code: 'player_unavailable',
+      details: { reason: 'spectating_entity', player: 'x'.repeat(37) },
     },
     {
       code: 'invalid_request',
@@ -489,6 +524,14 @@ test('enforces Java-aligned numeric ranges and cross-field invariants', () => {
     {
       code: 'region_too_large',
       details: { reason: 'touched_chunks', minimumRequired: 100, maximum: 100 },
+    },
+    {
+      code: 'region_too_large',
+      details: { reason: 'view_chunks', requested: INT32_MAX + 1, maximum: INT32_MAX },
+    },
+    {
+      code: 'region_too_large',
+      details: { reason: 'view_chunks', requested: 100, maximum: 100 },
     },
     {
       code: 'region_too_large',

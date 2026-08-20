@@ -21,6 +21,11 @@ export const BRIDGE_ROUTES = {
     path: '/v1/scan-orthographic-view',
     timeoutMilliseconds: 30_000,
   },
+  getPlayerContext: {
+    method: 'POST',
+    path: '/v1/get-player-context',
+    timeoutMilliseconds: 30_000,
+  },
   replaceRegionBlocks: {
     method: 'POST',
     path: '/v1/replace-region-blocks',
@@ -52,6 +57,8 @@ export const BRIDGE_ERROR_CODES = [
   'invalid_request',
   'method_not_allowed',
   'not_found',
+  'player_not_found',
+  'player_unavailable',
   'region_too_large',
   'result_too_large',
   'server_unavailable',
@@ -71,6 +78,7 @@ const NonBlankStringSchema = z
   .string()
   .min(1)
   .refine((value) => value.trim().length > 0, 'Must contain a non-whitespace character.');
+export const PlayerSelectorSchema = NonBlankStringSchema.max(36);
 const FieldSchema = NonBlankStringSchema.describe('Request field associated with the failure.');
 const TargetSchema = NonBlankStringSchema.describe(
   'Request input or derived operation target associated with the failure.',
@@ -176,6 +184,12 @@ const RegionTooLargeDetailsSchema = z.discriminatedUnion('reason', [
     minimumRequired: PositiveJsonSafeIntegerSchema.describe('Known lower bound on the number of touched chunks.'),
     maximum: PositiveInt32Schema.describe('Maximum accepted touched-chunk count.'),
   }).refine((details) => details.minimumRequired > details.maximum, 'minimumRequired must exceed maximum.'),
+  reasonWith('view_chunks', {
+    requested: PositiveInt32Schema.describe(
+      'Exact size of the conservative loaded-chunk preflight for the sampled rays.',
+    ),
+    maximum: PositiveInt32Schema.describe('Maximum accepted player-view checked-chunk count.'),
+  }).refine((details) => details.requested > details.maximum, 'requested must exceed maximum.'),
   reasonWith('block_count', {
     requested: PositiveInt32Schema.describe('Requested block placement count.'),
     maximum: PositiveInt32Schema.describe('Maximum accepted block placement count.'),
@@ -195,6 +209,14 @@ const ResultTooLargeDetailsSchema = z.discriminatedUnion('reason', [
     minimumRequired: PositiveJsonSafeIntegerSchema.describe('Known lower bound on the required result entries.'),
     maximum: PositiveInt32Schema.describe('Maximum accepted result entries.'),
   }).refine((details) => details.minimumRequired > details.maximum, 'minimumRequired must exceed maximum.'),
+  reasonWith('view_rays', {
+    minimumRequired: PositiveJsonSafeIntegerSchema.describe('Requested perspective-ray count.'),
+    maximum: PositiveInt32Schema.describe('Maximum accepted perspective-ray count.'),
+  }).refine((details) => details.minimumRequired > details.maximum, 'minimumRequired must exceed maximum.'),
+  reasonWith('view_ray_distance', {
+    minimumRequired: PositiveJsonSafeIntegerSchema.describe('Requested perspective ray-distance budget.'),
+    maximum: PositiveInt32Schema.describe('Maximum accepted perspective ray-distance budget.'),
+  }).refine((details) => details.minimumRequired > details.maximum, 'minimumRequired must exceed maximum.'),
 ]);
 
 const HistoryCapacityDetailsSchema = z.discriminatedUnion('reason', [
@@ -213,7 +235,7 @@ const ServerUnavailableDetailsSchema = z.discriminatedUnion('reason', [
   reason('dependency_unavailable'),
   reason('paper_unavailable'),
   reasonWith('inspection_busy', {
-    maximumConcurrentInspections: PositiveInt32Schema.describe('Maximum concurrent region inspections.'),
+    maximumConcurrentInspections: PositiveInt32Schema.describe('Maximum concurrent inspections.'),
   }),
 ]);
 
@@ -243,6 +265,49 @@ const WorldUnavailableDetailsSchema = z.discriminatedUnion('reason', [
   reasonWith('world_unloaded', { world: NonBlankStringSchema }),
   reasonWith('chunk_unloaded', { world: NonBlankStringSchema, chunk: ChunkSchema }),
   reasonWith('chunk_load_failed', { world: NonBlankStringSchema, chunk: ChunkSchema }),
+]);
+
+const PlayerUnavailableDetailsSchema = z.discriminatedUnion('reason', [
+  reasonWith('spectating_entity', {
+    player: PlayerSelectorSchema.describe('Requested online player selector.'),
+  }),
+  reasonWith('non_finite_state', {
+    player: PlayerSelectorSchema.describe('Requested online player selector.'),
+    field: z.enum([
+      'feetPosition.x',
+      'feetPosition.y',
+      'feetPosition.z',
+      'eyePosition.x',
+      'eyePosition.y',
+      'eyePosition.z',
+      'rotation.yaw',
+      'rotation.pitch',
+      'vitals.health',
+      'vitals.maxHealth',
+      'vitals.absorptionAmount',
+      'vitals.saturation',
+      'vitals.exhaustion',
+      'vitals.experienceProgress',
+      'movement.velocity.x',
+      'movement.velocity.y',
+      'movement.velocity.z',
+      'movement.fallDistance',
+    ]),
+  }),
+  reasonWith('position_out_of_range', {
+    player: PlayerSelectorSchema.describe('Requested online player selector.'),
+    field: z.enum([
+      'feetPosition.x',
+      'feetPosition.y',
+      'feetPosition.z',
+      'eyePosition.x',
+      'eyePosition.y',
+      'eyePosition.z',
+      'view.endpoint.x',
+      'view.endpoint.y',
+      'view.endpoint.z',
+    ]),
+  }),
 ]);
 
 export const BridgeErrorSchema = z.discriminatedUnion('code', [
@@ -284,6 +349,13 @@ export const BridgeErrorSchema = z.discriminatedUnion('code', [
   errorWithDetails('invalid_request', InvalidRequestDetailsSchema),
   errorWithDetails('method_not_allowed', z.object({ allowedMethod: z.enum(['GET', 'POST']) }).strict()),
   errorWithDetails('not_found', reason('route_not_found')),
+  errorWithDetails(
+    'player_not_found',
+    z
+      .object({ player: PlayerSelectorSchema.describe('Requested exact online player name or canonical UUID.') })
+      .strict(),
+  ),
+  errorWithDetails('player_unavailable', PlayerUnavailableDetailsSchema),
   errorWithDetails('region_too_large', RegionTooLargeDetailsSchema),
   errorWithDetails('result_too_large', ResultTooLargeDetailsSchema),
   errorWithDetails('server_unavailable', ServerUnavailableDetailsSchema),

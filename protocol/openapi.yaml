@@ -211,6 +211,63 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /v1/get-player-context:
+    post:
+      operationId: getPlayerContext
+      summary: Capture an online player's pose, selected state, and optional sampled perspective block view
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetPlayerContextRequest'
+      responses:
+        '200':
+          description: One coherent player snapshot with the requested optional sections
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetPlayerContextResponse'
+        '400':
+          description: Invalid player selector, include flags, or view options
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The selected player is not online
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          $ref: '#/components/responses/PostMethodNotAllowed'
+        '409':
+          description: The requested player camera or player state cannot be represented safely
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: The requested ray count, ray-distance budget, or checked-chunk count exceeds its inspection limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected player-context failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: The player-view preflight contains an unloaded chunk, Paper access was interrupted, or inspection capacity is exhausted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v1/replace-region-blocks:
     post:
       operationId: replaceRegionBlocks
@@ -564,6 +621,8 @@ components:
         - $ref: '#/components/schemas/InvalidRequestError'
         - $ref: '#/components/schemas/MethodNotAllowedError'
         - $ref: '#/components/schemas/NotFoundError'
+        - $ref: '#/components/schemas/PlayerNotFoundError'
+        - $ref: '#/components/schemas/PlayerUnavailableError'
         - $ref: '#/components/schemas/RegionTooLargeError'
         - $ref: '#/components/schemas/ResultTooLargeError'
         - $ref: '#/components/schemas/ServerUnavailableError'
@@ -584,6 +643,8 @@ components:
         - invalid_request
         - method_not_allowed
         - not_found
+        - player_not_found
+        - player_unavailable
         - region_too_large
         - result_too_large
         - server_unavailable
@@ -763,6 +824,107 @@ components:
                 reason:
                   const: route_not_found
       unevaluatedProperties: false
+    PlayerNotFoundError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+          properties:
+            code:
+              const: player_not_found
+            details:
+              type: object
+              additionalProperties: false
+              required:
+                - player
+              properties:
+                player:
+                  $ref: '#/components/schemas/PlayerSelector'
+                  description: Exact online player name or canonical UUID requested by the caller.
+      unevaluatedProperties: false
+    PlayerUnavailableError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+          properties:
+            code:
+              const: player_unavailable
+            details:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required:
+                    - reason
+                    - player
+                  properties:
+                    reason:
+                      const: spectating_entity
+                    player:
+                      $ref: '#/components/schemas/PlayerSelector'
+                      description: Requested online player name or canonical UUID selector.
+                - type: object
+                  additionalProperties: false
+                  required:
+                    - reason
+                    - player
+                    - field
+                  properties:
+                    reason:
+                      const: non_finite_state
+                    player:
+                      $ref: '#/components/schemas/PlayerSelector'
+                      description: Requested online player name or canonical UUID selector.
+                    field:
+                      type: string
+                      description: Player field whose server value was not a finite JSON number.
+                      enum:
+                        - feetPosition.x
+                        - feetPosition.y
+                        - feetPosition.z
+                        - eyePosition.x
+                        - eyePosition.y
+                        - eyePosition.z
+                        - rotation.yaw
+                        - rotation.pitch
+                        - vitals.health
+                        - vitals.maxHealth
+                        - vitals.absorptionAmount
+                        - vitals.saturation
+                        - vitals.exhaustion
+                        - vitals.experienceProgress
+                        - movement.velocity.x
+                        - movement.velocity.y
+                        - movement.velocity.z
+                        - movement.fallDistance
+                - type: object
+                  additionalProperties: false
+                  required:
+                    - reason
+                    - player
+                    - field
+                  properties:
+                    reason:
+                      const: position_out_of_range
+                    player:
+                      $ref: '#/components/schemas/PlayerSelector'
+                      description: Requested online player name or canonical UUID selector.
+                    field:
+                      type: string
+                      description: Coordinate whose floored block position was outside signed int32 range.
+                      enum:
+                        - feetPosition.x
+                        - feetPosition.y
+                        - feetPosition.z
+                        - eyePosition.x
+                        - eyePosition.y
+                        - eyePosition.z
+                        - view.endpoint.x
+                        - view.endpoint.y
+                        - view.endpoint.z
+      unevaluatedProperties: false
     RegionTooLargeError:
       allOf:
         - $ref: '#/components/schemas/BridgeErrorBase'
@@ -799,6 +961,8 @@ components:
                     - blocks
                     - runs
                     - visible_blocks
+                    - view_rays
+                    - view_ray_distance
                 minimumRequired:
                   $ref: '#/components/schemas/PositiveJsonSafeInteger'
                 maximum:
@@ -1075,6 +1239,21 @@ components:
               const: touched_chunks
             minimumRequired:
               $ref: '#/components/schemas/PositiveJsonSafeInteger'
+            maximum:
+              $ref: '#/components/schemas/PositiveInt32'
+        - type: object
+          additionalProperties: false
+          description: requested must be greater than maximum.
+          required:
+            - reason
+            - requested
+            - maximum
+          properties:
+            reason:
+              const: view_chunks
+            requested:
+              $ref: '#/components/schemas/PositiveInt32'
+              description: Exact size of the conservative loaded-chunk preflight for the sampled rays.
             maximum:
               $ref: '#/components/schemas/PositiveInt32'
         - type: object
@@ -1693,6 +1872,712 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/OrthographicViewBlock'
+    PlayerSelector:
+      type: string
+      minLength: 1
+      maxLength: 36
+      pattern: '.*\S.*'
+      description: Exact online player name (available from get_server_status when enabled) or canonical UUID.
+    PlayerContextIncludeOptions:
+      type: object
+      additionalProperties: false
+      properties:
+        view:
+          type: boolean
+          default: true
+          description: Include the perspective first-block-hit grid.
+        equipment:
+          type: boolean
+          default: true
+          description: Include the selected hotbar slot, held items, and armor.
+        inventory:
+          type: boolean
+          default: false
+          description: Include occupied player storage slots, excluding equipment and off-hand.
+        enderChest:
+          type: boolean
+          default: false
+          description: Include occupied ender-chest slots.
+        vitals:
+          type: boolean
+          default: false
+          description: Include health, food, air, experience, fire, and freeze state.
+        movement:
+          type: boolean
+          default: false
+          description: Include velocity, flight state, and movement/posture flags.
+        client:
+          type: boolean
+          default: false
+          description: Include ping, locale, and client/server view distances.
+        effects:
+          type: boolean
+          default: false
+          description: Include sorted active potion effects.
+    PlayerViewOptions:
+      type: object
+      additionalProperties: false
+      description: Server-authoritative perspective block-collision projection. This object is invalid when include.view is false.
+      properties:
+        width:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 255
+          default: 21
+          description: Odd number of left-to-right ray columns.
+          not:
+            multipleOf: 2
+        height:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 255
+          default: 13
+          description: Odd number of top-to-bottom ray rows.
+          not:
+            multipleOf: 2
+        verticalFieldOfViewDegrees:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 170
+          default: 70
+          description: Vertical projection angle. Paper cannot observe the client's configured or dynamically modified FOV.
+        maxDistance:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 128
+          default: 32
+          description: Maximum Euclidean block-ray distance from the eye position.
+        fluidCollision:
+          type: string
+          enum:
+            - never
+            - source_only
+            - always
+          default: never
+        ignorePassableBlocks:
+          type: boolean
+          default: false
+          description: Whether passable but collidable blocks are ignored by Paper ray tracing.
+    GetPlayerContextRequest:
+      type: object
+      additionalProperties: false
+      if:
+        required:
+          - include
+        properties:
+          include:
+            required:
+              - view
+            properties:
+              view:
+                const: false
+      then:
+        not:
+          properties:
+            view: {}
+          required:
+            - view
+      required:
+        - player
+      properties:
+        player:
+          $ref: '#/components/schemas/PlayerSelector'
+        include:
+          allOf:
+            - $ref: '#/components/schemas/PlayerContextIncludeOptions'
+          default:
+            view: true
+            equipment: true
+            inventory: false
+            enderChest: false
+            vitals: false
+            movement: false
+            client: false
+            effects: false
+        view:
+          $ref: '#/components/schemas/PlayerViewOptions'
+    ExactPosition:
+      type: object
+      additionalProperties: false
+      required:
+        - x
+        - y
+        - z
+      properties:
+        x:
+          type: number
+          format: double
+        y:
+          type: number
+          format: double
+        z:
+          type: number
+          format: double
+    PlayerIdentity:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - uuid
+      properties:
+        name:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+        uuid:
+          type: string
+          pattern: '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
+    PlayerRotation:
+      type: object
+      additionalProperties: false
+      required:
+        - yaw
+        - pitch
+      properties:
+        yaw:
+          type: number
+          format: double
+          description: Paper yaw in degrees.
+        pitch:
+          type: number
+          format: double
+    PlayerViewBasis:
+      type: object
+      additionalProperties: false
+      description: Orthonormal camera basis captured from the player's eye pose.
+      required:
+        - forward
+        - right
+        - up
+      properties:
+        forward:
+          $ref: '#/components/schemas/ExactPosition'
+        right:
+          $ref: '#/components/schemas/ExactPosition'
+        up:
+          $ref: '#/components/schemas/ExactPosition'
+    ResolvedPlayerViewport:
+      type: object
+      additionalProperties: false
+      required:
+        - width
+        - height
+        - verticalFieldOfViewDegrees
+        - horizontalFieldOfViewDegrees
+        - maxDistance
+        - fluidCollision
+        - ignorePassableBlocks
+      properties:
+        width:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 255
+        height:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 255
+        verticalFieldOfViewDegrees:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 170
+        horizontalFieldOfViewDegrees:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+          exclusiveMaximum: 180
+          description: Horizontal projection angle derived from vertical FOV and viewport aspect ratio.
+        maxDistance:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 128
+        fluidCollision:
+          type: string
+          enum:
+            - never
+            - source_only
+            - always
+        ignorePassableBlocks:
+          type: boolean
+    PlayerViewHit:
+      type: object
+      additionalProperties: false
+      required:
+        - row
+        - column
+        - blockStateIndex
+        - blockPosition
+        - hitPosition
+        - face
+        - distance
+      properties:
+        row:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Zero-based top-to-bottom viewport row.
+        column:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Zero-based left-to-right viewport column.
+        blockStateIndex:
+          type: integer
+          format: int32
+          minimum: 1
+          description: One-based index into blockStatePalette.
+        blockPosition:
+          $ref: '#/components/schemas/BlockPosition'
+        hitPosition:
+          $ref: '#/components/schemas/ExactPosition'
+        face:
+          oneOf:
+            - type: string
+              enum:
+                - up
+                - down
+                - north
+                - east
+                - south
+                - west
+            - type: 'null'
+          description: Hit block face when Paper supplies one.
+        distance:
+          type: number
+          format: double
+          minimum: 0
+          description: Euclidean ray distance from eyePosition.
+    PlayerPerspectiveView:
+      type: object
+      additionalProperties: false
+      description: Exact first Paper block-collision hits for viewport width times height sampled rays; misses are omitted; not a client framebuffer or rendered image.
+      required:
+        - basis
+        - viewport
+        - checkedChunkCount
+        - blockStatePalette
+        - hits
+        - crosshairHitIndex
+      properties:
+        basis:
+          $ref: '#/components/schemas/PlayerViewBasis'
+        viewport:
+          $ref: '#/components/schemas/ResolvedPlayerViewport'
+        checkedChunkCount:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Exact size of the conservative loaded-chunk preflight for the sampled rays.
+        blockStatePalette:
+          type: array
+          uniqueItems: true
+          description: Unique block states ordered by first appearance in hits.
+          items:
+            type: string
+            minLength: 1
+            pattern: '.*\S.*'
+        hits:
+          type: array
+          description: Sparse first hits in strictly increasing row-major viewport order.
+          items:
+            $ref: '#/components/schemas/PlayerViewHit'
+        crosshairHitIndex:
+          oneOf:
+            - type: integer
+              format: int32
+              minimum: 0
+            - type: 'null'
+          description: Zero-based hits index for the center ray, or null when it did not hit a block.
+    PlayerEnchantment:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - level
+      properties:
+        type:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+          description: Namespaced enchantment identifier.
+        level:
+          $ref: '#/components/schemas/Int32'
+    PlayerItemStack:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - amount
+        - maxStackSize
+        - damage
+        - maxDamage
+        - unbreakable
+        - enchantments
+      properties:
+        type:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+          description: Namespaced item type.
+        amount:
+          $ref: '#/components/schemas/PositiveInt32'
+        maxStackSize:
+          $ref: '#/components/schemas/PositiveInt32'
+        damage:
+          oneOf:
+            - type: integer
+              format: int32
+              minimum: 0
+            - type: 'null'
+        maxDamage:
+          oneOf:
+            - $ref: '#/components/schemas/PositiveInt32'
+            - type: 'null'
+        unbreakable:
+          type: boolean
+        enchantments:
+          type: array
+          description: Enchantments with distinct types in strictly increasing type order.
+          items:
+            $ref: '#/components/schemas/PlayerEnchantment'
+    NullablePlayerItemStack:
+      oneOf:
+        - $ref: '#/components/schemas/PlayerItemStack'
+        - type: 'null'
+    PlayerEquipment:
+      type: object
+      additionalProperties: false
+      required:
+        - selectedHotbarSlot
+        - mainHand
+        - offHand
+        - helmet
+        - chestplate
+        - leggings
+        - boots
+      properties:
+        selectedHotbarSlot:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 8
+        mainHand:
+          $ref: '#/components/schemas/NullablePlayerItemStack'
+        offHand:
+          $ref: '#/components/schemas/NullablePlayerItemStack'
+        helmet:
+          $ref: '#/components/schemas/NullablePlayerItemStack'
+        chestplate:
+          $ref: '#/components/schemas/NullablePlayerItemStack'
+        leggings:
+          $ref: '#/components/schemas/NullablePlayerItemStack'
+        boots:
+          $ref: '#/components/schemas/NullablePlayerItemStack'
+    PlayerInventorySlot:
+      type: object
+      additionalProperties: false
+      required:
+        - slot
+        - item
+      properties:
+        slot:
+          type: integer
+          format: int32
+          minimum: 0
+        item:
+          $ref: '#/components/schemas/PlayerItemStack'
+    PlayerInventory:
+      type: object
+      additionalProperties: false
+      description: Sparse occupied container slots in ascending slot order. Player inventory excludes equipment and off-hand; ender chest uses the same shape.
+      required:
+        - size
+        - slots
+      properties:
+        size:
+          $ref: '#/components/schemas/PositiveInt32'
+        slots:
+          type: array
+          description: Occupied slots with distinct indexes in strictly increasing order.
+          items:
+            $ref: '#/components/schemas/PlayerInventorySlot'
+    PlayerVitals:
+      type: object
+      additionalProperties: false
+      required:
+        - health
+        - maxHealth
+        - absorptionAmount
+        - foodLevel
+        - saturation
+        - exhaustion
+        - remainingAir
+        - maximumAir
+        - experienceLevel
+        - experienceProgress
+        - calculatedExperiencePoints
+        - fireTicks
+        - freezeTicks
+      properties:
+        health:
+          type: number
+          format: double
+          minimum: 0
+        maxHealth:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+        absorptionAmount:
+          type: number
+          format: double
+          minimum: 0
+        foodLevel:
+          $ref: '#/components/schemas/Int32'
+        saturation:
+          type: number
+          format: double
+        exhaustion:
+          type: number
+          format: double
+        remainingAir:
+          type: integer
+          format: int32
+        maximumAir:
+          $ref: '#/components/schemas/Int32'
+        experienceLevel:
+          type: integer
+          format: int32
+          minimum: 0
+        experienceProgress:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        calculatedExperiencePoints:
+          $ref: '#/components/schemas/Int32'
+          description: Total points calculated from the current experience level and progress.
+        fireTicks:
+          type: integer
+          format: int32
+        freezeTicks:
+          type: integer
+          format: int32
+          minimum: 0
+    PlayerMovement:
+      type: object
+      additionalProperties: false
+      required:
+        - velocity
+        - fallDistance
+        - allowFlight
+        - flying
+        - sneaking
+        - sprinting
+        - swimming
+        - gliding
+        - sleeping
+        - blocking
+        - riptiding
+      properties:
+        velocity:
+          $ref: '#/components/schemas/ExactPosition'
+        fallDistance:
+          type: number
+          format: double
+        allowFlight:
+          type: boolean
+        flying:
+          type: boolean
+        sneaking:
+          type: boolean
+        sprinting:
+          type: boolean
+        swimming:
+          type: boolean
+        gliding:
+          type: boolean
+        sleeping:
+          type: boolean
+        blocking:
+          type: boolean
+        riptiding:
+          type: boolean
+    PlayerClient:
+      type: object
+      additionalProperties: false
+      required:
+        - pingMillis
+        - locale
+        - clientViewDistance
+        - viewDistance
+        - sendViewDistance
+      properties:
+        pingMillis:
+          $ref: '#/components/schemas/Int32'
+        locale:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+        clientViewDistance:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Chunk render-distance preference reported by the client.
+        viewDistance:
+          allOf:
+            - $ref: '#/components/schemas/Int32'
+          description: Effective Paper chunk load distance for this player.
+        sendViewDistance:
+          allOf:
+            - $ref: '#/components/schemas/Int32'
+          description: Effective Paper chunk send distance for this player.
+    PlayerEffect:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - amplifier
+        - durationTicks
+        - ambient
+        - particles
+        - icon
+      properties:
+        type:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+          description: Namespaced effect identifier.
+        amplifier:
+          $ref: '#/components/schemas/Int32'
+        durationTicks:
+          allOf:
+            - $ref: '#/components/schemas/Int32'
+          description: Remaining ticks; Paper uses -1 as the infinite-duration sentinel and plugins may expose other signed values.
+        ambient:
+          type: boolean
+        particles:
+          type: boolean
+        icon:
+          type: boolean
+    GetPlayerContextResponse:
+      type: object
+      additionalProperties: false
+      description: Coherent Paper main-thread capture. Each requested section is non-null and each excluded section is null. When equipment and inventory are both included, equipment.mainHand equals the selectedHotbarSlot item, or is null when that sparse slot is omitted.
+      required:
+        - capturedAt
+        - player
+        - world
+        - worldId
+        - gameMode
+        - feetPosition
+        - blockPosition
+        - eyePosition
+        - rotation
+        - lookDirection
+        - pose
+        - onGround
+        - view
+        - equipment
+        - inventory
+        - enderChest
+        - vitals
+        - movement
+        - client
+        - effects
+      properties:
+        capturedAt:
+          type: string
+          format: date-time
+        player:
+          $ref: '#/components/schemas/PlayerIdentity'
+        world:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+        worldId:
+          $ref: '#/components/schemas/Uuid'
+        gameMode:
+          type: string
+          enum:
+            - survival
+            - creative
+            - adventure
+            - spectator
+        feetPosition:
+          $ref: '#/components/schemas/ExactPosition'
+        blockPosition:
+          $ref: '#/components/schemas/BlockPosition'
+        eyePosition:
+          $ref: '#/components/schemas/ExactPosition'
+        rotation:
+          $ref: '#/components/schemas/PlayerRotation'
+        lookDirection:
+          $ref: '#/components/schemas/ExactPosition'
+        pose:
+          type: string
+          enum:
+            - standing
+            - fall_flying
+            - sleeping
+            - swimming
+            - spin_attack
+            - sneaking
+            - long_jumping
+            - dying
+            - croaking
+            - using_tongue
+            - sitting
+            - roaring
+            - sniffing
+            - emerging
+            - digging
+            - sliding
+            - shooting
+            - inhaling
+        onGround:
+          type: boolean
+        view:
+          oneOf:
+            - $ref: '#/components/schemas/PlayerPerspectiveView'
+            - type: 'null'
+        equipment:
+          oneOf:
+            - $ref: '#/components/schemas/PlayerEquipment'
+            - type: 'null'
+        inventory:
+          oneOf:
+            - $ref: '#/components/schemas/PlayerInventory'
+            - type: 'null'
+        enderChest:
+          oneOf:
+            - $ref: '#/components/schemas/PlayerInventory'
+            - type: 'null'
+        vitals:
+          oneOf:
+            - $ref: '#/components/schemas/PlayerVitals'
+            - type: 'null'
+        movement:
+          oneOf:
+            - $ref: '#/components/schemas/PlayerMovement'
+            - type: 'null'
+        client:
+          oneOf:
+            - $ref: '#/components/schemas/PlayerClient'
+            - type: 'null'
+        effects:
+          oneOf:
+            - type: array
+              description: Active effects with distinct types in strictly increasing type order.
+              items:
+                $ref: '#/components/schemas/PlayerEffect'
+            - type: 'null'
     DestinationPaletteEntry:
       type: object
       additionalProperties: false
@@ -2216,7 +3101,7 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum distinct loaded chunks one inspection may snapshot; cannot exceed maxTouchedChunks.
+          description: Maximum distinct loaded chunks a region inspection may snapshot or a player-view scan may check; cannot exceed maxTouchedChunks.
         maxBlockStatePatterns:
           type: integer
           format: int32
@@ -2232,7 +3117,7 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum blocks scanned by exact block retrieval or an orthographic view; cannot exceed maxRegionVolume.
+          description: Maximum blocks scanned by exact block retrieval or an orthographic view, and maximum configured player-view ray-distance budget; cannot exceed maxRegionVolume.
         defaultInspectionResultLimit:
           type: integer
           format: int32
@@ -2242,7 +3127,7 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum caller-selectable exact-block, run, or visible-block result limit; cannot exceed maxInspectionVolume.
+          description: Maximum caller-selectable exact-block, run, or visible-block result limit and maximum player-view ray count; cannot exceed maxInspectionVolume.
     EditHistoryConfiguration:
       type: object
       additionalProperties: false
@@ -2321,6 +3206,7 @@ components:
         - count_region_block_states
         - get_region_blocks
         - scan_orthographic_view
+        - get_player_context
         - replace_region_blocks
         - fill_region
         - set_blocks
@@ -2336,6 +3222,8 @@ components:
         get_region_blocks:
           type: boolean
         scan_orthographic_view:
+          type: boolean
+        get_player_context:
           type: boolean
         replace_region_blocks:
           type: boolean

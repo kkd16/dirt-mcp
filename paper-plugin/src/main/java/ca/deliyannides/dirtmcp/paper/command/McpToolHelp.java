@@ -25,6 +25,18 @@ final class McpToolHelp {
                             "builds, performance (TPS and tick time), players, worlds, limits, "
                                     + "editHistory, defaults, logging, and tools.",
                             "Read-only; use the reported world names and active limits for later calls.");
+            case GET_PLAYER_CONTEXT ->
+                    new ToolSpec(
+                            "Get player context",
+                            ToolKind.READ_ONLY,
+                            "Captures an online player's exact pose and optional perspective, items, vitals, movement, client state, and effects.",
+                            "player (exact online name or UUID); optional include flags and bounded view "
+                                    + "width, height, verticalFieldOfViewDegrees, maxDistance, "
+                                    + "fluidCollision, and ignorePassableBlocks.",
+                            "One coherent player snapshot with requested nullable sections and sparse "
+                                    + "first block-collision hits from the captured eye pose.",
+                            "Read-only; the view is a server-side ray projection, not the client's "
+                                    + "framebuffer, third-person camera, resource-pack rendering, or FOV setting.");
             case COUNT_REGION_BLOCK_STATES ->
                     new ToolSpec(
                             "Count region block states",

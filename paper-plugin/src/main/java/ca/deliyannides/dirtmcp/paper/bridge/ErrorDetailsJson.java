@@ -21,6 +21,8 @@ final class ErrorDetailsJson {
             case ErrorDetails.EditNotFound ignored -> "edit_not_found";
             case ErrorDetails.EditNotLatest ignored -> "edit_not_latest";
             case ErrorDetails.HistoryCapacityExceeded ignored -> "history_capacity_exceeded";
+            case ErrorDetails.PlayerNotFound ignored -> "player_not_found";
+            case ErrorDetails.PlayerUnavailable ignored -> "player_unavailable";
             case ErrorDetails.RegionTooLarge ignored -> "region_too_large";
             case ErrorDetails.ResultTooLarge ignored -> "result_too_large";
             case ErrorDetails.ServerUnavailable ignored -> "server_unavailable";
@@ -98,6 +100,21 @@ final class ErrorDetailsJson {
                     property(reason("entries_total"), "maximum", value.maximum());
             case ErrorDetails.HistoryCapacityExceeded.RetainedChangedBlocks value ->
                     property(reason("retained_changed_blocks"), "maximum", value.maximum());
+            case ErrorDetails.PlayerNotFound value -> property("player", value.player());
+            case ErrorDetails.PlayerUnavailable.SpectatingEntity value ->
+                    property(reason("spectating_entity"), "player", value.player());
+            case ErrorDetails.PlayerUnavailable.NonFiniteState value -> {
+                JsonObject object = reason("non_finite_state");
+                object.addProperty("player", value.player());
+                object.addProperty("field", value.field());
+                yield object;
+            }
+            case ErrorDetails.PlayerUnavailable.PositionOutOfRange value -> {
+                JsonObject object = reason("position_out_of_range");
+                object.addProperty("player", value.player());
+                object.addProperty("field", value.field());
+                yield object;
+            }
             case ErrorDetails.RegionTooLarge.Volume value -> {
                 JsonObject object = reason("volume");
                 object.add("dimensions", dimensions(value.dimensions()));
@@ -107,6 +124,12 @@ final class ErrorDetailsJson {
             case ErrorDetails.RegionTooLarge.TouchedChunks value -> {
                 JsonObject object = reason("touched_chunks");
                 object.addProperty("minimumRequired", value.minimumRequired());
+                object.addProperty("maximum", value.maximum());
+                yield object;
+            }
+            case ErrorDetails.RegionTooLarge.ViewChunks value -> {
+                JsonObject object = reason("view_chunks");
+                object.addProperty("requested", value.requested());
                 object.addProperty("maximum", value.maximum());
                 yield object;
             }
@@ -122,6 +145,10 @@ final class ErrorDetailsJson {
                     result("runs", value.minimumRequired(), value.maximum());
             case ErrorDetails.ResultTooLarge.VisibleBlocks value ->
                     result("visible_blocks", value.minimumRequired(), value.maximum());
+            case ErrorDetails.ResultTooLarge.ViewRays value ->
+                    result("view_rays", value.minimumRequired(), value.maximum());
+            case ErrorDetails.ResultTooLarge.ViewRayDistance value ->
+                    result("view_ray_distance", value.minimumRequired(), value.maximum());
             case ErrorDetails.ServerUnavailable.DependencyUnavailable ignored ->
                     reason("dependency_unavailable");
             case ErrorDetails.ServerUnavailable.PaperUnavailable ignored ->

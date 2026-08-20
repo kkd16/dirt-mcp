@@ -22,6 +22,7 @@ tools:
   count_region_block_states: true
   get_region_blocks: true
   scan_orthographic_view: true
+  get_player_context: true
   replace_region_blocks: true
   fill_region: true
   set_blocks: true
@@ -44,19 +45,20 @@ limits:
   max-region-volume: 262144
   # Maximum distinct loaded chunks one edit may touch.
   max-touched-chunks: 256
-  # Maximum distinct loaded chunks one inspection may snapshot; cannot exceed
-  # max-touched-chunks.
+  # Maximum distinct loaded chunks a region snapshot or player-view ray set may check;
+  # cannot exceed max-touched-chunks.
   max-inspection-touched-chunks: 32
   # Maximum block-state patterns or palette entries (1-64); inspection filters share it.
   max-block-state-patterns: 64
   # Maximum blocks one mutation may change; cannot exceed max-region-volume.
   max-changed-blocks: 65536
-  # Maximum blocks scanned by exact retrieval or an orthographic view; cannot
-  # exceed max-region-volume.
+  # Maximum blocks scanned by a region inspection, and the conservative player-view
+  # ray-count x distance budget; cannot exceed max-region-volume.
   max-inspection-volume: 16384
-  # Result limit used when maxResults is omitted; cannot exceed max-inspection-results.
+  # Region/orthographic maxResults used when omitted; cannot exceed max-inspection-results.
   default-inspection-results: 512
-  # Highest maxResults accepted; cannot exceed max-inspection-volume.
+  # Highest region maxResults and player-view ray count; cannot exceed
+  # max-inspection-volume.
   max-inspection-results: 2048
 
 edit-history:

@@ -31,18 +31,20 @@ const LimitConfigurationSchema = z
     maxRegionVolume: PositiveInt32Schema.describe('Maximum cuboid mutation/count volume or explicit block placements.'),
     maxTouchedChunks: PositiveInt32Schema.describe('Maximum distinct loaded chunks one mutation may touch.'),
     maxInspectionTouchedChunks: PositiveInt32Schema.describe(
-      'Maximum distinct loaded chunks one inspection may snapshot.',
+      'Maximum loaded chunks a region inspection may snapshot or a player-view scan may check.',
     ),
     maxBlockStatePatterns: PositiveInt32Schema.max(MAX_BLOCK_STATE_ENTRIES).describe(
       'Maximum block-state patterns or palette entries in one operation; inspection include and exclude lists share this cap.',
     ),
     maxChangedBlocks: PositiveInt32Schema.describe('Maximum blocks one edit may change.'),
-    maxInspectionVolume: PositiveInt32Schema.describe('Maximum blocks scanned by a detailed inspection.'),
+    maxInspectionVolume: PositiveInt32Schema.describe(
+      'Maximum blocks scanned by a detailed region inspection or perspective ray-distance budget.',
+    ),
     defaultInspectionResultLimit: PositiveInt32Schema.describe(
-      'Default block, run, or visible-block result limit for detailed inspections.',
+      'Default exact-block, run, or visible-block result limit when maxResults is omitted.',
     ),
     maxInspectionResultLimit: PositiveInt32Schema.describe(
-      'Maximum caller-selectable result limit for detailed inspections.',
+      'Maximum caller-selected detailed-inspection result limit or player-view ray count.',
     ),
   })
   .strict()

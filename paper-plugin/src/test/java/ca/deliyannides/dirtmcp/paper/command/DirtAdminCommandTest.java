@@ -147,6 +147,7 @@ final class DirtAdminCommandTest {
         assertTrue(plain.contains("count_region_block_states  true"));
         assertTrue(plain.contains("get_region_blocks  false"));
         assertTrue(plain.contains("scan_orthographic_view  true"));
+        assertTrue(plain.contains("get_player_context  false"));
         assertTrue(plain.contains("replace_region_blocks  false"));
         assertTrue(plain.contains("fill_region  true"));
         assertTrue(plain.contains("set_blocks  false"));
@@ -184,7 +185,7 @@ final class DirtAdminCommandTest {
         Component message = fixture.messages.getFirst();
         String plain = PLAIN.serialize(message);
         assertTrue(plain.contains("DIRT MCP  /  MCP Tools"));
-        assertTrue(plain.contains("Paper startup snapshot  •  5 of 10 configured ON"));
+        assertTrue(plain.contains("Paper startup snapshot  •  5 of 11 configured ON"));
         assertTrue(plain.contains("restart Paper, then the MCP host"));
         Set<String> expectedCommands = new HashSet<>();
         for (McpTool tool : McpTool.values()) {

@@ -4,6 +4,7 @@ import ca.deliyannides.dirtmcp.paper.bridge.BridgeServer;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.CountRegionBlockStatesEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.FillRegionEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetEditHistoryEndpoint;
+import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetPlayerContextEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetRegionBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.PingEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ReplaceRegionBlocksEndpoint;
@@ -20,6 +21,9 @@ import ca.deliyannides.dirtmcp.paper.status.BukkitServerStatusAccess;
 import ca.deliyannides.dirtmcp.paper.status.PaperServerStatusService;
 import ca.deliyannides.dirtmcp.paper.world.edit.FaweWorldEditor;
 import ca.deliyannides.dirtmcp.paper.world.edit.WorldEditLifecycleListener;
+import ca.deliyannides.dirtmcp.paper.world.inspection.BukkitPlayerContextAccess;
+import ca.deliyannides.dirtmcp.paper.world.inspection.InspectionAdmission;
+import ca.deliyannides.dirtmcp.paper.world.inspection.PaperPlayerContextService;
 import ca.deliyannides.dirtmcp.paper.world.inspection.PaperRegionSnapshotSource;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionInspectionService;
 import io.papermc.paper.plugin.configuration.PluginMeta;
@@ -70,6 +74,8 @@ public final class DirtRuntime implements AutoCloseable {
                     new PaperServerStatusService(
                             mainThread, new BukkitServerStatusAccess(plugin, config));
             DirtConfig.Limits limits = config.limits();
+            InspectionAdmission inspectionAdmission =
+                    new InspectionAdmission(config.bridge().maxConcurrentInspections());
             RegionInspectionService inspection =
                     new RegionInspectionService(
                             new PaperRegionSnapshotSource(plugin.getServer(), mainThread),
@@ -78,7 +84,16 @@ public final class DirtRuntime implements AutoCloseable {
                             limits.maxInspectionResultLimit(),
                             limits.maxInspectionTouchedChunks(),
                             limits.maxBlockStatePatterns(),
-                            config.bridge().maxConcurrentInspections());
+                            inspectionAdmission);
+            PaperPlayerContextService playerContext =
+                    new PaperPlayerContextService(
+                            mainThread,
+                            new BukkitPlayerContextAccess(
+                                    plugin.getServer(),
+                                    limits.maxInspectionResultLimit(),
+                                    limits.maxInspectionVolume(),
+                                    limits.maxInspectionTouchedChunks()),
+                            inspectionAdmission);
             worldEditor =
                     new FaweWorldEditor(plugin, mainThread, limits, config.editHistory(), log);
             worldLifecycle = new WorldEditLifecycleListener(worldEditor);
@@ -94,6 +109,7 @@ public final class DirtRuntime implements AutoCloseable {
                                     new CountRegionBlockStatesEndpoint(inspection),
                                     new GetRegionBlocksEndpoint(inspection, config),
                                     new ScanOrthographicViewEndpoint(inspection, config),
+                                    new GetPlayerContextEndpoint(playerContext),
                                     new ReplaceRegionBlocksEndpoint(worldEditor, config),
                                     new FillRegionEndpoint(worldEditor, config),
                                     new SetBlocksEndpoint(worldEditor, config),

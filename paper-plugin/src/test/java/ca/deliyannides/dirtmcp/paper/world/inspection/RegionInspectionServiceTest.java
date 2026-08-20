@@ -154,7 +154,8 @@ final class RegionInspectionServiceTest {
     @Test
     void appliesInspectionVolumeAndResultLimits() {
         FakeSnapshotSource source = new FakeSnapshotSource();
-        RegionInspectionService service = new RegionInspectionService(source, 100, 2, 2, 16, 8, 1);
+        RegionInspectionService service =
+                new RegionInspectionService(source, 100, 2, 2, 16, 8, new InspectionAdmission(1));
         GetRegionBlocks.Request oversized =
                 new GetRegionBlocks.Request(
                         "world",
@@ -194,32 +195,45 @@ final class RegionInspectionServiceTest {
         FakeSnapshotSource source = new FakeSnapshotSource();
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new RegionInspectionService(source, 0, 1, 1, 1, 1, 1));
+                () ->
+                        new RegionInspectionService(
+                                source, 0, 1, 1, 1, 1, new InspectionAdmission(1)));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new RegionInspectionService(source, 1, 0, 1, 1, 1, 1));
+                () ->
+                        new RegionInspectionService(
+                                source, 1, 0, 1, 1, 1, new InspectionAdmission(1)));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new RegionInspectionService(source, 1, 1, 0, 1, 1, 1));
+                () ->
+                        new RegionInspectionService(
+                                source, 1, 1, 0, 1, 1, new InspectionAdmission(1)));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new RegionInspectionService(source, 1, 1, 1, 0, 1, 1));
+                () ->
+                        new RegionInspectionService(
+                                source, 1, 1, 1, 0, 1, new InspectionAdmission(1)));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new RegionInspectionService(source, 1, 1, 1, 1, 0, 1));
+                () ->
+                        new RegionInspectionService(
+                                source, 1, 1, 1, 1, 0, new InspectionAdmission(1)));
+        assertThrows(
+                NullPointerException.class,
+                () -> new RegionInspectionService(source, 1, 1, 1, 1, 1, null));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new RegionInspectionService(source, 1, 1, 1, 1, 1, 0));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new RegionInspectionService(source, 1, 2, 1, 1, 1, 1));
+                () ->
+                        new RegionInspectionService(
+                                source, 1, 2, 1, 1, 1, new InspectionAdmission(1)));
     }
 
     @Test
     void capsRawPatternCountAndDeduplicatesBeforePaperCapture() throws Exception {
         FakeSnapshotSource source = new FakeSnapshotSource();
         RegionInspectionService service =
-                new RegionInspectionService(source, 100, 100, 10, 16, 2, 1);
+                new RegionInspectionService(
+                        source, 100, 100, 10, 16, 2, new InspectionAdmission(1));
         GetRegionBlocks.Request tooMany =
                 new GetRegionBlocks.Request(
                         "world",
@@ -280,7 +294,8 @@ final class RegionInspectionServiceTest {
                     }
                 };
         RegionInspectionService service =
-                new RegionInspectionService(source, 100, 100, 10, 16, 8, 1);
+                new RegionInspectionService(
+                        source, 100, 100, 10, 16, 8, new InspectionAdmission(1));
 
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             var first =
@@ -376,7 +391,8 @@ final class RegionInspectionServiceTest {
     }
 
     private static RegionInspectionService service(FakeSnapshotSource source, int maxChunks) {
-        return new RegionInspectionService(source, 100, 100, 10, maxChunks, 8, 1);
+        return new RegionInspectionService(
+                source, 100, 100, 10, maxChunks, 8, new InspectionAdmission(1));
     }
 
     private static BlockPosition position(int x, int y, int z) {

@@ -5,6 +5,7 @@ import type { DirtLogger } from './logging.ts';
 import type { McpToolConfiguration } from './tools/configuration.ts';
 import { registerEditingTools } from './tools/editing.ts';
 import { registerInspectionTools } from './tools/inspection.ts';
+import { registerPlayerTools } from './tools/player.ts';
 import { registerStatusTools } from './tools/status.ts';
 
 function serverInstructions(configuration: McpToolConfiguration): string {
@@ -13,19 +14,23 @@ function serverInstructions(configuration: McpToolConfiguration): string {
   }
 
   const hasInspection =
-    configuration.count_region_block_states || configuration.get_region_blocks || configuration.scan_orthographic_view;
+    configuration.count_region_block_states ||
+    configuration.get_region_blocks ||
+    configuration.scan_orthographic_view ||
+    configuration.get_player_context;
   const hasMutation = configuration.replace_region_blocks || configuration.fill_region || configuration.set_blocks;
   const hasRegion =
     configuration.count_region_block_states ||
     configuration.get_region_blocks ||
     configuration.replace_region_blocks ||
     configuration.fill_region;
-  const hasDetailedInspection = configuration.get_region_blocks || configuration.scan_orthographic_view;
+  const hasDetailedInspection =
+    configuration.get_region_blocks || configuration.scan_orthographic_view || configuration.get_player_context;
   const hasWorldTool = hasInspection || hasMutation || configuration.get_edit_history || configuration.undo_edit;
   const instructions: string[] = [];
 
   if (hasWorldTool) instructions.push('World tools operate on live Paper worlds.');
-  if (hasInspection) instructions.push('Inspections require already-loaded chunks.');
+  if (hasInspection) instructions.push('Region and block-view inspections require already-loaded chunks.');
   if (hasMutation) instructions.push('New edits require already-loaded chunks.');
   if (configuration.undo_edit) instructions.push('Undo can reload existing chunks without generating terrain.');
 
@@ -44,6 +49,12 @@ function serverInstructions(configuration: McpToolConfiguration): string {
 
   if (hasDetailedInspection) {
     instructions.push('Inspection result limits fail the call instead of truncating data.');
+  }
+
+  if (configuration.get_player_context) {
+    instructions.push(
+      'Player context is point-in-time; recapture it before a POV-dependent edit if the player may have moved.',
+    );
   }
 
   let errorGuidance =
@@ -89,6 +100,7 @@ export function createDirtServer(
   );
   registerStatusTools(server, bridge, toolConfiguration, logger);
   registerInspectionTools(server, bridge, toolConfiguration, logger);
+  registerPlayerTools(server, bridge, toolConfiguration, logger);
   registerEditingTools(server, bridge, toolConfiguration, logger);
   return server;
 }

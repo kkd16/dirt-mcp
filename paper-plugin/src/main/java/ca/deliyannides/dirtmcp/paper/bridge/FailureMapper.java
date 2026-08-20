@@ -13,8 +13,8 @@ final class FailureMapper {
                 switch (failure) {
                     case INVALID_REQUEST -> 400;
                     case INTERNAL_ERROR -> 500;
-                    case EDIT_NOT_FOUND, WORLD_NOT_FOUND -> 404;
-                    case EDIT_NOT_LATEST, WORLD_BUSY -> 409;
+                    case EDIT_NOT_FOUND, PLAYER_NOT_FOUND, WORLD_NOT_FOUND -> 404;
+                    case EDIT_NOT_LATEST, PLAYER_UNAVAILABLE, WORLD_BUSY -> 409;
                     case CHANGE_LIMIT_EXCEEDED, REGION_TOO_LARGE, RESULT_TOO_LARGE -> 413;
                     case HISTORY_CAPACITY_EXCEEDED,
                             SERVER_UNAVAILABLE,

@@ -3,6 +3,7 @@ package ca.deliyannides.dirtmcp.paper.bridge;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.CountRegionBlockStatesEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.FillRegionEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetEditHistoryEndpoint;
+import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetPlayerContextEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetRegionBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.PingEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ReplaceRegionBlocksEndpoint;
@@ -26,6 +27,7 @@ import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
+import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
@@ -41,6 +43,7 @@ import java.net.http.HttpRequest;
 import java.time.Instant;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.slf4j.helpers.NOPLogger;
@@ -80,6 +83,7 @@ final class BridgeTestFixture {
                         new CountRegionBlockStatesEndpoint(operations),
                         new GetRegionBlocksEndpoint(operations, config),
                         new ScanOrthographicViewEndpoint(operations, config),
+                        new GetPlayerContextEndpoint(operations),
                         new ReplaceRegionBlocksEndpoint(operations, config),
                         new FillRegionEndpoint(operations, config),
                         new SetBlocksEndpoint(operations, config),
@@ -120,6 +124,7 @@ final class BridgeTestFixture {
                     CountRegionBlockStates,
                     GetRegionBlocks,
                     ScanOrthographicView,
+                    GetPlayerContext,
                     ReplaceRegionBlocks,
                     FillRegion,
                     SetBlocks,
@@ -199,6 +204,98 @@ final class BridgeTestFixture {
                     1,
                     0,
                     List.of());
+        }
+
+        @Override
+        public GetPlayerContext.Result getPlayerContext(GetPlayerContext.Request request)
+                throws OperationException {
+            GetPlayerContext.Includes include = request.include();
+            GetPlayerContext.PerspectiveView view = null;
+            if (include.view()) {
+                GetPlayerContext.ViewRequest options = request.view();
+                double verticalScale =
+                        Math.tan(Math.toRadians(options.verticalFieldOfViewDegrees()) / 2.0);
+                double horizontalFov =
+                        Math.toDegrees(
+                                2 * Math.atan(verticalScale * options.width() / options.height()));
+                view =
+                        new GetPlayerContext.PerspectiveView(
+                                new GetPlayerContext.ViewBasis(
+                                        new GetPlayerContext.Vector3(0, 0, -1),
+                                        new GetPlayerContext.Vector3(1, 0, 0),
+                                        new GetPlayerContext.Vector3(0, 1, 0)),
+                                new GetPlayerContext.Viewport(
+                                        options.width(),
+                                        options.height(),
+                                        options.verticalFieldOfViewDegrees(),
+                                        horizontalFov,
+                                        options.maxDistance(),
+                                        options.fluidCollision().name().toLowerCase(Locale.ROOT),
+                                        options.ignorePassableBlocks()),
+                                1,
+                                List.of(),
+                                List.of(),
+                                null);
+            }
+            GetPlayerContext.Equipment equipment =
+                    include.equipment()
+                            ? new GetPlayerContext.Equipment(0, null, null, null, null, null, null)
+                            : null;
+            GetPlayerContext.InventoryContents inventory =
+                    include.inventory()
+                            ? new GetPlayerContext.InventoryContents(36, List.of())
+                            : null;
+            GetPlayerContext.InventoryContents enderChest =
+                    include.enderChest()
+                            ? new GetPlayerContext.InventoryContents(27, List.of())
+                            : null;
+            GetPlayerContext.PlayerVitals vitals =
+                    include.vitals()
+                            ? new GetPlayerContext.PlayerVitals(
+                                    20, 20, 0, 20, 5, 0, 300, 300, 3, 0.5, 40, -1, 0)
+                            : null;
+            GetPlayerContext.PlayerMovement movement =
+                    include.movement()
+                            ? new GetPlayerContext.PlayerMovement(
+                                    new GetPlayerContext.Vector3(0, 0, 0),
+                                    0,
+                                    true,
+                                    false,
+                                    false,
+                                    false,
+                                    false,
+                                    false,
+                                    false,
+                                    false,
+                                    false)
+                            : null;
+            GetPlayerContext.PlayerClient playerClient =
+                    include.client()
+                            ? new GetPlayerContext.PlayerClient(12, "en-US", 12, 10, 10)
+                            : null;
+            List<GetPlayerContext.Effect> effects = include.effects() ? List.of() : null;
+            return new GetPlayerContext.Result(
+                    Instant.parse("2026-08-19T12:00:00Z"),
+                    new GetPlayerContext.PlayerIdentity(
+                            "Builder", UUID.fromString("423e4567-e89b-42d3-a456-426614174000")),
+                    "world",
+                    WORLD_ID,
+                    new GetPlayerContext.Position(12.5, 70, -3.25),
+                    new BlockPosition(12, 70, -4),
+                    new GetPlayerContext.Position(12.5, 71.62, -3.25),
+                    new GetPlayerContext.Rotation(180, 0),
+                    new GetPlayerContext.Vector3(0, 0, -1),
+                    "creative",
+                    "standing",
+                    true,
+                    view,
+                    equipment,
+                    inventory,
+                    enderChest,
+                    vitals,
+                    movement,
+                    playerClient,
+                    effects);
         }
 
         @Override

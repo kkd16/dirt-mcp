@@ -32,6 +32,8 @@ V1 provides these world capabilities:
 
 - inspect bounded regions as summaries, exact geometry, or sparse orthographic
   views;
+- inspect an online player's exact position, selected state, and sampled
+  server-authoritative perspective block view;
 - replace matching blocks;
 - fill a bounded region;
 - set weighted-palette block states at origin-relative offsets as one edit;
@@ -54,7 +56,7 @@ restarts; it is not a substitute for backups.
 - schematics and structure generation;
 - terrain, biome, road, or vegetation tools;
 - image rendering or visual critique;
-- Mineflayer or an embodied player;
+- player control, Mineflayer, or autonomous embodied clients;
 - durable jobs or retained edit history across restarts;
 - databases, web interfaces, Docker orchestration, and remote MCP hosting; and
 - support for multiple Paper versions.

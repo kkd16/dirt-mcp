@@ -7,6 +7,7 @@ public enum McpTool {
     COUNT_REGION_BLOCK_STATES("count_region_block_states"),
     GET_REGION_BLOCKS("get_region_blocks"),
     SCAN_ORTHOGRAPHIC_VIEW("scan_orthographic_view"),
+    GET_PLAYER_CONTEXT("get_player_context"),
     REPLACE_REGION_BLOCKS("replace_region_blocks"),
     FILL_REGION("fill_region"),
     SET_BLOCKS("set_blocks"),

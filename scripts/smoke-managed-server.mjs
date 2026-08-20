@@ -39,6 +39,7 @@ const mutationCallIds = new Set();
 const editMutationPaths = new Set(['/v1/replace-region-blocks', '/v1/fill-region', '/v1/set-blocks']);
 const inspectionPaths = new Set([
   '/v1/count-region-block-states',
+  '/v1/get-player-context',
   '/v1/get-region-blocks',
   '/v1/scan-orthographic-view',
 ]);
@@ -467,6 +468,7 @@ try {
   assert.deepEqual(serverStatus.tools, {
     ping_server: true,
     get_server_status: true,
+    get_player_context: true,
     count_region_block_states: true,
     get_region_blocks: true,
     scan_orthographic_view: true,
@@ -477,6 +479,17 @@ try {
     undo_edit: true,
   });
   await assertEditHistory([]);
+
+  const missingPlayer = randomUUID();
+  const missingPlayerContext = await bridgeResponse('/v1/get-player-context', {
+    player: missingPlayer,
+  });
+  assert.equal(missingPlayerContext.status, 404);
+  assert.deepEqual(missingPlayerContext.body.error, {
+    code: 'player_not_found',
+    message: `Player is not online: ${missingPlayer}`,
+    details: { player: missingPlayer },
+  });
 
   const chunkHeavyRegion = await bridgeResponse('/v1/count-region-block-states', {
     world,

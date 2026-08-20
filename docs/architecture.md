@@ -33,7 +33,8 @@ parses MCP messages.
 The plugin remains one deployable JAR but is organized as cohesive feature
 packages. A small bootstrap owns lifecycle; the bridge dispatcher owns exact
 routing, authentication, admission, and error mapping; narrow operation
-interfaces connect endpoints to status, inspection, and edit services.
+interfaces connect endpoints to status, inspection, player-context, and edit
+services.
 Focused static request decoders sit beside their endpoints without a shared
 decoder interface or hierarchy, while the exchange object owns common body and
 response mechanics.
@@ -55,8 +56,8 @@ The TypeScript process owns the agent-facing interface:
 - MCP stdio transport;
 - concise tool names and Zod input/output schemas;
 - calls to the local Paper bridge;
-- conversion of bridge results into structured MCP content, including the
-  optional lossless palette-grid view representation; and
+- conversion of bridge results into structured MCP content, including compact
+  lossless orthographic grids and sparse player-view hits; and
 - strict, actionable error details alongside human-readable messages.
 
 It does not read world files or reproduce Minecraft editing logic. Stdout is
@@ -65,8 +66,8 @@ reserved for MCP; process diagnostics are structured JSON Lines on stderr.
 The process entry point validates its environment and starts the current MCP
 stdio transport. When the connection opens, a composition root reads the
 authenticated Paper status snapshot and registers its enabled tool catalog.
-Tool schemas stay with their cohesive status, inspection, and editing
-registrars; one concrete bridge client owns authenticated HTTP and response
+Tool schemas stay with their cohesive status, inspection, player-context, and
+editing registrars; one concrete bridge client owns authenticated HTTP and response
 validation; one execution helper owns call IDs, error mapping, and auditing. The
 design uses functions and concrete modules rather than a tool class hierarchy
 or dependency-injection framework.
@@ -94,6 +95,15 @@ rejected rather than truncated when their cap is exceeded. Requests fail if the
 world, height range, or any chunk is unavailable. A separate touched-chunk limit
 is checked before snapshot capture, so thin regions cannot amplify main-thread
 work despite having a small block volume.
+
+Player context is captured in one bounded Paper main-thread action. When its
+perspective view is requested, Dirt first computes and verifies a conservative
+loaded-chunk preflight for the sampled rays, then uses Paper block-collision ray
+tracing from the captured eye pose. It does
+not emulate a renderer or inspect client-only presentation state.
+Player-context calls share the inspection admission gate; viewport dimensions
+determine the view ray count, whose configured max-distance product and checked
+chunks use the corresponding inspection ceilings.
 
 ## Deployment
 
