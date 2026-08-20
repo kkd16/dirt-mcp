@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.status;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.platform.MainThread;
@@ -25,6 +26,7 @@ public final class PaperServerStatusService implements PingServer, GetServerStat
             throw new OperationException(
                     OperationFailure.UNHEALTHY,
                     "Dirt MCP could not open a Paper-backed FAWE session",
+                    new ErrorDetails.Unhealthy.HealthCheckFailed(),
                     exception);
         }
     }
@@ -42,11 +44,17 @@ public final class PaperServerStatusService implements PingServer, GetServerStat
             if (exception.getCause() instanceof OperationException operationException) {
                 throw operationException;
             }
+            if (health) {
+                throw new OperationException(
+                        OperationFailure.UNHEALTHY,
+                        "The end-to-end health check could not access Paper",
+                        new ErrorDetails.Unhealthy.PaperUnavailable(),
+                        exception);
+            }
             throw new OperationException(
-                    health ? OperationFailure.UNHEALTHY : OperationFailure.SERVER_UNAVAILABLE,
-                    health
-                            ? "The end-to-end health check could not access Paper"
-                            : "Could not read Paper server context",
+                    OperationFailure.SERVER_UNAVAILABLE,
+                    "Could not read Paper server context",
+                    new ErrorDetails.ServerUnavailable.PaperUnavailable(),
                     exception);
         }
     }

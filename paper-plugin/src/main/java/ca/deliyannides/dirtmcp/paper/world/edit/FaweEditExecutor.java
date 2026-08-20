@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.world.edit;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
@@ -255,6 +256,7 @@ final class FaweEditExecutor {
             recovery = StoredUndo.pending(failedSession.getChangeSet(), changes, chunks, this.log);
             throw new EditRecoveryException(
                     "World edit failed and its undo data could not be finalized",
+                    new ErrorDetails.WorldUnavailable.OperationFailed(),
                     failure,
                     recovery);
         }
@@ -266,6 +268,7 @@ final class FaweEditExecutor {
                 failure.addSuppressed(rollbackFailure);
                 throw new EditRecoveryException(
                         "World edit failed and its automatic rollback also failed",
+                        new ErrorDetails.WorldUnavailable.RollbackFailed(),
                         failure,
                         recovery);
             }
@@ -301,15 +304,24 @@ final class FaweEditExecutor {
     static void requireNotInterrupted() throws OperationException {
         if (Thread.currentThread().isInterrupted()) {
             throw new OperationException(
-                    OperationFailure.WORLD_UNAVAILABLE, "World editing was interrupted");
+                    OperationFailure.WORLD_UNAVAILABLE,
+                    "World editing was interrupted",
+                    new ErrorDetails.WorldUnavailable.Interrupted());
         }
     }
 
     private OperationException changeLimit(Throwable cause) {
         String message = "Edit exceeds the maximum of " + this.maxChangedBlocks + " changed blocks";
         return cause == null
-                ? new OperationException(OperationFailure.CHANGE_LIMIT_EXCEEDED, message)
-                : new OperationException(OperationFailure.CHANGE_LIMIT_EXCEEDED, message, cause);
+                ? new OperationException(
+                        OperationFailure.CHANGE_LIMIT_EXCEEDED,
+                        message,
+                        new ErrorDetails.ChangeLimitExceeded(this.maxChangedBlocks))
+                : new OperationException(
+                        OperationFailure.CHANGE_LIMIT_EXCEEDED,
+                        message,
+                        new ErrorDetails.ChangeLimitExceeded(this.maxChangedBlocks),
+                        cause);
     }
 
     private static CuboidRegion selection(com.sk89q.worldedit.world.World world, Cuboid region) {

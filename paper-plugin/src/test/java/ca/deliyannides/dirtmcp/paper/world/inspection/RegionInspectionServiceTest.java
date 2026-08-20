@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates.Request;
@@ -272,6 +273,7 @@ final class RegionInspectionServiceTest {
                             throw new OperationException(
                                     OperationFailure.WORLD_UNAVAILABLE,
                                     "inspection interrupted",
+                                    new ErrorDetails.WorldUnavailable.Interrupted(),
                                     exception);
                         }
                         return super.capture(world, region, includes, excludes);
@@ -311,6 +313,31 @@ final class RegionInspectionServiceTest {
     void invalidDirectRequestsReturnTypedFailures() {
         RegionInspectionService service = service(new FakeSnapshotSource(), 16);
 
+        OperationException missingRequest =
+                assertThrows(OperationException.class, () -> service.scanOrthographicView(null));
+        assertEquals(
+                new ErrorDetails.InvalidRequest.Missing("request"),
+                missingRequest.details().orElseThrow());
+
+        OperationException combinedPatternLimit =
+                assertThrows(
+                        OperationException.class,
+                        () ->
+                                service.getRegionBlocks(
+                                        new GetRegionBlocks.Request(
+                                                "world",
+                                                position(0, 0, 0),
+                                                position(0, 0, 0),
+                                                java.util.Collections.nCopies(5, "stone"),
+                                                java.util.Collections.nCopies(4, "dirt"),
+                                                false,
+                                                1,
+                                                Format.BLOCKS)));
+        assertEquals(
+                new ErrorDetails.InvalidRequest.TooManyItems(
+                        List.of("includeBlockStatePatterns", "excludeBlockStatePatterns"), 8),
+                combinedPatternLimit.details().orElseThrow());
+
         assertEquals(
                 OperationFailure.INVALID_REQUEST,
                 assertThrows(
@@ -348,7 +375,7 @@ final class RegionInspectionServiceTest {
                         .failure());
     }
 
-    private static RegionInspectionService service(FakeSnapshotSource source, long maxChunks) {
+    private static RegionInspectionService service(FakeSnapshotSource source, int maxChunks) {
         return new RegionInspectionService(source, 100, 100, 10, maxChunks, 8, 1);
     }
 

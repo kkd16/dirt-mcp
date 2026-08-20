@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ServerContext } from '@modelcontextprotocol/server';
-import { ToolFailure } from '../dist/bridge/errors.js';
+import { ToolFailure, ToolFailureDataSchema } from '../dist/bridge/errors.js';
 import { createLogger, type DirtLogger } from '../dist/logging.js';
 import { executeToolCall, successResult } from '../dist/tools/execution.js';
 
@@ -20,13 +20,39 @@ async function captureLogs<T>(
   return { result: await operation(logger), records };
 }
 
+test('keeps MCP-local failure details strict and code-specific', () => {
+  for (const failure of [
+    { code: 'bridge_unavailable', message: 'Unavailable', details: { reason: 'timeout' } },
+    { code: 'bridge_unauthorized', message: 'Unauthorized', details: { reason: 'authentication_failed' } },
+    { code: 'bridge_http_error', message: 'Bad gateway', details: { status: 502 } },
+    { code: 'bridge_invalid_response', message: 'Invalid response' },
+    { code: 'dirt_internal_error', message: 'Internal error' },
+  ]) {
+    assert.equal(ToolFailureDataSchema.safeParse(failure).success, true, failure.code);
+  }
+
+  for (const failure of [
+    { code: 'bridge_unavailable', message: 'Unavailable' },
+    { code: 'bridge_unauthorized', message: 'Unauthorized', details: { reason: 'timeout' } },
+    { code: 'bridge_http_error', message: 'Invalid status', details: { status: 600 } },
+    { code: 'bridge_invalid_response', message: 'Invalid response', details: {} },
+    { code: 'dirt_internal_error', message: 'Internal error', details: { implementation: 'secret' } },
+  ]) {
+    assert.equal(ToolFailureDataSchema.safeParse(failure).success, false, failure.code);
+  }
+});
+
 test('maps expected tool failures and emits an unknown-client audit', async () => {
   const captured = await captureLogs((logger) =>
     executeToolCall(
       logger,
       { operation: 'test_tool', context: context(17), failureContext: 'Could not test' },
       async () => {
-        throw new ToolFailure('world_busy', 'World is busy');
+        throw new ToolFailure({
+          code: 'world_busy',
+          message: 'World is busy',
+          details: { reason: 'operation_in_progress', world: 'world' },
+        });
       },
     ),
   );
@@ -34,7 +60,12 @@ test('maps expected tool failures and emits an unknown-client audit', async () =
   const error = (captured.result.structuredContent as { error: Record<string, unknown> }).error;
   assert.match(error.callId as string, UUID_V4_PATTERN);
   assert.deepEqual(captured.result.structuredContent, {
-    error: { code: 'world_busy', message: 'World is busy', callId: error.callId },
+    error: {
+      code: 'world_busy',
+      message: 'World is busy',
+      details: { reason: 'operation_in_progress', world: 'world' },
+      callId: error.callId,
+    },
   });
   assert.equal(captured.result.isError, true);
   assert.equal(captured.records.length, 1);
@@ -54,6 +85,8 @@ test('maps expected tool failures and emits an unknown-client audit', async () =
     duration_ms: captured.records[0]?.duration_ms,
     error_code: 'world_busy',
   });
+  assert.equal(JSON.stringify(captured.records).includes('operation_in_progress'), false);
+  assert.equal(JSON.stringify(captured.records).includes('"world":"world"'), false);
 });
 
 test('exposes a retained edit ID on expected failures only when present', async () => {
@@ -62,7 +95,12 @@ test('exposes a retained edit ID on expected failures only when present', async 
       logger,
       { operation: 'test_tool', context: context(18), failureContext: 'Could not test' },
       async () => {
-        throw new ToolFailure('history_capacity_exceeded', 'Recovery is required', EDIT_ID);
+        throw new ToolFailure({
+          code: 'history_capacity_exceeded',
+          message: 'Recovery is required',
+          details: { reason: 'retained_changed_blocks', maximum: 100_000 },
+          editId: EDIT_ID,
+        });
       },
     ),
   );
@@ -73,6 +111,7 @@ test('exposes a retained edit ID on expected failures only when present', async 
     error: {
       code: 'history_capacity_exceeded',
       message: 'Recovery is required',
+      details: { reason: 'retained_changed_blocks', maximum: 100_000 },
       callId: error.callId,
       editId: EDIT_ID,
     },
@@ -89,7 +128,11 @@ test('elevates actionable bridge failures', async () => {
       logger,
       { operation: 'test_tool', context: context(19), failureContext: 'Could not test' },
       async () => {
-        throw new ToolFailure('bridge_unavailable', 'Bridge is unavailable');
+        throw new ToolFailure({
+          code: 'bridge_unavailable',
+          message: 'Bridge is unavailable',
+          details: { reason: 'request_failed' },
+        });
       },
     ),
   );
@@ -99,12 +142,20 @@ test('elevates actionable bridge failures', async () => {
 });
 
 test('reports unexpected bridge and protocol failures at error level', async () => {
-  for (const code of [
-    'bridge_http_error',
-    'bridge_invalid_response',
-    'internal_error',
-    'method_not_allowed',
-    'not_found',
+  for (const data of [
+    { code: 'bridge_http_error', message: 'Unexpected bridge failure', details: { status: 502 } },
+    { code: 'bridge_invalid_response', message: 'Unexpected bridge failure' },
+    { code: 'internal_error', message: 'Unexpected bridge failure' },
+    {
+      code: 'method_not_allowed',
+      message: 'Unexpected bridge failure',
+      details: { allowedMethod: 'POST' },
+    },
+    {
+      code: 'not_found',
+      message: 'Unexpected bridge failure',
+      details: { reason: 'route_not_found' },
+    },
   ] as const) {
     // Failure-severity cases are deliberately exercised serially for clear assertions.
     // oxlint-disable-next-line eslint/no-await-in-loop
@@ -113,13 +164,13 @@ test('reports unexpected bridge and protocol failures at error level', async () 
         logger,
         { operation: 'test_tool', context: context(20), failureContext: 'Could not test' },
         async () => {
-          throw new ToolFailure(code, 'Unexpected bridge failure');
+          throw new ToolFailure(data);
         },
       ),
     );
 
     assert.equal(captured.records[0]?.level, 'error');
-    assert.equal(captured.records[0]?.error_code, code);
+    assert.equal(captured.records[0]?.error_code, data.code);
   }
 });
 

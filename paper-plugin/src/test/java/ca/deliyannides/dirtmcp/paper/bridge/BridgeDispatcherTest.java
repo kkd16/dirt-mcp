@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.world.edit.DestinationPaletteEntry;
@@ -41,6 +42,18 @@ import org.slf4j.helpers.NOPLogger;
 
 final class BridgeDispatcherTest {
     private static final UUID EDIT_ID = UUID.fromString("11111111-1111-4111-8111-111111111111");
+
+    @Test
+    void rejectsAnEmptyDirectErrorMessage() {
+        try (RequestBodyReader reader = new RequestBodyReader(1)) {
+            BridgeExchange exchange =
+                    new BridgeExchange(new FailingExchange(DeliveryFailure.NONE), 1_024, reader);
+
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> exchange.sendError(404, "", new ErrorDetails.NotFound()));
+        }
+    }
 
     @Test
     void rejectsDuplicatePaths() {

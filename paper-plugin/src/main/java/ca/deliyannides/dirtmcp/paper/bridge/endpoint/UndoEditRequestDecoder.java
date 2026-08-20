@@ -2,6 +2,7 @@ package ca.deliyannides.dirtmcp.paper.bridge.endpoint;
 
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
 import ca.deliyannides.dirtmcp.paper.bridge.RequestJson;
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.validation.UuidV4;
 import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
@@ -23,7 +24,8 @@ final class UndoEditRequestDecoder {
                     RequestJson.string(object.get("world"), "world"),
                     UuidV4.parseCanonical(editId, "editId"));
         } catch (IllegalArgumentException exception) {
-            throw RequestJson.invalid(exception.getMessage());
+            throw RequestJson.invalid(
+                    exception.getMessage(), new ErrorDetails.InvalidRequest.InvalidValue("editId"));
         }
     }
 }

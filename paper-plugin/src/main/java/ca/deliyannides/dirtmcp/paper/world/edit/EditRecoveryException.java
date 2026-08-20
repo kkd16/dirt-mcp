@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.world.edit;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import java.io.Serial;
@@ -10,8 +11,12 @@ final class EditRecoveryException extends OperationException {
 
     private final transient EditPlatform.UndoToken recovery;
 
-    EditRecoveryException(String message, Throwable cause, EditPlatform.UndoToken recovery) {
-        super(OperationFailure.WORLD_UNAVAILABLE, message, cause);
+    EditRecoveryException(
+            String message,
+            ErrorDetails.WorldUnavailable details,
+            Throwable cause,
+            EditPlatform.UndoToken recovery) {
+        super(OperationFailure.WORLD_UNAVAILABLE, message, details, cause);
         this.recovery = Objects.requireNonNull(recovery, "recovery");
     }
 

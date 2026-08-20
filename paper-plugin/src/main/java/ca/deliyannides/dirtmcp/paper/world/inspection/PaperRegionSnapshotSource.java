@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.world.inspection;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.platform.MainThread;
@@ -60,7 +61,12 @@ public final class PaperRegionSnapshotSource implements RegionSnapshotSource {
                     Thread.currentThread().isInterrupted()
                             ? "World inspection was interrupted"
                             : "World inspection is unavailable";
-            throw new OperationException(OperationFailure.WORLD_UNAVAILABLE, message, exception);
+            ErrorDetails.WorldUnavailable details =
+                    Thread.currentThread().isInterrupted()
+                            ? new ErrorDetails.WorldUnavailable.Interrupted()
+                            : new ErrorDetails.WorldUnavailable.PaperUnavailable();
+            throw new OperationException(
+                    OperationFailure.WORLD_UNAVAILABLE, message, details, exception);
         }
     }
 
@@ -73,15 +79,22 @@ public final class PaperRegionSnapshotSource implements RegionSnapshotSource {
         World world = this.server.getWorld(worldName);
         if (world == null) {
             throw new OperationException(
-                    OperationFailure.WORLD_NOT_FOUND, "World is not loaded: " + worldName);
+                    OperationFailure.WORLD_NOT_FOUND,
+                    "World is not loaded: " + worldName,
+                    new ErrorDetails.WorldNotFound(worldName));
         }
         if (region.min().y() < world.getMinHeight() || region.max().y() >= world.getMaxHeight()) {
+            boolean minimumInvalid = region.min().y() < world.getMinHeight();
+            String field = minimumInvalid ? "min.y" : "max.y";
+            int value = minimumInvalid ? region.min().y() : region.max().y();
             throw new OperationException(
                     OperationFailure.INVALID_REQUEST,
                     "Y bounds must be between "
                             + world.getMinHeight()
                             + " and "
-                            + (world.getMaxHeight() - 1));
+                            + (world.getMaxHeight() - 1),
+                    new ErrorDetails.InvalidRequest.OutOfRange(
+                            field, value, world.getMinHeight(), world.getMaxHeight() - 1));
         }
 
         List<BlockData> includePatterns =
@@ -97,7 +110,9 @@ public final class PaperRegionSnapshotSource implements RegionSnapshotSource {
                 if (!world.isChunkLoaded(chunkX, chunkZ)) {
                     throw new OperationException(
                             OperationFailure.WORLD_UNAVAILABLE,
-                            "Region contains an unloaded chunk at " + chunkX + "," + chunkZ);
+                            "Region contains an unloaded chunk at " + chunkX + "," + chunkZ,
+                            new ErrorDetails.WorldUnavailable.ChunkUnloaded(
+                                    worldName, new ErrorDetails.Chunk(chunkX, chunkZ)));
                 }
             }
         }
@@ -122,13 +137,15 @@ public final class PaperRegionSnapshotSource implements RegionSnapshotSource {
     private List<BlockData> parsePatterns(List<String> inputs, String field)
             throws OperationException {
         List<BlockData> patterns = new ArrayList<>(inputs.size());
-        for (String input : inputs) {
+        for (int index = 0; index < inputs.size(); index++) {
+            String input = inputs.get(index);
             try {
                 patterns.add(this.server.createBlockData(input));
             } catch (IllegalArgumentException exception) {
                 throw new OperationException(
                         OperationFailure.INVALID_REQUEST,
                         field + " contains an invalid block state: " + input,
+                        new ErrorDetails.InvalidRequest.InvalidValue(field + "[" + index + "]"),
                         exception);
             }
         }

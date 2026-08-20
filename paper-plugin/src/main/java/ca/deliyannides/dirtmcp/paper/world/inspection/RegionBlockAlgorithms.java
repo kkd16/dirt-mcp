@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.world.inspection;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks.BlockRun;
@@ -48,7 +49,13 @@ final class RegionBlockAlgorithms {
                     }
                     blocks.add(new InspectedBlock(position, sample.blockState()));
                     if (format == Format.BLOCKS && blocks.size() > maxResults) {
-                        throw resultTooLarge(maxResults);
+                        throw new OperationException(
+                                OperationFailure.RESULT_TOO_LARGE,
+                                "Inspection result exceeds maxResults of "
+                                        + maxResults
+                                        + " entries",
+                                new ErrorDetails.ResultTooLarge.Blocks(
+                                        (long) maxResults + 1, maxResults));
                     }
                 }
             }
@@ -86,7 +93,10 @@ final class RegionBlockAlgorithms {
             }
             runs.add(new BlockRun(state, block.position(), to));
             if (runs.size() > maxResults) {
-                throw resultTooLarge(maxResults);
+                throw new OperationException(
+                        OperationFailure.RESULT_TOO_LARGE,
+                        "Inspection result exceeds maxResults of " + maxResults + " entries",
+                        new ErrorDetails.ResultTooLarge.Runs((long) maxResults + 1, maxResults));
             }
             for (int offset = 0; offset < length; offset++) {
                 remaining.remove(advance(block.position(), axis, offset));
@@ -117,12 +127,6 @@ final class RegionBlockAlgorithms {
             return null;
         }
         return new BlockPosition((int) x, (int) y, (int) z);
-    }
-
-    private static OperationException resultTooLarge(int maxResults) {
-        return new OperationException(
-                OperationFailure.RESULT_TOO_LARGE,
-                "Inspection result exceeds maxResults of " + maxResults + " entries");
     }
 
     private enum Axis {

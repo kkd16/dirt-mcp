@@ -1,6 +1,7 @@
 package ca.deliyannides.dirtmcp.paper.world.edit;
 
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
@@ -86,7 +87,9 @@ public final class FaweWorldEditor
             ReplaceRegionBlocks.Request request, UUID callId) throws OperationException {
         requireCallId(callId);
         if (request == null || request.min() == null || request.max() == null) {
-            throw invalid("min and max are required");
+            throw invalid(
+                    "min and max are required",
+                    new ErrorDetails.InvalidRequest.Missing(missingBoundsField(request)));
         }
         validateBlockStateList(request.sourceBlockStatePatterns(), "sourceBlockStatePatterns");
         validatePalette(request.destinationPalette(), "destinationPalette");
@@ -168,7 +171,9 @@ public final class FaweWorldEditor
             throws OperationException {
         requireCallId(callId);
         if (request == null || request.min() == null || request.max() == null) {
-            throw invalid("min and max are required");
+            throw invalid(
+                    "min and max are required",
+                    new ErrorDetails.InvalidRequest.Missing(missingBoundsField(request)));
         }
         validatePalette(request.destinationPalette(), "destinationPalette");
         Cuboid region = boundedRegion(request.min(), request.max());
@@ -322,7 +327,8 @@ public final class FaweWorldEditor
     public GetEditHistory.Result getEditHistory(GetEditHistory.Request request)
             throws OperationException {
         if (request == null) {
-            throw invalid("request is required");
+            throw invalid(
+                    "request is required", new ErrorDetails.InvalidRequest.Missing("request"));
         }
         EditPlatform.WorldHandle world = resolveWorld(request.world());
         try (EditCoordinator.Lease lease =
@@ -336,7 +342,10 @@ public final class FaweWorldEditor
             throws OperationException {
         requireCallId(callId);
         if (request == null || request.editId() == null) {
-            throw invalid("world and editId are required");
+            throw invalid(
+                    "world and editId are required",
+                    new ErrorDetails.InvalidRequest.Missing(
+                            request == null ? "request" : "editId"));
         }
         EditPlatform.WorldHandle world = resolveWorld(request.world());
         try (EditCoordinator.Lease lease = this.coordinator.enterUndo(world.id(), world.name())) {
@@ -350,7 +359,12 @@ public final class FaweWorldEditor
                         failure == OperationFailure.EDIT_NOT_LATEST
                                 ? "Edit is retained but is not the next edit eligible for undo"
                                 : "Edit is not retained for this world: " + request.editId();
-                throw new OperationException(failure, message);
+                ErrorDetails details =
+                        failure == OperationFailure.EDIT_NOT_LATEST
+                                ? new ErrorDetails.EditNotLatest(
+                                        world.name(), request.editId(), edit.record().editId())
+                                : new ErrorDetails.EditNotFound(world.name(), request.editId());
+                throw new OperationException(failure, message, details);
             }
             try {
                 this.platform.undo(world, edit.undo());
@@ -362,6 +376,7 @@ public final class FaweWorldEditor
                 throw new OperationException(
                         OperationFailure.INTERNAL_ERROR,
                         "Undo failed; recovery edit ID: " + edit.record().editId(),
+                        null,
                         failure,
                         edit.record().editId());
             }
@@ -373,6 +388,7 @@ public final class FaweWorldEditor
                         OperationFailure.INTERNAL_ERROR,
                         "Undo completed but response finalization failed; edit ID: "
                                 + edit.record().editId(),
+                        null,
                         failure,
                         edit.record().editId());
             }
@@ -406,6 +422,7 @@ public final class FaweWorldEditor
             throw new OperationException(
                     OperationFailure.INTERNAL_ERROR,
                     "The edit completed without required undo data; edit ID: " + editId,
+                    null,
                     null,
                     editId);
         }
@@ -448,6 +465,7 @@ public final class FaweWorldEditor
                     "The edit completed after its world became unavailable, but rollback failed; "
                             + "edit ID: "
                             + editId,
+                    new ErrorDetails.WorldUnavailable.RollbackFailed(),
                     rollbackFailure,
                     editId);
         } finally {
@@ -458,6 +476,7 @@ public final class FaweWorldEditor
                 "The edit completed after its world became unavailable and was rolled back; edit "
                         + "ID: "
                         + editId,
+                new ErrorDetails.WorldUnavailable.OperationFailed(),
                 null,
                 editId);
     }
@@ -492,6 +511,7 @@ public final class FaweWorldEditor
                             "Undo-history finalization and automatic rollback failed; recovery "
                                     + "edit ID: "
                                     + editId,
+                            null,
                             failure,
                             editId);
                 }
@@ -508,6 +528,7 @@ public final class FaweWorldEditor
                         "Undo-history finalization failed and recovery could not be retained or "
                                 + "rolled back; edit ID: "
                                 + editId,
+                        null,
                         failure,
                         editId);
             }
@@ -517,6 +538,7 @@ public final class FaweWorldEditor
                     "The edit was rolled back after undo-history finalization and its first "
                             + "automatic rollback failed; edit ID: "
                             + editId,
+                    null,
                     failure,
                     editId);
         }
@@ -525,6 +547,7 @@ public final class FaweWorldEditor
                 OperationFailure.INTERNAL_ERROR,
                 "The edit was rolled back after undo-history finalization failed; edit ID: "
                         + editId,
+                null,
                 failure,
                 editId);
     }
@@ -572,13 +595,24 @@ public final class FaweWorldEditor
                     "The edit and its automatic rollback failed, recovery could not be retained, "
                             + "and retry rollback failed; edit ID: "
                             + editId,
+                    new ErrorDetails.WorldUnavailable.RollbackFailed(),
                     failure,
                     editId);
         }
         recovery.close();
+        if (finalizationFailed) {
+            throw new OperationException(
+                    OperationFailure.INTERNAL_ERROR,
+                    "The edit failed, but its unretained recovery was rolled back; edit ID: "
+                            + editId,
+                    null,
+                    failure,
+                    editId);
+        }
         throw new OperationException(
-                finalizationFailed ? OperationFailure.INTERNAL_ERROR : failure.failure(),
+                failure.failure(),
                 "The edit failed, but its unretained recovery was rolled back; edit ID: " + editId,
+                new ErrorDetails.WorldUnavailable.OperationFailed(),
                 failure,
                 editId);
     }
@@ -621,7 +655,9 @@ public final class FaweWorldEditor
         try {
             UuidV4.require(callId, "callId");
         } catch (IllegalArgumentException | NullPointerException failure) {
-            throw invalid("callId must be a UUID version 4");
+            throw invalid(
+                    "callId must be a UUID version 4",
+                    new ErrorDetails.InvalidRequest.InvalidValue("callId"));
         }
     }
 
@@ -629,6 +665,7 @@ public final class FaweWorldEditor
         return new OperationException(
                 failure.failure(),
                 failure.getMessage() + "; recovery edit ID: " + editId,
+                failure.details().orElseThrow(),
                 failure,
                 editId);
     }
@@ -640,6 +677,7 @@ public final class FaweWorldEditor
         return new OperationException(
                 failure.failure(),
                 failure.getMessage() + "; committed edit ID: " + edit.editId(),
+                failure.details().orElse(null),
                 failure,
                 edit.editId());
     }
@@ -651,6 +689,7 @@ public final class FaweWorldEditor
         return new OperationException(
                 failure.failure(),
                 failure.getMessage() + "; recovery edit ID: " + editId,
+                failure.details().orElse(null),
                 failure,
                 editId);
     }
@@ -663,6 +702,7 @@ public final class FaweWorldEditor
                 OperationFailure.INTERNAL_ERROR,
                 "The edit committed but response finalization failed; committed edit ID: "
                         + edit.editId(),
+                null,
                 failure,
                 edit.editId());
     }
@@ -701,11 +741,16 @@ public final class FaweWorldEditor
     private SetRequestGeometry validateSetRequest(SetBlocks.Request request)
             throws OperationException {
         if (request == null || request.origin() == null) {
-            throw invalid("origin is required");
+            throw invalid(
+                    "origin is required",
+                    new ErrorDetails.InvalidRequest.Missing(
+                            request == null ? "request" : "origin"));
         }
         validateSetPalettes(request.palettes());
         if (request.placements() == null || request.placements().isEmpty()) {
-            throw invalid("placements must contain at least one entry");
+            throw invalid(
+                    "placements must contain at least one entry",
+                    new ErrorDetails.InvalidRequest.InvalidValue("placements"));
         }
 
         Set<ChunkPosition> chunks = new LinkedHashSet<>();
@@ -717,7 +762,9 @@ public final class FaweWorldEditor
                     OperationFailure.REGION_TOO_LARGE,
                     "Set-blocks edit contains more than the maximum of "
                             + this.maxRegionVolume
-                            + " blocks");
+                            + " blocks",
+                    new ErrorDetails.RegionTooLarge.BlockCount(
+                            request.placements().size(), this.maxRegionVolume));
         }
         for (int placementIndex = 0;
                 placementIndex < request.placements().size();
@@ -725,15 +772,21 @@ public final class FaweWorldEditor
             SetBlocks.Placement placement = request.placements().get(placementIndex);
             String placementName = "placements[" + placementIndex + "]";
             if (placement == null) {
-                throw invalid(placementName + " is required");
+                throw invalid(
+                        placementName + " is required",
+                        new ErrorDetails.InvalidRequest.Missing(placementName));
             }
             if (placement.paletteIndex() < 0
                     || placement.paletteIndex() >= request.palettes().size()) {
-                throw invalid(placementName + "[0] must reference an entry in palettes");
+                throw invalid(
+                        placementName + "[0] must reference an entry in palettes",
+                        new ErrorDetails.InvalidRequest.InvalidValue(placementName + "[0]"));
             }
             BlockPosition position = resolvePosition(request.origin(), placement, placementName);
             if (!positions.add(position)) {
-                throw invalid(placementName + " resolves to a duplicate block position");
+                throw invalid(
+                        placementName + " resolves to a duplicate block position",
+                        new ErrorDetails.InvalidRequest.Duplicate(placementName));
             }
             min =
                     min == null
@@ -755,7 +808,9 @@ public final class FaweWorldEditor
                         OperationFailure.REGION_TOO_LARGE,
                         "Operation touches more than the maximum of "
                                 + this.maxTouchedChunks
-                                + " chunks");
+                                + " chunks",
+                        new ErrorDetails.RegionTooLarge.TouchedChunks(
+                                (long) this.maxTouchedChunks + 1, this.maxTouchedChunks));
             }
         }
         return new SetRequestGeometry(
@@ -769,7 +824,9 @@ public final class FaweWorldEditor
     private void validateSetPalettes(List<List<DestinationPaletteEntry>> palettes)
             throws OperationException {
         if (palettes == null || palettes.isEmpty()) {
-            throw invalid("palettes must contain at least one palette");
+            throw invalid(
+                    "palettes must contain at least one palette",
+                    new ErrorDetails.InvalidRequest.InvalidValue("palettes"));
         }
         int entryCount = 0;
         for (int index = 0; index < palettes.size(); index++) {
@@ -780,7 +837,9 @@ public final class FaweWorldEditor
                 throw invalid(
                         "palettes may contain at most "
                                 + this.maxBlockStatePatterns
-                                + " entries in total");
+                                + " entries in total",
+                        new ErrorDetails.InvalidRequest.TooManyItems(
+                                List.of("palettes"), this.maxBlockStatePatterns));
             }
         }
     }
@@ -794,25 +853,41 @@ public final class FaweWorldEditor
     private static BlockPosition resolvePosition(
             BlockPosition origin, SetBlocks.Placement placement, String field)
             throws OperationException {
-        try {
-            return new BlockPosition(
-                    Math.addExact(origin.x(), placement.x()),
-                    Math.addExact(origin.y(), placement.y()),
-                    Math.addExact(origin.z(), placement.z()));
-        } catch (ArithmeticException exception) {
-            throw invalid(field + " resolves outside the signed 32-bit coordinate range");
+        long x = (long) origin.x() + placement.x();
+        long y = (long) origin.y() + placement.y();
+        long z = (long) origin.z() + placement.z();
+        if (x < Integer.MIN_VALUE || x > Integer.MAX_VALUE) {
+            throw resolvedPositionOutOfRange(field, "[1]", x);
         }
+        if (y < Integer.MIN_VALUE || y > Integer.MAX_VALUE) {
+            throw resolvedPositionOutOfRange(field, "[2]", y);
+        }
+        if (z < Integer.MIN_VALUE || z > Integer.MAX_VALUE) {
+            throw resolvedPositionOutOfRange(field, "[3]", z);
+        }
+        return new BlockPosition((int) x, (int) y, (int) z);
+    }
+
+    private static OperationException resolvedPositionOutOfRange(
+            String placementField, String component, long value) {
+        return invalid(
+                placementField + " resolves outside the signed 32-bit coordinate range",
+                new ErrorDetails.InvalidRequest.OutOfRange(
+                        placementField + component, value, Integer.MIN_VALUE, Integer.MAX_VALUE));
     }
 
     private EditPlatform.WorldHandle resolveWorld(String worldName) throws OperationException {
         if (worldName == null || worldName.isBlank()) {
-            throw invalid("world must be a non-empty string");
+            throw invalid(
+                    "world must be a non-empty string",
+                    new ErrorDetails.InvalidRequest.InvalidValue("world"));
         }
         EditPlatform.WorldHandle world = this.platform.resolveWorld(worldName);
         if (!worldName.equals(world.name())) {
             throw new OperationException(
                     OperationFailure.WORLD_NOT_FOUND,
-                    "World is not loaded with the exact name: " + worldName);
+                    "World is not loaded with the exact name: " + worldName,
+                    new ErrorDetails.WorldNotFound(worldName));
         }
         return world;
     }
@@ -820,11 +895,15 @@ public final class FaweWorldEditor
     private void validatePalette(List<DestinationPaletteEntry> palette, String field)
             throws OperationException {
         if (palette == null || palette.isEmpty()) {
-            throw invalid(field + " must contain at least one entry");
+            throw invalid(
+                    field + " must contain at least one entry",
+                    new ErrorDetails.InvalidRequest.InvalidValue(field));
         }
         if (palette.size() > this.maxBlockStatePatterns) {
             throw invalid(
-                    field + " may contain at most " + this.maxBlockStatePatterns + " entries");
+                    field + " may contain at most " + this.maxBlockStatePatterns + " entries",
+                    new ErrorDetails.InvalidRequest.TooManyItems(
+                            List.of(field), this.maxBlockStatePatterns));
         }
         boolean weighted = false;
         boolean unweighted = false;
@@ -832,14 +911,21 @@ public final class FaweWorldEditor
         for (int index = 0; index < palette.size(); index++) {
             DestinationPaletteEntry entry = palette.get(index);
             if (entry == null || entry.blockState() == null || entry.blockState().isBlank()) {
-                throw invalid(field + "[" + index + "].blockState must be a non-empty string");
+                String stateField = field + "[" + index + "].blockState";
+                throw invalid(
+                        stateField + " must be a non-empty string",
+                        new ErrorDetails.InvalidRequest.InvalidValue(stateField));
             }
             Integer weight = entry.weight();
             if (weight == null) {
                 unweighted = true;
             } else {
                 if (weight < 1 || weight > 100) {
-                    throw invalid(field + "[" + index + "].weight must be between 1 and 100");
+                    String weightField = field + "[" + index + "].weight";
+                    throw invalid(
+                            weightField + " must be between 1 and 100",
+                            new ErrorDetails.InvalidRequest.OutOfRange(
+                                    weightField, weight, 1, 100));
                 }
                 weighted = true;
                 totalWeight += weight;
@@ -847,37 +933,62 @@ public final class FaweWorldEditor
         }
         if (weighted && unweighted) {
             throw invalid(
-                    field
-                            + " weights must be provided for every entry or omitted from every entry");
+                    field + " weights must be provided for every entry or omitted from every entry",
+                    new ErrorDetails.InvalidRequest.InvalidValue(field));
         }
         if (weighted && totalWeight != 100) {
-            throw invalid(field + " weights must total 100");
+            throw invalid(
+                    field + " weights must total 100",
+                    new ErrorDetails.InvalidRequest.InvalidValue(field));
         }
     }
 
     private void validateBlockStateList(List<String> values, String field)
             throws OperationException {
         if (values == null || values.isEmpty()) {
-            throw invalid(field + " must contain at least one entry");
+            throw invalid(
+                    field + " must contain at least one entry",
+                    new ErrorDetails.InvalidRequest.InvalidValue(field));
         }
         if (values.size() > this.maxBlockStatePatterns) {
             throw invalid(
-                    field + " may contain at most " + this.maxBlockStatePatterns + " entries");
+                    field + " may contain at most " + this.maxBlockStatePatterns + " entries",
+                    new ErrorDetails.InvalidRequest.TooManyItems(
+                            List.of(field), this.maxBlockStatePatterns));
         }
         Set<String> distinct = new LinkedHashSet<>();
         for (int index = 0; index < values.size(); index++) {
             String value = values.get(index);
             if (value == null || value.isBlank()) {
-                throw invalid(field + "[" + index + "] must be a non-empty string");
+                String item = field + "[" + index + "]";
+                throw invalid(
+                        item + " must be a non-empty string",
+                        new ErrorDetails.InvalidRequest.InvalidValue(item));
             }
             if (!distinct.add(value)) {
-                throw invalid(field + " contains a duplicate pattern: " + value);
+                throw invalid(
+                        field + " contains a duplicate pattern: " + value,
+                        new ErrorDetails.InvalidRequest.Duplicate(field + "[" + index + "]"));
             }
         }
     }
 
-    private static OperationException invalid(String message) {
-        return new OperationException(OperationFailure.INVALID_REQUEST, message);
+    private static String missingBoundsField(ReplaceRegionBlocks.Request request) {
+        if (request == null) {
+            return "request";
+        }
+        return request.min() == null ? "min" : "max";
+    }
+
+    private static String missingBoundsField(FillRegion.Request request) {
+        if (request == null) {
+            return "request";
+        }
+        return request.min() == null ? "min" : "max";
+    }
+
+    private static OperationException invalid(String message, ErrorDetails.InvalidRequest details) {
+        return new OperationException(OperationFailure.INVALID_REQUEST, message, details);
     }
 
     private record SetRequestGeometry(

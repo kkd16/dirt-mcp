@@ -24,6 +24,20 @@ function openapiSchema(openapi: string, name: string): string {
   return openapi.slice(start, relativeEnd === -1 ? openapi.length : start + marker.length + relativeEnd);
 }
 
+function schemaReferenceCount(schema: string, name: string): number {
+  return schema.split(`#/components/schemas/${name}`).length - 1;
+}
+
+function openapiObjectVariant(schema: string, discriminatorValue: string): string {
+  const marker = `              const: ${discriminatorValue}\n`;
+  const markerIndex = schema.indexOf(marker);
+  assert.notEqual(markerIndex, -1, `OpenAPI schema is missing discriminator value: ${discriminatorValue}`);
+  const start = schema.lastIndexOf('        - type: object\n', markerIndex);
+  assert.notEqual(start, -1, `OpenAPI discriminator has no object variant: ${discriminatorValue}`);
+  const end = schema.indexOf('        - type: object\n', markerIndex + marker.length);
+  return schema.slice(start, end === -1 ? undefined : end);
+}
+
 function yamlTopLevelMappingBlock(yaml: string, key: string): string | undefined {
   const marker = new RegExp(`^${key}:\\s*(?:#.*)?$`, 'm');
   const match = marker.exec(yaml);
@@ -67,32 +81,89 @@ test('Java, OpenAPI, and Zod expose the same bridge error codes', () => {
   const operationFailures = read(
     '../../paper-plugin/src/main/java/ca/deliyannides/dirtmcp/paper/operation/OperationFailure.java',
   );
-  const bridgeDirectory = new URL(
-    '../../paper-plugin/src/main/java/ca/deliyannides/dirtmcp/paper/bridge/',
-    import.meta.url,
+  const directBridgeErrors = read(
+    '../../paper-plugin/src/main/java/ca/deliyannides/dirtmcp/paper/bridge/ErrorDetailsJson.java',
   );
 
-  const openapiBlock = /code:\n\s+type: string\n\s+enum:\n([\s\S]*?)\n\s+message:/.exec(openapi)?.[1];
-  assert.ok(openapiBlock, 'OpenAPI error response is missing its code enum');
-
-  const openapiCodes = new Set([...openapiBlock.matchAll(/- ([a-z_]+)/g)].flatMap((match) => match[1] ?? []));
+  const codeSchema = openapiSchema(openapi, 'BridgeErrorCode');
+  const openapiCodes = new Set([...codeSchema.matchAll(/^        - ([a-z_]+)$/gm)].flatMap((match) => match[1] ?? []));
+  const bridgeErrorSchema = openapiSchema(openapi, 'BridgeError');
+  const errorAlternatives = [...bridgeErrorSchema.matchAll(/\$ref: '#\/components\/schemas\/([A-Za-z0-9]+)'/g)].flatMap(
+    (match) => match[1] ?? [],
+  );
+  const alternativeCodes = errorAlternatives.map((schemaName) => {
+    const matches = [
+      ...openapiSchema(openapi, schemaName).matchAll(/^            code:\n              const: ([a-z_]+)$/gm),
+    ];
+    assert.equal(matches.length, 1, `${schemaName} must constrain exactly one error code`);
+    return matches[0]?.[1] ?? '';
+  });
   const operationCodes = new Set(
     [...operationFailures.matchAll(/^    ([A-Z_]+)(?:,|$)/gm)].flatMap((match) =>
       match[1] === undefined ? [] : [match[1].toLowerCase()],
     ),
   );
-  const transportCodes = new Set(
-    readdirSync(bridgeDirectory)
-      .filter((name) => name.endsWith('.java'))
-      .flatMap((name) =>
-        Array.from(readFileSync(new URL(name, bridgeDirectory), 'utf8').matchAll(/sendError\(\s*\d+,\s*"([a-z_]+)"/g)),
-      )
-      .flatMap((match) => match[1] ?? []),
-  );
-  const javaCodes = new Set([...operationCodes, ...transportCodes]);
+  const directCodes = new Set([...directBridgeErrors.matchAll(/-> "([a-z_]+)";/g)].flatMap((match) => match[1] ?? []));
+  const javaCodes = new Set([...operationCodes, ...directCodes]);
 
   assert.deepEqual(sorted(BRIDGE_ERROR_CODES), sorted(openapiCodes));
+  assert.deepEqual(sorted(alternativeCodes), sorted(openapiCodes));
+  assert.equal(new Set(alternativeCodes).size, alternativeCodes.length, 'Each bridge error code needs one alternative');
   assert.deepEqual(sorted(javaCodes), sorted(openapiCodes));
+});
+
+test('OpenAPI error numbers preserve Java ranges and documented relationships', () => {
+  const openapi = read('../../protocol/openapi.yaml');
+  assert.match(openapiSchema(openapi, 'Int32'), /format: int32\n      minimum: -2147483648\n      maximum: 2147483647/);
+  assert.match(openapiSchema(openapi, 'PositiveInt32'), /format: int32\n      minimum: 1\n      maximum: 2147483647/);
+  assert.match(
+    openapiSchema(openapi, 'JsonSafeInteger'),
+    /format: int64\n      minimum: -9007199254740991\n      maximum: 9007199254740991/,
+  );
+  assert.match(
+    openapiSchema(openapi, 'PositiveJsonSafeInteger'),
+    /format: int64\n      minimum: 1\n      maximum: 9007199254740991/,
+  );
+
+  const invalidRequest = openapiSchema(openapi, 'InvalidRequestDetails');
+  const outOfRange = openapiObjectVariant(invalidRequest, 'out_of_range');
+  const tooManyItems = openapiObjectVariant(invalidRequest, 'too_many_items');
+  const regionTooLarge = openapiSchema(openapi, 'RegionTooLargeDetails');
+  const resultTooLarge = openapiSchema(openapi, 'ResultTooLargeError');
+  assert.equal(schemaReferenceCount(openapiSchema(openapi, 'BridgeBusyError'), 'PositiveInt32'), 1);
+  assert.equal(schemaReferenceCount(openapiSchema(openapi, 'ChangeLimitExceededError'), 'PositiveInt32'), 1);
+  assert.equal(schemaReferenceCount(invalidRequest, 'PositiveInt32'), 2);
+  assert.equal(schemaReferenceCount(invalidRequest, 'JsonSafeInteger'), 3);
+  assert.equal(schemaReferenceCount(regionTooLarge, 'PositiveInt32'), 4);
+  assert.equal(schemaReferenceCount(regionTooLarge, 'PositiveJsonSafeInteger'), 1);
+  assert.equal(schemaReferenceCount(resultTooLarge, 'PositiveInt32'), 1);
+  assert.equal(schemaReferenceCount(resultTooLarge, 'PositiveJsonSafeInteger'), 1);
+  assert.equal(schemaReferenceCount(openapiSchema(openapi, 'HistoryCapacityDetails'), 'PositiveJsonSafeInteger'), 3);
+  assert.equal(schemaReferenceCount(openapiSchema(openapi, 'ServerUnavailableDetails'), 'PositiveInt32'), 1);
+  assert.equal(schemaReferenceCount(openapiSchema(openapi, 'Dimensions'), 'PositiveJsonSafeInteger'), 3);
+  assert.equal(schemaReferenceCount(openapiSchema(openapi, 'ChunkPosition'), 'Int32'), 2);
+  assert.equal(schemaReferenceCount(outOfRange, 'JsonSafeInteger'), 3);
+  assert.match(
+    outOfRange,
+    /description: value must be outside the inclusive range from minimum through maximum, and minimum must be less than or equal to maximum\./,
+  );
+  assert.match(outOfRange, /required:\n(?:\s+- [a-z]+\n)*\s+- value\n/);
+  assert.match(tooManyItems, /description: fields is a non-empty unique list/);
+  assert.match(
+    tooManyItems,
+    /fields:\n              type: array\n              minItems: 1\n              uniqueItems: true/,
+  );
+  assert.doesNotMatch(tooManyItems, /^            field:$/m);
+  assert.match(regionTooLarge, /description: The exact product of dimensions must be greater than maximum\./);
+  assert.match(
+    regionTooLarge,
+    /description: minimumRequired is a known lower bound and must be greater than maximum\./,
+  );
+  assert.match(regionTooLarge, /description: requested must be greater than maximum\./);
+  assert.match(
+    resultTooLarge,
+    /description: minimumRequired is a known lower bound on the required entries and must be greater than maximum\./,
+  );
 });
 
 test('Paper, OpenAPI, shipped YAML, and MCP expose one exact tool catalog', () => {

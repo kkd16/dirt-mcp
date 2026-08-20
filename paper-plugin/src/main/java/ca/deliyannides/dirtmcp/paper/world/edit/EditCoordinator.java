@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.world.edit;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import java.util.ArrayDeque;
@@ -68,7 +69,7 @@ final class EditCoordinator implements AutoCloseable {
                 throw unavailable(worldName);
             }
             if (access == Access.MUTATION && recoveryRequired(state)) {
-                throw recoveryRequired(worldName);
+                throw recoveryRequired(worldName, state.history.getLast().record().editId());
             }
             state.reservations++;
         }
@@ -76,19 +77,21 @@ final class EditCoordinator implements AutoCloseable {
             releaseReservation(worldId, state);
             throw busy(worldName);
         }
-        boolean unavailable;
+        boolean stopping;
+        boolean invalidated;
         synchronized (this.worlds) {
-            unavailable = this.closed.get() || state.invalidated;
-            if (!unavailable && access == Access.UNDO) {
+            stopping = this.closed.get();
+            invalidated = state.invalidated;
+            if (!stopping && !invalidated && access == Access.UNDO) {
                 state.undoActive = true;
             }
         }
-        if (unavailable) {
+        if (stopping || invalidated) {
             state.lock.unlock();
             releaseReservation(worldId, state);
-            throw unavailable(worldName);
+            throw stopping ? unavailable() : unavailable(worldName);
         }
-        return new Lease(worldId, state, access);
+        return new Lease(worldId, worldName, state, access);
     }
 
     void invalidate(UUID worldId) {
@@ -186,7 +189,7 @@ final class EditCoordinator implements AutoCloseable {
     private List<RetainedEdit> reserveHistory(WorldState state, long maximumChangedBlocks)
             throws OperationException {
         if (maximumChangedBlocks < 1 || maximumChangedBlocks > this.maxRetainedChangedBlocks) {
-            throw historyCapacity();
+            throw retainedChangedBlockCapacity();
         }
 
         Set<RetainedEdit> evictions = new LinkedHashSet<>();
@@ -195,22 +198,41 @@ final class EditCoordinator implements AutoCloseable {
                 > this.maxEntriesPerWorld) {
             RetainedEdit eviction = oldestEvictable(state.history, evictions);
             if (eviction == null) {
-                throw historyCapacity();
+                throw new OperationException(
+                        OperationFailure.HISTORY_CAPACITY_EXCEEDED,
+                        "No bounded edit-history slot is available; the world was not changed",
+                        new ErrorDetails.HistoryCapacityExceeded.EntriesPerWorld(
+                                this.maxEntriesPerWorld));
             }
             evictions.add(eviction);
             evictedChangedBlocks += eviction.record().changedBlockCount();
         }
 
-        while ((long) this.retained.size() + this.reservedHistoryEntries + 1 - evictions.size()
-                        > this.maxEntriesTotal
-                || this.retainedChangedBlocks
-                                + this.reservedHistoryChangedBlocks
-                                + maximumChangedBlocks
-                                - evictedChangedBlocks
-                        > this.maxRetainedChangedBlocks) {
+        while (true) {
+            boolean entriesExceeded =
+                    (long) this.retained.size() + this.reservedHistoryEntries + 1 - evictions.size()
+                            > this.maxEntriesTotal;
+            boolean changedBlocksExceeded =
+                    this.retainedChangedBlocks
+                                    + this.reservedHistoryChangedBlocks
+                                    + maximumChangedBlocks
+                                    - evictedChangedBlocks
+                            > this.maxRetainedChangedBlocks;
+            if (!entriesExceeded && !changedBlocksExceeded) {
+                break;
+            }
             RetainedEdit eviction = oldestEvictable(this.retained.values(), evictions);
             if (eviction == null) {
-                throw historyCapacity();
+                ErrorDetails.HistoryCapacityExceeded details =
+                        entriesExceeded
+                                ? new ErrorDetails.HistoryCapacityExceeded.EntriesTotal(
+                                        this.maxEntriesTotal)
+                                : new ErrorDetails.HistoryCapacityExceeded.RetainedChangedBlocks(
+                                        this.maxRetainedChangedBlocks);
+                throw new OperationException(
+                        OperationFailure.HISTORY_CAPACITY_EXCEEDED,
+                        "No bounded edit-history slot is available; the world was not changed",
+                        details);
             }
             evictions.add(eviction);
             evictedChangedBlocks += eviction.record().changedBlockCount();
@@ -326,40 +348,50 @@ final class EditCoordinator implements AutoCloseable {
     private static OperationException busy(String worldName) {
         return new OperationException(
                 OperationFailure.WORLD_BUSY,
-                "Another Dirt MCP world operation is running in world: " + worldName);
+                "Another Dirt MCP world operation is running in world: " + worldName,
+                new ErrorDetails.WorldBusy.OperationInProgress(worldName));
     }
 
-    private static OperationException historyCapacity() {
+    private OperationException retainedChangedBlockCapacity() {
         return new OperationException(
                 OperationFailure.HISTORY_CAPACITY_EXCEEDED,
-                "No bounded edit-history slot is available; the world was not changed");
+                "No bounded edit-history slot is available; the world was not changed",
+                new ErrorDetails.HistoryCapacityExceeded.RetainedChangedBlocks(
+                        this.maxRetainedChangedBlocks));
     }
 
     private static OperationException unavailable() {
         return new OperationException(
-                OperationFailure.WORLD_UNAVAILABLE, "World editing is stopping");
+                OperationFailure.WORLD_UNAVAILABLE,
+                "World editing is stopping",
+                new ErrorDetails.WorldUnavailable.Stopping());
     }
 
     private static OperationException unavailable(String worldName) {
         return new OperationException(
-                OperationFailure.WORLD_UNAVAILABLE, "World is unavailable: " + worldName);
+                OperationFailure.WORLD_UNAVAILABLE,
+                "World is unavailable: " + worldName,
+                new ErrorDetails.WorldUnavailable.WorldUnloaded(worldName));
     }
 
-    private static OperationException recoveryRequired(String worldName) {
+    private static OperationException recoveryRequired(String worldName, UUID newestEditId) {
         return new OperationException(
                 OperationFailure.WORLD_BUSY,
-                "The newest retained edit requires recovery before editing world: " + worldName);
+                "The newest retained edit requires recovery before editing world: " + worldName,
+                new ErrorDetails.WorldBusy.RecoveryRequired(worldName, newestEditId));
     }
 
     final class Lease implements AutoCloseable {
         private final UUID worldId;
+        private final String worldName;
         private final WorldState state;
         private final Access access;
         private long historyReservation;
         private boolean released;
 
-        private Lease(UUID worldId, WorldState state, Access access) {
+        private Lease(UUID worldId, String worldName, WorldState state, Access access) {
             this.worldId = worldId;
+            this.worldName = worldName;
             this.state = state;
             this.access = access;
         }
@@ -373,8 +405,11 @@ final class EditCoordinator implements AutoCloseable {
                     throw new IllegalStateException(
                             "History can only be reserved once by a current mutation lease");
                 }
-                if (this.state.invalidated || closed.get()) {
+                if (closed.get()) {
                     throw unavailable();
+                }
+                if (this.state.invalidated) {
+                    throw unavailable(this.worldName);
                 }
                 evictions = EditCoordinator.this.reserveHistory(this.state, maximumChangedBlocks);
                 this.historyReservation = maximumChangedBlocks;

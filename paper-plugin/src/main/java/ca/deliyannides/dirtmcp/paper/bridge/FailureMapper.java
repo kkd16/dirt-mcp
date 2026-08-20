@@ -3,7 +3,6 @@ package ca.deliyannides.dirtmcp.paper.bridge;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import java.io.IOException;
-import java.util.Locale;
 
 final class FailureMapper {
     private FailureMapper() {}
@@ -23,12 +22,21 @@ final class FailureMapper {
                             WORLD_UNAVAILABLE ->
                             503;
                 };
-        String code = failure.name().toLowerCase(Locale.ROOT);
+        if (failure == OperationFailure.INTERNAL_ERROR) {
+            if (exception.editId().isPresent()) {
+                exchange.sendInternalError(
+                        status, exception.getMessage(), exception.editId().orElseThrow());
+            } else {
+                exchange.sendInternalError(status, exception.getMessage());
+            }
+            return;
+        }
+        var details = exception.details().orElseThrow();
         if (exception.editId().isPresent()) {
             exchange.sendError(
-                    status, code, exception.getMessage(), exception.editId().orElseThrow());
+                    status, exception.getMessage(), details, exception.editId().orElseThrow());
         } else {
-            exchange.sendError(status, code, exception.getMessage());
+            exchange.sendError(status, exception.getMessage(), details);
         }
     }
 }

@@ -159,11 +159,11 @@ const EditResultMessage =
 
 export function requireMatchingCallId(expected: string, actual: string, editId: string): void {
   if (actual.toLowerCase() !== expected.toLowerCase()) {
-    throw new ToolFailure(
-      'bridge_invalid_response',
-      'Paper bridge response call ID did not match the request.',
+    throw new ToolFailure({
+      code: 'bridge_invalid_response',
+      message: 'Paper bridge response call ID did not match the request.',
       editId,
-    );
+    });
   }
 }
 
@@ -175,11 +175,11 @@ export function requireMatchingEditIdentity(
 ): void {
   const editId = actual.edit?.editId;
   if (actual.world !== expectedWorld || !sameBounds(actual.bounds, expectedBounds)) {
-    throw new ToolFailure(
-      'bridge_invalid_response',
-      'Paper bridge edit result did not match the requested world and bounds.',
-      editId,
-    );
+    throw new ToolFailure({
+      code: 'bridge_invalid_response',
+      message: 'Paper bridge edit result did not match the requested world and bounds.',
+      ...(editId === undefined ? {} : { editId }),
+    });
   }
   if (actual.edit !== null) requireMatchingCallId(expectedCallId, actual.edit.callId, actual.edit.editId);
 }
@@ -190,11 +190,11 @@ export function requireMatchingUndoIdentity(
   actual: z.infer<typeof EditRecordSchema>,
 ): void {
   if (actual.world !== expectedWorld || actual.editId.toLowerCase() !== expectedEditId.toLowerCase()) {
-    throw new ToolFailure(
-      'bridge_invalid_response',
-      'Paper bridge undo result did not match the requested edit.',
-      actual.editId,
-    );
+    throw new ToolFailure({
+      code: 'bridge_invalid_response',
+      message: 'Paper bridge undo result did not match the requested edit.',
+      editId: actual.editId,
+    });
   }
 }
 
@@ -384,7 +384,12 @@ export const GetEditHistoryOutputSchema = GetEditHistoryOutputShapeSchema.refine
 ).describe('Current bounded undoable edit history for one loaded world.');
 
 function invalidEditResult(actual: EditResultMetadata, message: string): never {
-  throw new ToolFailure('bridge_invalid_response', message, actual.edit?.editId);
+  const editId = actual.edit?.editId;
+  throw new ToolFailure({
+    code: 'bridge_invalid_response',
+    message,
+    ...(editId === undefined ? {} : { editId }),
+  });
 }
 
 export function requireMatchingEditOptions(

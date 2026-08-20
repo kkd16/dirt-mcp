@@ -48,7 +48,7 @@ export function inclusiveBlockVolume(bounds: Bounds): bigint {
 }
 
 export function invalidBridgeResponse(message: string): never {
-  throw new ToolFailure('bridge_invalid_response', message);
+  throw new ToolFailure({ code: 'bridge_invalid_response', message });
 }
 
 export function requireMatchingWorld(expected: string, actual: string): void {

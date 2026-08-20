@@ -3,6 +3,7 @@ package ca.deliyannides.dirtmcp.paper.world.model;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import org.junit.jupiter.api.Test;
@@ -33,6 +34,10 @@ final class RegionGeometryTest {
                                         1_000_000));
 
         assertEquals(OperationFailure.REGION_TOO_LARGE, exception.failure());
+        assertEquals(
+                new ErrorDetails.RegionTooLarge.Volume(
+                        new ErrorDetails.Dimensions(4_294_967_296L, 1, 4_294_967_296L), 1_000_000),
+                exception.details().orElseThrow());
     }
 
     @Test
@@ -47,10 +52,9 @@ final class RegionGeometryTest {
     @Test
     void rejectsHugeThinRegionsByTouchedChunkCount() throws Exception {
         Cuboid region =
-                RegionGeometry.normalize(
+                new Cuboid(
                         new BlockPosition(Integer.MIN_VALUE, 0, 0),
-                        new BlockPosition(Integer.MAX_VALUE, 0, 0),
-                        Long.MAX_VALUE);
+                        new BlockPosition(Integer.MAX_VALUE, 0, 0));
 
         OperationException exception =
                 assertThrows(
@@ -59,6 +63,9 @@ final class RegionGeometryTest {
         assertEquals(OperationFailure.REGION_TOO_LARGE, exception.failure());
         assertEquals(
                 "Operation touches more than the maximum of 256 chunks", exception.getMessage());
+        assertEquals(
+                new ErrorDetails.RegionTooLarge.TouchedChunks(257, 256),
+                exception.details().orElseThrow());
     }
 
     @Test

@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.world.inspection;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.BlockSample;
@@ -19,18 +20,30 @@ import java.util.List;
 final class OrthographicViewAlgorithms {
     private OrthographicViewAlgorithms() {}
 
-    static ViewGeometry geometry(Request request, long maximumVolume) throws OperationException {
+    static ViewGeometry geometry(Request request, int maximumVolume) throws OperationException {
         if (request.direction() == null) {
-            throw invalid("direction is required");
+            throw invalid(
+                    "direction is required", new ErrorDetails.InvalidRequest.Missing("direction"));
         }
         if (request.horizontalRadius() < 0 || request.verticalRadius() < 0) {
-            throw invalid("horizontalRadius and verticalRadius must be non-negative");
+            boolean horizontalInvalid = request.horizontalRadius() < 0;
+            String field = horizontalInvalid ? "horizontalRadius" : "verticalRadius";
+            int value = horizontalInvalid ? request.horizontalRadius() : request.verticalRadius();
+            throw invalid(
+                    "horizontalRadius and verticalRadius must be non-negative",
+                    new ErrorDetails.InvalidRequest.OutOfRange(field, value, 0, Integer.MAX_VALUE));
         }
         if (request.maxDistance() < 1) {
-            throw invalid("maxDistance must be positive");
+            throw invalid(
+                    "maxDistance must be positive",
+                    new ErrorDetails.InvalidRequest.OutOfRange(
+                            "maxDistance", request.maxDistance(), 1, Integer.MAX_VALUE));
         }
         if (request.depth() < 0) {
-            throw invalid("depth must be non-negative");
+            throw invalid(
+                    "depth must be non-negative",
+                    new ErrorDetails.InvalidRequest.OutOfRange(
+                            "depth", request.depth(), 0, Integer.MAX_VALUE));
         }
 
         ViewBasis basis = viewBasis(request.direction());
@@ -84,7 +97,10 @@ final class OrthographicViewAlgorithms {
                                         OperationFailure.RESULT_TOO_LARGE,
                                         "View result exceeds maxResults of "
                                                 + request.maxResults()
-                                                + " visible blocks");
+                                                + " visible blocks",
+                                        new ErrorDetails.ResultTooLarge.VisibleBlocks(
+                                                (long) request.maxResults() + 1,
+                                                request.maxResults()));
                             }
                             break;
                         }
@@ -137,19 +153,27 @@ final class OrthographicViewAlgorithms {
                         + (long) basis.horizontal().z() * horizontal
                         + (long) basis.vertical().z() * vertical
                         + (long) basis.forward().z() * distance;
-        if (x < Integer.MIN_VALUE
-                || x > Integer.MAX_VALUE
-                || y < Integer.MIN_VALUE
-                || y > Integer.MAX_VALUE
-                || z < Integer.MIN_VALUE
-                || z > Integer.MAX_VALUE) {
-            throw invalid("View extends beyond signed 32-bit block coordinates");
+        if (x < Integer.MIN_VALUE || x > Integer.MAX_VALUE) {
+            throw viewOutOfRange("view.x", x);
+        }
+        if (y < Integer.MIN_VALUE || y > Integer.MAX_VALUE) {
+            throw viewOutOfRange("view.y", y);
+        }
+        if (z < Integer.MIN_VALUE || z > Integer.MAX_VALUE) {
+            throw viewOutOfRange("view.z", z);
         }
         return new BlockPosition((int) x, (int) y, (int) z);
     }
 
-    private static OperationException invalid(String message) {
-        return new OperationException(OperationFailure.INVALID_REQUEST, message);
+    private static OperationException viewOutOfRange(String field, long value) {
+        return invalid(
+                "View extends beyond signed 32-bit block coordinates",
+                new ErrorDetails.InvalidRequest.OutOfRange(
+                        field, value, Integer.MIN_VALUE, Integer.MAX_VALUE));
+    }
+
+    private static OperationException invalid(String message, ErrorDetails.InvalidRequest details) {
+        return new OperationException(OperationFailure.INVALID_REQUEST, message, details);
     }
 
     record ViewGeometry(ViewBasis basis, Cuboid region) {}

@@ -425,14 +425,22 @@ let smokeCompleted = false;
 try {
   const unauthenticated = await fetch(`${baseUrl}/v1/ping`, { signal: AbortSignal.timeout(3_000) });
   assert.equal(unauthenticated.status, 401);
-  assert.equal((await unauthenticated.json()).error.code, 'unauthorized');
+  assert.deepEqual((await unauthenticated.json()).error, {
+    code: 'unauthorized',
+    message: 'A valid bearer token is required',
+    details: { reason: 'authentication_failed' },
+  });
 
   const unknownRoute = await fetch(`${baseUrl}/v1/ping/extra`, {
     headers: { Authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(3_000),
   });
   assert.equal(unknownRoute.status, 404);
-  assert.equal((await unknownRoute.json()).error.code, 'not_found');
+  assert.deepEqual((await unknownRoute.json()).error, {
+    code: 'not_found',
+    message: 'No bridge operation matches this path',
+    details: { reason: 'route_not_found' },
+  });
 
   const pingCallId = randomUUID();
   assert.deepEqual(await bridgeGet('/v1/ping', pingCallId), { status: 'ok' });
@@ -477,6 +485,11 @@ try {
   });
   assert.equal(chunkHeavyRegion.status, 413);
   assert.equal(chunkHeavyRegion.body.error.code, 'region_too_large');
+  assert.deepEqual(chunkHeavyRegion.body.error.details, {
+    reason: 'touched_chunks',
+    minimumRequired: serverStatus.limits.maxInspectionTouchedChunks + 1,
+    maximum: serverStatus.limits.maxInspectionTouchedChunks,
+  });
 
   await paperCommand('forceload add 0 0');
   fixtureIsForceLoaded = true;
@@ -551,6 +564,7 @@ try {
   });
   assert.equal(duplicateSet.status, 400);
   assert.equal(duplicateSet.body.error.code, 'invalid_request');
+  assert.deepEqual(duplicateSet.body.error.details, { reason: 'duplicate', field: 'placements[1]' });
 
   const invalidSet = await bridgeResponse('/v1/set-blocks', {
     world,
@@ -563,6 +577,10 @@ try {
   });
   assert.equal(invalidSet.status, 400);
   assert.equal(invalidSet.body.error.code, 'invalid_request');
+  assert.deepEqual(invalidSet.body.error.details, {
+    reason: 'invalid_value',
+    field: 'palettes[1][0].blockState',
+  });
   const afterInvalidSet = await bridgeRequest('/v1/get-region-blocks', {
     world,
     min: setMin,
@@ -609,6 +627,10 @@ try {
   const consumedSetUndo = await bridgeResponse('/v1/undo-edit', { world, editId: setResult.edit.editId });
   assert.equal(consumedSetUndo.status, 404);
   assert.equal(consumedSetUndo.body.error.code, 'edit_not_found');
+  assert.deepEqual(consumedSetUndo.body.error.details, {
+    world,
+    requestedEditId: setResult.edit.editId,
+  });
   const afterSetUndo = await bridgeRequest('/v1/get-region-blocks', {
     world,
     min: setMin,
@@ -721,6 +743,7 @@ try {
     error: {
       code: 'result_too_large',
       message: 'View result exceeds maxResults of 1 visible blocks',
+      details: { reason: 'visible_blocks', minimumRequired: 2, maximum: 1 },
     },
   });
 
@@ -748,6 +771,7 @@ try {
     error: {
       code: 'result_too_large',
       message: 'Inspection result exceeds maxResults of 1 entries',
+      details: { reason: 'blocks', minimumRequired: 2, maximum: 1 },
     },
   });
 
@@ -778,6 +802,11 @@ try {
   const nonLatestUndo = await bridgeResponse('/v1/undo-edit', { world, editId: filled.edit.editId });
   assert.equal(nonLatestUndo.status, 409);
   assert.equal(nonLatestUndo.body.error.code, 'edit_not_latest');
+  assert.deepEqual(nonLatestUndo.body.error.details, {
+    world,
+    requestedEditId: filled.edit.editId,
+    newestEditId: replaced.edit.editId,
+  });
   await assertEditHistory([replaced.edit, filled.edit]);
 
   await undoRetained(replaced);

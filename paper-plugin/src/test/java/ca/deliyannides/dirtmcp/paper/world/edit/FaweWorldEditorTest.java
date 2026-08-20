@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
@@ -256,18 +257,27 @@ final class FaweWorldEditorTest {
                                         "world",
                                         List.of(placement(0, 0, 0), placement(0, 0, 0)),
                                         false)));
-        assertFailure(
-                OperationFailure.INVALID_REQUEST,
-                () ->
-                        set(
-                                editor,
-                                new SetBlocks.Request(
-                                        "world",
-                                        position(Integer.MAX_VALUE, 0, 0),
-                                        palettes(),
-                                        List.of(new SetBlocks.Placement(0, 1, 0, 0)),
-                                        0,
-                                        false)));
+        OperationException coordinateOverflow =
+                assertThrows(
+                        OperationException.class,
+                        () ->
+                                set(
+                                        editor,
+                                        new SetBlocks.Request(
+                                                "world",
+                                                position(Integer.MAX_VALUE, 0, 0),
+                                                palettes(),
+                                                List.of(new SetBlocks.Placement(0, 1, 0, 0)),
+                                                0,
+                                                false)));
+        assertEquals(OperationFailure.INVALID_REQUEST, coordinateOverflow.failure());
+        assertEquals(
+                new ErrorDetails.InvalidRequest.OutOfRange(
+                        "placements[0][1]",
+                        (long) Integer.MAX_VALUE + 1,
+                        Integer.MIN_VALUE,
+                        Integer.MAX_VALUE),
+                coordinateOverflow.details().orElseThrow());
         assertFailure(OperationFailure.INVALID_REQUEST, () -> undo(editor, " ", UUID.randomUUID()));
         FaweWorldEditor smallEditor =
                 new FaweWorldEditor(
@@ -561,6 +571,9 @@ final class FaweWorldEditorTest {
 
         EditRecord recovery = history(editor, "world").getFirst();
         assertEquals(java.util.Optional.of(recovery.editId()), failure.editId());
+        assertEquals(
+                new ErrorDetails.WorldUnavailable.RollbackFailed(),
+                failure.details().orElseThrow());
         assertEquals(EditStatus.RECOVERY_REQUIRED, recovery.status());
         UndoEdit.Result result = undo(editor, "world", recovery.editId());
         assertEquals(3, result.edit().changedBlockCount());
@@ -686,6 +699,9 @@ final class FaweWorldEditorTest {
                                     .getCause();
             assertEquals(OperationFailure.WORLD_UNAVAILABLE, failure.failure());
             assertTrue(failure.editId().isPresent());
+            assertEquals(
+                    new ErrorDetails.WorldUnavailable.OperationFailed(),
+                    failure.details().orElseThrow());
             assertTrue(failure.getMessage().contains("was rolled back"));
             assertTrue(failure.getMessage().contains(failure.editId().orElseThrow().toString()));
         }
@@ -715,6 +731,9 @@ final class FaweWorldEditorTest {
 
             assertEquals(OperationFailure.WORLD_UNAVAILABLE, failure.failure());
             assertTrue(failure.editId().isPresent());
+            assertEquals(
+                    new ErrorDetails.WorldUnavailable.OperationFailed(),
+                    failure.details().orElseThrow());
             assertTrue(failure.getMessage().contains("unretained recovery was rolled back"));
         }
 
@@ -744,6 +763,9 @@ final class FaweWorldEditorTest {
 
             assertEquals(OperationFailure.WORLD_UNAVAILABLE, failure.failure());
             assertTrue(failure.editId().isPresent());
+            assertEquals(
+                    new ErrorDetails.WorldUnavailable.RollbackFailed(),
+                    failure.details().orElseThrow());
             assertTrue(failure.getMessage().contains("rollback failed"));
             assertTrue(failure.getMessage().contains(failure.editId().orElseThrow().toString()));
         }
@@ -958,7 +980,9 @@ final class FaweWorldEditorTest {
             }
             if (world == null) {
                 throw new OperationException(
-                        OperationFailure.WORLD_NOT_FOUND, "World is not loaded: " + worldName);
+                        OperationFailure.WORLD_NOT_FOUND,
+                        "World is not loaded: " + worldName,
+                        new ErrorDetails.WorldNotFound(worldName));
             }
             return world;
         }
@@ -1024,7 +1048,10 @@ final class FaweWorldEditorTest {
             this.executeCalls++;
             prepared.executedBeforeClose = !prepared.closed;
             if (this.failExecution) {
-                throw new OperationException(OperationFailure.WORLD_UNAVAILABLE, "edit failed");
+                throw new OperationException(
+                        OperationFailure.WORLD_UNAVAILABLE,
+                        "edit failed",
+                        new ErrorDetails.WorldUnavailable.OperationFailed());
             }
             if (!dryRun && this.nextChanges > 0) {
                 admission.beforeMutation();
@@ -1036,13 +1063,19 @@ final class FaweWorldEditorTest {
                 } catch (InterruptedException exception) {
                     Thread.currentThread().interrupt();
                     throw new OperationException(
-                            OperationFailure.WORLD_UNAVAILABLE, "interrupted", exception);
+                            OperationFailure.WORLD_UNAVAILABLE,
+                            "interrupted",
+                            new ErrorDetails.WorldUnavailable.Interrupted(),
+                            exception);
                 }
             }
             if (this.failWithRecovery) {
                 this.lastUndo = new FakeUndo(++this.nextUndoId, this.nextChanges);
                 throw new EditRecoveryException(
-                        "rollback failed", new IllegalStateException("edit failed"), this.lastUndo);
+                        "rollback failed",
+                        new ErrorDetails.WorldUnavailable.RollbackFailed(),
+                        new IllegalStateException("edit failed"),
+                        this.lastUndo);
             }
             this.lastUndo =
                     this.nextChanges > 0 && !dryRun
@@ -1056,14 +1089,19 @@ final class FaweWorldEditorTest {
         public void undo(WorldHandle world, UndoToken undo) throws OperationException {
             if (this.stopping) {
                 throw new OperationException(
-                        OperationFailure.WORLD_UNAVAILABLE, "world editing is stopping");
+                        OperationFailure.WORLD_UNAVAILABLE,
+                        "world editing is stopping",
+                        new ErrorDetails.WorldUnavailable.Stopping());
             }
             applyUndo(undo);
         }
 
         private void applyUndo(UndoToken undo) throws OperationException {
             if (this.failUndo) {
-                throw new OperationException(OperationFailure.WORLD_UNAVAILABLE, "undo failed");
+                throw new OperationException(
+                        OperationFailure.WORLD_UNAVAILABLE,
+                        "undo failed",
+                        new ErrorDetails.WorldUnavailable.OperationFailed());
             }
             this.undoneIds.add(((FakeUndo) undo).id());
         }
@@ -1128,7 +1166,9 @@ final class FaweWorldEditorTest {
                 this.closed = true;
                 if (failClose) {
                     throw new OperationException(
-                            OperationFailure.WORLD_UNAVAILABLE, "close failed");
+                            OperationFailure.WORLD_UNAVAILABLE,
+                            "close failed",
+                            new ErrorDetails.WorldUnavailable.OperationFailed());
                 }
             }
 

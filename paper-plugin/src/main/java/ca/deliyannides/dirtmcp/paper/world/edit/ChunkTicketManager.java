@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.world.edit;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.platform.MainThread;
@@ -28,17 +29,17 @@ final class ChunkTicketManager implements AutoCloseable {
         Objects.requireNonNull(chunks, "chunks");
         if (this.stopping.get()) {
             throw new OperationException(
-                    OperationFailure.WORLD_UNAVAILABLE, "World editing is stopping");
+                    OperationFailure.WORLD_UNAVAILABLE,
+                    "World editing is stopping",
+                    new ErrorDetails.WorldUnavailable.Stopping());
         }
         for (ChunkPosition chunk : chunks) {
             if (!world.isChunkLoaded(chunk)) {
                 throw new OperationException(
                         OperationFailure.WORLD_UNAVAILABLE,
-                        operation
-                                + " contains an unloaded chunk at "
-                                + chunk.x()
-                                + ","
-                                + chunk.z());
+                        operation + " contains an unloaded chunk at " + chunk.x() + "," + chunk.z(),
+                        new ErrorDetails.WorldUnavailable.ChunkUnloaded(
+                                world.name(), new ErrorDetails.Chunk(chunk.x(), chunk.z())));
             }
         }
 
@@ -47,7 +48,9 @@ final class ChunkTicketManager implements AutoCloseable {
             synchronized (this.tickets) {
                 if (this.stopping.get()) {
                     throw new OperationException(
-                            OperationFailure.WORLD_UNAVAILABLE, "World editing is stopping");
+                            OperationFailure.WORLD_UNAVAILABLE,
+                            "World editing is stopping",
+                            new ErrorDetails.WorldUnavailable.Stopping());
                 }
                 for (ChunkPosition chunk : chunks) {
                     TicketKey key = new TicketKey(world.id(), chunk);
@@ -188,6 +191,8 @@ final class ChunkTicketManager implements AutoCloseable {
 
     interface TicketWorld {
         UUID id();
+
+        String name();
 
         boolean isChunkLoaded(ChunkPosition chunk);
 

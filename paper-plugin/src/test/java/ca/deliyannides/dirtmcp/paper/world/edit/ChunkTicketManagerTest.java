@@ -227,6 +227,11 @@ final class ChunkTicketManagerTest {
         }
 
         @Override
+        public String name() {
+            return "world";
+        }
+
+        @Override
         public boolean isChunkLoaded(ChunkPosition chunk) {
             return !this.unloaded.contains(chunk);
         }

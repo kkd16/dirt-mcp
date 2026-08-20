@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.inspection.OrthographicViewAlgorithms.ViewGeometry;
@@ -165,6 +166,14 @@ final class OrthographicViewAlgorithmsTest {
                                                                 negativeDepth, 10))
                                         .failure()),
                 () -> assertEquals(OperationFailure.INVALID_REQUEST, overflowFailure.failure()),
+                () ->
+                        assertEquals(
+                                new ErrorDetails.InvalidRequest.OutOfRange(
+                                        "view.x",
+                                        (long) Integer.MAX_VALUE + 1,
+                                        Integer.MIN_VALUE,
+                                        Integer.MAX_VALUE),
+                                overflowFailure.details().orElseThrow()),
                 () ->
                         assertEquals(
                                 OperationFailure.INVALID_REQUEST,

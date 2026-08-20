@@ -57,7 +57,7 @@ The TypeScript process owns the agent-facing interface:
 - calls to the local Paper bridge;
 - conversion of bridge results into structured MCP content, including the
   optional lossless palette-grid view representation; and
-- actionable error messages.
+- strict, actionable error details alongside human-readable messages.
 
 It does not read world files or reproduce Minecraft editing logic. Stdout is
 reserved for MCP; process diagnostics are structured JSON Lines on stderr.

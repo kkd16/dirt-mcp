@@ -157,6 +157,18 @@ creating `callId`; an absent record means no retryable history remains. Every
 failure mapped by a Dirt tool handler also includes its generated `error.callId`
 for request correlation.
 
+Correctable bridge failures also include a strict `error.details` object whose
+shape is selected by `error.code`; reasons, rejected values or request fields,
+configured maxima, world or chunk identity, and edit ordering are
+machine-readable where relevant.
+`message` remains the human explanation. Internal errors deliberately omit
+`details` and never expose exception, path, or backend implementation data. The
+[OpenAPI contract](../protocol/openapi.yaml) defines every code-specific shape.
+MCP-local transport failures use `bridge_unavailable.details.reason`
+(`timeout` or `request_failed`), `bridge_unauthorized.details.reason`
+(`authentication_failed`), or `bridge_http_error.details.status`; local protocol
+and internal failures omit `details`.
+
 Ordinary edits still require already-loaded chunks. Retained history does not
 keep chunks loaded, so undo uses Paper's asynchronous existing-chunk load with
 generation disabled. After every required chunk is available, Dirt holds

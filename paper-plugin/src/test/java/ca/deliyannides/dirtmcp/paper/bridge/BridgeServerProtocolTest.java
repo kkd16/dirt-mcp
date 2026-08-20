@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
@@ -82,7 +83,8 @@ final class BridgeServerProtocolTest {
                 assertEquals(401, response.statusCode());
                 assertEquals(
                         json(
-                                "{\"error\":{\"code\":\"unauthorized\",\"message\":\"A valid bearer token is required\"}}"),
+                                "{\"error\":{\"code\":\"unauthorized\",\"message\":\"A valid bearer token is required\","
+                                        + "\"details\":{\"reason\":\"authentication_failed\"}}}"),
                         json(response.body()));
                 assertEquals(
                         "Bearer realm=\"dirt-mcp\"",
@@ -143,12 +145,13 @@ final class BridgeServerProtocolTest {
     @ParameterizedTest
     @MethodSource("operationFailures")
     void mapsTypedOperationFailures(
-            OperationFailure failure, int expectedStatus, String expectedCode) throws Exception {
+            OperationFailure failure, int expectedStatus, String expectedCode, ErrorDetails details)
+            throws Exception {
         BridgeTestFixture.TestOperations operations =
                 new BridgeTestFixture.TestOperations() {
                     @Override
                     public PingServer.Result ping() throws OperationException {
-                        throw new OperationException(failure, "safe message");
+                        throw new OperationException(failure, "safe message", details);
                     }
                 };
         try (BridgeServer bridge = server(config(availablePort(), 4), operations);
@@ -160,12 +163,10 @@ final class BridgeServerProtocolTest {
                             HttpResponse.BodyHandlers.ofString());
 
             assertEquals(expectedStatus, response.statusCode());
-            assertEquals(
-                    json(
-                            "{\"error\":{\"code\":\""
-                                    + expectedCode
-                                    + "\",\"message\":\"safe message\"}}"),
-                    json(response.body()));
+            var error = json(response.body()).getAsJsonObject().getAsJsonObject("error");
+            assertEquals(expectedCode, error.get("code").getAsString());
+            assertEquals("safe message", error.get("message").getAsString());
+            assertEquals(ErrorDetailsJson.serialize(details), error.getAsJsonObject("details"));
         }
     }
 
@@ -180,7 +181,7 @@ final class BridgeServerProtocolTest {
                     @Override
                     public PingServer.Result ping() throws OperationException {
                         throw new OperationException(
-                                OperationFailure.INTERNAL_ERROR, "edit failed", null, editId);
+                                OperationFailure.INTERNAL_ERROR, "edit failed", null, null, editId);
                     }
                 };
         try (log;
@@ -218,7 +219,7 @@ final class BridgeServerProtocolTest {
                     @Override
                     public PingServer.Result ping() throws OperationException {
                         throw new OperationException(
-                                OperationFailure.INTERNAL_ERROR, "internal failure");
+                                OperationFailure.INTERNAL_ERROR, "internal failure", null);
                     }
                 };
 
@@ -249,7 +250,9 @@ final class BridgeServerProtocolTest {
                     @Override
                     public PingServer.Result ping() throws OperationException {
                         throw new OperationException(
-                                OperationFailure.SERVER_UNAVAILABLE, "temporarily unavailable");
+                                OperationFailure.SERVER_UNAVAILABLE,
+                                "temporarily unavailable",
+                                new ErrorDetails.ServerUnavailable.DependencyUnavailable());
                     }
                 };
 
@@ -525,22 +528,69 @@ final class BridgeServerProtocolTest {
     }
 
     private static Stream<Arguments> operationFailures() {
+        UUID requestedEditId = UUID.fromString("123e4567-e89b-42d3-a456-426614174000");
+        UUID newestEditId = UUID.fromString("123e4567-e89b-42d3-a456-426614174001");
         return Stream.of(
-                Arguments.of(OperationFailure.INVALID_REQUEST, 400, "invalid_request"),
-                Arguments.of(OperationFailure.EDIT_NOT_FOUND, 404, "edit_not_found"),
-                Arguments.of(OperationFailure.WORLD_NOT_FOUND, 404, "world_not_found"),
-                Arguments.of(OperationFailure.EDIT_NOT_LATEST, 409, "edit_not_latest"),
-                Arguments.of(OperationFailure.WORLD_BUSY, 409, "world_busy"),
-                Arguments.of(OperationFailure.CHANGE_LIMIT_EXCEEDED, 413, "change_limit_exceeded"),
-                Arguments.of(OperationFailure.REGION_TOO_LARGE, 413, "region_too_large"),
-                Arguments.of(OperationFailure.RESULT_TOO_LARGE, 413, "result_too_large"),
+                Arguments.of(
+                        OperationFailure.INVALID_REQUEST,
+                        400,
+                        "invalid_request",
+                        new ErrorDetails.InvalidRequest.InvalidValue("field")),
+                Arguments.of(
+                        OperationFailure.EDIT_NOT_FOUND,
+                        404,
+                        "edit_not_found",
+                        new ErrorDetails.EditNotFound("world", requestedEditId)),
+                Arguments.of(
+                        OperationFailure.WORLD_NOT_FOUND,
+                        404,
+                        "world_not_found",
+                        new ErrorDetails.WorldNotFound("world")),
+                Arguments.of(
+                        OperationFailure.EDIT_NOT_LATEST,
+                        409,
+                        "edit_not_latest",
+                        new ErrorDetails.EditNotLatest("world", requestedEditId, newestEditId)),
+                Arguments.of(
+                        OperationFailure.WORLD_BUSY,
+                        409,
+                        "world_busy",
+                        new ErrorDetails.WorldBusy.OperationInProgress("world")),
+                Arguments.of(
+                        OperationFailure.CHANGE_LIMIT_EXCEEDED,
+                        413,
+                        "change_limit_exceeded",
+                        new ErrorDetails.ChangeLimitExceeded(1)),
+                Arguments.of(
+                        OperationFailure.REGION_TOO_LARGE,
+                        413,
+                        "region_too_large",
+                        new ErrorDetails.RegionTooLarge.BlockCount(2, 1)),
+                Arguments.of(
+                        OperationFailure.RESULT_TOO_LARGE,
+                        413,
+                        "result_too_large",
+                        new ErrorDetails.ResultTooLarge.Blocks(2, 1)),
                 Arguments.of(
                         OperationFailure.HISTORY_CAPACITY_EXCEEDED,
                         503,
-                        "history_capacity_exceeded"),
-                Arguments.of(OperationFailure.SERVER_UNAVAILABLE, 503, "server_unavailable"),
-                Arguments.of(OperationFailure.UNHEALTHY, 503, "unhealthy"),
-                Arguments.of(OperationFailure.WORLD_UNAVAILABLE, 503, "world_unavailable"));
+                        "history_capacity_exceeded",
+                        new ErrorDetails.HistoryCapacityExceeded.EntriesTotal(1)),
+                Arguments.of(
+                        OperationFailure.SERVER_UNAVAILABLE,
+                        503,
+                        "server_unavailable",
+                        new ErrorDetails.ServerUnavailable.PaperUnavailable()),
+                Arguments.of(
+                        OperationFailure.UNHEALTHY,
+                        503,
+                        "unhealthy",
+                        new ErrorDetails.Unhealthy.HealthCheckFailed()),
+                Arguments.of(
+                        OperationFailure.WORLD_UNAVAILABLE,
+                        503,
+                        "world_unavailable",
+                        new ErrorDetails.WorldUnavailable.PaperUnavailable()));
     }
 
     private static String rawRequest(BridgeServer bridge, int contentLength, byte[] partialBody)

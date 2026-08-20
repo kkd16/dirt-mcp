@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
@@ -63,12 +64,14 @@ final class EditCoordinatorTest {
         coordinator.invalidate(WORLD_ID);
 
         assertFalse(first.closed);
-        assertEquals(
-                OperationFailure.WORLD_UNAVAILABLE,
+        OperationException unavailable =
                 assertThrows(
-                                OperationException.class,
-                                () -> coordinator.enterMutation(WORLD_ID, "world"))
-                        .failure());
+                        OperationException.class,
+                        () -> coordinator.enterMutation(WORLD_ID, "world"));
+        assertEquals(OperationFailure.WORLD_UNAVAILABLE, unavailable.failure());
+        assertEquals(
+                new ErrorDetails.WorldUnavailable.WorldUnloaded("world"),
+                unavailable.details().orElseThrow());
         active.close();
         assertTrue(first.closed);
         assertEquals(0, coordinator.trackedWorldCount());
@@ -419,16 +422,42 @@ final class EditCoordinatorTest {
 
         assertFalse(coordinator.isQuiescent());
         assertFalse(undo.closed);
-        assertEquals(
-                OperationFailure.WORLD_UNAVAILABLE,
+        OperationException stopping =
                 assertThrows(
-                                OperationException.class,
-                                () -> coordinator.enterHistory(WORLD_ID, "world"))
-                        .failure());
+                        OperationException.class,
+                        () -> coordinator.enterHistory(WORLD_ID, "world"));
+        assertEquals(OperationFailure.WORLD_UNAVAILABLE, stopping.failure());
+        assertEquals(
+                new ErrorDetails.WorldUnavailable.Stopping(), stopping.details().orElseThrow());
         active.close();
         assertTrue(coordinator.isQuiescent());
         assertTrue(undo.closed);
         assertEquals(0, coordinator.trackedWorldCount());
+    }
+
+    @Test
+    void activeLeasesDistinguishWorldInvalidationFromShutdownBeforeReservation()
+            throws OperationException {
+        EditCoordinator invalidatedCoordinator = new EditCoordinator(2, 4, 10);
+        EditCoordinator.Lease invalidated = invalidatedCoordinator.enterMutation(WORLD_ID, "world");
+        invalidatedCoordinator.invalidate(WORLD_ID);
+
+        OperationException unavailable =
+                assertThrows(OperationException.class, () -> invalidated.reserveHistory(1));
+        assertEquals(
+                new ErrorDetails.WorldUnavailable.WorldUnloaded("world"),
+                unavailable.details().orElseThrow());
+        invalidated.close();
+
+        EditCoordinator stoppingCoordinator = new EditCoordinator(2, 4, 10);
+        EditCoordinator.Lease stopping = stoppingCoordinator.enterMutation(WORLD_ID, "world");
+        stoppingCoordinator.close();
+
+        OperationException shutdown =
+                assertThrows(OperationException.class, () -> stopping.reserveHistory(1));
+        assertEquals(
+                new ErrorDetails.WorldUnavailable.Stopping(), shutdown.details().orElseThrow());
+        stopping.close();
     }
 
     @Test

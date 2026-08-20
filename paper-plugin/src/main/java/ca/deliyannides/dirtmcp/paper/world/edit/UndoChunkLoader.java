@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.world.edit;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.platform.MainThread;
@@ -67,6 +68,7 @@ final class UndoChunkLoader {
                 throw new OperationException(
                         OperationFailure.WORLD_UNAVAILABLE,
                         "Undo chunk loading was interrupted in world: " + world.name(),
+                        new ErrorDetails.WorldUnavailable.Interrupted(),
                         exception);
             } catch (CancellationException exception) {
                 cancel(loads);
@@ -88,6 +90,7 @@ final class UndoChunkLoader {
             throw new OperationException(
                     OperationFailure.WORLD_UNAVAILABLE,
                     "Could not prepare chunks for undo on Paper's main thread",
+                    new ErrorDetails.WorldUnavailable.PaperUnavailable(),
                     exception);
         }
     }
@@ -96,7 +99,8 @@ final class UndoChunkLoader {
         if (!world.isAvailable()) {
             throw new OperationException(
                     OperationFailure.WORLD_UNAVAILABLE,
-                    "World is no longer available: " + world.name());
+                    "World is no longer available: " + world.name(),
+                    new ErrorDetails.WorldUnavailable.WorldUnloaded(world.name()));
         }
     }
 
@@ -110,8 +114,17 @@ final class UndoChunkLoader {
                         + " in world: "
                         + world.name();
         return cause == null
-                ? new OperationException(OperationFailure.WORLD_UNAVAILABLE, message)
-                : new OperationException(OperationFailure.WORLD_UNAVAILABLE, message, cause);
+                ? new OperationException(
+                        OperationFailure.WORLD_UNAVAILABLE,
+                        message,
+                        new ErrorDetails.WorldUnavailable.ChunkLoadFailed(
+                                world.name(), new ErrorDetails.Chunk(chunk.x(), chunk.z())))
+                : new OperationException(
+                        OperationFailure.WORLD_UNAVAILABLE,
+                        message,
+                        new ErrorDetails.WorldUnavailable.ChunkLoadFailed(
+                                world.name(), new ErrorDetails.Chunk(chunk.x(), chunk.z())),
+                        cause);
     }
 
     private static void cancel(List<CompletableFuture<Boolean>> loads) {

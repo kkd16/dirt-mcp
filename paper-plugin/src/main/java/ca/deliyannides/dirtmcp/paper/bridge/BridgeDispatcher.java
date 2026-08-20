@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.bridge;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
@@ -17,6 +18,7 @@ final class BridgeDispatcher implements AutoCloseable {
     private final Map<String, BridgeEndpoint> routes;
     private final BearerAuthenticator authenticator;
     private final Semaphore admissions;
+    private final int maximumConcurrentRequests;
     private final int maximumRequestBytes;
     private final RequestBodyReader bodyReader;
     private final DirtLog log;
@@ -31,6 +33,7 @@ final class BridgeDispatcher implements AutoCloseable {
         this.routes = routes(endpoints);
         this.authenticator = authenticator;
         this.admissions = new Semaphore(maximumConcurrentRequests);
+        this.maximumConcurrentRequests = maximumConcurrentRequests;
         this.maximumRequestBytes = maximumRequestBytes;
         this.bodyReader = new RequestBodyReader(requestBodyTimeoutSeconds);
         this.log = log;
@@ -49,31 +52,39 @@ final class BridgeDispatcher implements AutoCloseable {
             if (!this.authenticator.accepts(
                     rawExchange.getRequestHeaders().getFirst("Authorization"))) {
                 exchange.challenge();
-                exchange.sendError(401, "unauthorized", "A valid bearer token is required");
+                exchange.sendError(
+                        401, "A valid bearer token is required", new ErrorDetails.Unauthorized());
                 return;
             }
 
             if (rawExchange.getRequestURI().getRawQuery() != null) {
-                exchange.sendError(404, "not_found", "No bridge operation matches this path");
+                exchange.sendError(
+                        404, "No bridge operation matches this path", new ErrorDetails.NotFound());
                 return;
             }
 
             BridgeEndpoint endpoint = this.routes.get(rawExchange.getRequestURI().getRawPath());
             if (endpoint == null) {
-                exchange.sendError(404, "not_found", "No bridge operation matches this path");
+                exchange.sendError(
+                        404, "No bridge operation matches this path", new ErrorDetails.NotFound());
                 return;
             }
 
             if (!endpoint.method().equals(rawExchange.getRequestMethod())) {
                 exchange.allow(endpoint.method());
                 exchange.sendError(
-                        405, "method_not_allowed", "Method must be " + endpoint.method());
+                        405,
+                        "Method must be " + endpoint.method(),
+                        new ErrorDetails.MethodNotAllowed(endpoint.method()));
                 return;
             }
             operation = endpoint.operation();
 
             if (!this.admissions.tryAcquire()) {
-                exchange.sendError(503, "bridge_busy", "The bridge is handling too many requests");
+                exchange.sendError(
+                        503,
+                        "The bridge is handling too many requests",
+                        new ErrorDetails.BridgeBusy(this.maximumConcurrentRequests));
                 return;
             }
             try {
@@ -89,14 +100,11 @@ final class BridgeDispatcher implements AutoCloseable {
                 requestFailure = exception;
                 unexpectedFailure = true;
                 if (exchange.editId() == null) {
-                    exchange.sendError(500, "internal_error", endpoint.internalErrorMessage());
+                    exchange.sendInternalError(500, endpoint.internalErrorMessage());
                 } else {
                     recoveryRisk = true;
-                    exchange.sendError(
-                            500,
-                            "internal_error",
-                            endpoint.internalErrorMessage(),
-                            exchange.editId());
+                    exchange.sendInternalError(
+                            500, endpoint.internalErrorMessage(), exchange.editId());
                 }
             } finally {
                 this.admissions.release();

@@ -2,6 +2,7 @@ package ca.deliyannides.dirtmcp.paper.bridge;
 
 import static ca.deliyannides.dirtmcp.paper.bridge.RequestJson.invalid;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.validation.UuidV4;
 import ca.deliyannides.dirtmcp.paper.world.edit.FillRegion;
@@ -56,7 +57,9 @@ public final class BridgeExchange {
                         .trim()
                         .toLowerCase(Locale.ROOT)
                         .equals("application/json")) {
-            throw invalid("Content-Type must be application/json");
+            throw invalid(
+                    "Content-Type must be application/json",
+                    new ErrorDetails.InvalidRequest.UnsupportedMediaType("application/json"));
         }
         validateContentLength();
         byte[] body =
@@ -64,7 +67,8 @@ public final class BridgeExchange {
         this.requestBytes = (long) body.length;
         if (body.length > this.maximumRequestBytes) {
             throw invalid(
-                    "Request body exceeds the maximum of " + this.maximumRequestBytes + " bytes");
+                    "Request body exceeds the maximum of " + this.maximumRequestBytes + " bytes",
+                    new ErrorDetails.InvalidRequest.BodyTooLarge(this.maximumRequestBytes));
         }
         try {
             String json =
@@ -76,11 +80,15 @@ public final class BridgeExchange {
                             .toString();
             JsonElement document = JsonParser.parseString(json);
             if (!document.isJsonObject()) {
-                throw invalid("Request body must be a JSON object");
+                throw invalid(
+                        "Request body must be a JSON object",
+                        new ErrorDetails.InvalidRequest.InvalidValue("body"));
             }
             return document.getAsJsonObject();
         } catch (CharacterCodingException | JsonParseException exception) {
-            throw invalid("Request body must contain valid JSON values");
+            throw invalid(
+                    "Request body must contain valid JSON values",
+                    new ErrorDetails.InvalidRequest.MalformedJson());
         }
     }
 
@@ -99,10 +107,13 @@ public final class BridgeExchange {
                 throw invalid(
                         "Request body exceeds the maximum of "
                                 + this.maximumRequestBytes
-                                + " bytes");
+                                + " bytes",
+                        new ErrorDetails.InvalidRequest.BodyTooLarge(this.maximumRequestBytes));
             }
         } catch (NumberFormatException exception) {
-            throw invalid("Content-Length must be a non-negative integer");
+            throw invalid(
+                    "Content-Length must be a non-negative integer",
+                    new ErrorDetails.InvalidRequest.InvalidValue("Content-Length"));
         }
     }
 
@@ -115,7 +126,9 @@ public final class BridgeExchange {
         try {
             return UuidV4.parseCanonical(value, "X-Dirt-Call-Id");
         } catch (IllegalArgumentException exception) {
-            throw invalid(exception.getMessage());
+            throw invalid(
+                    exception.getMessage(),
+                    new ErrorDetails.InvalidRequest.InvalidValue("X-Dirt-Call-Id"));
         }
     }
 
@@ -123,20 +136,42 @@ public final class BridgeExchange {
         send(200, body);
     }
 
-    void sendError(int status, String code, String message) throws IOException {
-        sendErrorEnvelope(status, code, message, null);
+    void sendError(int status, String message, ErrorDetails details) throws IOException {
+        sendErrorEnvelope(status, ErrorDetailsJson.code(details), message, details, null);
     }
 
-    void sendError(int status, String code, String message, UUID editId) throws IOException {
-        sendErrorEnvelope(status, code, message, Objects.requireNonNull(editId, "editId"));
-    }
-
-    private void sendErrorEnvelope(int status, String code, String message, UUID editId)
+    void sendError(int status, String message, ErrorDetails details, UUID editId)
             throws IOException {
+        sendErrorEnvelope(
+                status,
+                ErrorDetailsJson.code(details),
+                message,
+                details,
+                Objects.requireNonNull(editId, "editId"));
+    }
+
+    void sendInternalError(int status, String message) throws IOException {
+        sendErrorEnvelope(status, "internal_error", message, null, null);
+    }
+
+    void sendInternalError(int status, String message, UUID editId) throws IOException {
+        sendErrorEnvelope(
+                status, "internal_error", message, null, Objects.requireNonNull(editId, "editId"));
+    }
+
+    private void sendErrorEnvelope(
+            int status, String code, String message, ErrorDetails details, UUID editId)
+            throws IOException {
+        if (message == null || message.isEmpty()) {
+            throw new IllegalArgumentException("Error message must not be empty");
+        }
         this.errorCode = code;
         JsonObject detail = new JsonObject();
         detail.addProperty("code", code);
         detail.addProperty("message", message);
+        if (details != null) {
+            detail.add("details", ErrorDetailsJson.serialize(details));
+        }
         if (editId != null) {
             this.editId = editId;
             detail.addProperty("editId", editId.toString());

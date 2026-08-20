@@ -1,6 +1,7 @@
 package ca.deliyannides.dirtmcp.paper.status;
 
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.Builds;
@@ -43,12 +44,17 @@ public final class BukkitServerStatusAccess implements PaperServerStatusService.
         Server server = this.plugin.getServer();
         if (!this.plugin.isEnabled()) {
             throw new OperationException(
-                    OperationFailure.UNHEALTHY, "The Dirt MCP plugin is not enabled");
+                    OperationFailure.UNHEALTHY,
+                    "The Dirt MCP plugin is not enabled",
+                    new ErrorDetails.Unhealthy.PluginDisabled());
         }
         requireFawe(server, OperationFailure.UNHEALTHY);
         List<World> worlds = server.getWorlds();
         if (worlds.isEmpty()) {
-            throw new OperationException(OperationFailure.UNHEALTHY, "Paper has no loaded worlds");
+            throw new OperationException(
+                    OperationFailure.UNHEALTHY,
+                    "Paper has no loaded worlds",
+                    new ErrorDetails.Unhealthy.NoLoadedWorlds());
         }
         com.sk89q.worldedit.world.World world = BukkitAdapter.adapt(worlds.getFirst());
         return () -> verifyFawe(world);
@@ -125,7 +131,16 @@ public final class BukkitServerStatusAccess implements PaperServerStatusService.
             throws OperationException {
         Plugin fawe = server.getPluginManager().getPlugin(FAWE_PLUGIN_NAME);
         if (fawe == null || !fawe.isEnabled()) {
-            throw new OperationException(failure, "FastAsyncWorldEdit is not enabled");
+            ErrorDetails details =
+                    switch (failure) {
+                        case UNHEALTHY -> new ErrorDetails.Unhealthy.DependencyUnavailable();
+                        case SERVER_UNAVAILABLE ->
+                                new ErrorDetails.ServerUnavailable.DependencyUnavailable();
+                        default ->
+                                throw new IllegalArgumentException(
+                                        "FAWE availability has an unsupported failure code");
+                    };
+            throw new OperationException(failure, "FastAsyncWorldEdit is not enabled", details);
         }
         return fawe;
     }

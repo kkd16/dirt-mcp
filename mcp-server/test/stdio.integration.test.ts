@@ -295,7 +295,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       response.statusCode = 413;
       response.end(
         JSON.stringify({
-          error: { code: 'change_limit_exceeded', message: 'Too many changes' },
+          error: { code: 'change_limit_exceeded', message: 'Too many changes', details: { maximum: 100_000 } },
         }),
       );
     } else if (request.url === '/v1/replace-region-blocks') {
@@ -517,7 +517,12 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
         },
       ],
       structuredContent: {
-        error: { code: 'change_limit_exceeded', message: 'Too many changes', callId: failedFillCallId },
+        error: {
+          code: 'change_limit_exceeded',
+          message: 'Too many changes',
+          details: { maximum: 100_000 },
+          callId: failedFillCallId,
+        },
       },
     }),
   );
@@ -951,11 +956,27 @@ for (const bootstrapFailure of ['unauthorized', 'malformed', 'unavailable', 'dom
       if (bootstrapFailure === 'unauthorized') {
         response.statusCode = 401;
         response.setHeader('Content-Type', 'application/json');
-        response.end(JSON.stringify({ error: { code: 'unauthorized', message: 'bad token' } }));
+        response.end(
+          JSON.stringify({
+            error: {
+              code: 'unauthorized',
+              message: 'bad token',
+              details: { reason: 'authentication_failed' },
+            },
+          }),
+        );
       } else if (bootstrapFailure === 'domain-error') {
         response.statusCode = 404;
         response.setHeader('Content-Type', 'application/json');
-        response.end(JSON.stringify({ error: { code: 'world_not_found', message: 'unexpected route result' } }));
+        response.end(
+          JSON.stringify({
+            error: {
+              code: 'world_not_found',
+              message: 'unexpected route result',
+              details: { world: 'world' },
+            },
+          }),
+        );
       } else {
         response.setHeader('Content-Type', 'application/json');
         response.end('{}');
@@ -1092,7 +1113,15 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
     if (behavior === 'unauthorized') {
       response.statusCode = 401;
       response.setHeader('Content-Type', 'application/json');
-      response.end(JSON.stringify({ error: { code: 'unauthorized', message: 'bad token' } }));
+      response.end(
+        JSON.stringify({
+          error: {
+            code: 'unauthorized',
+            message: 'bad token',
+            details: { reason: 'authentication_failed' },
+          },
+        }),
+      );
     } else if (behavior === 'invalid') {
       response.setHeader('Content-Type', 'application/json');
       response.end('{}');
@@ -1147,6 +1176,7 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
     error: {
       code: 'bridge_unauthorized',
       message: 'Paper bridge rejected DIRT_MCP_BRIDGE_TOKEN.',
+      details: { reason: 'authentication_failed' },
       callId: unauthorizedCallId,
     },
   });
@@ -1192,6 +1222,7 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
     error: {
       code: 'bridge_http_error',
       message: 'Paper bridge returned unstructured HTTP 502.',
+      details: { status: 502 },
       callId: unstructuredCallId,
     },
   });
@@ -1203,6 +1234,7 @@ test('returns stable structured codes for MCP-local bridge failures', async (con
   assert.ok(unavailable.result);
   assert.equal(unavailable.result.isError, true);
   assert.equal(unavailable.result.structuredContent?.error?.code, 'bridge_unavailable');
+  assert.deepEqual(unavailable.result.structuredContent?.error?.details, { reason: 'request_failed' });
 
   const exited = once(child, 'exit');
   child.stdin.end();

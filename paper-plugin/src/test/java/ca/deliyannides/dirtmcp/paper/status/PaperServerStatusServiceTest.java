@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.config.McpTool;
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.platform.MainThread;
@@ -29,7 +30,10 @@ final class PaperServerStatusServiceTest {
     @Test
     void preservesExpectedStatusFailures() {
         OperationException expected =
-                new OperationException(OperationFailure.SERVER_UNAVAILABLE, "FAWE unavailable");
+                new OperationException(
+                        OperationFailure.SERVER_UNAVAILABLE,
+                        "FAWE unavailable",
+                        new ErrorDetails.ServerUnavailable.DependencyUnavailable());
         var service =
                 new PaperServerStatusService(
                         new DirectMainThread(),

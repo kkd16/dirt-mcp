@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.world.model;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import java.util.Objects;
@@ -7,7 +8,7 @@ import java.util.Objects;
 public final class RegionGeometry {
     private RegionGeometry() {}
 
-    public static Cuboid normalize(BlockPosition first, BlockPosition second, long maxVolume)
+    public static Cuboid normalize(BlockPosition first, BlockPosition second, int maxVolume)
             throws OperationException {
         Objects.requireNonNull(first, "first");
         Objects.requireNonNull(second, "second");
@@ -32,13 +33,15 @@ public final class RegionGeometry {
         if (sizeX > maxVolume || sizeY > maxVolume / sizeX || sizeZ > maxVolume / (sizeX * sizeY)) {
             throw new OperationException(
                     OperationFailure.REGION_TOO_LARGE,
-                    "Region exceeds the maximum volume of " + maxVolume + " blocks");
+                    "Region exceeds the maximum volume of " + maxVolume + " blocks",
+                    new ErrorDetails.RegionTooLarge.Volume(
+                            new ErrorDetails.Dimensions(sizeX, sizeY, sizeZ), maxVolume));
         }
 
         return new Cuboid(min, max);
     }
 
-    public static long touchedChunks(Cuboid region, long maximum) throws OperationException {
+    public static long touchedChunks(Cuboid region, int maximum) throws OperationException {
         long minChunkX = region.min().x() >> 4;
         long maxChunkX = region.max().x() >> 4;
         long minChunkZ = region.min().z() >> 4;
@@ -55,9 +58,10 @@ public final class RegionGeometry {
         return count;
     }
 
-    private static OperationException tooManyChunks(long maximum) {
+    private static OperationException tooManyChunks(int maximum) {
         return new OperationException(
                 OperationFailure.REGION_TOO_LARGE,
-                "Operation touches more than the maximum of " + maximum + " chunks");
+                "Operation touches more than the maximum of " + maximum + " chunks",
+                new ErrorDetails.RegionTooLarge.TouchedChunks((long) maximum + 1, maximum));
     }
 }

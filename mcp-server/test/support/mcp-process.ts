@@ -22,6 +22,7 @@ export interface JsonRpcResult {
     readonly error?: {
       readonly callId: string;
       readonly code: string;
+      readonly details?: Readonly<Record<string, unknown>>;
       readonly editId?: string;
       readonly message: string;
     };

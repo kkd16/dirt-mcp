@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.platform.MainThread;
@@ -173,9 +174,20 @@ final class PaperRegionSnapshotSourceTest {
                                                 "world", valid, List.of("not a block"), List.of()));
 
         assertEquals(OperationFailure.WORLD_NOT_FOUND, missing.failure());
+        assertEquals(new ErrorDetails.WorldNotFound("missing"), missing.details().orElseThrow());
         assertEquals(OperationFailure.INVALID_REQUEST, height.failure());
+        assertEquals(
+                new ErrorDetails.InvalidRequest.OutOfRange("min.y", -65, -64, 319),
+                height.details().orElseThrow());
         assertEquals(OperationFailure.WORLD_UNAVAILABLE, chunk.failure());
+        assertEquals(
+                new ErrorDetails.WorldUnavailable.ChunkUnloaded(
+                        "world", new ErrorDetails.Chunk(0, 0)),
+                chunk.details().orElseThrow());
         assertEquals(OperationFailure.INVALID_REQUEST, pattern.failure());
+        assertEquals(
+                new ErrorDetails.InvalidRequest.InvalidValue("includeBlockStatePatterns[0]"),
+                pattern.details().orElseThrow());
     }
 
     @Test

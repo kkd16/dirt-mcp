@@ -47,7 +47,7 @@ function serverInstructions(configuration: McpToolConfiguration): string {
   }
 
   let errorGuidance =
-    'Treat structuredContent as the canonical result; text content is only a summary. Dirt-mapped failures set isError=true and put code, message, and callId in structuredContent.error, with an optional editId for reconciliation.';
+    'Treat structuredContent as the canonical result; text content is only a summary. Dirt-mapped failures set isError=true and put code, message, and callId in structuredContent.error. Correctable failures also include strict code-specific details; editId is included when reconciliation may be needed.';
   if (configuration.get_edit_history) {
     errorGuidance +=
       ' Reconcile records returned by get_edit_history using editId or callId; an absent record means no undoable edit remains.';

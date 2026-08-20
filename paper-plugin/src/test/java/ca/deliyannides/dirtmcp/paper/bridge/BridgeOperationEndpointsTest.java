@@ -673,5 +673,6 @@ final class BridgeOperationEndpointsTest {
         var error = json(response.body()).getAsJsonObject().getAsJsonObject("error");
         assertEquals("invalid_request", error.get("code").getAsString());
         assertEquals(message, error.get("message").getAsString());
+        assertTrue(error.has("details"));
     }
 }

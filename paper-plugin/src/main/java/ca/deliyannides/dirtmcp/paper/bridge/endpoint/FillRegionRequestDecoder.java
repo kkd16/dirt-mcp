@@ -21,7 +21,7 @@ final class FillRegionRequestDecoder {
     static FillRegion.Request decode(BridgeExchange exchange, DirtConfig config)
             throws IOException, OperationException {
         JsonObject object = exchange.readJsonObject();
-        RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS);
+        RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS, "Request");
         return new FillRegion.Request(
                 RequestJson.string(object.get("world"), "world"),
                 RequestJson.position(object.get("min"), "min"),

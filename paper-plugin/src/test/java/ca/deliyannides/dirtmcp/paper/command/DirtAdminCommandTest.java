@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.config.McpTool;
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
@@ -97,7 +98,9 @@ final class DirtAdminCommandTest {
     void statusReportsExpectedOperationalFailureWithoutThrowing() throws Exception {
         OperationException expected =
                 new OperationException(
-                        OperationFailure.SERVER_UNAVAILABLE, "FAWE is not available");
+                        OperationFailure.SERVER_UNAVAILABLE,
+                        "FAWE is not available",
+                        new ErrorDetails.ServerUnavailable.DependencyUnavailable());
         List<LogRecord> records = new ArrayList<>();
         DirtLog log = recordingLog(records);
         var fixture =
@@ -235,6 +238,7 @@ final class DirtAdminCommandTest {
             assertTrue(plain.contains(spec.notes()), tool.id());
             assertTrue(plain.contains("Canonical results are in structuredContent"), tool.id());
             assertTrue(plain.contains("structuredContent.error"), tool.id());
+            assertTrue(plain.contains("code-specific details"), tool.id());
             assertEquals(Set.of("/dirt tools"), runCommands(message), tool.id());
         }
     }

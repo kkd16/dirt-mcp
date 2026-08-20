@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.world.inspection;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks.BlockListResult;
@@ -19,19 +20,20 @@ import java.util.concurrent.Semaphore;
 public final class RegionInspectionService
         implements CountRegionBlockStates, GetRegionBlocks, ScanOrthographicView {
     private final RegionSnapshotSource snapshots;
-    private final long maxRegionVolume;
-    private final long maxInspectionVolume;
+    private final int maxRegionVolume;
+    private final int maxInspectionVolume;
     private final int maxInspectionResults;
-    private final long maxTouchedChunks;
+    private final int maxTouchedChunks;
     private final int maxBlockStatePatterns;
     private final Semaphore admissions;
+    private final int maximumConcurrentInspections;
 
     public RegionInspectionService(
             RegionSnapshotSource snapshots,
-            long maxRegionVolume,
-            long maxInspectionVolume,
+            int maxRegionVolume,
+            int maxInspectionVolume,
             int maxInspectionResults,
-            long maxTouchedChunks,
+            int maxTouchedChunks,
             int maxBlockStatePatterns,
             int maxConcurrentInspections) {
         if (maxRegionVolume < 1
@@ -50,13 +52,16 @@ public final class RegionInspectionService
         this.maxTouchedChunks = maxTouchedChunks;
         this.maxBlockStatePatterns = maxBlockStatePatterns;
         this.admissions = new Semaphore(maxConcurrentInspections);
+        this.maximumConcurrentInspections = maxConcurrentInspections;
     }
 
     @Override
     public CountRegionBlockStates.Result countRegionBlockStates(
             CountRegionBlockStates.Request request) throws OperationException {
         if (request == null || request.min() == null || request.max() == null) {
-            throw invalid("world, min, and max are required");
+            throw invalid(
+                    "world, min, and max are required",
+                    new ErrorDetails.InvalidRequest.Missing(missingRegionField(request)));
         }
         validateWorld(request.world());
         return admitted(
@@ -91,7 +96,10 @@ public final class RegionInspectionService
             throw invalid(
                     "includeBlockStatePatterns and excludeBlockStatePatterns may contain at most "
                             + this.maxBlockStatePatterns
-                            + " entries combined");
+                            + " entries combined",
+                    new ErrorDetails.InvalidRequest.TooManyItems(
+                            List.of("includeBlockStatePatterns", "excludeBlockStatePatterns"),
+                            this.maxBlockStatePatterns));
         }
         return admitted(
                 () -> {
@@ -132,7 +140,11 @@ public final class RegionInspectionService
     public ScanOrthographicView.Result scanOrthographicView(ScanOrthographicView.Request request)
             throws OperationException {
         if (request == null || request.origin() == null || request.direction() == null) {
-            throw invalid("world, origin, and direction are required");
+            String field =
+                    request == null ? "request" : request.origin() == null ? "origin" : "direction";
+            throw invalid(
+                    "world, origin, and direction are required",
+                    new ErrorDetails.InvalidRequest.Missing(field));
         }
         validateWorld(request.world());
         validateMaxResults(request.maxResults());
@@ -169,7 +181,9 @@ public final class RegionInspectionService
         if (maxResults < 1 || maxResults > this.maxInspectionResults) {
             throw new OperationException(
                     OperationFailure.INVALID_REQUEST,
-                    "maxResults must be between 1 and " + this.maxInspectionResults);
+                    "maxResults must be between 1 and " + this.maxInspectionResults,
+                    new ErrorDetails.InvalidRequest.OutOfRange(
+                            "maxResults", maxResults, 1, this.maxInspectionResults));
         }
     }
 
@@ -181,7 +195,9 @@ public final class RegionInspectionService
         if (!this.admissions.tryAcquire()) {
             throw new OperationException(
                     OperationFailure.SERVER_UNAVAILABLE,
-                    "The server is handling too many region inspections");
+                    "The server is handling too many region inspections",
+                    new ErrorDetails.ServerUnavailable.InspectionBusy(
+                            this.maximumConcurrentInspections));
         }
         try {
             return inspection.run();
@@ -198,7 +214,21 @@ public final class RegionInspectionService
                 || request.includeBlockStatePatterns() == null
                 || request.excludeBlockStatePatterns() == null
                 || request.format() == null) {
-            throw invalid("world, min, max, pattern lists, and format are required");
+            String field =
+                    request == null
+                            ? "request"
+                            : request.min() == null
+                                    ? "min"
+                                    : request.max() == null
+                                            ? "max"
+                                            : request.includeBlockStatePatterns() == null
+                                                    ? "includeBlockStatePatterns"
+                                                    : request.excludeBlockStatePatterns() == null
+                                                            ? "excludeBlockStatePatterns"
+                                                            : "format";
+            throw invalid(
+                    "world, min, max, pattern lists, and format are required",
+                    new ErrorDetails.InvalidRequest.Missing(field));
         }
         validateWorld(request.world());
         validatePatterns(request.includeBlockStatePatterns(), "includeBlockStatePatterns");
@@ -207,7 +237,9 @@ public final class RegionInspectionService
 
     private static void validateWorld(String world) throws OperationException {
         if (world == null || world.isBlank()) {
-            throw invalid("world must be a non-empty string");
+            throw invalid(
+                    "world must be a non-empty string",
+                    new ErrorDetails.InvalidRequest.InvalidValue("world"));
         }
     }
 
@@ -216,7 +248,10 @@ public final class RegionInspectionService
         for (int index = 0; index < patterns.size(); index++) {
             String pattern = patterns.get(index);
             if (pattern == null || pattern.isBlank()) {
-                throw invalid(field + "[" + index + "] must be a non-empty string");
+                String item = field + "[" + index + "]";
+                throw invalid(
+                        item + " must be a non-empty string",
+                        new ErrorDetails.InvalidRequest.InvalidValue(item));
             }
         }
     }
@@ -225,8 +260,15 @@ public final class RegionInspectionService
         return List.copyOf(new LinkedHashSet<>(patterns));
     }
 
-    private static OperationException invalid(String message) {
-        return new OperationException(OperationFailure.INVALID_REQUEST, message);
+    private static String missingRegionField(CountRegionBlockStates.Request request) {
+        if (request == null) {
+            return "request";
+        }
+        return request.min() == null ? "min" : "max";
+    }
+
+    private static OperationException invalid(String message, ErrorDetails.InvalidRequest details) {
+        return new OperationException(OperationFailure.INVALID_REQUEST, message, details);
     }
 
     @FunctionalInterface

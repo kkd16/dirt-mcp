@@ -2,13 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as z from 'zod/v4';
 import { BridgeClient } from '../dist/bridge/client.js';
-import { BRIDGE_ROUTES, BridgeErrorResponseSchema } from '../dist/bridge/contract.js';
+import { BRIDGE_ERROR_CODES, BRIDGE_ROUTES, BridgeErrorResponseSchema } from '../dist/bridge/contract.js';
 import { ToolFailure } from '../dist/bridge/errors.js';
 
 const ResponseSchema = z.object({ value: z.string() }).strict();
 const CALL_ID = '11111111-1111-4111-8111-111111111111';
 const EDIT_ID = '22222222-2222-4222-8222-222222222222';
 const OTHER_EDIT_ID = '33333333-3333-4333-8333-333333333333';
+const INT32_MIN = -2_147_483_648;
+const INT32_MAX = 2_147_483_647;
 
 test('sends an authenticated exact bridge request through the injected fetch function', async () => {
   let requestedUrl: URL | undefined;
@@ -51,48 +53,369 @@ test('does not send a body or content type for GET requests', async () => {
 });
 
 test('preserves structured bridge failures and classifies network failures', async () => {
+  const details = { reason: 'operation_in_progress', world: 'world' } as const;
   const structured = new BridgeClient({ origin: 'http://127.0.0.1', token: 'token' }, async () =>
-    Response.json({ error: { code: 'world_busy', editId: EDIT_ID, message: 'World is busy' } }, { status: 409 }),
+    Response.json(
+      { error: { code: 'world_busy', details, editId: EDIT_ID, message: 'World is busy' } },
+      { status: 409 },
+    ),
   );
-  await assert.rejects(
-    structured.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema),
-    (error: unknown) =>
-      error instanceof ToolFailure &&
-      error.code === 'world_busy' &&
-      error.editId === EDIT_ID &&
-      error.message === 'World is busy',
-  );
+  await assert.rejects(structured.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema), (error: unknown) => {
+    if (!(error instanceof ToolFailure) || error.data.code !== 'world_busy') return false;
+    assert.deepEqual(error.data.details, details);
+    return error.editId === EDIT_ID && error.message === 'World is busy';
+  });
 
   const unavailable = new BridgeClient({ origin: 'http://127.0.0.1', token: 'token' }, async () => {
     throw new TypeError('connection refused');
   });
-  await assert.rejects(
-    unavailable.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema),
-    (error: unknown) =>
-      error instanceof ToolFailure &&
-      error.code === 'bridge_unavailable' &&
-      error.message === 'Paper bridge request failed: connection refused',
-  );
+  await assert.rejects(unavailable.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema), (error: unknown) => {
+    if (!(error instanceof ToolFailure) || error.data.code !== 'bridge_unavailable') return false;
+    assert.deepEqual(error.data.details, { reason: 'request_failed' });
+    return error.message === 'Paper bridge request failed: connection refused';
+  });
 });
 
-test('accepts only optional UUIDv4 edit IDs in structured bridge failures', () => {
-  assert.equal(
-    BridgeErrorResponseSchema.safeParse({ error: { code: 'world_busy', message: 'World is busy' } }).success,
-    true,
-  );
+test('classifies fetch timeout failures without exposing transport objects', async () => {
+  const client = new BridgeClient({ origin: 'http://127.0.0.1', token: 'token' }, async () => {
+    throw new DOMException('timed out', 'TimeoutError');
+  });
+
+  await assert.rejects(client.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema), (error: unknown) => {
+    if (!(error instanceof ToolFailure) || error.data.code !== 'bridge_unavailable') return false;
+    assert.deepEqual(error.data.details, { reason: 'timeout' });
+    return true;
+  });
+});
+
+test('enforces code-specific bridge error details and optional UUIDv4 edit IDs', () => {
+  const worldBusy = {
+    error: {
+      code: 'world_busy',
+      message: 'World is busy',
+      details: { reason: 'operation_in_progress', world: 'world' },
+    },
+  };
+  assert.equal(BridgeErrorResponseSchema.safeParse(worldBusy).success, true);
+  assert.equal(BridgeErrorResponseSchema.safeParse({ error: { ...worldBusy.error, editId: EDIT_ID } }).success, true);
   assert.equal(
     BridgeErrorResponseSchema.safeParse({
-      error: { code: 'world_busy', editId: EDIT_ID, message: 'World is busy' },
-    }).success,
-    true,
-  );
-  assert.equal(
-    BridgeErrorResponseSchema.safeParse({
-      error: { code: 'world_busy', editId: '22222222-2222-1222-8222-222222222222', message: 'World is busy' },
+      error: { ...worldBusy.error, editId: '22222222-2222-1222-8222-222222222222' },
     }).success,
     false,
   );
-  assert.equal(BridgeErrorResponseSchema.safeParse({ error: { code: 'world_busy', message: '' } }).success, false);
+  assert.equal(BridgeErrorResponseSchema.safeParse({ error: { ...worldBusy.error, message: '' } }).success, false);
+  assert.equal(
+    BridgeErrorResponseSchema.safeParse({ error: { code: 'world_busy', message: 'World is busy' } }).success,
+    false,
+  );
+  assert.equal(
+    BridgeErrorResponseSchema.safeParse({
+      error: { ...worldBusy.error, details: { reason: 'route_not_found' } },
+    }).success,
+    false,
+  );
+  assert.equal(
+    BridgeErrorResponseSchema.safeParse({
+      error: { code: 'internal_error', message: 'Internal failure', details: { reason: 'implementation' } },
+    }).success,
+    false,
+  );
+  assert.equal(
+    BridgeErrorResponseSchema.safeParse({
+      error: { ...worldBusy.error, details: { ...worldBusy.error.details, unexpected: true } },
+    }).success,
+    false,
+  );
+});
+
+test('accepts one strict details variant for every bridge error code', () => {
+  const errors: readonly Record<string, unknown>[] = [
+    {
+      code: 'bridge_busy',
+      message: 'Busy',
+      details: { maximumConcurrentRequests: 8 },
+    },
+    { code: 'change_limit_exceeded', message: 'Too many changes', details: { maximum: 100_000 } },
+    {
+      code: 'edit_not_found',
+      message: 'Edit not found',
+      details: { world: 'world', requestedEditId: EDIT_ID },
+    },
+    {
+      code: 'edit_not_latest',
+      message: 'Edit not latest',
+      details: { world: 'world', requestedEditId: EDIT_ID, newestEditId: OTHER_EDIT_ID },
+    },
+    {
+      code: 'history_capacity_exceeded',
+      message: 'History full',
+      details: { reason: 'retained_changed_blocks', maximum: 100_000 },
+    },
+    { code: 'internal_error', message: 'Internal failure' },
+    {
+      code: 'invalid_request',
+      message: 'Invalid request',
+      details: { reason: 'out_of_range', field: 'maxResults', value: 0, minimum: 1, maximum: 1_000 },
+    },
+    { code: 'method_not_allowed', message: 'Wrong method', details: { allowedMethod: 'POST' } },
+    { code: 'not_found', message: 'Unknown route', details: { reason: 'route_not_found' } },
+    {
+      code: 'region_too_large',
+      message: 'Region too large',
+      details: { reason: 'volume', dimensions: { x: 10, y: 20, z: 30 }, maximum: 5_000 },
+    },
+    {
+      code: 'result_too_large',
+      message: 'Result too large',
+      details: { reason: 'runs', minimumRequired: 1_001, maximum: 1_000 },
+    },
+    {
+      code: 'server_unavailable',
+      message: 'Inspections busy',
+      details: { reason: 'inspection_busy', maximumConcurrentInspections: 2 },
+    },
+    { code: 'unauthorized', message: 'Unauthorized', details: { reason: 'authentication_failed' } },
+    { code: 'unhealthy', message: 'Unhealthy', details: { reason: 'health_check_failed' } },
+    {
+      code: 'world_busy',
+      message: 'Recovery required',
+      details: { reason: 'recovery_required', world: 'world', newestEditId: EDIT_ID },
+    },
+    { code: 'world_not_found', message: 'World not found', details: { world: 'world' } },
+    {
+      code: 'world_unavailable',
+      message: 'Chunk unavailable',
+      details: { reason: 'chunk_load_failed', world: 'world', chunk: { x: -2, z: 3 } },
+    },
+  ];
+
+  assert.deepEqual(
+    errors.map((error) => error.code),
+    [...BRIDGE_ERROR_CODES],
+  );
+  for (const error of errors) {
+    assert.equal(BridgeErrorResponseSchema.safeParse({ error }).success, true, String(error.code));
+  }
+});
+
+test('accepts every reason-discriminated bridge detail variant', () => {
+  const variants: Readonly<Record<string, readonly Readonly<Record<string, unknown>>[]>> = {
+    invalid_request: [
+      { reason: 'unsupported_media_type', expected: 'application/json' },
+      { reason: 'body_too_large', maximumBytes: 1_024 },
+      { reason: 'malformed_json' },
+      { reason: 'missing', field: 'world' },
+      { reason: 'invalid_value', field: 'world' },
+      { reason: 'duplicate', field: 'positions' },
+      { reason: 'unknown_fields', field: 'legacyOption' },
+      { reason: 'out_of_range', field: 'maxResults', value: 0, minimum: 1, maximum: 1_000 },
+      { reason: 'too_many_items', fields: ['positions'], maximum: 10_000 },
+    ],
+    region_too_large: [
+      { reason: 'volume', dimensions: { x: 10, y: 20, z: 30 }, maximum: 5_000 },
+      { reason: 'touched_chunks', minimumRequired: 101, maximum: 100 },
+      { reason: 'block_count', requested: 101, maximum: 100 },
+    ],
+    result_too_large: [
+      { reason: 'blocks', minimumRequired: 101, maximum: 100 },
+      { reason: 'runs', minimumRequired: 101, maximum: 100 },
+      { reason: 'visible_blocks', minimumRequired: 101, maximum: 100 },
+    ],
+    history_capacity_exceeded: [
+      { reason: 'entries_per_world', maximum: 100 },
+      { reason: 'entries_total', maximum: 1_000 },
+      { reason: 'retained_changed_blocks', maximum: 100_000 },
+    ],
+    server_unavailable: [
+      { reason: 'dependency_unavailable' },
+      { reason: 'paper_unavailable' },
+      { reason: 'inspection_busy', maximumConcurrentInspections: 2 },
+    ],
+    unhealthy: [
+      { reason: 'plugin_disabled' },
+      { reason: 'dependency_unavailable' },
+      { reason: 'no_loaded_worlds' },
+      { reason: 'health_check_failed' },
+      { reason: 'paper_unavailable' },
+    ],
+    world_busy: [
+      { reason: 'operation_in_progress', world: 'world' },
+      { reason: 'recovery_required', world: 'world', newestEditId: EDIT_ID },
+    ],
+    world_unavailable: [
+      { reason: 'stopping' },
+      { reason: 'interrupted' },
+      { reason: 'paper_unavailable' },
+      { reason: 'operation_failed' },
+      { reason: 'rollback_failed' },
+      { reason: 'world_unloaded', world: 'world' },
+      { reason: 'chunk_unloaded', world: 'world', chunk: { x: -2, z: 3 } },
+      { reason: 'chunk_load_failed', world: 'world', chunk: { x: -2, z: 3 } },
+    ],
+  };
+
+  for (const [code, detailsVariants] of Object.entries(variants)) {
+    for (const details of detailsVariants) {
+      assert.equal(
+        BridgeErrorResponseSchema.safeParse({ error: { code, message: 'Failure', details } }).success,
+        true,
+        `${code}/${String(details.reason)}`,
+      );
+    }
+  }
+});
+
+test('enforces Java-aligned numeric ranges and cross-field invariants', () => {
+  const valid = [
+    { code: 'bridge_busy', details: { maximumConcurrentRequests: INT32_MAX } },
+    {
+      code: 'invalid_request',
+      details: {
+        reason: 'out_of_range',
+        field: 'coordinate',
+        value: Number.MIN_SAFE_INTEGER,
+        minimum: Number.MIN_SAFE_INTEGER + 1,
+        maximum: Number.MAX_SAFE_INTEGER,
+      },
+    },
+    {
+      code: 'invalid_request',
+      details: {
+        reason: 'out_of_range',
+        field: 'coordinate',
+        value: Number.MAX_SAFE_INTEGER,
+        minimum: Number.MIN_SAFE_INTEGER,
+        maximum: Number.MAX_SAFE_INTEGER - 1,
+      },
+    },
+    {
+      code: 'invalid_request',
+      details: { reason: 'too_many_items', fields: ['include', 'exclude'], maximum: INT32_MAX },
+    },
+    {
+      code: 'history_capacity_exceeded',
+      details: { reason: 'retained_changed_blocks', maximum: Number.MAX_SAFE_INTEGER },
+    },
+    {
+      code: 'region_too_large',
+      details: {
+        reason: 'volume',
+        dimensions: { x: Number.MAX_SAFE_INTEGER, y: 1, z: 1 },
+        maximum: INT32_MAX,
+      },
+    },
+    {
+      code: 'region_too_large',
+      details: { reason: 'volume', dimensions: { x: 1_001, y: 1, z: 1 }, maximum: 1_000 },
+    },
+    {
+      code: 'region_too_large',
+      details: { reason: 'touched_chunks', minimumRequired: INT32_MAX + 1, maximum: INT32_MAX },
+    },
+    {
+      code: 'region_too_large',
+      details: { reason: 'block_count', requested: INT32_MAX, maximum: INT32_MAX - 1 },
+    },
+    {
+      code: 'result_too_large',
+      details: { reason: 'blocks', minimumRequired: INT32_MAX + 1, maximum: INT32_MAX },
+    },
+    {
+      code: 'world_unavailable',
+      details: { reason: 'chunk_unloaded', world: 'world', chunk: { x: INT32_MIN, z: INT32_MAX } },
+    },
+  ];
+  const invalid = [
+    { code: 'bridge_busy', details: { maximumConcurrentRequests: INT32_MAX + 1 } },
+    {
+      code: 'invalid_request',
+      details: {
+        reason: 'out_of_range',
+        field: 'coordinate',
+        value: Number.MIN_SAFE_INTEGER,
+        minimum: Number.MIN_SAFE_INTEGER - 1,
+        maximum: Number.MIN_SAFE_INTEGER - 1,
+      },
+    },
+    {
+      code: 'invalid_request',
+      details: {
+        reason: 'out_of_range',
+        field: 'coordinate',
+        value: Number.MAX_SAFE_INTEGER + 1,
+        minimum: 0,
+        maximum: 1,
+      },
+    },
+    {
+      code: 'history_capacity_exceeded',
+      details: { reason: 'entries_total', maximum: Number.MAX_SAFE_INTEGER + 1 },
+    },
+    {
+      code: 'region_too_large',
+      details: {
+        reason: 'volume',
+        dimensions: { x: Number.MAX_SAFE_INTEGER + 1, y: 1, z: 1 },
+        maximum: INT32_MAX,
+      },
+    },
+    {
+      code: 'region_too_large',
+      details: { reason: 'volume', dimensions: { x: 10, y: 10, z: 10 }, maximum: 1_000 },
+    },
+    {
+      code: 'world_unavailable',
+      details: { reason: 'chunk_unloaded', world: 'world', chunk: { x: INT32_MIN - 1, z: 0 } },
+    },
+    {
+      code: 'invalid_request',
+      details: { reason: 'out_of_range', field: 'limit', value: 0, minimum: 2, maximum: 1 },
+    },
+    {
+      code: 'invalid_request',
+      details: { reason: 'out_of_range', field: 'limit', value: 2, minimum: 1, maximum: 3 },
+    },
+    {
+      code: 'invalid_request',
+      details: { reason: 'too_many_items', fields: [], maximum: 10 },
+    },
+    {
+      code: 'invalid_request',
+      details: { reason: 'too_many_items', fields: ['positions', 'positions'], maximum: 10 },
+    },
+    {
+      code: 'invalid_request',
+      details: { reason: 'too_many_items', fields: ['  '], maximum: 10 },
+    },
+    {
+      code: 'invalid_request',
+      details: { reason: 'too_many_items', field: 'positions', maximum: 10 },
+    },
+    {
+      code: 'invalid_request',
+      details: { reason: 'too_many_items', fields: ['positions'], maximum: INT32_MAX + 1 },
+    },
+    {
+      code: 'region_too_large',
+      details: { reason: 'touched_chunks', minimumRequired: 100, maximum: 100 },
+    },
+    {
+      code: 'region_too_large',
+      details: { reason: 'block_count', requested: 100, maximum: 100 },
+    },
+    {
+      code: 'result_too_large',
+      details: { reason: 'runs', minimumRequired: 100, maximum: 100 },
+    },
+  ];
+
+  for (const error of valid) {
+    assert.equal(BridgeErrorResponseSchema.safeParse({ error: { ...error, message: 'Failure' } }).success, true);
+  }
+  for (const error of invalid) {
+    assert.equal(BridgeErrorResponseSchema.safeParse({ error: { ...error, message: 'Failure' } }).success, false);
+  }
 });
 
 test('salvages a valid edit ID from a malformed successful mutation response', async () => {

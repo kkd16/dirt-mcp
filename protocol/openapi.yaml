@@ -551,38 +551,617 @@ components:
         - error
       properties:
         error:
-          type: object
-          additionalProperties: false
+          $ref: '#/components/schemas/BridgeError'
+    BridgeError:
+      description: Code-discriminated error. Correctable failures require strict machine-readable details; internal errors deliberately omit them.
+      oneOf:
+        - $ref: '#/components/schemas/BridgeBusyError'
+        - $ref: '#/components/schemas/ChangeLimitExceededError'
+        - $ref: '#/components/schemas/EditNotFoundError'
+        - $ref: '#/components/schemas/EditNotLatestError'
+        - $ref: '#/components/schemas/HistoryCapacityExceededError'
+        - $ref: '#/components/schemas/InternalErrorDetail'
+        - $ref: '#/components/schemas/InvalidRequestError'
+        - $ref: '#/components/schemas/MethodNotAllowedError'
+        - $ref: '#/components/schemas/NotFoundError'
+        - $ref: '#/components/schemas/RegionTooLargeError'
+        - $ref: '#/components/schemas/ResultTooLargeError'
+        - $ref: '#/components/schemas/ServerUnavailableError'
+        - $ref: '#/components/schemas/UnauthorizedError'
+        - $ref: '#/components/schemas/UnhealthyError'
+        - $ref: '#/components/schemas/WorldBusyError'
+        - $ref: '#/components/schemas/WorldNotFoundError'
+        - $ref: '#/components/schemas/WorldUnavailableError'
+    BridgeErrorCode:
+      type: string
+      enum:
+        - bridge_busy
+        - change_limit_exceeded
+        - edit_not_found
+        - edit_not_latest
+        - history_capacity_exceeded
+        - internal_error
+        - invalid_request
+        - method_not_allowed
+        - not_found
+        - region_too_large
+        - result_too_large
+        - server_unavailable
+        - unauthorized
+        - unhealthy
+        - world_busy
+        - world_not_found
+        - world_unavailable
+    BridgeErrorBase:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          $ref: '#/components/schemas/BridgeErrorCode'
+        editId:
+          description: Edit transaction associated with a failure that may need reconciliation against retained history; an absent history record means no undoable edit remains.
+          $ref: '#/components/schemas/UuidV4'
+        message:
+          type: string
+          minLength: 1
+    BridgeBusyError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
           required:
-            - code
-            - message
+            - details
           properties:
             code:
+              const: bridge_busy
+            details:
+              type: object
+              additionalProperties: false
+              required:
+                - maximumConcurrentRequests
+              properties:
+                maximumConcurrentRequests:
+                  $ref: '#/components/schemas/PositiveInt32'
+      unevaluatedProperties: false
+    ChangeLimitExceededError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+          properties:
+            code:
+              const: change_limit_exceeded
+            details:
+              type: object
+              additionalProperties: false
+              required:
+                - maximum
+              properties:
+                maximum:
+                  $ref: '#/components/schemas/PositiveInt32'
+      unevaluatedProperties: false
+    EditNotFoundError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+          properties:
+            code:
+              const: edit_not_found
+            details:
+              type: object
+              additionalProperties: false
+              required:
+                - world
+                - requestedEditId
+              properties:
+                world:
+                  type: string
+                  minLength: 1
+                  pattern: '.*\S.*'
+                requestedEditId:
+                  $ref: '#/components/schemas/UuidV4'
+      unevaluatedProperties: false
+    EditNotLatestError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+          properties:
+            code:
+              const: edit_not_latest
+            details:
+              type: object
+              additionalProperties: false
+              required:
+                - world
+                - requestedEditId
+                - newestEditId
+              properties:
+                world:
+                  type: string
+                  minLength: 1
+                  pattern: '.*\S.*'
+                requestedEditId:
+                  $ref: '#/components/schemas/UuidV4'
+                newestEditId:
+                  $ref: '#/components/schemas/UuidV4'
+      unevaluatedProperties: false
+    HistoryCapacityExceededError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+          properties:
+            code:
+              const: history_capacity_exceeded
+            details:
+              $ref: '#/components/schemas/HistoryCapacityDetails'
+      unevaluatedProperties: false
+    InternalErrorDetail:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          properties:
+            code:
+              const: internal_error
+      unevaluatedProperties: false
+    InvalidRequestError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+          properties:
+            code:
+              const: invalid_request
+            details:
+              $ref: '#/components/schemas/InvalidRequestDetails'
+      unevaluatedProperties: false
+    MethodNotAllowedError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+          properties:
+            code:
+              const: method_not_allowed
+            details:
+              type: object
+              additionalProperties: false
+              required:
+                - allowedMethod
+              properties:
+                allowedMethod:
+                  type: string
+                  enum:
+                    - GET
+                    - POST
+      unevaluatedProperties: false
+    NotFoundError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+          properties:
+            code:
+              const: not_found
+            details:
+              type: object
+              additionalProperties: false
+              required:
+                - reason
+              properties:
+                reason:
+                  const: route_not_found
+      unevaluatedProperties: false
+    RegionTooLargeError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+          properties:
+            code:
+              const: region_too_large
+            details:
+              $ref: '#/components/schemas/RegionTooLargeDetails'
+      unevaluatedProperties: false
+    ResultTooLargeError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+          properties:
+            code:
+              const: result_too_large
+            details:
+              type: object
+              additionalProperties: false
+              description: minimumRequired is a known lower bound on the required entries and must be greater than maximum.
+              required:
+                - reason
+                - minimumRequired
+                - maximum
+              properties:
+                reason:
+                  type: string
+                  enum:
+                    - blocks
+                    - runs
+                    - visible_blocks
+                minimumRequired:
+                  $ref: '#/components/schemas/PositiveJsonSafeInteger'
+                maximum:
+                  $ref: '#/components/schemas/PositiveInt32'
+      unevaluatedProperties: false
+    ServerUnavailableError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+          properties:
+            code:
+              const: server_unavailable
+            details:
+              $ref: '#/components/schemas/ServerUnavailableDetails'
+      unevaluatedProperties: false
+    UnauthorizedError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+          properties:
+            code:
+              const: unauthorized
+            details:
+              type: object
+              additionalProperties: false
+              required:
+                - reason
+              properties:
+                reason:
+                  const: authentication_failed
+      unevaluatedProperties: false
+    UnhealthyError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+          properties:
+            code:
+              const: unhealthy
+            details:
+              type: object
+              additionalProperties: false
+              required:
+                - reason
+              properties:
+                reason:
+                  type: string
+                  enum:
+                    - plugin_disabled
+                    - dependency_unavailable
+                    - no_loaded_worlds
+                    - health_check_failed
+                    - paper_unavailable
+      unevaluatedProperties: false
+    WorldBusyError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+          properties:
+            code:
+              const: world_busy
+            details:
+              $ref: '#/components/schemas/WorldBusyDetails'
+      unevaluatedProperties: false
+    WorldNotFoundError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+          properties:
+            code:
+              const: world_not_found
+            details:
+              type: object
+              additionalProperties: false
+              required:
+                - world
+              properties:
+                world:
+                  type: string
+                  minLength: 1
+                  pattern: '.*\S.*'
+      unevaluatedProperties: false
+    WorldUnavailableError:
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+          properties:
+            code:
+              const: world_unavailable
+            details:
+              $ref: '#/components/schemas/WorldUnavailableDetails'
+      unevaluatedProperties: false
+    InvalidRequestDetails:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - reason
+            - expected
+          properties:
+            reason:
+              const: unsupported_media_type
+            expected:
+              const: application/json
+        - type: object
+          additionalProperties: false
+          required:
+            - reason
+            - maximumBytes
+          properties:
+            reason:
+              const: body_too_large
+            maximumBytes:
+              $ref: '#/components/schemas/PositiveInt32'
+        - type: object
+          additionalProperties: false
+          required:
+            - reason
+          properties:
+            reason:
+              const: malformed_json
+        - type: object
+          additionalProperties: false
+          required:
+            - reason
+            - field
+          properties:
+            reason:
               type: string
               enum:
-                - bridge_busy
-                - internal_error
-                - invalid_request
-                - method_not_allowed
-                - change_limit_exceeded
-                - edit_not_found
-                - edit_not_latest
-                - history_capacity_exceeded
-                - not_found
-                - region_too_large
-                - result_too_large
-                - server_unavailable
-                - unauthorized
-                - unhealthy
-                - world_busy
-                - world_not_found
-                - world_unavailable
-            editId:
-              description: Edit transaction associated with a failure that may need reconciliation against retained history; an absent history record means no undoable edit remains.
-              $ref: '#/components/schemas/UuidV4'
-            message:
+                - missing
+                - invalid_value
+                - duplicate
+                - unknown_fields
+            field:
               type: string
               minLength: 1
+              pattern: '.*\S.*'
+        - type: object
+          additionalProperties: false
+          description: value must be outside the inclusive range from minimum through maximum, and minimum must be less than or equal to maximum.
+          required:
+            - reason
+            - field
+            - value
+            - minimum
+            - maximum
+          properties:
+            reason:
+              const: out_of_range
+            field:
+              type: string
+              minLength: 1
+              pattern: '.*\S.*'
+            value:
+              description: Rejected value.
+              $ref: '#/components/schemas/JsonSafeInteger'
+            minimum:
+              $ref: '#/components/schemas/JsonSafeInteger'
+            maximum:
+              $ref: '#/components/schemas/JsonSafeInteger'
+        - type: object
+          additionalProperties: false
+          description: fields is a non-empty unique list of request fields whose aggregate item count exceeds maximum.
+          required:
+            - reason
+            - fields
+            - maximum
+          properties:
+            reason:
+              const: too_many_items
+            fields:
+              type: array
+              minItems: 1
+              uniqueItems: true
+              items:
+                type: string
+                minLength: 1
+                pattern: '.*\S.*'
+            maximum:
+              $ref: '#/components/schemas/PositiveInt32'
+    RegionTooLargeDetails:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          description: The exact product of dimensions must be greater than maximum.
+          required:
+            - reason
+            - dimensions
+            - maximum
+          properties:
+            reason:
+              const: volume
+            dimensions:
+              $ref: '#/components/schemas/Dimensions'
+            maximum:
+              $ref: '#/components/schemas/PositiveInt32'
+        - type: object
+          additionalProperties: false
+          description: minimumRequired is a known lower bound and must be greater than maximum.
+          required:
+            - reason
+            - minimumRequired
+            - maximum
+          properties:
+            reason:
+              const: touched_chunks
+            minimumRequired:
+              $ref: '#/components/schemas/PositiveJsonSafeInteger'
+            maximum:
+              $ref: '#/components/schemas/PositiveInt32'
+        - type: object
+          additionalProperties: false
+          description: requested must be greater than maximum.
+          required:
+            - reason
+            - requested
+            - maximum
+          properties:
+            reason:
+              const: block_count
+            requested:
+              $ref: '#/components/schemas/PositiveInt32'
+            maximum:
+              $ref: '#/components/schemas/PositiveInt32'
+    HistoryCapacityDetails:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - reason
+            - maximum
+          properties:
+            reason:
+              const: entries_per_world
+            maximum:
+              $ref: '#/components/schemas/PositiveJsonSafeInteger'
+        - type: object
+          additionalProperties: false
+          required:
+            - reason
+            - maximum
+          properties:
+            reason:
+              const: entries_total
+            maximum:
+              $ref: '#/components/schemas/PositiveJsonSafeInteger'
+        - type: object
+          additionalProperties: false
+          required:
+            - reason
+            - maximum
+          properties:
+            reason:
+              const: retained_changed_blocks
+            maximum:
+              $ref: '#/components/schemas/PositiveJsonSafeInteger'
+    ServerUnavailableDetails:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - reason
+          properties:
+            reason:
+              type: string
+              enum:
+                - dependency_unavailable
+                - paper_unavailable
+        - type: object
+          additionalProperties: false
+          required:
+            - reason
+            - maximumConcurrentInspections
+          properties:
+            reason:
+              const: inspection_busy
+            maximumConcurrentInspections:
+              $ref: '#/components/schemas/PositiveInt32'
+    WorldBusyDetails:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - reason
+            - world
+          properties:
+            reason:
+              const: operation_in_progress
+            world:
+              type: string
+              minLength: 1
+              pattern: '.*\S.*'
+        - type: object
+          additionalProperties: false
+          required:
+            - reason
+            - world
+            - newestEditId
+          properties:
+            reason:
+              const: recovery_required
+            world:
+              type: string
+              minLength: 1
+              pattern: '.*\S.*'
+            newestEditId:
+              $ref: '#/components/schemas/UuidV4'
+    WorldUnavailableDetails:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - reason
+          properties:
+            reason:
+              type: string
+              enum:
+                - stopping
+                - interrupted
+                - paper_unavailable
+                - operation_failed
+                - rollback_failed
+        - type: object
+          additionalProperties: false
+          required:
+            - reason
+            - world
+          properties:
+            reason:
+              const: world_unloaded
+            world:
+              type: string
+              minLength: 1
+              pattern: '.*\S.*'
+        - type: object
+          additionalProperties: false
+          required:
+            - reason
+            - world
+            - chunk
+          properties:
+            reason:
+              type: string
+              enum:
+                - chunk_unloaded
+                - chunk_load_failed
+            world:
+              type: string
+              minLength: 1
+              pattern: '.*\S.*'
+            chunk:
+              $ref: '#/components/schemas/ChunkPosition'
     Uuid:
       type: string
       format: uuid
@@ -590,6 +1169,28 @@ components:
       type: string
       format: uuid
       pattern: '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-4[0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$'
+    Int32:
+      type: integer
+      format: int32
+      minimum: -2147483648
+      maximum: 2147483647
+    PositiveInt32:
+      type: integer
+      format: int32
+      minimum: 1
+      maximum: 2147483647
+    JsonSafeInteger:
+      description: Integer within the exact IEEE-754/JSON safe range.
+      type: integer
+      format: int64
+      minimum: -9007199254740991
+      maximum: 9007199254740991
+    PositiveJsonSafeInteger:
+      description: Positive integer within the exact IEEE-754/JSON safe range.
+      type: integer
+      format: int64
+      minimum: 1
+      maximum: 9007199254740991
     BlockPosition:
       type: object
       additionalProperties: false
@@ -607,6 +1208,17 @@ components:
         z:
           type: integer
           format: int32
+    ChunkPosition:
+      type: object
+      additionalProperties: false
+      required:
+        - x
+        - z
+      properties:
+        x:
+          $ref: '#/components/schemas/Int32'
+        z:
+          $ref: '#/components/schemas/Int32'
     Bounds:
       type: object
       additionalProperties: false
@@ -628,17 +1240,11 @@ components:
         - z
       properties:
         x:
-          type: integer
-          format: int64
-          minimum: 1
+          $ref: '#/components/schemas/PositiveJsonSafeInteger'
         y:
-          type: integer
-          format: int64
-          minimum: 1
+          $ref: '#/components/schemas/PositiveJsonSafeInteger'
         z:
-          type: integer
-          format: int64
-          minimum: 1
+          $ref: '#/components/schemas/PositiveJsonSafeInteger'
     CountRegionBlockStatesRequest:
       type: object
       additionalProperties: false

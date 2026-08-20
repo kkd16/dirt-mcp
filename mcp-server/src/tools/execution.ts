@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { CLIENT_INFO_META_KEY, type CallToolResult, type ServerContext } from '@modelcontextprotocol/server';
-import { ToolFailure, toolFailureLogLevel } from '../bridge/errors.ts';
+import { ToolFailure, ToolFailureResultSchema, toolFailureLogLevel } from '../bridge/errors.ts';
 import { safeErrorFields, type DirtLogger, type LogFields } from '../logging.ts';
 
 const INTERNAL_ERROR_MESSAGE = 'Dirt MCP encountered an unexpected internal error.';
@@ -43,16 +43,12 @@ export async function executeToolCall(
     if (!(error instanceof ToolFailure)) {
       callLogger.error('tool.unexpected_failure', 'Tool call failed unexpectedly.', safeErrorFields(error));
     }
+    const structuredContent = ToolFailureResultSchema.parse({
+      error: { ...failure.data, callId },
+    });
     return {
       content: [{ type: 'text', text: `${details.failureContext}: ${failure.message}` }],
-      structuredContent: {
-        error: {
-          code: failure.code,
-          message: failure.message,
-          callId,
-          ...(failure.editId === undefined ? {} : { editId: failure.editId }),
-        },
-      },
+      structuredContent,
       isError: true,
     };
   } finally {
@@ -85,7 +81,9 @@ export async function executeToolCall(
 }
 
 function toolFailure(error: unknown): ToolFailure {
-  return error instanceof ToolFailure ? error : new ToolFailure('dirt_internal_error', INTERNAL_ERROR_MESSAGE);
+  return error instanceof ToolFailure
+    ? error
+    : new ToolFailure({ code: 'dirt_internal_error', message: INTERNAL_ERROR_MESSAGE });
 }
 
 function successfulResultLogFields(result: CallToolResult): LogFields {

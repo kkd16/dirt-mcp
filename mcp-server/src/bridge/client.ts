@@ -57,36 +57,57 @@ export class BridgeClient {
       response = await this.#fetch(new URL(route.path, this.origin), request);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new ToolFailure('bridge_unavailable', `Paper bridge request failed: ${message}`);
+      throw new ToolFailure({
+        code: 'bridge_unavailable',
+        message: `Paper bridge request failed: ${message}`,
+        details: { reason: requestFailureReason(error) },
+      });
     }
 
     if (!response.ok) {
       const body: unknown = await response.json().catch(() => undefined);
       const editId = salvageEditId(route, body);
       if (response.status === 401) {
-        throw new ToolFailure('bridge_unauthorized', 'Paper bridge rejected DIRT_MCP_BRIDGE_TOKEN.', editId);
+        throw new ToolFailure({
+          code: 'bridge_unauthorized',
+          message: 'Paper bridge rejected DIRT_MCP_BRIDGE_TOKEN.',
+          details: { reason: 'authentication_failed' },
+          ...(editId === undefined ? {} : { editId }),
+        });
       }
       const detail = BridgeErrorResponseSchema.safeParse(body);
       if (detail.success) {
-        throw new ToolFailure(detail.data.error.code, detail.data.error.message, detail.data.error.editId);
+        throw new ToolFailure(detail.data.error);
       }
-      throw new ToolFailure('bridge_http_error', `Paper bridge returned unstructured HTTP ${response.status}.`, editId);
+      throw new ToolFailure({
+        code: 'bridge_http_error',
+        message: `Paper bridge returned unstructured HTTP ${response.status}.`,
+        details: { status: response.status },
+        ...(editId === undefined ? {} : { editId }),
+      });
     }
 
     let body: unknown;
     try {
       body = await response.json();
     } catch {
-      throw new ToolFailure('bridge_invalid_response', 'Paper bridge returned invalid JSON.');
+      throw new ToolFailure({ code: 'bridge_invalid_response', message: 'Paper bridge returned invalid JSON.' });
     }
     const parsed = responseSchema.safeParse(body);
     if (!parsed.success) {
-      throw new ToolFailure(
-        'bridge_invalid_response',
-        'Paper bridge response did not match the documented schema.',
-        salvageEditId(route, body),
-      );
+      const editId = salvageEditId(route, body);
+      throw new ToolFailure({
+        code: 'bridge_invalid_response',
+        message: 'Paper bridge response did not match the documented schema.',
+        ...(editId === undefined ? {} : { editId }),
+      });
     }
     return parsed.data;
   }
+}
+
+function requestFailureReason(error: unknown): 'timeout' | 'request_failed' {
+  return error instanceof DOMException && (error.name === 'TimeoutError' || error.name === 'AbortError')
+    ? 'timeout'
+    : 'request_failed';
 }

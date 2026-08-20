@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.world.edit;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.platform.MainThread;
@@ -49,7 +50,8 @@ final class PaperEditPreparation implements AutoCloseable {
                     if (world == null) {
                         throw new OperationException(
                                 OperationFailure.WORLD_NOT_FOUND,
-                                "World is not loaded: " + worldName);
+                                "World is not loaded: " + worldName,
+                                new ErrorDetails.WorldNotFound(worldName));
                     }
                     return new PaperWorld(
                             world.getUID(),
@@ -194,7 +196,9 @@ final class PaperEditPreparation implements AutoCloseable {
             String canonical = pattern.getAsString(true);
             if (!canonicalPatterns.add(canonical)) {
                 throw invalid(
-                        "sourceBlockStatePatterns contains a duplicate pattern: " + canonical);
+                        "sourceBlockStatePatterns contains a duplicate pattern: " + canonical,
+                        new ErrorDetails.InvalidRequest.Duplicate(
+                                "sourceBlockStatePatterns[" + index + "]"));
             }
             BlockState parsed = BukkitAdapter.adapt(pattern);
             for (BlockState candidate : parsed.getBlockType().getAllStates()) {
@@ -218,7 +222,9 @@ final class PaperEditPreparation implements AutoCloseable {
                     parseBlockData(entry.blockState(), field + "[" + index + "].blockState");
             String canonicalState = data.getAsString();
             if (!statesSeen.add(canonicalState)) {
-                throw invalid(field + " contains a duplicate block state: " + canonicalState);
+                throw invalid(
+                        field + " contains a duplicate block state: " + canonicalState,
+                        new ErrorDetails.InvalidRequest.Duplicate(field + "[" + index + "]"));
             }
             Integer weight = entry.weight();
             canonical.add(new DestinationPaletteEntry(canonicalState, weight));
@@ -234,6 +240,7 @@ final class PaperEditPreparation implements AutoCloseable {
             throw new OperationException(
                     OperationFailure.INVALID_REQUEST,
                     field + " is not a valid block state",
+                    new ErrorDetails.InvalidRequest.InvalidValue(field),
                     exception);
         }
     }
@@ -248,6 +255,7 @@ final class PaperEditPreparation implements AutoCloseable {
             throw new OperationException(
                     OperationFailure.WORLD_UNAVAILABLE,
                     "Could not access the world on Paper's main thread",
+                    new ErrorDetails.WorldUnavailable.PaperUnavailable(),
                     exception);
         }
     }
@@ -256,7 +264,8 @@ final class PaperEditPreparation implements AutoCloseable {
         if (this.plugin.getServer().getWorld(world.id()) != world.bukkitWorld()) {
             throw new OperationException(
                     OperationFailure.WORLD_UNAVAILABLE,
-                    "World is no longer available: " + world.name());
+                    "World is no longer available: " + world.name(),
+                    new ErrorDetails.WorldUnavailable.WorldUnloaded(world.name()));
         }
     }
 
@@ -272,11 +281,16 @@ final class PaperEditPreparation implements AutoCloseable {
     private static void requireValidHeight(
             World world, BlockPosition minimum, BlockPosition maximum) throws OperationException {
         if (minimum.y() < world.getMinHeight() || maximum.y() >= world.getMaxHeight()) {
+            boolean minimumInvalid = minimum.y() < world.getMinHeight();
+            String field = minimumInvalid ? "min.y" : "max.y";
+            int value = minimumInvalid ? minimum.y() : maximum.y();
             throw invalid(
                     "Y bounds must be between "
                             + world.getMinHeight()
                             + " and "
-                            + (world.getMaxHeight() - 1));
+                            + (world.getMaxHeight() - 1),
+                    new ErrorDetails.InvalidRequest.OutOfRange(
+                            field, value, world.getMinHeight(), world.getMaxHeight() - 1));
         }
     }
 
@@ -294,8 +308,8 @@ final class PaperEditPreparation implements AutoCloseable {
         return List.copyOf(chunks);
     }
 
-    private static OperationException invalid(String message) {
-        return new OperationException(OperationFailure.INVALID_REQUEST, message);
+    private static OperationException invalid(String message, ErrorDetails.InvalidRequest details) {
+        return new OperationException(OperationFailure.INVALID_REQUEST, message, details);
     }
 
     record PaperWorld(

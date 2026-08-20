@@ -3,6 +3,7 @@ package ca.deliyannides.dirtmcp.paper.bridge.endpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
 import ca.deliyannides.dirtmcp.paper.bridge.RequestJson;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks;
 import com.google.gson.JsonObject;
@@ -28,7 +29,7 @@ final class GetRegionBlocksRequestDecoder {
     static GetRegionBlocks.Request decode(BridgeExchange exchange, DirtConfig config)
             throws IOException, OperationException {
         JsonObject object = exchange.readJsonObject();
-        RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS);
+        RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS, "Request");
         int maxResults =
                 object.has("maxResults")
                         ? RequestJson.integer(object.get("maxResults"), "maxResults")
@@ -61,7 +62,10 @@ final class GetRegionBlocksRequestDecoder {
         return switch (format) {
             case "blocks" -> GetRegionBlocks.Format.BLOCKS;
             case "runs" -> GetRegionBlocks.Format.RUNS;
-            default -> throw RequestJson.invalid("format must be blocks or runs");
+            default ->
+                    throw RequestJson.invalid(
+                            "format must be blocks or runs",
+                            new ErrorDetails.InvalidRequest.InvalidValue("format"));
         };
     }
 }
