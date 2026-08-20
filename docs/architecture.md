@@ -63,15 +63,13 @@ It does not read world files or reproduce Minecraft editing logic. Stdout is
 reserved for MCP; process diagnostics are structured JSON Lines on stderr.
 
 The process entry point validates its environment and starts the current MCP
-stdio transport. During startup, a composition root reads the authenticated
-Paper status snapshot and installs a deterministic catalog containing only tools
-enabled there. Missing tool entries resolve false in the Paper configuration;
-disabled tools stay out of discovery and are rejected before their handlers run.
-Tool schemas stay with their cohesive
-status, inspection, and editing registrars; one concrete bridge client owns
-authenticated HTTP and response validation; one execution helper owns call IDs,
-error mapping, and auditing. The design uses functions and concrete modules
-rather than a tool class hierarchy or dependency-injection framework.
+stdio transport. When the connection opens, a composition root reads the
+authenticated Paper status snapshot and registers its enabled tool catalog.
+Tool schemas stay with their cohesive status, inspection, and editing
+registrars; one concrete bridge client owns authenticated HTTP and response
+validation; one execution helper owns call IDs, error mapping, and auditing. The
+design uses functions and concrete modules rather than a tool class hierarchy
+or dependency-injection framework.
 
 Each accepted tool call carries explicit context across asynchronous boundaries
 and writes one completion object to stderr. Its generated call ID is forwarded
@@ -81,8 +79,7 @@ semantics are documented in the [v1 behavior guide](v1-design.md#logging).
 ### Protocol
 
 `protocol/openapi.yaml` is the versioned boundary between Java and TypeScript.
-It contains implemented behavior only. Every new operation is added with its
-Java implementation, TypeScript tool, validation, and tests.
+It contains implemented behavior only.
 
 ## Inspection execution
 

@@ -15,8 +15,7 @@ final class McpToolHelp {
                             "Checks the authenticated bridge, Dirt, Paper, and FAWE end to end.",
                             "None.",
                             "status = ok after every required service passes its health check.",
-                            "The quickest non-mutating connectivity check.",
-                            false);
+                            "The quickest non-mutating connectivity check.");
             case GET_SERVER_STATUS ->
                     new ToolSpec(
                             "Get Dirt server status",
@@ -25,8 +24,7 @@ final class McpToolHelp {
                             "None.",
                             "builds, performance (TPS and tick time), players, worlds, limits, "
                                     + "editHistory, defaults, logging, and tools.",
-                            "Read-only; use the reported world names and active limits for later calls.",
-                            false);
+                            "Read-only; use the reported world names and active limits for later calls.");
             case COUNT_REGION_BLOCK_STATES ->
                     new ToolSpec(
                             "Count region block states",
@@ -34,8 +32,7 @@ final class McpToolHelp {
                             "Builds a complete canonical block-state histogram for an inclusive cuboid.",
                             "world, min{x,y,z}, max{x,y,z}.",
                             "world, normalized bounds, dimensions, volume, and blockStateCounts.",
-                            "Read-only; the histogram includes air and full block-state properties.",
-                            false);
+                            "Read-only; the histogram includes air and full block-state properties.");
             case GET_REGION_BLOCKS ->
                     new ToolSpec(
                             "Get region blocks",
@@ -47,8 +44,7 @@ final class McpToolHelp {
                                     + "use the active Paper defaults.",
                             "world, bounds, volume, matchedBlockCount, format, and either exact "
                                     + "blocks or lossless runs.",
-                            "Read-only; active size limits fail the call rather than truncate results.",
-                            false);
+                            "Read-only; active size limits fail the call rather than truncate results.");
             case SCAN_ORTHOGRAPHIC_VIEW ->
                     new ToolSpec(
                             "Scan an orthographic view",
@@ -62,8 +58,7 @@ final class McpToolHelp {
                                     + "visibleBlockCount, format, and either blocks or "
                                     + "blockStatePalette/blockStateIndexRows/distanceRows.",
                             "Read-only; depth is zero-based and the origin itself is not scanned. "
-                                    + "Active result ceilings fail the call rather than truncate.",
-                            false);
+                                    + "Active result ceilings fail the call rather than truncate.");
             case REPLACE_REGION_BLOCKS ->
                     new ToolSpec(
                             "Replace region blocks",
@@ -77,8 +72,7 @@ final class McpToolHelp {
                                     + "outcome, edit, matchedBlockCount, and changedBlockCount.",
                             "Successful results use outcome preview, no_change, or committed; "
                                     + "committed non-empty edits enter undo history. A failed edit "
-                                    + "can retain a recovery_required record.",
-                            true);
+                                    + "can retain a recovery_required record.");
             case FILL_REGION ->
                     new ToolSpec(
                             "Fill a region",
@@ -92,8 +86,7 @@ final class McpToolHelp {
                                     + "changedBlockCount.",
                             "Successful results use outcome preview, no_change, or committed; "
                                     + "committed non-empty edits enter undo history. A failed edit "
-                                    + "can retain a recovery_required record.",
-                            true);
+                                    + "can retain a recovery_required record.");
             case SET_BLOCKS ->
                     new ToolSpec(
                             "Set blocks",
@@ -109,8 +102,7 @@ final class McpToolHelp {
                             "Validates every position first and does not trigger neighbor physics. "
                                     + "Successful results use outcome preview, no_change, or committed; "
                                     + "committed non-empty edits enter undo history, and a failed edit "
-                                    + "can retain a recovery_required record.",
-                            true);
+                                    + "can retain a recovery_required record.");
             case GET_EDIT_HISTORY ->
                     new ToolSpec(
                             "Get edit history",
@@ -119,8 +111,7 @@ final class McpToolHelp {
                             "world.",
                             "world and edits, an ordered array of retained edit records.",
                             "Dry runs, no-ops, consumed edits, and evicted edits are not returned. "
-                                    + "In-memory history clears on world unload or Paper restart.",
-                            true);
+                                    + "In-memory history clears on world unload or Paper restart.");
             case UNDO_EDIT ->
                     new ToolSpec(
                             "Undo an edit",
@@ -129,8 +120,7 @@ final class McpToolHelp {
                             "world, editId (UUIDv4 of the newest retained edit).",
                             "edit (the consumed pre-undo EditRecord), undoCallId, and undoneAt.",
                             "Newest-only identity checking prevents an intervening edit from being "
-                                    + "undone accidentally.",
-                            true);
+                                    + "undone accidentally.");
         };
     }
 
@@ -155,6 +145,5 @@ final class McpToolHelp {
             String purpose,
             String arguments,
             String returns,
-            String notes,
-            boolean usesEditRecords) {}
+            String notes) {}
 }

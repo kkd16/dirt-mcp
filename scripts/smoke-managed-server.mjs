@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -146,7 +147,7 @@ async function waitForDetailedLogRecord(predicate, failureMessage) {
     const record = (await readDetailedLogRecords()).find(predicate);
     if (record) return record;
     // oxlint-disable-next-line eslint/no-await-in-loop
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await delay(100);
   } while (Date.now() < deadline);
 
   throw new Error(failureMessage);
@@ -237,7 +238,7 @@ async function waitForRestoredBlock(position, blockState) {
       // A transient bridge failure is retried until the bounded deadline below.
     }
     // oxlint-disable-next-line eslint/no-await-in-loop
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await delay(100);
   }
   throw new Error(
     `Paper did not restore ${position.x},${position.y},${position.z} to ${blockState}; observed ${String(observedState)}`,
@@ -254,24 +255,10 @@ async function waitForRegion(region) {
     } catch (error) {
       lastError = error;
       // oxlint-disable-next-line eslint/no-await-in-loop
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await delay(100);
     }
   }
   throw lastError;
-}
-
-function normalizedJson(value) {
-  if (Array.isArray(value)) {
-    return value.map(normalizedJson);
-  }
-  if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value)
-        .toSorted(([left], [right]) => left.localeCompare(right))
-        .map(([key, entry]) => [key, normalizedJson(entry)]),
-    );
-  }
-  return value;
 }
 
 function sortedBlockKeys(blocks) {
@@ -367,7 +354,7 @@ async function cleanupRetainedEdits() {
       if (attempt === 39) throw error;
       // Cleanup readiness retries are deliberately serial.
       // oxlint-disable-next-line eslint/no-await-in-loop
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await delay(250);
       continue;
     }
 
@@ -378,7 +365,7 @@ async function cleanupRetainedEdits() {
       }
       // Cleanup readiness retries are deliberately serial.
       // oxlint-disable-next-line eslint/no-await-in-loop
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await delay(250);
       continue;
     }
 
@@ -395,7 +382,7 @@ async function cleanupRetainedEdits() {
       if (emptyObservations === 2) return;
       // Confirm emptiness after pending authenticated work has had a chance to acquire the lock.
       // oxlint-disable-next-line eslint/no-await-in-loop
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await delay(250);
       continue;
     }
 
@@ -413,14 +400,14 @@ async function cleanupRetainedEdits() {
       // A transport failure is ambiguous: the undo may still be running. The next history
       // request is an ordering fence and must settle before any direct fixture restoration.
       // oxlint-disable-next-line eslint/no-await-in-loop
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await delay(250);
       continue;
     }
     if (!undo.ok && undo.body.error?.code !== 'edit_not_found') {
       if (undo.body.error?.code === 'world_busy' || undo.body.error?.code === 'bridge_busy') {
         // Cleanup readiness retries are deliberately serial.
         // oxlint-disable-next-line eslint/no-await-in-loop
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await delay(250);
         continue;
       }
       throw new Error(`Undo cleanup returned ${undo.status}: ${JSON.stringify(undo.body)}`);
@@ -809,7 +796,7 @@ try {
   await assertEditHistory([]);
 
   const restored = await bridgeRequest('/v1/count-region-block-states', region);
-  assert.deepEqual(normalizedJson(restored), normalizedJson(original));
+  assert.deepEqual(restored, original);
   const restoredBlocks = await bridgeRequest('/v1/get-region-blocks', {
     ...region,
     includeAir: true,

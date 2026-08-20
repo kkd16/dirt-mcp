@@ -33,7 +33,6 @@ GNU coreutils.
 ```bash
 git clone https://github.com/kkd16/dirt-mcp.git
 cd dirt-mcp
-make install
 make build
 ```
 
@@ -60,7 +59,7 @@ The loopback bridge starts with the plugin and requires a bearer token. Supply
 the token when starting Paper:
 
 ```bash
-export DIRT_MCP_BRIDGE_TOKEN="$(openssl rand -hex 32)"
+export DIRT_MCP_BRIDGE_TOKEN="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
 DIRT_MCP_BRIDGE_PORT=8765 \
 java -Xms2G -Xmx2G -jar paper.jar --nogui
 ```
@@ -88,26 +87,21 @@ local MCP process.
 
 ### Paper operator command
 
-Operators can inspect the running plugin with `/dirt`. Running it without a
-subcommand displays its formatted help menu; `/dirt version` shows the packaged
-plugin version, `/dirt status` gives a compact server and bridge summary, and
-`/dirt config` lists the active startup-snapshotted configuration, including
-every resolved per-tool flag. `/dirt tools` lists every supported MCP tool with
-its configured ON/OFF state; select one or run `/dirt tools <tool_id>` for a
-concise view of its purpose, arguments, structured return values, and important
-behavior. The config view reflects the `DIRT_MCP_BRIDGE_PORT` override when
-present. Restart Paper to apply configuration file changes.
+Run `/dirt` for the current operator-command help. Its status, configuration,
+and tool views expose the active runtime state and concise MCP tool synopses.
+Restart Paper to apply configuration changes.
 
 The command requires `dirtmcp.command`, which is granted to operators by
 default and may be assigned explicitly through a permission plugin.
 
 ### Logs
 
-Paper's server console receives concise lifecycle, mutation, undo, warning, and
-failure events. More detailed structured events are written as rotating JSON
-Lines under `plugins/DirtMCP/logs/`; the shipped configuration documents the
-console threshold and file bounds. A detail-sink failure does not stop world
-operations and is reported prominently in the console.
+Subject to `logging.console-level`, Paper's console receives concise lifecycle,
+mutation, undo, warning, and failure events. More detailed structured events are
+written as rotating JSON Lines under `plugins/DirtMCP/logs/`; the shipped
+configuration documents the console threshold and file bounds. A detail-sink
+failure does not stop world operations and is reported prominently in the
+console.
 
 The MCP process writes structured diagnostics to stderr while stdout remains
 reserved for MCP protocol messages. Paper and MCP records carry correlation
@@ -121,7 +115,8 @@ its ignored development token, then start Codex from this trusted repository.
 Codex launches the MCP process when it connects. Rebuild MCP changes and restart
 Codex so it launches the new process and tool catalog.
 
-For another MCP host, configure it to launch the source build:
+For an MCP host that uses an `mcpServers` JSON configuration, configure it to
+launch the source build:
 
 ```json
 {
@@ -138,14 +133,11 @@ For another MCP host, configure it to launch the source build:
 }
 ```
 
-The implemented tool surface contains `ping_server`, `get_server_status`,
-`count_region_block_states`, `get_region_blocks`, `scan_orthographic_view`,
-`replace_region_blocks`, `fill_region`, `set_blocks`, `get_edit_history`, and
-`undo_edit`. Fresh configurations enable all ten. The MCP process advertises
-only tools enabled in the Paper startup snapshot; a disabled tool is absent from
-`tools/list` and cannot be called. See the [v1 behavior guide](docs/v1-design.md)
-for tool selection and edit, history, recovery, and undo semantics, and the
-[OpenAPI contract](protocol/openapi.yaml) for exact bridge schemas.
+The MCP process advertises only tools enabled in the Paper startup snapshot; a
+disabled tool is absent from `tools/list` and cannot be called. See the
+[v1 behavior guide](docs/v1-design.md#tools) for the implemented tool surface
+and workflow semantics, and the [OpenAPI contract](protocol/openapi.yaml) for
+exact bridge schemas.
 
 ## Local development
 
@@ -190,69 +182,24 @@ make up MC_PORT=25567 BRIDGE_PORT=9876
 The selected ports are retained by `make reload`. Restart Codex after changing
 the bridge port so its MCP process reads the new development state.
 
-Useful commands:
-
-```text
-make verify    Run the complete incremental local gate, including live smoke coverage
-make check     Run all offline builds, tests, lint, formatting, and validation
-make smoke     Restart Paper and run live integration and lifecycle validation
-make ci        Run the clean complete gate used by GitHub Actions, including smoke
-make build     Build the Paper plugin and MCP server
-make format    Apply the repository's Java, TypeScript, and configuration formatters
-make reload    Incrementally rebuild and gracefully restart Paper
-make up        Start or reuse the managed Paper server
-make down      Stop the managed Paper server cleanly
-make status    Report Paper and authenticated bridge health
-make logs      Print recent Paper console output
-make console   Attach to Paper; detach without stopping with Ctrl-b d
-make command   Send one console command with CMD='...'
-make health    Run the authenticated end-to-end Dirt/Paper/FAWE ping
-make mcp       Run the MCP stdio process
-make clean     Remove build outputs, preserving the development world
-```
+Run `make help` for the current development-command list.
 
 Generated Paper state lives in `paper-plugin/run/` and is not committed. This is
 the canonical disposable development world: reuse and mutate it freely instead
 of creating temporary Paper servers. Normal builds, reloads, and cleans preserve
 the world.
 
-`make verify` is the standard pre-handoff gate. It runs all Java, TypeScript,
-Node, MCP, contract, configuration, package, and formatting checks, validates
-the built Paper JAR, restarts the managed server, runs live bridge, Paper, and
-FAWE coverage, and rejects serious lifecycle log failures. The live suite
-temporarily force-loads chunk `0,0`, verifies status and inspection paths,
-mutates a bounded fixture through fill, replacement, and palette-based setting,
-checks result caps, exact states, no-ops, history metadata, and ID-checked undo,
-then restores the prior world state. Run it without concurrent Dirt MCP edits.
-
-The offline Java suite publishes a complete JaCoCo report at
-`paper-plugin/build/reports/jacoco/test/html/index.html` and enforces separate
-whole-plugin and independently testable-core gates. Their thresholds and the
-narrow Paper/FAWE adapter exclusion list live in
-[the plugin build](paper-plugin/build.gradle.kts). Excluded adapters remain in
-the complete report and are exercised by the managed smoke suite, whose separate
-JVM is not counted by JaCoCo. The MCP suite uses Node's native coverage across
-the complete emitted server; its gate is owned by
-[the server package](mcp-server/package.json).
+`make verify` is the standard pre-handoff gate. It runs the offline checks and
+managed Paper/FAWE smoke suite against the disposable development world. The
+smoke fixture is restored afterward; avoid concurrent Dirt MCP edits. The Java
+coverage report is written to
+`paper-plugin/build/reports/jacoco/test/html/index.html`.
 
 ## Contributing
 
-Keep changes focused and implement behavior vertically across Java, OpenAPI,
-TypeScript, tests, and documentation. Do not add empty packages or document
-unimplemented endpoints as available.
-
-Before handing off a local change:
-
-```bash
-make verify
-```
-
-GitHub Actions runs `make ci` from a clean dependency and build state, including
-the same managed Paper smoke suite. Use focused native checks during iteration
-when the complete gate is unnecessary.
-
-Read [`AGENTS.md`](AGENTS.md) for repository engineering rules and
-[`docs/`](docs/README.md) for the v1 product design.
+Keep changes focused and vertical across implementation, contract, tests, and
+concise documentation. See [`AGENTS.md`](AGENTS.md) for repository rules and
+[`docs/`](docs/README.md) for product and behavior documentation.
 
 ## License
 

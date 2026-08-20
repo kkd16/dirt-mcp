@@ -10,7 +10,7 @@ updates:
     cooldown:
       default-days: 1
     groups:
-      pnpm-minor-and-patch:
+      npm-minor-and-patch:
         patterns:
           - '*'
         update-types:

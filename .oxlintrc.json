@@ -6,13 +6,11 @@
     "suspicious": "error",
     "perf": "error"
   },
-  "rules": {},
   "options": {
     "denyWarnings": true,
     "reportUnusedDisableDirectives": "error"
   },
   "env": {
-    "builtin": true,
     "node": true
   }
 }

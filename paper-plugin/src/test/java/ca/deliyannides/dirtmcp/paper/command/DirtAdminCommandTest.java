@@ -229,55 +229,14 @@ final class DirtAdminCommandTest {
             assertTrue(plain.contains("ARGUMENTS"), tool.id());
             assertTrue(plain.contains("RETURNS"), tool.id());
             assertTrue(plain.contains("BEHAVIOR"), tool.id());
+            assertTrue(plain.contains(spec.purpose()), tool.id());
             assertTrue(plain.contains(spec.arguments()), tool.id());
             assertTrue(plain.contains(spec.returns()), tool.id());
+            assertTrue(plain.contains(spec.notes()), tool.id());
+            assertTrue(plain.contains("Canonical results are in structuredContent"), tool.id());
+            assertTrue(plain.contains("structuredContent.error"), tool.id());
             assertEquals(Set.of("/dirt tools"), runCommands(message), tool.id());
         }
-    }
-
-    @Test
-    void toolDetailsCoverInspectionMutationAndUndoSemantics() throws Exception {
-        var fixture = fixture(true, status());
-
-        assertEquals(1, fixture.execute("dirt tools get_region_blocks"));
-        String inspection = PLAIN.serialize(fixture.messages.getLast());
-        assertTrue(inspection.contains("includeBlockStatePatterns"));
-        assertTrue(inspection.contains("blocks|runs"));
-        assertTrue(inspection.contains("Pattern lists default empty"));
-        assertTrue(inspection.contains("fail the call rather than truncate"));
-        assertTrue(inspection.contains("Canonical results are in structuredContent"));
-
-        assertEquals(1, fixture.execute("dirt tools scan_orthographic_view"));
-        String scan = PLAIN.serialize(fixture.messages.getLast());
-        assertTrue(scan.contains("depth defaults to 0"));
-        assertTrue(scan.contains("format to blocks"));
-        assertTrue(scan.contains("scannedVolume"));
-        assertTrue(scan.contains("fail the call rather than truncate"));
-
-        assertEquals(1, fixture.execute("dirt tools set_blocks"));
-        String mutation = PLAIN.serialize(fixture.messages.getLast());
-        assertTrue(mutation.contains("placements = [paletteIndex,xOffset,yOffset,zOffset]"));
-        assertTrue(mutation.contains("omitted seed is generated and returned"));
-        assertTrue(mutation.contains("dryRun uses the Paper default"));
-        assertTrue(mutation.contains("does not trigger neighbor physics"));
-        assertTrue(mutation.contains("recovery_required"));
-        assertTrue(mutation.contains("EditRecord fields: editId, callId"));
-
-        assertEquals(1, fixture.execute("dirt tools undo_edit"));
-        String undo = PLAIN.serialize(fixture.messages.getLast());
-        assertTrue(undo.contains("newest retained edit"));
-        assertTrue(undo.contains("edit (the consumed pre-undo EditRecord)"));
-        assertTrue(undo.contains("undoCallId"));
-
-        assertEquals(1, fixture.execute("dirt tools get_edit_history"));
-        assertTrue(
-                PLAIN.serialize(fixture.messages.getLast())
-                        .contains("history clears on world unload or Paper restart"));
-
-        assertEquals(1, fixture.execute("dirt tools ping_server"));
-        assertTrue(PLAIN.serialize(fixture.messages.getLast()).contains("Ping Dirt server"));
-        assertEquals(1, fixture.execute("dirt tools get_server_status"));
-        assertTrue(PLAIN.serialize(fixture.messages.getLast()).contains("Get Dirt server status"));
     }
 
     @Test

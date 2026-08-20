@@ -22,8 +22,8 @@ behavior that matters when choosing and combining tools.
 | `undo_edit`                 | `POST /v1/undo-edit`                 | Undo the identified newest retained edit in one loaded world.         |
 
 The table is the implemented surface. The `tools` configuration section is an
-explicit allowlist for the agent-facing MCP catalog. The shipped file lists all
-ten tools as true; every recognized tool omitted from that section resolves to
+explicit allowlist for the agent-facing MCP catalog. The shipped file sets every
+listed tool to true; every recognized tool omitted from that section resolves to
 false. Disabled tools are absent from MCP discovery and calls to them are
 rejected before Dirt creates a call ID or bridge request. Flags are independent,
 so operators can expose only the workflow they intend. Authenticated bridge
@@ -155,9 +155,7 @@ success or non-2xx responses on edit and undo routes when possible. Callers can
 reconcile records returned by `get_edit_history` using `editId` or the record's
 creating `callId`; an absent record means no retryable history remains. Every
 failure mapped by a Dirt tool handler also includes its generated `error.callId`
-for request correlation. Invalid tool names or arguments fail before Dirt
-generates a call ID. MCP SDK output-validation failures occur outside Dirt error
-mapping and do not carry a structured Dirt `error.callId`.
+for request correlation.
 
 Ordinary edits still require already-loaded chunks. Retained history does not
 keep chunks loaded, so undo uses Paper's asynchronous existing-chunk load with
@@ -197,8 +195,8 @@ or complete block payloads.
 ## Limits and security
 
 Startup-validated limits bound region volume, touched and snapshotted chunks,
-changed blocks, detailed scans, result sizes, request bodies and uploads,
-concurrent bridge and inspection work, and retained history. Active operation
+changed blocks, detailed scans, result sizes, request bodies, concurrent bridge
+and inspection work, and retained history. Active operation
 limits, the separate `editHistory` object, `logging` configuration, and every
 resolved per-tool boolean in `tools` are available through `get_server_status`;
 the history fields are

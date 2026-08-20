@@ -4,8 +4,9 @@
 
 Dirt MCP is a local-first interface for inspecting and editing a live Paper
 world. The MCP server communicates over authenticated loopback HTTP with a Paper
-plugin, which owns Minecraft and FAWE access. `protocol/openapi.yaml` documents
-implemented bridge behavior; `docs/v1-design.md` documents the product design.
+plugin, which owns Minecraft and FAWE access. `protocol/openapi.yaml` is the
+authoritative bridge contract; `docs/v1-design.md` records composed tool
+behavior, and `docs/vision.md` defines product boundaries.
 
 - Support only the latest stable Paper release. Verify official sources before
   changing Paper, Java, Gradle, FAWE, or MCP dependencies.

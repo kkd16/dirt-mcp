@@ -275,20 +275,11 @@ public final class DirtAdminCommand {
         appendParagraph(message, spec.returns());
         appendSection(message, "Behavior");
         appendParagraph(message, spec.notes());
-        if (spec.usesEditRecords()) {
-            appendParagraph(
-                    message,
-                    "EditRecord fields: editId, callId, operation, world, worldId, bounds, "
-                            + "changedBlockCount, completedAt, and status.");
-        }
         appendParagraph(
                 message,
                 "Canonical results are in structuredContent; text content is only a summary. "
-                        + "Dirt-mapped failures use structuredContent.error.code, "
-                        + "structuredContent.error.message, and structuredContent.error.callId, "
-                        + "and may add structuredContent.error.editId for reconciliation. Invalid "
-                        + "tool names or arguments fail before Dirt creates a callId; MCP SDK output "
-                        + "validation occurs outside this mapping.");
+                        + "Dirt-mapped failures put code, message, and callId in "
+                        + "structuredContent.error, with an optional editId for reconciliation.");
 
         message.append(Component.newline()).append(Component.newline());
         message.append(

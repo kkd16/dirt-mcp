@@ -502,7 +502,7 @@ export function registerInspectionTools(
     {
       title: 'Count region block states',
       description:
-        'Return a complete canonical block-state histogram for an inclusive region. Use this before exact retrieval when totals are sufficient.',
+        'Return a complete canonical block-state histogram for an inclusive region. Use this when totals are sufficient.',
       inputSchema: CountRegionBlockStatesInputSchema,
       outputSchema: CountRegionBlockStatesOutputSchema,
       annotations: READ_WORLD_ANNOTATIONS,

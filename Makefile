@@ -5,7 +5,6 @@ SHELL := /bin/bash
 MC_PORT ?= 25566
 BRIDGE_PORT ?= 8765
 DEV_TOKEN_FILE := paper-plugin/run/.dirt-mcp-token
-NODE_MODULES_STAMP := node_modules/.modules.yaml
 
 .PHONY: help doctor install node-deps build build-java build-mcp dev-build paper-runtime check verify ci format dev-token up reload down status logs console command smoke mcp health clean
 
@@ -48,12 +47,9 @@ doctor: ## Verify the required Java, Node.js, pnpm, Gradle, curl, tmux, and lint
 	@printf 'ShellCheck: %s\n' "$$(shellcheck --version | awk '/^version:/ { print $$2 }')"
 	@printf 'actionlint: %s\n' "$$(actionlint -version | awk 'NR == 1 { print $$1 }')"
 
-install: ## Install the locked Node.js dependencies.
-	pnpm install --frozen-lockfile
+install: node-deps ## Install the locked Node.js dependencies.
 
-node-deps: $(NODE_MODULES_STAMP)
-
-$(NODE_MODULES_STAMP): pnpm-lock.yaml pnpm-workspace.yaml package.json mcp-server/package.json
+node-deps:
 	pnpm install --frozen-lockfile
 
 build: build-java build-mcp ## Build the Paper plugin and MCP server.
@@ -142,7 +138,7 @@ smoke: ## Restart Paper and run the complete managed-server integration gate.
 	}
 	@scripts/validate-paper-log running
 
-mcp: build-mcp ## Run the MCP stdio server for an MCP host.
+mcp: ## Run the built MCP stdio server for an MCP host.
 	@scripts/run-dirt-mcp
 
 health: ## Run the authenticated end-to-end Dirt/Paper/FAWE ping.

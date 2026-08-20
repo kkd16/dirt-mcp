@@ -184,17 +184,38 @@ start_server() {
 }
 
 stop_server() {
+  local before_stop_command="${1:-}"
   if ! session_exists; then
     printf 'Dirt MCP development server is already stopped.\n'
     return
   fi
 
-  tmux send-keys -t "${session_name}" -l -- stop
-  tmux send-keys -t "${session_name}" Enter
+  local shutdown_log_start=0
+  local shutdown_log_identity=''
+  if [[ -f "${run_dir}/logs/latest.log" ]]; then
+    shutdown_log_start="$(wc -l < "${run_dir}/logs/latest.log")"
+    shutdown_log_identity="$(stat -c '%d:%i' "${run_dir}/logs/latest.log")"
+  fi
+
+  if [[ -n "${before_stop_command}" ]]; then
+    send_console_command "${before_stop_command}"
+  fi
+  send_console_command 'stop'
 
   local deadline=$((SECONDS + shutdown_timeout))
   while (( SECONDS < deadline )); do
     if ! session_exists; then
+      if [[ -n "${shutdown_log_identity}" && -f "${run_dir}/logs/latest.log" ]]; then
+        local current_log_identity
+        local current_log_lines
+        current_log_identity="$(stat -c '%d:%i' "${run_dir}/logs/latest.log")"
+        current_log_lines="$(wc -l < "${run_dir}/logs/latest.log")"
+        if [[ "${current_log_identity}" != "${shutdown_log_identity}" ]] \
+          || (( current_log_lines < shutdown_log_start )); then
+          shutdown_log_start=0
+        fi
+      fi
+      "${repo_root}/scripts/validate-paper-log" shutdown "${shutdown_log_start}"
       printf 'Dirt MCP development server stopped cleanly.\n'
       return
     fi
@@ -220,31 +241,7 @@ restart_server() {
     bridge_port="${state_bridge_port}"
   fi
 
-  local was_running=false
-  local shutdown_log_start=0
-  local shutdown_log_identity=''
-  local current_log_identity=''
-  local current_log_lines=0
-  if session_exists; then
-    was_running=true
-    if [[ -f "${run_dir}/logs/latest.log" ]]; then
-      shutdown_log_start="$(wc -l < "${run_dir}/logs/latest.log")"
-      shutdown_log_identity="$(stat -c '%d:%i' "${run_dir}/logs/latest.log")"
-    fi
-    send_console_command 'kick @a Server restarting for a Dirt MCP update. Please reconnect in a moment.'
-  fi
-  stop_server
-  if [[ "${was_running}" == true ]]; then
-    if [[ -n "${shutdown_log_identity}" && -f "${run_dir}/logs/latest.log" ]]; then
-      current_log_identity="$(stat -c '%d:%i' "${run_dir}/logs/latest.log")"
-      current_log_lines="$(wc -l < "${run_dir}/logs/latest.log")"
-      if [[ "${current_log_identity}" != "${shutdown_log_identity}" ]] \
-        || (( current_log_lines < shutdown_log_start )); then
-        shutdown_log_start=0
-      fi
-    fi
-    "${repo_root}/scripts/validate-paper-log" shutdown "${shutdown_log_start}"
-  fi
+  stop_server 'kick @a Server restarting for a Dirt MCP update. Please reconnect in a moment.'
   start_server "${mc_port}" "${bridge_port}"
 }
 
@@ -309,7 +306,8 @@ case "${1:-}" in
     ;;
   health)
     [[ $# -eq 1 ]] || usage
-    require_bridge_runtime
+    require_curl
+    require_token
     health_server
     ;;
   logs)
