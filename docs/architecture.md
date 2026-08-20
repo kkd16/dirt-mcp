@@ -110,8 +110,11 @@ Potentially blocking FAWE work stays off Paper's main tick thread. Any Paper API
 that requires server-thread ownership crosses a small scheduler boundary.
 Responses report success only after FAWE has completed and closed its edit
 session. Plugin chunk tickets are reference counted and held only for the
-duration of an edit or undo; runtime shutdown rejects new work and releases all
-remaining tickets before closing the scheduler boundary.
+duration of an edit or undo. Runtime shutdown rejects new work and waits a
+bounded time for active bridge workers. If editing is quiescent, Dirt releases
+its resources before closing the scheduler boundary; otherwise it leaves
+active resources intact for Paper's plugin shutdown cleanup rather than racing
+an edit that ignored interruption.
 
 `replace_region_blocks` and `fill_region` use the same already-loaded-chunk
 rule as inspection. `set_blocks` checks only the chunks containing its explicit

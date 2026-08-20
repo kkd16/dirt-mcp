@@ -121,10 +121,10 @@ detailed scans of 16,384 blocks, 512 results by default and at most 2,048, 10
 commands per request, 8,192 retained command-feedback characters, and 20 undo
 entries per world. JSON request bodies are capped at 262,144 bytes with a
 five-second upload deadline. At most 32 authenticated bridge requests and two
-inspection scans execute concurrently. Active world-operation limits are available
-through `get_server_status` and are
-configured in `plugins/DirtMCP/config.yml`; the complete shipped file is shown
-in the repository [README](../README.md#running-on-a-paper-server).
+inspection scans execute concurrently. Active world-operation limits are
+available through `get_server_status` and are configured in
+`plugins/DirtMCP/config.yml`; every shipped setting and default is documented in
+the plugin's [configuration file](../paper-plugin/src/main/resources/config.yml).
 
 Limits bound resource use; they are not a permissions or land-policy system.
 Every bridge endpoint requires the shared bearer token, the bridge binds only to

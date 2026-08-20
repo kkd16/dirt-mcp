@@ -62,37 +62,9 @@ DIRT_MCP_BRIDGE_PORT=8765 \
 java -Xms2G -Xmx2G -jar paper.jar --nogui
 ```
 
-The port may instead be set in `plugins/DirtMCP/config.yml`:
-
-```yaml
-bridge:
-  port: 8765
-  backlog: 0
-  shutdown-delay-seconds: 5
-  request-body-timeout-seconds: 5
-  minimum-token-bytes: 32
-  max-concurrent-requests: 32
-  max-concurrent-inspections: 2
-
-limits:
-  max-request-bytes: 262144
-  max-region-volume: 262144
-  max-touched-chunks: 256
-  max-inspection-touched-chunks: 32
-  max-block-state-patterns: 64
-  max-changed-blocks: 65536
-  max-inspection-volume: 16384
-  default-inspection-results: 512
-  max-inspection-results: 2048
-  max-commands-per-request: 10
-  max-command-feedback-characters: 8192
-  undo-history-per-world: 20
-
-defaults:
-  region-blocks-include-air: false
-  region-blocks-format: blocks
-  edit-dry-run: false
-```
+The port may instead be set in `plugins/DirtMCP/config.yml`. The
+[shipped configuration](paper-plugin/src/main/resources/config.yml) documents
+every setting and default.
 
 The bridge always binds to `127.0.0.1`; do not proxy or expose it publicly. Give
 the same `DIRT_MCP_BRIDGE_TOKEN` to the MCP process. Tokens must satisfy the
@@ -246,9 +218,8 @@ make verify
 ```
 
 GitHub Actions runs `make ci` from a clean dependency and build state, including
-the same managed Paper smoke suite. It retains no dependency cache or uploaded
-artifacts. Use focused native checks during iteration when the complete gate is
-unnecessary.
+the same managed Paper smoke suite. Use focused native checks during iteration
+when the complete gate is unnecessary.
 
 Read [`AGENTS.md`](AGENTS.md) for repository engineering rules and
 [`docs/`](docs/README.md) for the v1 product design.
