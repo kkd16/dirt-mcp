@@ -3,9 +3,7 @@ package ca.deliyannides.dirtmcp.paper.world.inspection;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks.BlockListResult;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks.BlockRunsResult;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks.InspectedBlock;
+import ca.deliyannides.dirtmcp.paper.world.inspection.RegionBlockAlgorithms.InspectedBlock;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.CapturedRegion;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.Viewport;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
@@ -17,7 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 
 public final class RegionInspectionService
-        implements CountRegionBlockStates, GetRegionBlocks, ScanOrthographicView {
+        implements CountRegionBlockStates, GetBlocks, ScanOrthographicView {
     private final RegionSnapshotSource snapshots;
     private final int maxRegionVolume;
     private final int maxInspectionVolume;
@@ -80,9 +78,8 @@ public final class RegionInspectionService
     }
 
     @Override
-    public GetRegionBlocks.Result getRegionBlocks(GetRegionBlocks.Request request)
-            throws OperationException {
-        validateDetailedRequest(request);
+    public GetBlocks.Result getBlocks(GetBlocks.Request request) throws OperationException {
+        validateGetBlocksRequest(request);
         validateMaxResults(request.maxResults());
         List<String> includes = canonicalPatterns(request.includeBlockStatePatterns());
         List<String> excludes = canonicalPatterns(request.excludeBlockStatePatterns());
@@ -107,28 +104,19 @@ public final class RegionInspectionService
                             this.snapshots.capture(request.world(), region, includes, excludes);
                     List<InspectedBlock> blocks =
                             RegionBlockAlgorithms.collectBlocks(
-                                    region,
-                                    capture,
-                                    request.includeAir(),
+                                    region, capture, request.includeAir());
+                    RegionBlockAlgorithms.PackedBlocks packed =
+                            RegionBlockAlgorithms.packBlocks(
+                                    region.min(),
+                                    blocks,
                                     request.maxResults(),
-                                    request.format());
-                    if (request.format() == GetRegionBlocks.Format.BLOCKS) {
-                        return new BlockListResult(
-                                capture.worldName(),
-                                region.bounds(),
-                                region.volume(),
-                                blocks.size(),
-                                "blocks",
-                                blocks);
-                    }
-
-                    return new BlockRunsResult(
+                                    this.maxBlockStatePatterns);
+                    return new GetBlocks.Result(
                             capture.worldName(),
-                            region.bounds(),
-                            region.volume(),
-                            blocks.size(),
-                            "runs",
-                            RegionBlockAlgorithms.groupSortedRuns(blocks, request.maxResults()));
+                            region.min(),
+                            packed.palettes(),
+                            packed.placements(),
+                            packed.runs());
                 });
     }
 
@@ -187,14 +175,12 @@ public final class RegionInspectionService
         RegionGeometry.touchedChunks(region, this.maxTouchedChunks);
     }
 
-    private void validateDetailedRequest(GetRegionBlocks.Request request)
-            throws OperationException {
+    private void validateGetBlocksRequest(GetBlocks.Request request) throws OperationException {
         if (request == null
                 || request.min() == null
                 || request.max() == null
                 || request.includeBlockStatePatterns() == null
-                || request.excludeBlockStatePatterns() == null
-                || request.format() == null) {
+                || request.excludeBlockStatePatterns() == null) {
             String field =
                     request == null
                             ? "request"
@@ -204,11 +190,9 @@ public final class RegionInspectionService
                                             ? "max"
                                             : request.includeBlockStatePatterns() == null
                                                     ? "includeBlockStatePatterns"
-                                                    : request.excludeBlockStatePatterns() == null
-                                                            ? "excludeBlockStatePatterns"
-                                                            : "format";
+                                                    : "excludeBlockStatePatterns";
             throw invalid(
-                    "world, min, max, pattern lists, and format are required",
+                    "world, min, max, and pattern lists are required",
                     new ErrorDetails.InvalidRequest.Missing(field));
         }
         validateWorld(request.world());

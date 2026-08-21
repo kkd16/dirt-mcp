@@ -2,7 +2,6 @@ package ca.deliyannides.dirtmcp.paper.config;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -13,8 +12,6 @@ public record DirtConfig(
         Limits limits,
         EditHistory editHistory,
         Defaults defaults) {
-    private static final Set<String> REGION_BLOCKS_FORMATS = Set.of("blocks", "runs");
-
     public DirtConfig {
         if (bridge == null
                 || tools == null
@@ -206,20 +203,7 @@ public record DirtConfig(
         }
     }
 
-    public record Defaults(
-            boolean regionBlocksIncludeAir, String regionBlocksFormat, boolean editDryRun) {
-        public Defaults {
-            if (regionBlocksFormat == null || regionBlocksFormat.isBlank()) {
-                throw new IllegalArgumentException(
-                        "defaults.region-blocks-format must be a non-empty string");
-            }
-            regionBlocksFormat = regionBlocksFormat.toLowerCase(Locale.ROOT);
-            if (!REGION_BLOCKS_FORMATS.contains(regionBlocksFormat)) {
-                throw new IllegalArgumentException(
-                        "defaults.region-blocks-format must be blocks or runs");
-            }
-        }
-    }
+    public record Defaults(boolean getBlocksIncludeAir, boolean editDryRun) {}
 
     private static void requirePositive(String path, int value) {
         if (value < 1) {

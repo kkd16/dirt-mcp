@@ -9,9 +9,13 @@ import ca.deliyannides.dirtmcp.paper.platform.MainThread;
 import ca.deliyannides.dirtmcp.paper.validation.UuidV4;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockStructure.Placement;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockStructure.Run;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import ca.deliyannides.dirtmcp.paper.world.model.RegionGeometry;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -248,9 +252,21 @@ public final class FaweWorldEditor
         requireCallId(callId);
         SetRequestGeometry geometry = validateSetRequest(request);
         EditPlatform.WorldHandle world = resolveWorld(request.world());
-        UUID editId = pendingEditId(request.dryRun());
         try (EditCoordinator.Lease lease =
                 this.coordinator.enterMutation(world.id(), world.name())) {
+            if (geometry.blocks().isEmpty()) {
+                return new SetBlocks.Result(
+                        world.name(),
+                        null,
+                        List.of(),
+                        request.seed(),
+                        EditOutcome.NO_CHANGE,
+                        0,
+                        0,
+                        0,
+                        null);
+            }
+            UUID editId = pendingEditId(request.dryRun());
             EditPlatform.EditResult execution;
             EditRecord edit = null;
             int blockCount;
@@ -259,11 +275,11 @@ public final class FaweWorldEditor
                     this.platform.prepareSet(
                             world,
                             request,
-                            geometry.positions(),
+                            geometry.blocks(),
                             geometry.bounds(),
                             geometry.chunks())) {
                 blockCount = prepared.blockCount();
-                if (blockCount != request.placements().size()) {
+                if (blockCount != geometry.blocks().size()) {
                     throw new IllegalStateException(
                             "Prepared set-blocks count does not match its validated request");
                 }
@@ -277,7 +293,7 @@ public final class FaweWorldEditor
                                             lease.reserveHistory(
                                                     Math.min(
                                                             (long) this.maxChangedBlocks,
-                                                            request.placements().size())));
+                                                            blockCount)));
                 } catch (EditRecoveryException failure) {
                     retainOrRollbackRecovery(
                             lease,
@@ -746,52 +762,90 @@ public final class FaweWorldEditor
                     new ErrorDetails.InvalidRequest.Missing(
                             request == null ? "request" : "origin"));
         }
-        validateSetPalettes(request.palettes());
-        if (request.placements() == null || request.placements().isEmpty()) {
+        if (request.placements() == null || request.runs() == null) {
+            String field = request.placements() == null ? "placements" : "runs";
             throw invalid(
-                    "placements must contain at least one entry",
-                    new ErrorDetails.InvalidRequest.InvalidValue("placements"));
+                    "placements and runs are required",
+                    new ErrorDetails.InvalidRequest.Missing(field));
         }
+        if (request.placements().isEmpty() && request.runs().isEmpty()) {
+            if (request.palettes() == null || !request.palettes().isEmpty()) {
+                throw invalid(
+                        "palettes must be empty when placements and runs are empty",
+                        new ErrorDetails.InvalidRequest.InvalidValue("palettes"));
+            }
+            return new SetRequestGeometry(List.of(), List.of(), null);
+        }
+        validateSetPalettes(request.palettes());
 
         Set<ChunkPosition> chunks = new LinkedHashSet<>();
-        Set<BlockPosition> positions = new LinkedHashSet<>();
-        BlockPosition min = null;
-        BlockPosition max = null;
-        if (request.placements().size() > this.maxRegionVolume) {
-            throw new OperationException(
-                    OperationFailure.REGION_TOO_LARGE,
-                    "Set-blocks edit contains more than the maximum of "
-                            + this.maxRegionVolume
-                            + " blocks",
-                    new ErrorDetails.RegionTooLarge.BlockCount(
-                            request.placements().size(), this.maxRegionVolume));
-        }
+        Set<BlockPosition> positions = new HashSet<>();
+        List<SetBlocks.ResolvedBlock> blocks = new ArrayList<>();
+        long requestedBlockCount = request.placements().size();
+        enforceSetBlockCount(requestedBlockCount);
         for (int placementIndex = 0;
                 placementIndex < request.placements().size();
                 placementIndex++) {
-            SetBlocks.Placement placement = request.placements().get(placementIndex);
+            Placement placement = request.placements().get(placementIndex);
             String placementName = "placements[" + placementIndex + "]";
             if (placement == null) {
                 throw invalid(
                         placementName + " is required",
                         new ErrorDetails.InvalidRequest.Missing(placementName));
             }
-            if (placement.paletteIndex() < 0
-                    || placement.paletteIndex() >= request.palettes().size()) {
+            validatePaletteIndex(
+                    placement.paletteIndex(), request.palettes().size(), placementName);
+            BlockPosition position =
+                    resolvePosition(
+                            request.origin(),
+                            placement.x(),
+                            placement.y(),
+                            placement.z(),
+                            placementName);
+            addResolvedBlock(
+                    blocks,
+                    positions,
+                    chunks,
+                    new SetBlocks.ResolvedBlock(placement.paletteIndex(), position),
+                    placementName);
+        }
+        for (int runIndex = 0; runIndex < request.runs().size(); runIndex++) {
+            Run run = request.runs().get(runIndex);
+            String runName = "runs[" + runIndex + "]";
+            if (run == null) {
                 throw invalid(
-                        placementName + "[0] must reference an entry in palettes",
-                        new ErrorDetails.InvalidRequest.OutOfRange(
-                                placementName + "[0]",
-                                placement.paletteIndex(),
-                                0,
-                                request.palettes().size() - 1));
+                        runName + " is required", new ErrorDetails.InvalidRequest.Missing(runName));
             }
-            BlockPosition position = resolvePosition(request.origin(), placement, placementName);
-            if (!positions.add(position)) {
+            validatePaletteIndex(run.paletteIndex(), request.palettes().size(), runName);
+            if (run.x() > run.toX() || run.y() > run.toY() || run.z() > run.toZ()) {
                 throw invalid(
-                        placementName + " resolves to a duplicate block position",
-                        new ErrorDetails.InvalidRequest.Duplicate(placementName));
+                        runName + " must use component-wise forward inclusive corners",
+                        new ErrorDetails.InvalidRequest.InvalidValue(runName));
             }
+            requestedBlockCount = addRunBlockCount(requestedBlockCount, run);
+            BlockPosition from =
+                    resolvePosition(request.origin(), run.x(), run.y(), run.z(), runName);
+            BlockPosition to =
+                    resolvePosition(request.origin(), run.toX(), run.toY(), run.toZ(), runName);
+            for (long y = from.y(); y <= to.y(); y++) {
+                for (long z = from.z(); z <= to.z(); z++) {
+                    for (long x = from.x(); x <= to.x(); x++) {
+                        addResolvedBlock(
+                                blocks,
+                                positions,
+                                chunks,
+                                new SetBlocks.ResolvedBlock(
+                                        run.paletteIndex(),
+                                        new BlockPosition((int) x, (int) y, (int) z)),
+                                runName);
+                    }
+                }
+            }
+        }
+
+        BlockPosition min = null;
+        BlockPosition max = null;
+        for (BlockPosition position : positions) {
             min =
                     min == null
                             ? position
@@ -806,19 +860,9 @@ public final class FaweWorldEditor
                                     Math.max(max.x(), position.x()),
                                     Math.max(max.y(), position.y()),
                                     Math.max(max.z(), position.z()));
-            chunks.add(ChunkPosition.containing(position.x(), position.z()));
-            if (chunks.size() > this.maxTouchedChunks) {
-                throw new OperationException(
-                        OperationFailure.REGION_TOO_LARGE,
-                        "Operation touches more than the maximum of "
-                                + this.maxTouchedChunks
-                                + " chunks",
-                        new ErrorDetails.RegionTooLarge.TouchedChunks(
-                                (long) this.maxTouchedChunks + 1, this.maxTouchedChunks));
-            }
         }
         return new SetRequestGeometry(
-                List.copyOf(positions),
+                blocks,
                 List.copyOf(chunks),
                 new BlockBounds(
                         Objects.requireNonNull(min, "minimum position"),
@@ -854,12 +898,74 @@ public final class FaweWorldEditor
         return palettes.stream().map(List::copyOf).toList();
     }
 
-    private static BlockPosition resolvePosition(
-            BlockPosition origin, SetBlocks.Placement placement, String field)
+    private void validatePaletteIndex(int paletteIndex, int paletteCount, String field)
             throws OperationException {
-        long x = (long) origin.x() + placement.x();
-        long y = (long) origin.y() + placement.y();
-        long z = (long) origin.z() + placement.z();
+        if (paletteIndex < 0 || paletteIndex >= paletteCount) {
+            throw invalid(
+                    field + "[0] must reference an entry in palettes",
+                    new ErrorDetails.InvalidRequest.OutOfRange(
+                            field + "[0]", paletteIndex, 0, paletteCount - 1));
+        }
+    }
+
+    private long addRunBlockCount(long current, Run run) throws OperationException {
+        long sizeX = (long) run.toX() - run.x() + 1;
+        long sizeY = (long) run.toY() - run.y() + 1;
+        long sizeZ = (long) run.toZ() - run.z() + 1;
+        long remaining = (long) this.maxRegionVolume - current;
+        if (sizeX > remaining || sizeY > remaining / sizeX || sizeZ > remaining / (sizeX * sizeY)) {
+            throw setBlockCountExceeded();
+        }
+        return current + sizeX * sizeY * sizeZ;
+    }
+
+    private void enforceSetBlockCount(long blockCount) throws OperationException {
+        if (blockCount > this.maxRegionVolume) {
+            throw setBlockCountExceeded();
+        }
+    }
+
+    private OperationException setBlockCountExceeded() {
+        return new OperationException(
+                OperationFailure.REGION_TOO_LARGE,
+                "Set-blocks edit contains more than the maximum of "
+                        + this.maxRegionVolume
+                        + " blocks",
+                new ErrorDetails.RegionTooLarge.BlockCount(
+                        (long) this.maxRegionVolume + 1, this.maxRegionVolume));
+    }
+
+    private void addResolvedBlock(
+            List<SetBlocks.ResolvedBlock> blocks,
+            Set<BlockPosition> positions,
+            Set<ChunkPosition> chunks,
+            SetBlocks.ResolvedBlock block,
+            String field)
+            throws OperationException {
+        if (!positions.add(block.position())) {
+            throw invalid(
+                    field + " resolves to a duplicate block position",
+                    new ErrorDetails.InvalidRequest.Duplicate(field));
+        }
+        blocks.add(block);
+        chunks.add(ChunkPosition.containing(block.position().x(), block.position().z()));
+        if (chunks.size() > this.maxTouchedChunks) {
+            throw new OperationException(
+                    OperationFailure.REGION_TOO_LARGE,
+                    "Operation touches more than the maximum of "
+                            + this.maxTouchedChunks
+                            + " chunks",
+                    new ErrorDetails.RegionTooLarge.TouchedChunks(
+                            (long) this.maxTouchedChunks + 1, this.maxTouchedChunks));
+        }
+    }
+
+    private static BlockPosition resolvePosition(
+            BlockPosition origin, int offsetX, int offsetY, int offsetZ, String field)
+            throws OperationException {
+        long x = (long) origin.x() + offsetX;
+        long y = (long) origin.y() + offsetY;
+        long z = (long) origin.z() + offsetZ;
         if (x < Integer.MIN_VALUE || x > Integer.MAX_VALUE) {
             throw resolvedPositionOutOfRange(field, ".resolved.x", x);
         }
@@ -999,11 +1105,14 @@ public final class FaweWorldEditor
     }
 
     private record SetRequestGeometry(
-            List<BlockPosition> positions, List<ChunkPosition> chunks, BlockBounds bounds) {
+            List<SetBlocks.ResolvedBlock> blocks, List<ChunkPosition> chunks, BlockBounds bounds) {
         private SetRequestGeometry {
-            Objects.requireNonNull(positions, "positions");
-            Objects.requireNonNull(chunks, "chunks");
-            Objects.requireNonNull(bounds, "bounds");
+            blocks = List.copyOf(Objects.requireNonNull(blocks, "blocks"));
+            chunks = List.copyOf(Objects.requireNonNull(chunks, "chunks"));
+            if (blocks.isEmpty() != (bounds == null)) {
+                throw new IllegalArgumentException(
+                        "bounds must be null exactly when set-blocks geometry is empty");
+            }
         }
     }
 }

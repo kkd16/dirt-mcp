@@ -9,6 +9,25 @@ export const BLOCK_AXES = ['x', 'y', 'z'] as const;
 const CANONICAL_UUID = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/;
 
 export const SignedInt32Schema = z.number().int().min(INT32_MIN).max(INT32_MAX);
+const PaletteIndexSchema = z.number().int().min(0).max(INT32_MAX);
+
+export const PalettePlacementSchema = z
+  .tuple([PaletteIndexSchema, SignedInt32Schema, SignedInt32Schema, SignedInt32Schema])
+  .rest(z.never())
+  .describe('Exact [paletteIndex, x, y, z] tuple with origin-relative coordinates.');
+
+export const PaletteRunSchema = z
+  .tuple([
+    PaletteIndexSchema,
+    SignedInt32Schema,
+    SignedInt32Schema,
+    SignedInt32Schema,
+    SignedInt32Schema,
+    SignedInt32Schema,
+    SignedInt32Schema,
+  ])
+  .rest(z.never())
+  .describe('Exact [paletteIndex, x, y, z, toX, toY, toZ] inclusive origin-relative cuboid tuple.');
 
 export const NonBlankStringSchema = z
   .string()

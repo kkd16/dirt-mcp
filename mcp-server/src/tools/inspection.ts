@@ -6,15 +6,17 @@ import { toolOutputSchema } from '../bridge/errors.ts';
 import type { DirtLogger } from '../logging.ts';
 import {
   BlockPositionSchema,
-  BLOCK_AXES,
   BoundsSchema,
   DimensionsSchema,
   INT32_MAX,
   MAX_BLOCK_STATE_ENTRIES,
   NonBlankStringSchema,
+  PalettePlacementSchema,
+  PaletteRunSchema,
   READ_WORLD_ANNOTATIONS,
   SignedInt32Schema,
 } from './common.ts';
+import { isForwardRun, resolveOffset, runContains, runsOverlap, structureBlockCount } from './block-structure.ts';
 import { executeToolCall, successResult } from './execution.ts';
 import type { McpToolConfiguration } from './configuration.ts';
 import {
@@ -50,7 +52,7 @@ const CountRegionBlockStatesOutputSchema = z
   .strict()
   .describe('Complete block-state histogram for the region.');
 
-export const GetRegionBlocksInputSchema = z
+export const GetBlocksInputSchema = z
   .object({
     world: NonBlankStringSchema.describe('Exact name of an already loaded Paper world.'),
     min: BlockPositionSchema.describe('One inclusive corner; ordering relative to max does not matter.'),
@@ -78,13 +80,7 @@ export const GetRegionBlocksInputSchema = z
       .max(INT32_MAX)
       .optional()
       .describe(
-        'Maximum returned blocks or runs, bounded by the active inspection-result limit. Results fail instead of truncating.',
-      ),
-    format: z
-      .enum(['blocks', 'runs'])
-      .optional()
-      .describe(
-        'blocks returns individual positions; runs returns lossless axis-aligned spans. Omission uses the plugin default.',
+        'Maximum returned placements plus runs, bounded by the active inspection-result limit. Results fail instead of truncating.',
       ),
   })
   .strict()
@@ -96,54 +92,42 @@ export const GetRegionBlocksInputSchema = z
       });
     }
   })
-  .describe('Filters and return format for exact region block data.');
+  .describe('Filters for replay-ready exact region block data.');
 
-const RegionBlocksOutputBase = {
-  world: z.string().min(1).describe('Inspected world name.'),
-  bounds: BoundsSchema,
-  volume: z.number().int().positive().describe('Total blocks scanned before filtering.'),
-  matchedBlockCount: z.number().int().nonnegative().describe('Total matching blocks represented by the response.'),
-};
+const ExactPaletteEntrySchema = z
+  .object({ blockState: z.string().min(1).describe('Exact canonical block state represented by this palette.') })
+  .strict();
 
-const GetRegionBlocksOutputSchema = z
-  .discriminatedUnion('format', [
-    z
-      .object({
-        ...RegionBlocksOutputBase,
-        format: z.literal('blocks').describe('Response contains one entry per matching block.'),
-        blocks: z
-          .array(
-            z
-              .object({
-                position: BlockPositionSchema,
-                blockState: z.string().min(1).describe('Canonical block state at position.'),
-              })
-              .strict()
-              .describe('One matching block.'),
-          )
-          .describe('Matching blocks in deterministic scan order.'),
-      })
-      .strict(),
-    z
-      .object({
-        ...RegionBlocksOutputBase,
-        format: z.literal('runs').describe('Response contains lossless axis-aligned block runs.'),
-        runs: z
-          .array(
-            z
-              .object({
-                blockState: z.string().min(1).describe('Canonical block state shared by the run.'),
-                from: BlockPositionSchema.describe('Inclusive first block of the run.'),
-                to: BlockPositionSchema.describe('Inclusive last block of the run.'),
-              })
-              .strict()
-              .describe('A lossless run of matching blocks.'),
-          )
-          .describe('Matching block runs in deterministic scan order.'),
-      })
-      .strict(),
-  ])
-  .describe('Exact matching block data; inspect format before reading blocks or runs.');
+const ExactPalettesSchema = z
+  .array(z.tuple([ExactPaletteEntrySchema]).rest(z.never()))
+  .max(MAX_BLOCK_STATE_ENTRIES)
+  .superRefine((palettes, context) => {
+    const states = new Set<string>();
+    palettes.forEach((palette, index) => {
+      const state = palette[0].blockState;
+      if (states.has(state)) {
+        context.addIssue({ code: 'custom', path: [index], message: 'Exact palettes must represent distinct states.' });
+      }
+      states.add(state);
+    });
+  })
+  .describe('First-seen exact singleton palettes referenced by placements and runs.');
+
+export const GetBlocksOutputSchema = z
+  .object({
+    world: z.string().min(1).describe('Inspected world name.'),
+    origin: BlockPositionSchema.describe('Normalized minimum requested corner used by every relative tuple.'),
+    palettes: ExactPalettesSchema,
+    placements: z.array(PalettePlacementSchema).describe('Single matching blocks as origin-relative tuples.'),
+    runs: z.array(PaletteRunSchema).describe('Matching blocks packed as origin-relative inclusive cuboids.'),
+  })
+  .strict()
+  .refine(
+    (result) =>
+      result.placements.length + result.runs.length === 0 ? result.palettes.length === 0 : result.palettes.length > 0,
+    'Palettes must be empty exactly when the returned geometry is empty.',
+  )
+  .describe('Replay-ready exact block structure accepted directly by set_blocks.');
 
 const OrthographicViewDirectionSchema = z
   .enum(['north', 'east', 'south', 'west', 'up', 'down'])
@@ -289,8 +273,8 @@ export type ScanOrthographicViewGridOutput = z.infer<typeof ScanOrthographicView
 
 type CountRegionBlockStatesInput = z.infer<typeof CountRegionBlockStatesInputSchema>;
 type CountRegionBlockStatesOutput = z.infer<typeof CountRegionBlockStatesOutputSchema>;
-type GetRegionBlocksInput = z.infer<typeof GetRegionBlocksInputSchema>;
-type GetRegionBlocksOutput = z.infer<typeof GetRegionBlocksOutputSchema>;
+type GetBlocksInput = z.infer<typeof GetBlocksInputSchema>;
+type GetBlocksOutput = z.infer<typeof GetBlocksOutputSchema>;
 type ScanOrthographicViewInput = z.infer<typeof ScanOrthographicViewInputSchema>;
 
 const VIEW_BASIS = {
@@ -352,59 +336,66 @@ export function requireMatchingCountRegionResponse(
   }
 }
 
-export function requireMatchingGetRegionResponse(expected: GetRegionBlocksInput, actual: GetRegionBlocksOutput): void {
+export function requireMatchingGetBlocksResponse(expected: GetBlocksInput, actual: GetBlocksOutput): void {
   requireMatchingWorld(expected.world, actual.world);
   const bounds = normalizedBounds(expected.min, expected.max);
   const volume = inclusiveBlockVolume(bounds);
-  if (!sameBounds(bounds, actual.bounds) || BigInt(actual.volume) !== volume) {
-    invalidBridgeResponse('Paper bridge region result did not match the requested bounds and volume.');
-  }
-  if (expected.format !== undefined && actual.format !== expected.format) {
-    invalidBridgeResponse('Paper bridge region result format did not match the explicit request.');
-  }
-  if (BigInt(actual.matchedBlockCount) > volume) {
-    invalidBridgeResponse('Paper bridge matchedBlockCount exceeded the requested region volume.');
+  if (!sameCoordinates(bounds.min, actual.origin)) {
+    invalidBridgeResponse('Paper bridge block origin did not match the normalized requested minimum.');
   }
 
-  const entries = actual.format === 'blocks' ? actual.blocks : actual.runs;
-  if (expected.maxResults !== undefined && entries.length > expected.maxResults) {
+  const entryCount = actual.placements.length + actual.runs.length;
+  if (expected.maxResults !== undefined && entryCount > expected.maxResults) {
     invalidBridgeResponse('Paper bridge region result exceeded the requested maxResults.');
   }
+  const positions = new Set<string>();
+  const referencedPalettes = new Set<number>();
+  const requirePalette = (paletteIndex: number): void => {
+    if (paletteIndex >= actual.palettes.length) {
+      invalidBridgeResponse('Paper bridge block geometry referenced a missing palette.');
+    }
+    referencedPalettes.add(paletteIndex);
+  };
+  const addPlacement = (position: { readonly x: number; readonly y: number; readonly z: number }): void => {
+    if (!containsPosition(bounds, position)) {
+      invalidBridgeResponse('Paper bridge returned block geometry outside the requested region.');
+    }
+    const key = `${position.x},${position.y},${position.z}`;
+    if (positions.has(key)) {
+      invalidBridgeResponse('Paper bridge returned overlapping block geometry.');
+    }
+    positions.add(key);
+  };
 
-  if (actual.format === 'blocks') {
-    if (actual.blocks.length !== actual.matchedBlockCount) {
-      invalidBridgeResponse('Paper bridge block entries did not match matchedBlockCount.');
-    }
-    const positions = new Set<string>();
-    for (const block of actual.blocks) {
-      if (!containsPosition(bounds, block.position)) {
-        invalidBridgeResponse('Paper bridge returned a block outside the requested region.');
-      }
-      const positionKey = `${block.position.x},${block.position.y},${block.position.z}`;
-      if (positions.has(positionKey)) {
-        invalidBridgeResponse('Paper bridge returned a duplicate block position.');
-      }
-      positions.add(positionKey);
-    }
-    return;
+  for (const placement of actual.placements) {
+    requirePalette(placement[0]);
+    const position = resolveOffset(actual.origin, placement[1], placement[2], placement[3]);
+    if (position === undefined) invalidBridgeResponse('Paper bridge returned an overflowing block placement.');
+    addPlacement(position);
   }
-
-  let representedBlocks = 0n;
-  for (const run of actual.runs) {
-    if (!containsPosition(bounds, run.from) || !containsPosition(bounds, run.to)) {
-      invalidBridgeResponse('Paper bridge returned a block run outside the requested region.');
+  for (const [runIndex, run] of actual.runs.entries()) {
+    requirePalette(run[0]);
+    if (!isForwardRun(run)) invalidBridgeResponse('Paper bridge returned a reversed block run.');
+    const from = resolveOffset(actual.origin, run[1], run[2], run[3]);
+    const to = resolveOffset(actual.origin, run[4], run[5], run[6]);
+    if (from === undefined || to === undefined || !containsPosition(bounds, from) || !containsPosition(bounds, to)) {
+      invalidBridgeResponse('Paper bridge returned an invalid block run.');
     }
-    const varyingAxes = BLOCK_AXES.filter((axis) => run.from[axis] !== run.to[axis]);
-    if (varyingAxes.length > 1 || run.from.x > run.to.x || run.from.y > run.to.y || run.from.z > run.to.z) {
-      invalidBridgeResponse('Paper bridge returned an invalid axis-aligned block run.');
+    for (const placement of actual.placements) {
+      if (runContains(run, placement[1], placement[2], placement[3])) {
+        invalidBridgeResponse('Paper bridge returned overlapping block geometry.');
+      }
     }
-    representedBlocks += inclusiveBlockVolume({ min: run.from, max: run.to });
-    if (representedBlocks > BigInt(actual.matchedBlockCount)) {
-      invalidBridgeResponse('Paper bridge block runs represented more blocks than matchedBlockCount.');
+    for (const [previousIndex, previous] of actual.runs.entries()) {
+      if (previousIndex >= runIndex) break;
+      if (runsOverlap(run, previous)) invalidBridgeResponse('Paper bridge returned overlapping block geometry.');
     }
   }
-  if (representedBlocks !== BigInt(actual.matchedBlockCount)) {
-    invalidBridgeResponse('Paper bridge block runs did not represent matchedBlockCount exactly.');
+  if (structureBlockCount(actual.placements, actual.runs) > volume) {
+    invalidBridgeResponse('Paper bridge block structure exceeded the requested region volume.');
+  }
+  if (referencedPalettes.size !== actual.palettes.length) {
+    invalidBridgeResponse('Paper bridge returned an unused exact palette.');
   }
 }
 
@@ -534,46 +525,41 @@ export function registerInspectionTools(
   );
   if (!toolConfiguration.count_region_block_states) countRegionBlockStates.disable();
 
-  const getRegionBlocks = server.registerTool(
-    'get_region_blocks',
+  const getBlocks = server.registerTool(
+    'get_blocks',
     {
-      title: 'Get region blocks',
+      title: 'Get blocks',
       description:
-        'Return filtered exact blocks or lossless runs from an inclusive region. Use filters and runs to keep output compact. Results that exceed active scan or result ceilings fail rather than truncate.' +
+        'Return filtered exact block states as replay-ready origin-relative palettes, placements, and inclusive cuboid runs. Pass the result directly to set_blocks and change only origin to copy it. Results that exceed active scan, palette, or result ceilings fail rather than truncate.' +
         (toolConfiguration.get_server_status
           ? ' The active ceilings are reported by get_server_status with include.configuration=true.'
           : ''),
-      inputSchema: GetRegionBlocksInputSchema,
-      outputSchema: toolOutputSchema(GetRegionBlocksOutputSchema),
+      inputSchema: GetBlocksInputSchema,
+      outputSchema: toolOutputSchema(GetBlocksOutputSchema),
       annotations: READ_WORLD_ANNOTATIONS,
     },
     async (input, context) =>
       executeToolCall(
         logger,
         {
-          operation: 'get_region_blocks',
+          operation: 'get_blocks',
           world: input.world,
           context,
-          failureContext: 'Could not get region blocks',
+          failureContext: 'Could not get blocks',
         },
         async (callId) => {
-          const result = await bridge.request(
-            BRIDGE_ROUTES.getRegionBlocks,
-            callId,
-            GetRegionBlocksOutputSchema,
-            input,
-          );
-          requireMatchingGetRegionResponse(input, result);
-          const entries = result.format === 'blocks' ? result.blocks.length : result.runs.length;
-          const entryKind = result.format === 'blocks' ? 'block' : 'run';
+          const result = await bridge.request(BRIDGE_ROUTES.getBlocks, callId, GetBlocksOutputSchema, input);
+          requireMatchingGetBlocksResponse(input, result);
+          const entries = result.placements.length + result.runs.length;
+          const blockCount = structureBlockCount(result.placements, result.runs);
           return successResult(
             result,
-            `Matching blocks: ${result.matchedBlockCount}; ${entryKind} entries: ${entries}; world: ${result.world}.`,
+            `Matching blocks: ${blockCount}; structure entries: ${entries}; palettes: ${result.palettes.length}; world: ${result.world}.`,
           );
         },
       ),
   );
-  if (!toolConfiguration.get_region_blocks) getRegionBlocks.disable();
+  if (!toolConfiguration.get_blocks) getBlocks.disable();
 
   const scanOrthographicView = server.registerTool(
     'scan_orthographic_view',

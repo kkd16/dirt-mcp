@@ -59,18 +59,19 @@ final class McpToolHelp {
                             "world, min{x,y,z}, max{x,y,z}.",
                             "world, normalized bounds, dimensions, volume, and blockStateCounts.",
                             "Read-only; the histogram includes air and full block-state properties.");
-            case GET_REGION_BLOCKS ->
+            case GET_BLOCKS ->
                     new ToolSpec(
-                            "Get region blocks",
+                            "Get blocks",
                             ToolKind.READ_ONLY,
-                            "Retrieves filtered exact block geometry from an inclusive cuboid.",
+                            "Returns replay-ready filtered block geometry from an inclusive cuboid.",
                             "world, min, max; optional includeBlockStatePatterns, "
-                                    + "excludeBlockStatePatterns, includeAir, maxResults, and format "
-                                    + "= blocks|runs. Pattern lists default empty; other omissions "
-                                    + "use the active Paper defaults.",
-                            "world, bounds, volume, matchedBlockCount, format, and either exact "
-                                    + "blocks or lossless runs.",
-                            "Read-only; active size limits fail the call rather than truncate results.");
+                                    + "excludeBlockStatePatterns, includeAir, and maxResults. Pattern "
+                                    + "lists default empty; other omissions use active Paper defaults.",
+                            "world, normalized-min origin, exact singleton palettes, relative "
+                                    + "placements, and inclusive relative cuboid runs.",
+                            "Read-only; the result is accepted directly by set_blocks, and changing "
+                                    + "only origin copies it elsewhere. Active size limits fail the "
+                                    + "call rather than truncate results.");
             case SCAN_ORTHOGRAPHIC_VIEW ->
                     new ToolSpec(
                             "Scan an orthographic view",
@@ -117,15 +118,17 @@ final class McpToolHelp {
                     new ToolSpec(
                             "Set blocks",
                             ToolKind.WORLD_MUTATION,
-                            "Applies one edit at distinct origin-relative positions using palettes.",
+                            "Applies one edit from replay-ready origin-relative geometry and palettes.",
                             "world, origin, palettes (arrays of {blockState,weight?}), placements = "
-                                    + "[paletteIndex,xOffset,yOffset,zOffset]; optional seed and "
-                                    + "dryRun. paletteIndex is zero-based; palette weights are all "
-                                    + "omitted or total 100. An omitted seed is generated and returned; "
-                                    + "dryRun uses the Paper default.",
-                            "world, bounds, palettes, seed, outcome, edit, blockCount, "
+                                    + "[paletteIndex,xOffset,yOffset,zOffset], and runs = "
+                                    + "[paletteIndex,xOffset,yOffset,zOffset,toXOffset,toYOffset,toZOffset]; "
+                                    + "optional seed and dryRun. Run corners are inclusive. Palette "
+                                    + "weights are all omitted or total 100.",
+                            "world, nullable bounds, palettes, seed, outcome, edit, blockCount, "
                                     + "changedBlockCount, and unchangedBlockCount.",
-                            "Validates every position first and does not trigger neighbor physics. "
+                            "Validates every expanded position and rejects overlap before mutation. "
+                                    + "Empty palettes and geometry are a valid no-op. Placement does "
+                                    + "not trigger neighbor physics. "
                                     + "Successful results use outcome preview, no_change, or committed; "
                                     + "committed non-empty edits enter undo history, and a failed edit "
                                     + "can retain a recovery_required record.");

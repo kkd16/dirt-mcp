@@ -222,7 +222,7 @@ test('accepts one strict details variant for every bridge error code', () => {
     {
       code: 'result_too_large',
       message: 'Result too large',
-      details: { reason: 'runs', minimumRequired: 1_001, maximum: 1_000 },
+      details: { reason: 'structure_entries', minimumRequired: 1_001, maximum: 1_000 },
     },
     {
       code: 'server_unavailable',
@@ -279,11 +279,11 @@ test('accepts every reason-discriminated bridge detail variant', () => {
       { reason: 'volume', dimensions: { x: 10, y: 20, z: 30 }, maximum: 5_000 },
       { reason: 'touched_chunks', minimumRequired: 101, maximum: 100 },
       { reason: 'perspective_chunks', requested: 101, maximum: 100 },
-      { reason: 'block_count', requested: 101, maximum: 100 },
+      { reason: 'block_count', minimumRequired: 101, maximum: 100 },
     ],
     result_too_large: [
-      { reason: 'blocks', minimumRequired: 101, maximum: 100 },
-      { reason: 'runs', minimumRequired: 101, maximum: 100 },
+      { reason: 'structure_entries', minimumRequired: 101, maximum: 100 },
+      { reason: 'palettes', minimumRequired: 101, maximum: 100 },
       { reason: 'visible_blocks', minimumRequired: 101, maximum: 100 },
       { reason: 'perspective_rays', minimumRequired: 101, maximum: 100 },
       { reason: 'perspective_ray_distance', minimumRequired: 101, maximum: 100 },
@@ -395,11 +395,11 @@ test('enforces Java-aligned numeric ranges and cross-field invariants', () => {
     },
     {
       code: 'region_too_large',
-      details: { reason: 'block_count', requested: INT32_MAX, maximum: INT32_MAX - 1 },
+      details: { reason: 'block_count', minimumRequired: INT32_MAX, maximum: INT32_MAX - 1 },
     },
     {
       code: 'result_too_large',
-      details: { reason: 'blocks', minimumRequired: INT32_MAX + 1, maximum: INT32_MAX },
+      details: { reason: 'structure_entries', minimumRequired: INT32_MAX + 1, maximum: INT32_MAX },
     },
     {
       code: 'world_unavailable',
@@ -535,11 +535,11 @@ test('enforces Java-aligned numeric ranges and cross-field invariants', () => {
     },
     {
       code: 'region_too_large',
-      details: { reason: 'block_count', requested: 100, maximum: 100 },
+      details: { reason: 'block_count', minimumRequired: 100, maximum: 100 },
     },
     {
       code: 'result_too_large',
-      details: { reason: 'runs', minimumRequired: 100, maximum: 100 },
+      details: { reason: 'palettes', minimumRequired: 100, maximum: 100 },
     },
   ];
 

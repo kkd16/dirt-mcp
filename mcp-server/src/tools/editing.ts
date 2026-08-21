@@ -6,16 +6,23 @@ import type { DirtLogger } from '../logging.ts';
 import { ToolFailure, toolOutputSchema } from '../bridge/errors.ts';
 import {
   BlockPositionSchema,
-  BLOCK_AXES,
   BoundsSchema,
-  INT32_MAX,
-  INT32_MIN,
   MAX_BLOCK_STATE_ENTRIES,
   NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
   NonBlankStringSchema,
+  PalettePlacementSchema,
+  PaletteRunSchema,
   READ_WORLD_ANNOTATIONS,
   SignedInt32Schema,
 } from './common.ts';
+import {
+  isForwardRun,
+  resolveOffset,
+  runContains,
+  runsOverlap,
+  structureBlockCount,
+  structureBounds,
+} from './block-structure.ts';
 import { executeToolCall, successResult } from './execution.ts';
 import type { McpToolConfiguration } from './configuration.ts';
 import { inclusiveBlockVolume, normalizedBounds, requireMatchingWorld, sameBounds } from './response-validation.ts';
@@ -127,7 +134,7 @@ const EditOutcomeSchema = z
   .describe('Whether the request previewed, made no changes, or committed an undoable edit.');
 
 interface EditResultMetadata {
-  readonly bounds: z.infer<typeof BoundsSchema>;
+  readonly bounds: z.infer<typeof BoundsSchema> | null;
   readonly changedBlockCount: number;
   readonly edit: z.infer<typeof EditRecordSchema> | null;
   readonly outcome: z.infer<typeof EditOutcomeSchema>;
@@ -147,6 +154,7 @@ function hasConsistentEditResult(
       edit.operation === expectedOperation &&
       edit.world === result.world &&
       edit.changedBlockCount === result.changedBlockCount &&
+      result.bounds !== null &&
       sameBounds(edit.bounds, result.bounds)
     );
   }
@@ -174,7 +182,7 @@ export function requireMatchingEditIdentity(
   actual: EditResultMetadata,
 ): void {
   const editId = actual.edit?.editId;
-  if (actual.world !== expectedWorld || !sameBounds(actual.bounds, expectedBounds)) {
+  if (actual.world !== expectedWorld || actual.bounds === null || !sameBounds(actual.bounds, expectedBounds)) {
     throw new ToolFailure({
       code: 'bridge_invalid_response',
       message: 'Paper bridge edit result did not match the requested world and bounds.',
@@ -261,14 +269,8 @@ export const FillRegionOutputSchema = z
   .refine((result) => result.changedBlockCount <= result.volume, 'changedBlockCount must not exceed volume.')
   .describe('Completed or previewed region fill.');
 
-const SetBlocksPlacementSchema = z
-  .array(SignedInt32Schema)
-  .length(4)
-  .describe('Exact [paletteIndex, x, y, z] tuple; x, y, and z are signed offsets from the origin.');
-
 const SetBlocksPalettesSchema = z
   .array(DestinationPaletteSchema)
-  .min(1)
   .max(MAX_BLOCK_STATE_ENTRIES)
   .superRefine((palettes, context) => {
     const entryCount = palettes.reduce((sum, palette) => sum + palette.length, 0);
@@ -280,7 +282,7 @@ const SetBlocksPalettesSchema = z
     }
   })
   .describe(
-    `One or more weighted block-state palettes referenced by zero-based index; at most ${MAX_BLOCK_STATE_ENTRIES} entries total.`,
+    `Weighted block-state palettes referenced by zero-based index; empty only for empty geometry, with at most ${MAX_BLOCK_STATE_ENTRIES} entries total.`,
   );
 
 export const SetBlocksInputSchema = z
@@ -288,23 +290,43 @@ export const SetBlocksInputSchema = z
     world: NonBlankStringSchema.describe('Exact name of an already loaded Paper world.'),
     origin: BlockPositionSchema.describe('Absolute anchor added to every placement offset.'),
     palettes: SetBlocksPalettesSchema,
-    placements: z.array(SetBlocksPlacementSchema).min(1).describe('Palette-indexed origin-relative block placements.'),
+    placements: z.array(PalettePlacementSchema).describe('Palette-indexed origin-relative block placements.'),
+    runs: z.array(PaletteRunSchema).describe('Palette-indexed origin-relative inclusive cuboids.'),
     ...EditOptionsInputShape,
   })
   .strict()
   .superRefine((input, context) => {
+    const empty = input.placements.length === 0 && input.runs.length === 0;
+    if (empty && input.palettes.length !== 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['palettes'],
+        message: 'Palettes must be empty when placements and runs are empty.',
+      });
+      return;
+    }
+    if (!empty && input.palettes.length === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['palettes'],
+        message: 'At least one palette is required for non-empty geometry.',
+      });
+      return;
+    }
+
     const positions = new Set<string>();
-    input.placements.forEach((placement, placementIndex) => {
-      const paletteIndex = placement[0]!;
-      if (paletteIndex < 0 || paletteIndex >= input.palettes.length) {
+    for (const [placementIndex, placement] of input.placements.entries()) {
+      const paletteIndex = placement[0];
+      if (paletteIndex >= input.palettes.length) {
         context.addIssue({
           code: 'custom',
           path: ['placements', placementIndex, 0],
           message: 'Palette index must reference an entry in palettes.',
         });
+        return;
       }
-      const resolved = [input.origin.x + placement[1]!, input.origin.y + placement[2]!, input.origin.z + placement[3]!];
-      if (resolved.some((coordinate) => coordinate < INT32_MIN || coordinate > INT32_MAX)) {
+      const resolved = resolveOffset(input.origin, placement[1], placement[2], placement[3]);
+      if (resolved === undefined) {
         context.addIssue({
           code: 'custom',
           path: ['placements', placementIndex],
@@ -312,33 +334,99 @@ export const SetBlocksInputSchema = z
         });
         return;
       }
-      const key = resolved.join(',');
+      const key = `${resolved.x},${resolved.y},${resolved.z}`;
       if (positions.has(key)) {
         context.addIssue({
           code: 'custom',
           path: ['placements', placementIndex],
           message: 'Resolved block positions must be distinct.',
         });
+        return;
       }
       positions.add(key);
-    });
+    }
+
+    for (const [runIndex, run] of input.runs.entries()) {
+      const paletteIndex = run[0];
+      if (paletteIndex >= input.palettes.length) {
+        context.addIssue({
+          code: 'custom',
+          path: ['runs', runIndex, 0],
+          message: 'Palette index must reference an entry in palettes.',
+        });
+        return;
+      }
+      if (!isForwardRun(run)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['runs', runIndex],
+          message: 'Run must use component-wise forward inclusive corners.',
+        });
+        return;
+      }
+      if (
+        resolveOffset(input.origin, run[1], run[2], run[3]) === undefined ||
+        resolveOffset(input.origin, run[4], run[5], run[6]) === undefined
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['runs', runIndex],
+          message: 'Resolved run corners must use signed 32-bit coordinates.',
+        });
+        return;
+      }
+      for (const [placementIndex, placement] of input.placements.entries()) {
+        if (runContains(run, placement[1], placement[2], placement[3])) {
+          context.addIssue({
+            code: 'custom',
+            path: ['runs', runIndex],
+            message: `Run overlaps placements[${placementIndex}].`,
+          });
+          return;
+        }
+      }
+      for (const [otherIndex, other] of input.runs.entries()) {
+        if (otherIndex >= runIndex) break;
+        if (runsOverlap(run, other)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['runs', runIndex],
+            message: `Run overlaps runs[${otherIndex}].`,
+          });
+          return;
+        }
+      }
+    }
   })
-  .describe('One undoable weighted-palette block edit at origin-relative offsets.');
+  .describe('One undoable weighted-palette edit from origin-relative placements and cuboids.');
 
 export const SetBlocksOutputSchema = z
   .object({
     world: z.string().min(1).describe('Edited world name.'),
-    bounds: BoundsSchema.describe('Smallest inclusive bounds containing every requested position.'),
+    bounds: BoundsSchema.nullable().describe(
+      'Smallest inclusive bounds containing every requested block, or null when empty.',
+    ),
     palettes: SetBlocksPalettesSchema.describe('Canonical palettes used by the edit.'),
     seed: SeedSchema.describe('Supplied request seed, or the generated seed when the request omitted one.'),
     outcome: EditOutcomeSchema.describe('Explicit dryRun=true requires preview; false excludes preview.'),
     edit: EditRecordSchema.nullable().describe('Retained edit metadata, present only for a committed outcome.'),
-    blockCount: z.number().int().positive().describe('Number of requested placements.'),
+    blockCount: z.number().int().nonnegative().describe('Number of expanded unique requested blocks.'),
     changedBlockCount: z.number().int().nonnegative().describe('Blocks changed, or that would change in a dry run.'),
     unchangedBlockCount: z.number().int().nonnegative().describe('Blocks already in their requested state.'),
   })
   .strict()
-  .refine((result) => hasConsistentEditResult(result, 'set_blocks'), EditResultMessage)
+  .refine(
+    (result) =>
+      result.blockCount === 0
+        ? result.bounds === null &&
+          result.palettes.length === 0 &&
+          result.outcome === 'no_change' &&
+          result.edit === null &&
+          result.changedBlockCount === 0 &&
+          result.unchangedBlockCount === 0
+        : result.bounds !== null && result.palettes.length > 0 && hasConsistentEditResult(result, 'set_blocks'),
+    EditResultMessage,
+  )
   .refine(
     (result) => result.changedBlockCount + result.unchangedBlockCount === result.blockCount,
     'changedBlockCount and unchangedBlockCount must sum to blockCount.',
@@ -397,14 +485,21 @@ export function requireMatchingEditOptions(
   expectedDryRun: boolean | undefined,
   actual: EditResultMetadata & { readonly seed: number },
 ): void {
-  if (expectedSeed !== undefined && actual.seed !== expectedSeed) {
-    invalidEditResult(actual, 'Paper bridge edit result seed did not match the request.');
-  }
+  requireMatchingSeed(expectedSeed, actual);
   if (
     (expectedDryRun === true && actual.outcome !== 'preview') ||
     (expectedDryRun === false && actual.outcome === 'preview')
   ) {
     invalidEditResult(actual, 'Paper bridge edit outcome did not match the explicit dryRun request.');
+  }
+}
+
+function requireMatchingSeed(
+  expectedSeed: number | undefined,
+  actual: EditResultMetadata & { readonly seed: number },
+): void {
+  if (expectedSeed !== undefined && actual.seed !== expectedSeed) {
+    invalidEditResult(actual, 'Paper bridge edit result seed did not match the request.');
   }
 }
 
@@ -427,36 +522,14 @@ export function requireMatchingFillVolume(
 }
 
 export function requireMatchingSetBlockCount(
-  expectedCount: number,
+  expectedCount: bigint,
   actual: EditResultMetadata & {
     readonly blockCount: number;
   },
 ): void {
-  if (actual.blockCount !== expectedCount) {
-    invalidEditResult(actual, 'Paper bridge blockCount did not match the number of requested placements.');
+  if (BigInt(actual.blockCount) !== expectedCount) {
+    invalidEditResult(actual, 'Paper bridge blockCount did not match the expanded requested geometry.');
   }
-}
-
-function setBlocksBounds(input: z.infer<typeof SetBlocksInputSchema>): z.infer<typeof BoundsSchema> {
-  const first = input.placements[0]!;
-  const initial = {
-    x: input.origin.x + first[1]!,
-    y: input.origin.y + first[2]!,
-    z: input.origin.z + first[3]!,
-  };
-  const bounds = { min: { ...initial }, max: { ...initial } };
-  for (const placement of input.placements.slice(1)) {
-    const position = {
-      x: input.origin.x + placement[1]!,
-      y: input.origin.y + placement[2]!,
-      z: input.origin.z + placement[3]!,
-    };
-    for (const axis of BLOCK_AXES) {
-      bounds.min[axis] = Math.min(bounds.min[axis], position[axis]);
-      bounds.max[axis] = Math.max(bounds.max[axis], position[axis]);
-    }
-  }
-  return bounds;
 }
 
 const UndoEditInputSchema = z
@@ -559,7 +632,7 @@ export function registerEditingTools(
     {
       title: 'Set blocks',
       description:
-        'Place blocks from weighted palettes at distinct origin-relative positions, using one FAWE edit and one retained Dirt history entry. Each placement is [paletteIndex, x, y, z], where paletteIndex is zero-based. Omit every weight in a palette for equal probability, or provide whole percentages totaling 100. Reuse the returned seed to replay a preview. All states and resolved positions are validated before mutation. Keep palettes and the encoded request within the active configured limits.' +
+        'Place blocks from weighted palettes using origin-relative singleton placements and forward inclusive cuboids. Each placement is [paletteIndex, x, y, z]; each run is [paletteIndex, x, y, z, toX, toY, toZ]. Palette indexes are zero-based and represented blocks cannot overlap. Omit every weight in a palette for equal probability, or provide whole percentages totaling 100. Change only origin on a get_blocks result to copy its exact structure elsewhere. Empty palettes, placements, and runs are a valid no-op. Reuse the returned seed to replay a preview. All states and resolved geometry are validated before mutation. Keep the expanded block count, palettes, and encoded request within the active configured limits.' +
         (toolConfiguration.get_server_status
           ? ' Those limits are reported by get_server_status with include.configuration=true.'
           : '') +
@@ -574,9 +647,16 @@ export function registerEditingTools(
         { operation: 'set_blocks', world: input.world, context, failureContext: 'Could not set blocks' },
         async (callId) => {
           const result = await bridge.request(BRIDGE_ROUTES.setBlocks, callId, SetBlocksOutputSchema, input);
-          requireMatchingEditIdentity(input.world, setBlocksBounds(input), callId, result);
-          requireMatchingEditOptions(input.seed, input.dryRun, result);
-          requireMatchingSetBlockCount(input.placements.length, result);
+          const bounds = structureBounds(input.origin, input.placements, input.runs);
+          const expectedBlockCount = structureBlockCount(input.placements, input.runs);
+          if (bounds === null) {
+            requireMatchingWorld(input.world, result.world);
+            requireMatchingSeed(input.seed, result);
+          } else {
+            requireMatchingEditIdentity(input.world, bounds, callId, result);
+            requireMatchingEditOptions(input.seed, input.dryRun, result);
+          }
+          requireMatchingSetBlockCount(expectedBlockCount, result);
           const verb = result.outcome === 'preview' ? 'Would change' : 'Changed';
           const editSummary = result.edit === null ? '' : ` Edit ID: ${result.edit.editId}.`;
           return successResult(

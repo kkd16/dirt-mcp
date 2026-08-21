@@ -33,8 +33,7 @@ public final class DirtConfigLoader {
                     "edit-history.max-entries-per-world",
                     "edit-history.max-entries-total",
                     "edit-history.max-retained-changed-blocks",
-                    "defaults.region-blocks-include-air",
-                    "defaults.region-blocks-format",
+                    "defaults.get-blocks-include-air",
                     "defaults.edit-dry-run");
     private static final Set<String> TOOL_PATHS =
             Arrays.stream(McpTool.values())
@@ -79,8 +78,7 @@ public final class DirtConfigLoader {
                         requiredInteger(config, "edit-history.max-entries-total"),
                         requiredInteger(config, "edit-history.max-retained-changed-blocks")),
                 new DirtConfig.Defaults(
-                        requiredBoolean(config, "defaults.region-blocks-include-air"),
-                        requiredString(config, "defaults.region-blocks-format"),
+                        requiredBoolean(config, "defaults.get-blocks-include-air"),
                         requiredBoolean(config, "defaults.edit-dry-run")));
     }
 

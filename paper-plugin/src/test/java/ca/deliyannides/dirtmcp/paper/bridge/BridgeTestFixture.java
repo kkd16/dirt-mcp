@@ -2,10 +2,10 @@ package ca.deliyannides.dirtmcp.paper.bridge;
 
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.CountRegionBlockStatesEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.FillRegionEndpoint;
+import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetEditHistoryEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetPerspectiveViewEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetPlayerContextEndpoint;
-import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetRegionBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.PingEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ReplaceRegionBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.RunMinecraftCommandsEndpoint;
@@ -30,9 +30,9 @@ import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
+import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.PlayerIdentity;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
@@ -72,7 +72,7 @@ final class BridgeTestFixture {
                 new DirtConfig.Limits(
                         262_144, 1_000_000, 256, 32, 64, 250_000, 32_768, 321, 654, 10, 8_192),
                 new DirtConfig.EditHistory(20, 100, 1_000_000),
-                new DirtConfig.Defaults(false, "blocks", false));
+                new DirtConfig.Defaults(false, false));
     }
 
     static BridgeServer server(DirtConfig config, TestOperations operations) {
@@ -90,7 +90,7 @@ final class BridgeTestFixture {
                         new PingEndpoint(operations),
                         new ServerStatusEndpoint(operations),
                         new CountRegionBlockStatesEndpoint(operations),
-                        new GetRegionBlocksEndpoint(operations, config),
+                        new GetBlocksEndpoint(operations, config),
                         new ScanOrthographicViewEndpoint(operations, config),
                         new GetPlayerContextEndpoint(operations),
                         new GetPerspectiveViewEndpoint(operations),
@@ -133,7 +133,7 @@ final class BridgeTestFixture {
             implements PingServer,
                     GetServerStatus,
                     CountRegionBlockStates,
-                    GetRegionBlocks,
+                    GetBlocks,
                     ScanOrthographicView,
                     GetPlayerContext,
                     GetPerspectiveView,
@@ -169,7 +169,7 @@ final class BridgeTestFixture {
                     new GetServerStatus.EffectiveLimits(
                             262_144, 1_000_000, 256, 32, 64, 250_000, 32_768, 321, 654, 10, 8_192),
                     new GetServerStatus.EffectiveEditHistory(20, 100, 1_000_000),
-                    new GetServerStatus.EffectiveDefaults(false, "blocks", false));
+                    new GetServerStatus.EffectiveDefaults(false, false));
         }
 
         @Override
@@ -184,15 +184,9 @@ final class BridgeTestFixture {
         }
 
         @Override
-        public GetRegionBlocks.Result getRegionBlocks(GetRegionBlocks.Request request)
-                throws OperationException {
-            return new GetRegionBlocks.BlockListResult(
-                    request.world(),
-                    new BlockBounds(request.min(), request.max()),
-                    1,
-                    0,
-                    "blocks",
-                    List.of());
+        public GetBlocks.Result getBlocks(GetBlocks.Request request) throws OperationException {
+            return new GetBlocks.Result(
+                    request.world(), request.min(), List.of(), List.of(), List.of());
         }
 
         @Override

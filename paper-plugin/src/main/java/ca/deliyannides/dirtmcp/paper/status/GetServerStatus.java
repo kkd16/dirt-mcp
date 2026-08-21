@@ -87,6 +87,5 @@ public interface GetServerStatus {
     record EffectiveEditHistory(
             int maxEntriesPerWorld, int maxEntriesTotal, int maxRetainedChangedBlocks) {}
 
-    record EffectiveDefaults(
-            boolean regionBlocksIncludeAir, String regionBlocksFormat, boolean editDryRun) {}
+    record EffectiveDefaults(boolean getBlocksIncludeAir, boolean editDryRun) {}
 }

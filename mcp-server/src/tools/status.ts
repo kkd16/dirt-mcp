@@ -123,8 +123,7 @@ export const EditHistoryConfigurationSchema = z
 
 const DefaultConfigurationSchema = z
   .object({
-    regionBlocksIncludeAir: z.boolean().describe('Default air inclusion for exact region retrieval.'),
-    regionBlocksFormat: z.enum(['blocks', 'runs']).describe('Default exact region-retrieval format.'),
+    getBlocksIncludeAir: z.boolean().describe('Default air inclusion for exact block retrieval.'),
     editDryRun: z.boolean().describe('Default dry-run behavior for every Dirt block-edit tool.'),
   })
   .strict()

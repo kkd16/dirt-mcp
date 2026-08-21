@@ -12,11 +12,12 @@ import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
+import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
@@ -122,6 +123,22 @@ public final class BridgeExchange {
 
     public void world(String world) {
         this.world = world;
+    }
+
+    public void bounds(BlockPosition first, BlockPosition second) {
+        Objects.requireNonNull(first, "first");
+        Objects.requireNonNull(second, "second");
+        BlockPosition minimum =
+                new BlockPosition(
+                        Math.min(first.x(), second.x()),
+                        Math.min(first.y(), second.y()),
+                        Math.min(first.z(), second.z()));
+        BlockPosition maximum =
+                new BlockPosition(
+                        Math.max(first.x(), second.x()),
+                        Math.max(first.y(), second.y()),
+                        Math.max(first.z(), second.z()));
+        this.bounds = bounds(new BlockBounds(minimum, maximum));
     }
 
     public UUID requiredCallId() throws OperationException {
@@ -287,10 +304,7 @@ public final class BridgeExchange {
                 this.bounds = bounds(result.bounds());
                 this.resultCount = (long) result.blockStateCounts().size();
             }
-            case GetRegionBlocks.Result result -> {
-                this.bounds = bounds(result.bounds());
-                this.resultCount = result.matchedBlockCount();
-            }
+            case GetBlocks.Result result -> this.resultCount = result.blockCount();
             case ScanOrthographicView.Result result -> {
                 this.bounds = bounds(result.bounds());
                 this.resultCount = result.visibleBlockCount();
@@ -329,6 +343,9 @@ public final class BridgeExchange {
     }
 
     private static String bounds(BlockBounds value) {
+        if (value == null) {
+            return null;
+        }
         return value.min().x()
                 + ","
                 + value.min().y()

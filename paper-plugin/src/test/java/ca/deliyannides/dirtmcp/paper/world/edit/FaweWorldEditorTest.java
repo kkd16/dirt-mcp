@@ -13,6 +13,8 @@ import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockStructure.Placement;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockStructure.Run;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -128,7 +130,39 @@ final class FaweWorldEditorTest {
     }
 
     @Test
-    void passesResolvedSetGeometryToThePlatformInPlacementOrder() throws Exception {
+    void emptySetIsANoOpWithoutPreparingFaweOrHistory() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        FaweWorldEditor editor = editor(platform, 3);
+
+        SetBlocks.Result result =
+                set(
+                        editor,
+                        new SetBlocks.Request(
+                                "world",
+                                position(10, 64, 10),
+                                List.of(),
+                                List.of(),
+                                List.of(),
+                                13,
+                                true));
+
+        assertEquals("world", result.world());
+        assertNull(result.bounds());
+        assertEquals(List.of(), result.palettes());
+        assertEquals(13, result.seed());
+        assertEquals(EditOutcome.NO_CHANGE, result.outcome());
+        assertEquals(0, result.blockCount());
+        assertEquals(0, result.changedBlockCount());
+        assertEquals(0, result.unchangedBlockCount());
+        assertNull(result.edit());
+        assertEquals(1, platform.resolveCalls);
+        assertEquals(0, platform.prepareCalls);
+        assertEquals(0, platform.executeCalls);
+        assertEquals(List.of(), history(editor, "world"));
+    }
+
+    @Test
+    void expandsRunsAndPassesResolvedSetGeometryToThePlatformInWireOrder() throws Exception {
         FakePlatform platform = new FakePlatform();
         FaweWorldEditor editor = editor(platform, 3);
 
@@ -138,14 +172,16 @@ final class FaweWorldEditorTest {
                         "world",
                         position(15, 64, -17),
                         palettes(),
-                        List.of(placement(-1, 2, 3), placement(2, -3, 20)),
+                        List.of(placement(-1, 2, 3)),
+                        List.of(new Run(0, 2, -3, 20, 3, -3, 20)),
                         13,
                         true));
 
         assertEquals(
-                List.of(position(14, 66, -14), position(17, 61, 3)), platform.lastSetPositions);
+                List.of(position(14, 66, -14), position(17, 61, 3), position(18, 61, 3)),
+                platform.lastSetPositions);
         assertEquals(
-                new BlockBounds(position(14, 61, -14), position(17, 66, 3)),
+                new BlockBounds(position(14, 61, -14), position(18, 66, 3)),
                 platform.lastSetBounds);
         assertEquals(
                 List.of(new ChunkPosition(0, -1), new ChunkPosition(1, 0)), platform.lastSetChunks);
@@ -234,6 +270,7 @@ final class FaweWorldEditorTest {
                                         position(0, 0, 0),
                                         palettes(),
                                         List.of(),
+                                        List.of(),
                                         0,
                                         false)));
         OperationException paletteReference =
@@ -246,7 +283,8 @@ final class FaweWorldEditorTest {
                                                 "world",
                                                 position(0, 0, 0),
                                                 palettes(),
-                                                List.of(new SetBlocks.Placement(1, 0, 0, 0)),
+                                                List.of(new Placement(1, 0, 0, 0)),
+                                                List.of(),
                                                 0,
                                                 false)));
         assertEquals(OperationFailure.INVALID_REQUEST, paletteReference.failure());
@@ -272,7 +310,8 @@ final class FaweWorldEditorTest {
                                                 "world",
                                                 position(Integer.MAX_VALUE, 0, 0),
                                                 palettes(),
-                                                List.of(new SetBlocks.Placement(0, 1, 0, 0)),
+                                                List.of(new Placement(0, 1, 0, 0)),
+                                                List.of(),
                                                 0,
                                                 false)));
         assertEquals(OperationFailure.INVALID_REQUEST, coordinateOverflow.failure());
@@ -375,6 +414,7 @@ final class FaweWorldEditorTest {
                                         null,
                                         palettes(),
                                         List.of(placement(0, 0, 0)),
+                                        List.of(),
                                         0,
                                         false)));
         assertFailure(
@@ -387,6 +427,7 @@ final class FaweWorldEditorTest {
                                         origin,
                                         null,
                                         List.of(placement(0, 0, 0)),
+                                        List.of(),
                                         0,
                                         false)));
         assertFailure(
@@ -399,6 +440,7 @@ final class FaweWorldEditorTest {
                                         origin,
                                         List.of(List.of(new DestinationPaletteEntry(" ", null))),
                                         List.of(placement(0, 0, 0)),
+                                        List.of(),
                                         0,
                                         false)));
         assertFailure(
@@ -416,6 +458,7 @@ final class FaweWorldEditorTest {
                                                         new DestinationPaletteEntry(
                                                                 "minecraft:dirt", null))),
                                         List.of(placement(0, 0, 0)),
+                                        List.of(),
                                         0,
                                         false)));
         assertFailure(
@@ -436,6 +479,7 @@ final class FaweWorldEditorTest {
                                                         new DestinationPaletteEntry(
                                                                 "minecraft:dirt", null))),
                                         List.of(placement(0, 0, 0)),
+                                        List.of(),
                                         0,
                                         false)));
         assertFailure(
@@ -448,6 +492,7 @@ final class FaweWorldEditorTest {
                                         origin,
                                         palettes(),
                                         java.util.Collections.singletonList(null),
+                                        List.of(),
                                         0,
                                         false)));
         assertFailure(
@@ -459,7 +504,8 @@ final class FaweWorldEditorTest {
                                         "world",
                                         origin,
                                         palettes(),
-                                        List.of(new SetBlocks.Placement(-1, 0, 0, 0)),
+                                        List.of(new Placement(-1, 0, 0, 0)),
+                                        List.of(),
                                         0,
                                         false)));
         assertFailure(
@@ -472,8 +518,81 @@ final class FaweWorldEditorTest {
                                         origin,
                                         List.of(java.util.Collections.emptyList()),
                                         List.of(placement(0, 0, 0)),
+                                        List.of(),
                                         0,
                                         false)));
+    }
+
+    @Test
+    void rejectsReversedOverlappingOverflowingAndOversizedRuns() {
+        FaweWorldEditor editor = editor(new FakePlatform(), 3);
+        BlockPosition origin = position(0, 0, 0);
+
+        assertFailure(
+                OperationFailure.INVALID_REQUEST,
+                () ->
+                        set(
+                                editor,
+                                new SetBlocks.Request(
+                                        "world",
+                                        origin,
+                                        palettes(),
+                                        List.of(),
+                                        List.of(new Run(0, 1, 0, 0, 0, 0, 0)),
+                                        0,
+                                        false)));
+        OperationException overlap =
+                assertThrows(
+                        OperationException.class,
+                        () ->
+                                set(
+                                        editor,
+                                        new SetBlocks.Request(
+                                                "world",
+                                                origin,
+                                                palettes(),
+                                                List.of(placement(1, 0, 0)),
+                                                List.of(new Run(0, 0, 0, 0, 2, 0, 0)),
+                                                0,
+                                                false)));
+        assertEquals(
+                new ErrorDetails.InvalidRequest.Duplicate("runs[0]"),
+                overlap.details().orElseThrow());
+        assertFailure(
+                OperationFailure.INVALID_REQUEST,
+                () ->
+                        set(
+                                editor,
+                                new SetBlocks.Request(
+                                        "world",
+                                        position(Integer.MAX_VALUE, 0, 0),
+                                        palettes(),
+                                        List.of(),
+                                        List.of(new Run(0, 0, 0, 0, 1, 0, 0)),
+                                        0,
+                                        false)));
+
+        FaweWorldEditor smallEditor =
+                new FaweWorldEditor(
+                        new FakePlatform(), 3, 10, MAX_BLOCK_STATE_PATTERNS, 3, history(3));
+        OperationException oversized =
+                assertThrows(
+                        OperationException.class,
+                        () ->
+                                set(
+                                        smallEditor,
+                                        new SetBlocks.Request(
+                                                "world",
+                                                origin,
+                                                palettes(),
+                                                List.of(),
+                                                List.of(new Run(0, 0, 0, 0, 3, 0, 0)),
+                                                0,
+                                                false)));
+        assertEquals(OperationFailure.REGION_TOO_LARGE, oversized.failure());
+        assertEquals(
+                new ErrorDetails.RegionTooLarge.BlockCount(4, 3),
+                oversized.details().orElseThrow());
     }
 
     @Test
@@ -867,21 +986,26 @@ final class FaweWorldEditorTest {
     void requestListsAreDefensiveCopies() {
         List<DestinationPaletteEntry> palette = new ArrayList<>(palette());
         List<List<DestinationPaletteEntry>> palettes = new ArrayList<>(List.of(palette));
-        List<SetBlocks.Placement> placements = new ArrayList<>(List.of(placement(0, 0, 0)));
+        List<Placement> placements = new ArrayList<>(List.of(placement(0, 0, 0)));
+        List<Run> runs = new ArrayList<>(List.of(new Run(0, 1, 0, 0, 2, 0, 0)));
         SetBlocks.Request request =
-                new SetBlocks.Request("world", position(0, 0, 0), palettes, placements, 13, false);
+                new SetBlocks.Request(
+                        "world", position(0, 0, 0), palettes, placements, runs, 13, false);
 
         palette.clear();
         palettes.clear();
         placements.clear();
+        runs.clear();
 
         assertEquals(1, request.palettes().size());
         assertEquals(1, request.palettes().getFirst().size());
         assertEquals(1, request.placements().size());
+        assertEquals(1, request.runs().size());
         assertThrows(UnsupportedOperationException.class, () -> request.palettes().clear());
         assertThrows(
                 UnsupportedOperationException.class, () -> request.palettes().getFirst().clear());
         assertThrows(UnsupportedOperationException.class, () -> request.placements().clear());
+        assertThrows(UnsupportedOperationException.class, () -> request.runs().clear());
     }
 
     private static FaweWorldEditor editor(FakePlatform platform, int history) {
@@ -932,12 +1056,13 @@ final class FaweWorldEditorTest {
     }
 
     private static SetBlocks.Request setRequest(
-            String world, List<SetBlocks.Placement> placements, boolean dryRun) {
-        return new SetBlocks.Request(world, position(0, 0, 0), palettes(), placements, 13, dryRun);
+            String world, List<Placement> placements, boolean dryRun) {
+        return new SetBlocks.Request(
+                world, position(0, 0, 0), palettes(), placements, List.of(), 13, dryRun);
     }
 
-    private static SetBlocks.Placement placement(int x, int y, int z) {
-        return new SetBlocks.Placement(0, x, y, z);
+    private static Placement placement(int x, int y, int z) {
+        return new Placement(0, x, y, z);
     }
 
     private static BlockPosition position(int x, int y, int z) {
@@ -1025,13 +1150,14 @@ final class FaweWorldEditorTest {
         public PreparedSet prepareSet(
                 WorldHandle world,
                 SetBlocks.Request request,
-                List<BlockPosition> resolvedPositions,
+                List<SetBlocks.ResolvedBlock> resolvedBlocks,
                 BlockBounds bounds,
                 List<ChunkPosition> touchedChunks) {
-            this.lastSetPositions = List.copyOf(resolvedPositions);
+            this.lastSetPositions =
+                    resolvedBlocks.stream().map(SetBlocks.ResolvedBlock::position).toList();
             this.lastSetBounds = bounds;
             this.lastSetChunks = List.copyOf(touchedChunks);
-            return prepared(world, List.of(), request.placements().size());
+            return prepared(world, List.of(), resolvedBlocks.size());
         }
 
         private FakePrepared prepared(

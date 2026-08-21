@@ -28,6 +28,8 @@ const stairMiddle = { x: 3, y: 0, z: 0 };
 const stairMax = { x: 4, y: 0, z: 0 };
 const setMin = { x: 5, y: 0, z: 0 };
 const setMax = { x: 6, y: 0, z: 0 };
+const copyMin = { x: 7, y: 0, z: 0 };
+const copyMax = { x: 8, y: 0, z: 0 };
 const northStairs = 'minecraft:dark_oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]';
 const southStairs = 'minecraft:dark_oak_stairs[facing=south,half=bottom,shape=straight,waterlogged=false]';
 const baseUrl = `http://127.0.0.1:${bridgePort}`;
@@ -42,7 +44,7 @@ const inspectionPaths = new Set([
   '/v1/count-region-block-states',
   '/v1/get-player-context',
   '/v1/get-perspective-view',
-  '/v1/get-region-blocks',
+  '/v1/get-blocks',
   '/v1/scan-orthographic-view',
 ]);
 
@@ -242,14 +244,13 @@ async function waitForRestoredBlock(position, blockState) {
     try {
       // Restoration readiness retries are deliberately serial.
       // oxlint-disable-next-line eslint/no-await-in-loop
-      const inspection = await bridgeRequest('/v1/get-region-blocks', {
+      const inspection = await bridgeRequest('/v1/get-blocks', {
         world,
         min: position,
         max: position,
         includeAir: true,
-        format: 'blocks',
       });
-      observedState = inspection.blocks[0]?.blockState;
+      observedState = expandStructure(inspection)[0]?.blockState;
       if (observedState === blockState) return;
     } catch {
       // A transient bridge failure is retried until the bounded deadline below.
@@ -282,6 +283,39 @@ function sortedBlockKeys(blocks) {
   return blocks.map(({ position, blockState }) => `${position.x},${position.y},${position.z}:${blockState}`).toSorted();
 }
 
+function relativeBlockKeys(structure) {
+  return expandStructure(structure)
+    .map(
+      ({ position, blockState }) =>
+        `${position.x - structure.origin.x},${position.y - structure.origin.y},${position.z - structure.origin.z}:${blockState}`,
+    )
+    .toSorted();
+}
+
+function expandStructure(structure) {
+  const blocks = [];
+  const add = (paletteIndex, x, y, z) => {
+    const palette = structure.palettes[paletteIndex];
+    assert.equal(palette?.length, 1, 'Exact get_blocks palettes must be singletons');
+    assert.equal(Object.hasOwn(palette[0], 'weight'), false, 'Exact get_blocks palettes cannot be weighted');
+    blocks.push({
+      position: { x: structure.origin.x + x, y: structure.origin.y + y, z: structure.origin.z + z },
+      blockState: palette[0].blockState,
+    });
+  };
+  for (const [paletteIndex, x, y, z] of structure.placements) add(paletteIndex, x, y, z);
+  for (const [paletteIndex, x, y, z, toX, toY, toZ] of structure.runs) {
+    assert.ok(x <= toX && y <= toY && z <= toZ, 'Runs must use forward inclusive corners');
+    for (let offsetY = y; offsetY <= toY; offsetY += 1) {
+      for (let offsetZ = z; offsetZ <= toZ; offsetZ += 1) {
+        for (let offsetX = x; offsetX <= toX; offsetX += 1) add(paletteIndex, offsetX, offsetY, offsetZ);
+      }
+    }
+  }
+  assert.equal(new Set(blocks.map(({ position }) => `${position.x},${position.y},${position.z}`)).size, blocks.length);
+  return blocks;
+}
+
 function expectedBlockKeys(blockState) {
   const blocks = [];
   for (let y = min.y; y <= max.y; y += 1) {
@@ -294,29 +328,11 @@ function expectedBlockKeys(blockState) {
   return blocks.toSorted();
 }
 
-function expandedRunKeys(runs) {
-  const blocks = [];
-  for (const run of runs) {
-    assert.ok(run.from.x <= run.to.x && run.from.y <= run.to.y && run.from.z <= run.to.z);
-    const varyingAxes = ['x', 'y', 'z'].filter((axis) => run.from[axis] !== run.to[axis]);
-    assert.ok(varyingAxes.length <= 1, 'Each run must be axis-aligned');
-    for (let y = run.from.y; y <= run.to.y; y += 1) {
-      for (let z = run.from.z; z <= run.to.z; z += 1) {
-        for (let x = run.from.x; x <= run.to.x; x += 1) {
-          blocks.push(`${x},${y},${z}:${run.blockState}`);
-        }
-      }
-    }
-  }
-  return blocks.toSorted();
-}
-
 function assertExactBlocks(inspection, blockState) {
-  assert.equal(inspection.format, 'blocks');
-  assert.equal(inspection.volume, 8);
-  assert.equal(inspection.matchedBlockCount, 8);
-  assert.deepEqual(inspection.bounds, { min, max });
-  assert.deepEqual(sortedBlockKeys(inspection.blocks), expectedBlockKeys(blockState));
+  const blocks = expandStructure(inspection);
+  assert.deepEqual(inspection.origin, min);
+  assert.equal(blocks.length, 8);
+  assert.deepEqual(sortedBlockKeys(blocks), expectedBlockKeys(blockState));
 }
 
 const region = { world, min, max };
@@ -437,6 +453,7 @@ let fixtureIsForceLoaded = false;
 let originalRegionFixture;
 let originalStairFixture;
 let originalSetFixture;
+let originalCopyFixture;
 let cleanupFailed = false;
 let smokeCompleted = false;
 try {
@@ -483,13 +500,14 @@ try {
     detailFileMaxBytes: 10_485_760,
     detailFileRetainedFiles: 5,
   });
+  assert.deepEqual(serverStatus.defaults, { getBlocksIncludeAir: false, editDryRun: false });
   assert.deepEqual(serverStatus.tools, {
     ping_server: true,
     get_server_status: true,
     get_player_context: true,
     get_perspective_view: true,
     count_region_block_states: true,
-    get_region_blocks: true,
+    get_blocks: true,
     scan_orthographic_view: true,
     replace_region_blocks: true,
     fill_region: true,
@@ -536,23 +554,21 @@ try {
   await paperCommand('forceload add 0 0');
   fixtureIsForceLoaded = true;
   const original = await waitForRegion(region);
-  originalRegionFixture = await bridgeRequest('/v1/get-region-blocks', {
+  originalRegionFixture = await bridgeRequest('/v1/get-blocks', {
     ...region,
     includeAir: true,
-    format: 'blocks',
   });
-  assert.equal(originalRegionFixture.matchedBlockCount, original.volume);
+  assert.equal(expandStructure(originalRegionFixture).length, original.volume);
 
-  originalSetFixture = await bridgeRequest('/v1/get-region-blocks', {
+  originalSetFixture = await bridgeRequest('/v1/get-blocks', {
     world,
     min: setMin,
     max: setMax,
     includeAir: true,
-    format: 'blocks',
   });
-  assert.equal(originalSetFixture.matchedBlockCount, 2);
+  assert.equal(expandStructure(originalSetFixture).length, 2);
   const originalSetStates = new Map(
-    originalSetFixture.blocks.map((block) => [
+    expandStructure(originalSetFixture).map((block) => [
       `${block.position.x},${block.position.y},${block.position.z}`,
       block.blockState,
     ]),
@@ -561,6 +577,17 @@ try {
   const secondOriginalState = originalSetStates.get('6,0,0');
   assert.ok(firstOriginalState);
   assert.ok(secondOriginalState);
+  originalCopyFixture = await bridgeRequest('/v1/get-blocks', {
+    world,
+    min: copyMin,
+    max: copyMax,
+    includeAir: true,
+  });
+  const originalCopyStates = expandStructure(originalCopyFixture);
+  const firstCopyState = originalCopyStates.find(({ position }) => position.x === copyMin.x)?.blockState;
+  const secondCopyState = originalCopyStates.find(({ position }) => position.x === copyMax.x)?.blockState;
+  assert.ok(firstCopyState);
+  assert.ok(secondCopyState);
   const commandStates = ['minecraft:stone', 'minecraft:gold_block', 'minecraft:diamond_block'].filter(
     (state) => state !== firstOriginalState,
   );
@@ -581,13 +608,13 @@ try {
     fields: ['commands'],
     maximum: serverStatus.limits.maxCommandsPerRequest,
   });
-  const afterOversizedCommandBatch = await bridgeRequest('/v1/get-region-blocks', {
+  const afterOversizedCommandBatch = await bridgeRequest('/v1/get-blocks', {
     world,
     min: setMin,
     max: setMin,
     includeAir: true,
   });
-  assert.equal(afterOversizedCommandBatch.blocks[0].blockState, firstOriginalState);
+  assert.equal(expandStructure(afterOversizedCommandBatch)[0].blockState, firstOriginalState);
 
   const commandRunResponse = await bridgeResponse('/v1/run-minecraft-commands', {
     commands: [
@@ -623,12 +650,12 @@ try {
   assert.ok(versionFeedback.includes(serverStatus.builds.dirtMcp));
   assert.ok(timeFeedback.length > 0);
   assert.ok(commandRun.results.every(({ message, rawMessage }) => message === null && rawMessage === null));
-  const afterOrderedCommands = await bridgeRequest('/v1/get-region-blocks', {
+  const afterOrderedCommands = await bridgeRequest('/v1/get-blocks', {
     world,
     min: setMin,
     max: setMin,
   });
-  assert.equal(afterOrderedCommands.blocks[0].blockState, commandSecondState);
+  assert.equal(expandStructure(afterOrderedCommands)[0].blockState, commandSecondState);
 
   const commandMarker = `dirt_smoke_missing_${randomUUID().replaceAll('-', '')}`;
   const missingCommandRun = await bridgeResponse('/v1/run-minecraft-commands', {
@@ -642,12 +669,12 @@ try {
   assert.ok(missingCommandRun.body.results[0].message.length > 0);
   assert.equal(missingCommandRun.body.results[0].rawMessage, null);
   await assertDetailedCommandLog(missingCommandRun.callId, commandMarker, 1);
-  const afterMissingCommand = await bridgeRequest('/v1/get-region-blocks', {
+  const afterMissingCommand = await bridgeRequest('/v1/get-blocks', {
     world,
     min: setMin,
     max: setMin,
   });
-  assert.equal(afterMissingCommand.blocks[0].blockState, commandSecondState);
+  assert.equal(expandStructure(afterMissingCommand)[0].blockState, commandSecondState);
 
   const invalidTimeQuery = `time query dirt_smoke_invalid_${randomUUID().replaceAll('-', '')}`;
   const failedCommandRun = await bridgeRequest('/v1/run-minecraft-commands', {
@@ -659,13 +686,13 @@ try {
   );
   assert.ok(failedCommandRun.results[0].message.length > 0);
   assert.ok(failedCommandRun.results[0].rawMessage.length > 0);
-  const afterFailedCommand = await bridgeRequest('/v1/get-region-blocks', {
+  const afterFailedCommand = await bridgeRequest('/v1/get-blocks', {
     world,
     min: setMin,
     max: setMin,
     includeAir: true,
   });
-  assert.equal(afterFailedCommand.blocks[0].blockState, commandSecondState);
+  assert.equal(expandStructure(afterFailedCommand)[0].blockState, commandSecondState);
 
   const restoredCommandRun = await bridgeRequest('/v1/run-minecraft-commands', {
     commands: [`setblock ${setMin.x} ${setMin.y} ${setMin.z} ${firstOriginalState} replace`],
@@ -674,36 +701,64 @@ try {
     restoredCommandRun.results.map(({ outcome }) => outcome),
     ['dispatched'],
   );
-  const afterCommandRestore = await bridgeRequest('/v1/get-region-blocks', {
+  const afterCommandRestore = await bridgeRequest('/v1/get-blocks', {
     world,
     min: setMin,
     max: setMin,
     includeAir: true,
   });
-  assert.equal(afterCommandRestore.blocks[0].blockState, firstOriginalState);
+  assert.equal(expandStructure(afterCommandRestore)[0].blockState, firstOriginalState);
   await assertEditHistory([]);
 
-  const firstSetState =
-    firstOriginalState === 'minecraft:diamond_block' ? 'minecraft:gold_block' : 'minecraft:diamond_block';
-  const secondSetState =
-    secondOriginalState === 'minecraft:emerald_block' ? 'minecraft:redstone_block' : 'minecraft:emerald_block';
+  const distinctStates = [
+    'minecraft:diamond_block',
+    'minecraft:gold_block',
+    'minecraft:emerald_block',
+    'minecraft:redstone_block',
+  ];
+  const firstSetStates = distinctStates.filter((state) => state !== firstOriginalState && state !== firstCopyState);
+  const secondSetState = distinctStates.find((state) => state !== secondOriginalState && state !== secondCopyState);
+  assert.ok(firstSetStates.length >= 2);
+  assert.ok(secondSetState);
+  const firstSetState = firstSetStates[0];
+  const alternateFirstSetState = firstSetStates[1];
   const setPalettes = [
     [
-      { blockState: firstOriginalState, weight: 50 },
       { blockState: firstSetState, weight: 50 },
+      { blockState: alternateFirstSetState, weight: 50 },
     ],
     [{ blockState: secondSetState }],
   ];
   const setSeed = 1_234_567;
 
+  const emptySet = await bridgeRequest('/v1/set-blocks', {
+    world,
+    origin: setMin,
+    palettes: [],
+    placements: [],
+    runs: [],
+    seed: setSeed,
+    dryRun: true,
+  });
+  assert.deepEqual(emptySet, {
+    world,
+    bounds: null,
+    palettes: [],
+    seed: setSeed,
+    outcome: 'no_change',
+    edit: null,
+    blockCount: 0,
+    changedBlockCount: 0,
+    unchangedBlockCount: 0,
+  });
+  await assertEditHistory([]);
+
   const setPreview = await bridgeRequest('/v1/set-blocks', {
     world,
     origin: setMin,
     palettes: setPalettes,
-    placements: [
-      [0, 0, 0, 0],
-      [1, 1, 0, 0],
-    ],
+    placements: [[0, 0, 0, 0]],
+    runs: [[1, 1, 0, 0, 1, 0, 0]],
     seed: setSeed,
     dryRun: true,
   });
@@ -713,7 +768,7 @@ try {
   assert.equal(setPreview.outcome, 'preview');
   assert.equal(setPreview.edit, null);
   assert.equal(setPreview.blockCount, 2);
-  assert.ok(setPreview.changedBlockCount === 1 || setPreview.changedBlockCount === 2);
+  assert.equal(setPreview.changedBlockCount, 2);
   assert.equal(setPreview.unchangedBlockCount, 2 - setPreview.changedBlockCount);
   await assertEditHistory([]);
 
@@ -725,6 +780,7 @@ try {
       [0, 0, 0, 0],
       [1, 0, 0, 0],
     ],
+    runs: [],
   });
   assert.equal(duplicateSet.status, 400);
   assert.equal(duplicateSet.body.error.code, 'invalid_request');
@@ -738,6 +794,7 @@ try {
       [0, 0, 0, 0],
       [1, 1, 0, 0],
     ],
+    runs: [],
   });
   assert.equal(invalidSet.status, 400);
   assert.equal(invalidSet.body.error.code, 'invalid_request');
@@ -745,22 +802,23 @@ try {
     reason: 'invalid_value',
     field: 'palettes[1][0].blockState',
   });
-  const afterInvalidSet = await bridgeRequest('/v1/get-region-blocks', {
+  const afterInvalidSet = await bridgeRequest('/v1/get-blocks', {
     world,
     min: setMin,
     max: setMax,
     includeAir: true,
   });
-  assert.deepEqual(sortedBlockKeys(afterInvalidSet.blocks), sortedBlockKeys(originalSetFixture.blocks));
+  assert.deepEqual(
+    sortedBlockKeys(expandStructure(afterInvalidSet)),
+    sortedBlockKeys(expandStructure(originalSetFixture)),
+  );
 
   const setResponse = await bridgeResponse('/v1/set-blocks', {
     world,
     origin: setMin,
     palettes: setPalettes,
-    placements: [
-      [0, 0, 0, 0],
-      [1, 1, 0, 0],
-    ],
+    placements: [[0, 0, 0, 0]],
+    runs: [[1, 1, 0, 0, 1, 0, 0]],
     seed: setSeed,
   });
   assert.equal(setResponse.status, 200);
@@ -775,17 +833,51 @@ try {
   assert.equal(setResult.changedBlockCount, setPreview.changedBlockCount);
   assert.equal(setResult.unchangedBlockCount, setPreview.unchangedBlockCount);
   await assertEditHistory([setResult.edit]);
-  const afterSet = await bridgeRequest('/v1/get-region-blocks', {
+  const afterSet = await bridgeRequest('/v1/get-blocks', {
     world,
     min: setMin,
     max: setMax,
     includeAir: true,
   });
   const afterSetStates = new Map(
-    afterSet.blocks.map((block) => [`${block.position.x},${block.position.y},${block.position.z}`, block.blockState]),
+    expandStructure(afterSet).map((block) => [
+      `${block.position.x},${block.position.y},${block.position.z}`,
+      block.blockState,
+    ]),
   );
-  assert.ok([firstOriginalState, firstSetState].includes(afterSetStates.get('5,0,0')));
+  assert.ok(firstSetStates.slice(0, 2).includes(afterSetStates.get('5,0,0')));
   assert.equal(afterSetStates.get('6,0,0'), secondSetState);
+
+  const copyResponse = await bridgeResponse('/v1/set-blocks', { ...afterSet, origin: copyMin });
+  assert.equal(copyResponse.status, 200);
+  const copyResult = copyResponse.body;
+  retainEdit(copyResult, 'set_blocks');
+  assert.equal(copyResult.edit.callId, copyResponse.callId);
+  assert.deepEqual(copyResult.bounds, { min: copyMin, max: copyMax });
+  assert.equal(copyResult.blockCount, 2);
+  assert.equal(copyResult.changedBlockCount, 2);
+  await assertEditHistory([copyResult.edit, setResult.edit]);
+  const copiedStructure = await bridgeRequest('/v1/get-blocks', {
+    world,
+    min: copyMin,
+    max: copyMax,
+    includeAir: true,
+  });
+  assert.deepEqual(relativeBlockKeys(copiedStructure), relativeBlockKeys(afterSet));
+  await undoRetained(copyResult);
+  await assertEditHistory([setResult.edit]);
+  const afterCopyUndo = await bridgeRequest('/v1/get-blocks', {
+    world,
+    min: copyMin,
+    max: copyMax,
+    includeAir: true,
+  });
+  assert.deepEqual(
+    sortedBlockKeys(expandStructure(afterCopyUndo)),
+    sortedBlockKeys(expandStructure(originalCopyFixture)),
+  );
+  originalCopyFixture = undefined;
+
   await undoRetained(setResult);
   await assertEditHistory([]);
   const consumedSetUndo = await bridgeResponse('/v1/undo-edit', { world, editId: setResult.edit.editId });
@@ -795,13 +887,16 @@ try {
     world,
     requestedEditId: setResult.edit.editId,
   });
-  const afterSetUndo = await bridgeRequest('/v1/get-region-blocks', {
+  const afterSetUndo = await bridgeRequest('/v1/get-blocks', {
     world,
     min: setMin,
     max: setMax,
     includeAir: true,
   });
-  assert.deepEqual(sortedBlockKeys(afterSetUndo.blocks), sortedBlockKeys(originalSetFixture.blocks));
+  assert.deepEqual(
+    sortedBlockKeys(expandStructure(afterSetUndo)),
+    sortedBlockKeys(expandStructure(originalSetFixture)),
+  );
   originalSetFixture = undefined;
 
   const originalStates = Object.keys(original.blockStateCounts);
@@ -839,7 +934,7 @@ try {
   const afterFill = await bridgeRequest('/v1/count-region-block-states', region);
   assert.deepEqual(afterFill.blockStateCounts, { [filledState]: filled.volume });
 
-  const exactBlocks = await bridgeRequest('/v1/get-region-blocks', region);
+  const exactBlocks = await bridgeRequest('/v1/get-blocks', region);
   assertExactBlocks(exactBlocks, filledState);
 
   const syntheticCamera = { x: 0.5, y: 3, z: 0.5 };
@@ -944,33 +1039,25 @@ try {
     },
   });
 
-  const exactRuns = await bridgeRequest('/v1/get-region-blocks', {
+  const exactRuns = await bridgeRequest('/v1/get-blocks', {
     ...region,
     includeBlockStatePatterns: [filledState],
-    format: 'runs',
     maxResults: 8,
   });
-  assert.equal(exactRuns.format, 'runs');
-  assert.equal(exactRuns.matchedBlockCount, 8);
-  assert.ok(exactRuns.runs.length > 0 && exactRuns.runs.length < 8);
-  assert.deepEqual(expandedRunKeys(exactRuns.runs), expectedBlockKeys(filledState));
+  assert.deepEqual(exactRuns.origin, min);
+  assert.deepEqual(exactRuns.placements, []);
+  assert.equal(exactRuns.runs.length, 1);
+  assert.deepEqual(sortedBlockKeys(expandStructure(exactRuns)), expectedBlockKeys(filledState));
 
-  const excluded = await bridgeRequest('/v1/get-region-blocks', {
+  const excluded = await bridgeRequest('/v1/get-blocks', {
     ...region,
     excludeBlockStatePatterns: [filledState],
   });
-  assert.equal(excluded.matchedBlockCount, 0);
-  assert.deepEqual(excluded.blocks, []);
+  assert.deepEqual(excluded, { world, origin: min, palettes: [], placements: [], runs: [] });
 
-  const limited = await bridgeResponse('/v1/get-region-blocks', { ...region, maxResults: 1 });
-  assert.equal(limited.status, 413);
-  assert.deepEqual(limited.body, {
-    error: {
-      code: 'result_too_large',
-      message: 'Inspection result exceeds maxResults of 1 entries',
-      details: { reason: 'blocks', minimumRequired: 2, maximum: 1 },
-    },
-  });
+  const compressed = await bridgeRequest('/v1/get-blocks', { ...region, maxResults: 1 });
+  assert.equal(compressed.placements.length + compressed.runs.length, 1);
+  assert.equal(expandStructure(compressed).length, 8);
 
   const replacementDestination = 'minecraft:gold_block';
   const replacePreview = await bridgeRequest('/v1/replace-region-blocks', {
@@ -994,7 +1081,7 @@ try {
   assert.equal(replaced.matchedBlockCount, replacePreview.matchedBlockCount);
   assert.equal(replaced.changedBlockCount, replacePreview.changedBlockCount);
   await assertEditHistory([replaced.edit, filled.edit]);
-  assertExactBlocks(await bridgeRequest('/v1/get-region-blocks', region), replaced.destinationPalette[0].blockState);
+  assertExactBlocks(await bridgeRequest('/v1/get-blocks', region), replaced.destinationPalette[0].blockState);
 
   const nonLatestUndo = await bridgeResponse('/v1/undo-edit', { world, editId: filled.edit.editId });
   assert.equal(nonLatestUndo.status, 409);
@@ -1008,7 +1095,7 @@ try {
 
   await undoRetained(replaced);
   await assertEditHistory([filled.edit]);
-  assertExactBlocks(await bridgeRequest('/v1/get-region-blocks', region), filledState);
+  assertExactBlocks(await bridgeRequest('/v1/get-blocks', region), filledState);
 
   const noOp = await bridgeRequest('/v1/fill-region', {
     ...region,
@@ -1024,20 +1111,21 @@ try {
 
   const restored = await bridgeRequest('/v1/count-region-block-states', region);
   assert.deepEqual(restored, original);
-  const restoredBlocks = await bridgeRequest('/v1/get-region-blocks', {
+  const restoredBlocks = await bridgeRequest('/v1/get-blocks', {
     ...region,
     includeAir: true,
-    format: 'blocks',
   });
-  assert.deepEqual(sortedBlockKeys(restoredBlocks.blocks), sortedBlockKeys(originalRegionFixture.blocks));
+  assert.deepEqual(
+    sortedBlockKeys(expandStructure(restoredBlocks)),
+    sortedBlockKeys(expandStructure(originalRegionFixture)),
+  );
   originalRegionFixture = undefined;
 
-  originalStairFixture = await bridgeRequest('/v1/get-region-blocks', {
+  originalStairFixture = await bridgeRequest('/v1/get-blocks', {
     ...stairRegion,
     includeAir: true,
-    format: 'blocks',
   });
-  assert.equal(originalStairFixture.matchedBlockCount, 3);
+  assert.equal(expandStructure(originalStairFixture).length, 3);
   await restoreBlocks([
     { position: stairMin, blockState: northStairs },
     { position: stairMiddle, blockState: 'minecraft:air' },
@@ -1068,17 +1156,17 @@ try {
   retainEdit(exactStateReplacement, 'replace_region_blocks');
   assert.equal(exactStateReplacement.matchedBlockCount, 3);
   assert.equal(exactStateReplacement.changedBlockCount, 3);
-  const exactStateBlocks = await bridgeRequest('/v1/get-region-blocks', {
+  const exactStateBlocks = await bridgeRequest('/v1/get-blocks', {
     ...stairRegion,
     includeBlockStatePatterns: ['minecraft:gold_block', 'minecraft:diamond_block'],
   });
-  assert.equal(exactStateBlocks.matchedBlockCount, 3);
+  assert.equal(expandStructure(exactStateBlocks).length, 3);
   assert.ok(
-    exactStateBlocks.blocks.every(
+    expandStructure(exactStateBlocks).every(
       ({ blockState }) => blockState === 'minecraft:gold_block' || blockState === 'minecraft:diamond_block',
     ),
   );
-  const firstSeededLayout = sortedBlockKeys(exactStateBlocks.blocks);
+  const firstSeededLayout = sortedBlockKeys(expandStructure(exactStateBlocks));
 
   await undoRetained(exactStateReplacement);
 
@@ -1093,11 +1181,11 @@ try {
   });
   retainEdit(replayedReplacement, 'replace_region_blocks');
   assert.equal(replayedReplacement.changedBlockCount, exactStateReplacement.changedBlockCount);
-  const replayedBlocks = await bridgeRequest('/v1/get-region-blocks', {
+  const replayedBlocks = await bridgeRequest('/v1/get-blocks', {
     ...stairRegion,
     includeBlockStatePatterns: ['minecraft:gold_block', 'minecraft:diamond_block'],
   });
-  assert.deepEqual(sortedBlockKeys(replayedBlocks.blocks), firstSeededLayout);
+  assert.deepEqual(sortedBlockKeys(expandStructure(replayedBlocks)), firstSeededLayout);
   await undoRetained(replayedReplacement);
 
   const propertyFillPreview = await bridgeRequest('/v1/fill-region', {
@@ -1119,24 +1207,26 @@ try {
   retainEdit(propertyFill, 'fill_region');
   assert.equal(propertyFill.changedBlockCount, 1);
   await assertDetailedMutationLog(propertyFill);
-  const propertyFillBlocks = await bridgeRequest('/v1/get-region-blocks', {
+  const propertyFillBlocks = await bridgeRequest('/v1/get-blocks', {
     world,
     min: stairMin,
     max: stairMin,
   });
-  assert.deepEqual(sortedBlockKeys(propertyFillBlocks.blocks), [
+  assert.deepEqual(sortedBlockKeys(expandStructure(propertyFillBlocks)), [
     `${stairMin.x},${stairMin.y},${stairMin.z}:${southStairs}`,
   ]);
 
   await undoRetained(propertyFill);
 
-  await restoreBlocks(originalStairFixture.blocks);
-  const restoredStairFixture = await bridgeRequest('/v1/get-region-blocks', {
+  await restoreBlocks(expandStructure(originalStairFixture));
+  const restoredStairFixture = await bridgeRequest('/v1/get-blocks', {
     ...stairRegion,
     includeAir: true,
-    format: 'blocks',
   });
-  assert.deepEqual(sortedBlockKeys(restoredStairFixture.blocks), sortedBlockKeys(originalStairFixture.blocks));
+  assert.deepEqual(
+    sortedBlockKeys(expandStructure(restoredStairFixture)),
+    sortedBlockKeys(expandStructure(originalStairFixture)),
+  );
   originalStairFixture = undefined;
   await assertEditHistory([]);
   smokeCompleted = true;
@@ -1151,12 +1241,12 @@ try {
       cleanupFailed = true;
     }
   }
-  if (!cleanupSettled && (originalRegionFixture || originalStairFixture || originalSetFixture)) {
+  if (!cleanupSettled && (originalRegionFixture || originalStairFixture || originalSetFixture || originalCopyFixture)) {
     process.stderr.write('Skipping direct fixture restoration because bridge cleanup did not reach quiescence\n');
   }
   if (cleanupSettled && originalRegionFixture) {
     try {
-      await restoreBlocks(originalRegionFixture.blocks);
+      await restoreBlocks(expandStructure(originalRegionFixture));
     } catch (error) {
       process.stderr.write(`Could not restore region fixture: ${error.message}\n`);
       cleanupFailed = true;
@@ -1164,7 +1254,7 @@ try {
   }
   if (cleanupSettled && originalStairFixture) {
     try {
-      await restoreBlocks(originalStairFixture.blocks);
+      await restoreBlocks(expandStructure(originalStairFixture));
     } catch (error) {
       process.stderr.write(`Could not restore stair fixture: ${error.message}\n`);
       cleanupFailed = true;
@@ -1172,9 +1262,17 @@ try {
   }
   if (cleanupSettled && originalSetFixture) {
     try {
-      await restoreBlocks(originalSetFixture.blocks);
+      await restoreBlocks(expandStructure(originalSetFixture));
     } catch (error) {
       process.stderr.write(`Could not restore set-blocks fixture: ${error.message}\n`);
+      cleanupFailed = true;
+    }
+  }
+  if (cleanupSettled && originalCopyFixture) {
+    try {
+      await restoreBlocks(expandStructure(originalCopyFixture));
+    } catch (error) {
+      process.stderr.write(`Could not restore copied-structure fixture: ${error.message}\n`);
       cleanupFailed = true;
     }
   }

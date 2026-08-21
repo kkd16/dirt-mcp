@@ -264,12 +264,12 @@ public sealed interface ErrorDetails extends Serializable {
             }
         }
 
-        record BlockCount(int requested, int maximum) implements RegionTooLarge {
+        record BlockCount(long minimumRequired, int maximum) implements RegionTooLarge {
             public BlockCount {
-                requirePositive(requested, "requested");
+                requirePositive(minimumRequired, "minimumRequired");
                 requirePositive(maximum, "maximum");
-                if (requested <= maximum) {
-                    throw new IllegalArgumentException("requested must exceed maximum");
+                if (minimumRequired <= maximum) {
+                    throw new IllegalArgumentException("minimumRequired must exceed maximum");
                 }
             }
         }
@@ -280,14 +280,14 @@ public sealed interface ErrorDetails extends Serializable {
 
         int maximum();
 
-        record Blocks(long minimumRequired, int maximum) implements ResultTooLarge {
-            public Blocks {
+        record StructureEntries(long minimumRequired, int maximum) implements ResultTooLarge {
+            public StructureEntries {
                 validateResultLimit(minimumRequired, maximum);
             }
         }
 
-        record Runs(long minimumRequired, int maximum) implements ResultTooLarge {
-            public Runs {
+        record Palettes(long minimumRequired, int maximum) implements ResultTooLarge {
+            public Palettes {
                 validateResultLimit(minimumRequired, maximum);
             }
         }

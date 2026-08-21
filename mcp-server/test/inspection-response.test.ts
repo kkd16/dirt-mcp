@@ -2,20 +2,18 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ToolFailure } from '../dist/bridge/errors.js';
 import {
-  GetRegionBlocksInputSchema,
+  GetBlocksInputSchema,
   requireMatchingCountRegionResponse,
-  requireMatchingGetRegionResponse,
+  requireMatchingGetBlocksResponse,
   requireMatchingScanResponse,
   ScanOrthographicViewInputSchema,
 } from '../dist/tools/inspection.js';
 
 type CountInput = Parameters<typeof requireMatchingCountRegionResponse>[0];
 type CountOutput = Parameters<typeof requireMatchingCountRegionResponse>[1];
-type GetInput = Parameters<typeof requireMatchingGetRegionResponse>[0];
-type GetOutput = Parameters<typeof requireMatchingGetRegionResponse>[1];
+type GetInput = Parameters<typeof requireMatchingGetBlocksResponse>[0];
+type GetOutput = Parameters<typeof requireMatchingGetBlocksResponse>[1];
 type ScanOutput = Parameters<typeof requireMatchingScanResponse>[1];
-type BlocksOutput = Extract<GetOutput, { format: 'blocks' }>;
-type RunsOutput = Extract<GetOutput, { format: 'runs' }>;
 
 const isInvalidBridgeResponse = (error: unknown): boolean =>
   error instanceof ToolFailure && error.code === 'bridge_invalid_response';
@@ -64,103 +62,88 @@ test('correlates count-region bounds, dimensions, volume, and histogram totals',
   assertInvalid(() => requireMatchingCountRegionResponse(countInput, wrongHistogram));
 });
 
-const getInput = GetRegionBlocksInputSchema.parse({
+const getInput = GetBlocksInputSchema.parse({
   world: 'world',
   min: { x: 2, y: 0, z: 0 },
   max: { x: 0, y: 0, z: 0 },
-  format: 'blocks',
   maxResults: 2,
 });
 
-function blocksOutput(): BlocksOutput {
+function blocksOutput(): GetOutput {
   return {
     world: 'world',
-    bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 2, y: 0, z: 0 } },
-    volume: 3,
-    matchedBlockCount: 2,
-    format: 'blocks',
-    blocks: [
-      { position: { x: 0, y: 0, z: 0 }, blockState: 'minecraft:stone' },
-      { position: { x: 2, y: 0, z: 0 }, blockState: 'minecraft:dirt' },
+    origin: { x: 0, y: 0, z: 0 },
+    palettes: [[{ blockState: 'minecraft:stone' }], [{ blockState: 'minecraft:dirt' }]],
+    placements: [
+      [0, 0, 0, 0],
+      [1, 2, 0, 0],
     ],
+    runs: [],
   };
 }
 
-function runsOutput(): RunsOutput {
+function runsOutput(): GetOutput {
   return {
     world: 'world',
-    bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 2, y: 0, z: 0 } },
-    volume: 3,
-    matchedBlockCount: 3,
-    format: 'runs',
-    runs: [
-      {
-        blockState: 'minecraft:stone',
-        from: { x: 0, y: 0, z: 0 },
-        to: { x: 2, y: 0, z: 0 },
-      },
-    ],
+    origin: { x: 0, y: 0, z: 0 },
+    palettes: [[{ blockState: 'minecraft:stone' }]],
+    placements: [],
+    runs: [[0, 0, 0, 0, 2, 0, 0]],
   };
 }
 
-test('correlates explicit region blocks and rejects duplicate or out-of-bounds positions', () => {
-  assert.doesNotThrow(() => requireMatchingGetRegionResponse(getInput, blocksOutput()));
-  const defaults = GetRegionBlocksInputSchema.parse({
+test('correlates exact block structures and rejects invalid placements', () => {
+  assert.doesNotThrow(() => requireMatchingGetBlocksResponse(getInput, blocksOutput()));
+  const defaults = GetBlocksInputSchema.parse({
     world: 'world',
     min: { x: 0, y: 0, z: 0 },
     max: { x: 2, y: 0, z: 0 },
   });
-  assert.doesNotThrow(() => requireMatchingGetRegionResponse(defaults, blocksOutput()));
+  assert.doesNotThrow(() => requireMatchingGetBlocksResponse(defaults, blocksOutput()));
 
-  const wrongBounds = blocksOutput();
-  wrongBounds.bounds.max.x = 1;
-  assertInvalid(() => requireMatchingGetRegionResponse(getInput, wrongBounds));
+  const wrongOrigin = blocksOutput();
+  wrongOrigin.origin.x = 1;
+  assertInvalid(() => requireMatchingGetBlocksResponse(getInput, wrongOrigin));
 
-  const wrongVolume = blocksOutput();
-  wrongVolume.volume = 2;
-  assertInvalid(() => requireMatchingGetRegionResponse(getInput, wrongVolume));
+  const missingPalette = blocksOutput();
+  missingPalette.placements[1]![0] = 2;
+  assertInvalid(() => requireMatchingGetBlocksResponse(getInput, missingPalette));
 
-  assertInvalid(() => requireMatchingGetRegionResponse(getInput, runsOutput()));
+  const unusedPalette = blocksOutput();
+  unusedPalette.palettes.push([{ blockState: 'minecraft:lantern' }]);
+  assertInvalid(() => requireMatchingGetBlocksResponse(getInput, unusedPalette));
 
-  const tooManyMatches = blocksOutput();
-  tooManyMatches.matchedBlockCount = 4;
-  assertInvalid(() => requireMatchingGetRegionResponse(getInput, tooManyMatches));
-
-  assertInvalid(() => requireMatchingGetRegionResponse({ ...getInput, maxResults: 1 }, blocksOutput()));
-
-  const wrongCount = blocksOutput();
-  wrongCount.matchedBlockCount = 1;
-  assertInvalid(() => requireMatchingGetRegionResponse(getInput, wrongCount));
+  assertInvalid(() => requireMatchingGetBlocksResponse({ ...getInput, maxResults: 1 }, blocksOutput()));
 
   const outside = blocksOutput();
-  outside.blocks[0]!.position.x = -1;
-  assertInvalid(() => requireMatchingGetRegionResponse(getInput, outside));
+  outside.placements[0]![1] = -1;
+  assertInvalid(() => requireMatchingGetBlocksResponse(getInput, outside));
 
   const duplicate = blocksOutput();
-  duplicate.blocks[1]!.position = { ...duplicate.blocks[0]!.position };
-  assertInvalid(() => requireMatchingGetRegionResponse(getInput, duplicate));
+  duplicate.placements[1] = [1, 0, 0, 0];
+  assertInvalid(() => requireMatchingGetBlocksResponse(getInput, duplicate));
 });
 
-test('requires region runs to be forward axis-aligned and represent the exact match count', () => {
-  const input: GetInput = { ...getInput, format: 'runs', maxResults: 1 };
-  assert.doesNotThrow(() => requireMatchingGetRegionResponse(input, runsOutput()));
+test('requires runs to be forward, in bounds, and disjoint', () => {
+  const input: GetInput = { ...getInput, maxResults: 1 };
+  assert.doesNotThrow(() => requireMatchingGetBlocksResponse(input, runsOutput()));
 
   const outside = runsOutput();
-  outside.runs[0]!.to.x = 3;
-  assertInvalid(() => requireMatchingGetRegionResponse(input, outside));
+  outside.runs[0]![4] = 3;
+  assertInvalid(() => requireMatchingGetBlocksResponse(input, outside));
 
-  const diagonal = runsOutput();
-  diagonal.runs[0]!.to.y = 1;
-  assertInvalid(() => requireMatchingGetRegionResponse(input, diagonal));
+  const tooManyBlocks = runsOutput();
+  tooManyBlocks.runs[0]![5] = 1;
+  assertInvalid(() => requireMatchingGetBlocksResponse(input, tooManyBlocks));
 
   const reversed = runsOutput();
-  reversed.runs[0]!.from.x = 2;
-  reversed.runs[0]!.to.x = 0;
-  assertInvalid(() => requireMatchingGetRegionResponse(input, reversed));
+  reversed.runs[0]![1] = 2;
+  reversed.runs[0]![4] = 0;
+  assertInvalid(() => requireMatchingGetBlocksResponse(input, reversed));
 
-  const wrongCount = runsOutput();
-  wrongCount.matchedBlockCount = 2;
-  assertInvalid(() => requireMatchingGetRegionResponse(input, wrongCount));
+  const overlapping = runsOutput();
+  overlapping.placements.push([0, 1, 0, 0]);
+  assertInvalid(() => requireMatchingGetBlocksResponse({ ...input, maxResults: 2 }, overlapping));
 });
 
 const scanInput = ScanOrthographicViewInputSchema.parse({

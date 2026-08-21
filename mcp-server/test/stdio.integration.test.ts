@@ -49,7 +49,7 @@ function minimalServerStatus(tools: McpToolConfiguration = allToolsEnabled): Rec
       maxCommandFeedbackCharacters: 1,
     },
     editHistory: { maxEntriesPerWorld: 1, maxEntriesTotal: 1, maxRetainedChangedBlocks: 1 },
-    defaults: { regionBlocksIncludeAir: false, regionBlocksFormat: 'blocks', editDryRun: false },
+    defaults: { getBlocksIncludeAir: false, editDryRun: false },
     logging: { consoleLevel: 'info', detailFileMaxBytes: 1, detailFileRetainedFiles: 2 },
     tools,
   };
@@ -150,8 +150,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       maxRetainedChangedBlocks: 1_000_000,
     },
     defaults: {
-      regionBlocksIncludeAir: false,
-      regionBlocksFormat: 'blocks',
+      getBlocksIncludeAir: false,
       editDryRun: false,
     },
     logging: {
@@ -161,13 +160,12 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     },
     tools: allToolsEnabled,
   };
-  const regionBlocks = {
+  const exactBlocks = {
     world: 'world',
-    bounds: { min: { x: 1, y: 2, z: 3 }, max: { x: 2, y: 2, z: 3 } },
-    volume: 2,
-    matchedBlockCount: 1,
-    format: 'blocks',
-    blocks: [{ position: { x: 1, y: 2, z: 3 }, blockState: 'minecraft:stone' }],
+    origin: { x: 1, y: 2, z: 3 },
+    palettes: [[{ blockState: 'minecraft:stone' }]],
+    placements: [[0, 0, 0, 0]],
+    runs: [],
   };
   const blockStateCount = {
     world: 'world',
@@ -367,8 +365,8 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       response.end(JSON.stringify(serverStatus));
     } else if (request.url === '/v1/count-region-block-states') {
       response.end(JSON.stringify(blockStateCount));
-    } else if (request.url === '/v1/get-region-blocks') {
-      response.end(JSON.stringify(regionBlocks));
+    } else if (request.url === '/v1/get-blocks') {
+      response.end(JSON.stringify(exactBlocks));
     } else if (request.url === '/v1/scan-orthographic-view') {
       response.end(JSON.stringify(view));
     } else if (request.url === '/v1/get-player-context') {
@@ -451,7 +449,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { name: 'ping_server', annotations: readAnnotations() },
       { name: 'get_server_status', annotations: readAnnotations() },
       { name: 'count_region_block_states', annotations: readAnnotations() },
-      { name: 'get_region_blocks', annotations: readAnnotations() },
+      { name: 'get_blocks', annotations: readAnnotations() },
       { name: 'scan_orthographic_view', annotations: readAnnotations() },
       { name: 'get_player_context', annotations: readAnnotations() },
       { name: 'get_perspective_view', annotations: readAnnotations() },
@@ -531,20 +529,34 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   const listedSetBlocks = listedTools.find((tool) => tool.name === 'set_blocks');
   assert.ok(listedSetBlocks);
   const setBlocksInputSchema = listedSetBlocks.inputSchema as {
+    readonly required?: readonly string[];
     readonly properties: {
       readonly placements: { readonly items: unknown };
+      readonly runs: { readonly items: unknown };
     };
   };
+  assert.deepEqual(setBlocksInputSchema.required, ['world', 'origin', 'palettes', 'placements', 'runs']);
+  const paletteIndexSchema = { type: 'integer', minimum: 0, maximum: 2_147_483_647 };
+  const offsetSchema = { type: 'integer', minimum: -2_147_483_648, maximum: 2_147_483_647 };
   assert.deepEqual(setBlocksInputSchema.properties.placements.items, {
     type: 'array',
-    items: {
-      type: 'integer',
-      minimum: -2_147_483_648,
-      maximum: 2_147_483_647,
-    },
-    minItems: 4,
-    maxItems: 4,
-    description: 'Exact [paletteIndex, x, y, z] tuple; x, y, and z are signed offsets from the origin.',
+    prefixItems: [paletteIndexSchema, offsetSchema, offsetSchema, offsetSchema],
+    items: { not: {} },
+    description: 'Exact [paletteIndex, x, y, z] tuple with origin-relative coordinates.',
+  });
+  assert.deepEqual(setBlocksInputSchema.properties.runs.items, {
+    type: 'array',
+    prefixItems: [
+      paletteIndexSchema,
+      offsetSchema,
+      offsetSchema,
+      offsetSchema,
+      offsetSchema,
+      offsetSchema,
+      offsetSchema,
+    ],
+    items: { not: {} },
+    description: 'Exact [paletteIndex, x, y, z, toX, toY, toZ] inclusive origin-relative cuboid tuple.',
   });
   const listedPlayerContext = listedTools.find((tool) => tool.name === 'get_player_context');
   assert.ok(listedPlayerContext);
@@ -577,14 +589,14 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 3,
     method: 'tools/call',
-    params: requestParams({ name: 'get_region_blocks', arguments: region }),
+    params: requestParams({ name: 'get_blocks', arguments: region }),
   });
   const inspected = await waitFor(messages, 3);
   assert.deepEqual(
     inspected.result,
     completeResult({
-      content: [{ type: 'text', text: 'Matching blocks: 1; block entries: 1; world: world.' }],
-      structuredContent: regionBlocks,
+      content: [{ type: 'text', text: 'Matching blocks: 1; structure entries: 1; palettes: 1; world: world.' }],
+      structuredContent: exactBlocks,
     }),
   );
 
@@ -713,10 +725,8 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
         { blockState: 'minecraft:glass', weight: 25 },
       ],
     ],
-    placements: [
-      [0, 0, 0, 0],
-      [0, 4, 0, 0],
-    ],
+    placements: [[0, 0, 0, 0]],
+    runs: [[0, 4, 0, 0, 4, 0, 0]],
     seed: 123,
   };
   send(child, {
@@ -889,7 +899,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     [
       { method: 'GET', path: '/v1/server-status' },
       { method: 'GET', path: '/v1/ping' },
-      { method: 'POST', path: '/v1/get-region-blocks' },
+      { method: 'POST', path: '/v1/get-blocks' },
       { method: 'POST', path: '/v1/scan-orthographic-view' },
       { method: 'POST', path: '/v1/scan-orthographic-view' },
       { method: 'POST', path: '/v1/fill-region' },
@@ -975,7 +985,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   const auditRecords = logs.values.filter((record) => record.event === 'tool.completed');
   const expectedAudits: readonly (readonly [string, number, boolean, boolean])[] = [
     ['ping_server', 2, false, true],
-    ['get_region_blocks', 3, true, true],
+    ['get_blocks', 3, true, true],
     ['scan_orthographic_view', 4, true, true],
     ['scan_orthographic_view', 5, true, true],
     ['fill_region', 6, true, false],
@@ -1345,7 +1355,7 @@ test('runs fail-fast Minecraft command batches with in-band failures and strict 
 test('serves the configured tool snapshot over MCP 2025-06-18 and rejects disabled calls locally', async (context) => {
   const configuredTools = toolConfiguration(false);
   configuredTools.ping_server = true;
-  configuredTools.get_region_blocks = true;
+  configuredTools.get_blocks = true;
   configuredTools.set_blocks = true;
   configuredTools.undo_edit = true;
   const requests: BridgeRequestRecord[] = [];
@@ -1420,7 +1430,7 @@ test('serves the configured tool snapshot over MCP 2025-06-18 and rejects disabl
   assert.equal(Object.hasOwn(catalog.result, '_meta'), false);
   assert.deepEqual(
     catalog.result.tools?.map((tool) => tool.name),
-    ['ping_server', 'get_region_blocks', 'set_blocks', 'undo_edit'],
+    ['ping_server', 'get_blocks', 'set_blocks', 'undo_edit'],
   );
   const listedMetadata = JSON.stringify(catalog.result.tools);
   assert.doesNotMatch(listedMetadata, /get_server_status|get_edit_history/);

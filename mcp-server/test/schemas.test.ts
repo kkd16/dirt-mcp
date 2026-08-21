@@ -19,7 +19,11 @@ import {
   SetBlocksOutputSchema,
   SourceBlockStatePatternsSchema,
 } from '../dist/tools/editing.js';
-import { GetRegionBlocksInputSchema, ScanOrthographicViewInputSchema } from '../dist/tools/inspection.js';
+import {
+  GetBlocksInputSchema,
+  GetBlocksOutputSchema,
+  ScanOrthographicViewInputSchema,
+} from '../dist/tools/inspection.js';
 import {
   EditHistoryConfigurationSchema,
   GetServerStatusInputSchema,
@@ -61,20 +65,20 @@ function serverStatusFixture() {
       maxCommandFeedbackCharacters: 8_192,
     },
     editHistory: { maxEntriesPerWorld: 1, maxEntriesTotal: 1, maxRetainedChangedBlocks: 50 },
-    defaults: { regionBlocksIncludeAir: false, regionBlocksFormat: 'blocks', editDryRun: false },
+    defaults: { getBlocksIncludeAir: false, editDryRun: false },
     logging: { consoleLevel: 'info', detailFileMaxBytes: 1, detailFileRetainedFiles: 2 },
     tools,
   };
 }
 
 test('applies inspection defaults and rejects combined pattern amplification', () => {
-  assert.deepEqual(GetRegionBlocksInputSchema.parse(region), {
+  assert.deepEqual(GetBlocksInputSchema.parse(region), {
     ...region,
     includeBlockStatePatterns: [],
     excludeBlockStatePatterns: [],
   });
   assert.equal(
-    GetRegionBlocksInputSchema.safeParse({
+    GetBlocksInputSchema.safeParse({
       ...region,
       includeBlockStatePatterns: Array.from({ length: 33 }, (_, index) => `minecraft:stone[a=${index}]`),
       excludeBlockStatePatterns: Array.from({ length: 32 }, (_, index) => `minecraft:dirt[a=${index}]`),
@@ -101,6 +105,34 @@ test('applies inspection defaults and rejects combined pattern amplification', (
       format: 'blocks',
     },
   );
+});
+
+test('accepts every exact get-blocks structure directly as set-blocks input', () => {
+  const exact = GetBlocksOutputSchema.parse({
+    world: 'world',
+    origin: { x: 100, y: 64, z: 100 },
+    palettes: [[{ blockState: 'minecraft:stone_bricks' }], [{ blockState: 'minecraft:lantern' }]],
+    placements: [[1, 0, 1, 0]],
+    runs: [[0, 0, 0, 0, 15, 0, 0]],
+  });
+  assert.deepEqual(SetBlocksInputSchema.parse(exact), exact);
+  assert.equal(SetBlocksInputSchema.safeParse({ ...exact, origin: { x: -20, y: 80, z: 45 } }).success, true);
+  assert.equal(
+    GetBlocksOutputSchema.safeParse({
+      ...exact,
+      palettes: [[{ blockState: 'minecraft:stone_bricks' }], [{ blockState: 'minecraft:stone_bricks' }]],
+    }).success,
+    false,
+  );
+
+  const empty = GetBlocksOutputSchema.parse({
+    world: 'world',
+    origin: { x: 0, y: 0, z: 0 },
+    palettes: [],
+    placements: [],
+    runs: [],
+  });
+  assert.deepEqual(SetBlocksInputSchema.parse(empty), empty);
 });
 
 test('validates distinct source patterns and complete destination weights', () => {
@@ -258,7 +290,7 @@ test('strictly validates active Paper logging configuration', () => {
   assert.equal(LoggingConfigurationSchema.safeParse({ ...logging, unknown: true }).success, false);
 });
 
-test('validates weighted set-block palettes and compact placements', () => {
+test('validates weighted set-block palettes, placements, and cuboid runs', () => {
   const input = {
     world: 'world',
     origin: { x: 10, y: 20, z: 30 },
@@ -274,6 +306,7 @@ test('validates weighted set-block palettes and compact placements', () => {
       [0, 1, 0, 0],
       [1, 0, 1, 0],
     ],
+    runs: [[1, 2, 0, 0, 2, 1, 0]],
     seed: 42,
   };
 
@@ -292,11 +325,42 @@ test('validates weighted set-block palettes and compact placements', () => {
     }).success,
     false,
   );
+  assert.equal(
+    SetBlocksInputSchema.safeParse({
+      ...input,
+      placements: [[0, 0, 0, 0, 0]],
+    }).success,
+    false,
+  );
   assert.equal(SetBlocksInputSchema.safeParse({ ...input, unknownProperty: true }).success, false);
+  assert.equal(SetBlocksInputSchema.safeParse({ ...input, runs: [[1, 2, 1, 0, 2, 0, 0]] }).success, false);
+  assert.equal(SetBlocksInputSchema.safeParse({ ...input, runs: [[1, 0, 0, 0, 2, 0, 0]] }).success, false);
+  assert.equal(
+    SetBlocksInputSchema.safeParse({ world: 'world', origin: input.origin, palettes: [], placements: [], runs: [] })
+      .success,
+    true,
+  );
+  assert.equal(
+    SetBlocksInputSchema.safeParse({
+      world: 'world',
+      origin: input.origin,
+      palettes: input.palettes,
+      placements: [],
+      runs: [],
+    }).success,
+    false,
+  );
   assert.equal(
     SetBlocksInputSchema.safeParse({
       ...input,
       placements: [[2, 0, 0, 0]],
+    }).success,
+    false,
+  );
+  assert.equal(
+    SetBlocksInputSchema.safeParse({
+      ...input,
+      placements: [[-1, 0, 0, 0]],
     }).success,
     false,
   );
@@ -318,6 +382,12 @@ test('validates weighted set-block palettes and compact placements', () => {
     }).success,
     false,
   );
+  const multipleOverlaps = SetBlocksInputSchema.safeParse({
+    ...input,
+    runs: [[0, 0, 0, 0, 2, 1, 0]],
+  });
+  assert.equal(multipleOverlaps.success, false);
+  if (!multipleOverlaps.success) assert.equal(multipleOverlaps.error.issues.length, 1);
   assert.equal(
     SetBlocksInputSchema.safeParse({
       ...input,
@@ -433,6 +503,30 @@ test('validates retained edit metadata and edit-result outcome invariants', () =
       blockCount: 2,
       changedBlockCount: 1,
       unchangedBlockCount: 2,
+    }).success,
+    false,
+  );
+  const emptySetResult = {
+    world: 'world',
+    bounds: null,
+    palettes: [],
+    seed: 42,
+    outcome: 'no_change',
+    edit: null,
+    blockCount: 0,
+    changedBlockCount: 0,
+    unchangedBlockCount: 0,
+  };
+  assert.equal(SetBlocksOutputSchema.safeParse(emptySetResult).success, true);
+  assert.equal(SetBlocksOutputSchema.safeParse({ ...emptySetResult, bounds: edit.bounds }).success, false);
+  assert.equal(SetBlocksOutputSchema.safeParse({ ...emptySetResult, outcome: 'preview' }).success, false);
+  assert.equal(
+    SetBlocksOutputSchema.safeParse({
+      ...emptySetResult,
+      bounds: edit.bounds,
+      outcome: 'preview',
+      blockCount: 1,
+      changedBlockCount: 1,
     }).success,
     false,
   );
@@ -570,6 +664,6 @@ test('correlates edit options and counts with the originating request', () => {
   assert.doesNotThrow(() => requireMatchingFillVolume(bounds, { ...result, volume: 8 }));
   assert.throws(() => requireMatchingFillVolume(bounds, { ...result, volume: 7 }), isInvalidBridgeResponse);
 
-  assert.doesNotThrow(() => requireMatchingSetBlockCount(2, { ...result, blockCount: 2 }));
-  assert.throws(() => requireMatchingSetBlockCount(2, { ...result, blockCount: 3 }), isInvalidBridgeResponse);
+  assert.doesNotThrow(() => requireMatchingSetBlockCount(2n, { ...result, blockCount: 2 }));
+  assert.throws(() => requireMatchingSetBlockCount(2n, { ...result, blockCount: 3 }), isInvalidBridgeResponse);
 });

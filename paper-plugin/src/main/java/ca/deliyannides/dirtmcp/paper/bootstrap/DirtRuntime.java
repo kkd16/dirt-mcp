@@ -3,10 +3,10 @@ package ca.deliyannides.dirtmcp.paper.bootstrap;
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeServer;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.CountRegionBlockStatesEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.FillRegionEndpoint;
+import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetEditHistoryEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetPerspectiveViewEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetPlayerContextEndpoint;
-import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetRegionBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.PingEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ReplaceRegionBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.RunMinecraftCommandsEndpoint;
@@ -122,7 +122,7 @@ public final class DirtRuntime implements AutoCloseable {
                                     new PingEndpoint(status),
                                     new ServerStatusEndpoint(status),
                                     new CountRegionBlockStatesEndpoint(inspection),
-                                    new GetRegionBlocksEndpoint(inspection, config),
+                                    new GetBlocksEndpoint(inspection, config),
                                     new ScanOrthographicViewEndpoint(inspection, config),
                                     new GetPlayerContextEndpoint(playerContext),
                                     new GetPerspectiveViewEndpoint(perspectiveView),

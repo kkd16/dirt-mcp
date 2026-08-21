@@ -15,7 +15,7 @@ export const BRIDGE_ROUTES = {
     path: '/v1/count-region-block-states',
     timeoutMilliseconds: 30_000,
   },
-  getRegionBlocks: { method: 'POST', path: '/v1/get-region-blocks', timeoutMilliseconds: 30_000 },
+  getBlocks: { method: 'POST', path: '/v1/get-blocks', timeoutMilliseconds: 30_000 },
   scanOrthographicView: {
     method: 'POST',
     path: '/v1/scan-orthographic-view',
@@ -201,19 +201,19 @@ const RegionTooLargeDetailsSchema = z.discriminatedUnion('reason', [
     maximum: PositiveInt32Schema.describe('Maximum accepted perspective-view checked-chunk count.'),
   }).refine((details) => details.requested > details.maximum, 'requested must exceed maximum.'),
   reasonWith('block_count', {
-    requested: PositiveInt32Schema.describe('Requested block placement count.'),
-    maximum: PositiveInt32Schema.describe('Maximum accepted block placement count.'),
-  }).refine((details) => details.requested > details.maximum, 'requested must exceed maximum.'),
+    minimumRequired: PositiveJsonSafeIntegerSchema.describe('Known lower bound on the expanded block count.'),
+    maximum: PositiveInt32Schema.describe('Maximum accepted expanded block count.'),
+  }).refine((details) => details.minimumRequired > details.maximum, 'minimumRequired must exceed maximum.'),
 ]);
 
 const ResultTooLargeDetailsSchema = z.discriminatedUnion('reason', [
-  reasonWith('blocks', {
-    minimumRequired: PositiveJsonSafeIntegerSchema.describe('Known lower bound on the required result entries.'),
+  reasonWith('structure_entries', {
+    minimumRequired: PositiveJsonSafeIntegerSchema.describe('Known lower bound on the required placements plus runs.'),
     maximum: PositiveInt32Schema.describe('Maximum accepted result entries.'),
   }).refine((details) => details.minimumRequired > details.maximum, 'minimumRequired must exceed maximum.'),
-  reasonWith('runs', {
-    minimumRequired: PositiveJsonSafeIntegerSchema.describe('Known lower bound on the required result entries.'),
-    maximum: PositiveInt32Schema.describe('Maximum accepted result entries.'),
+  reasonWith('palettes', {
+    minimumRequired: PositiveJsonSafeIntegerSchema.describe('Known lower bound on the required exact palettes.'),
+    maximum: PositiveInt32Schema.describe('Maximum accepted palette count.'),
   }).refine((details) => details.minimumRequired > details.maximum, 'minimumRequired must exceed maximum.'),
   reasonWith('visible_blocks', {
     minimumRequired: PositiveJsonSafeIntegerSchema.describe('Known lower bound on the required result entries.'),

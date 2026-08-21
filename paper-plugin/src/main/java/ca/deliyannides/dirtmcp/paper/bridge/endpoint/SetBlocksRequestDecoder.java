@@ -7,6 +7,8 @@ import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.edit.DestinationPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockStructure.Placement;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockStructure.Run;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -18,9 +20,9 @@ import java.util.concurrent.ThreadLocalRandom;
 
 final class SetBlocksRequestDecoder {
     private static final Set<String> REQUIRED_FIELDS =
-            Set.of("world", "origin", "palettes", "placements");
+            Set.of("world", "origin", "palettes", "placements", "runs");
     private static final Set<String> ALLOWED_FIELDS =
-            Set.of("world", "origin", "palettes", "placements", "seed", "dryRun");
+            Set.of("world", "origin", "palettes", "placements", "runs", "seed", "dryRun");
 
     private SetBlocksRequestDecoder() {}
 
@@ -33,6 +35,7 @@ final class SetBlocksRequestDecoder {
                 RequestJson.position(object.get("origin"), "origin"),
                 palettes(object.get("palettes")),
                 placements(object.get("placements")),
+                runs(object.get("runs")),
                 object.has("seed")
                         ? RequestJson.integer(object.get("seed"), "seed")
                         : ThreadLocalRandom.current().nextInt(),
@@ -43,9 +46,9 @@ final class SetBlocksRequestDecoder {
 
     private static List<List<DestinationPaletteEntry>> palettes(JsonElement element)
             throws OperationException {
-        if (element == null || !element.isJsonArray() || element.getAsJsonArray().isEmpty()) {
+        if (element == null || !element.isJsonArray()) {
             throw RequestJson.invalid(
-                    "palettes must be a non-empty array",
+                    "palettes must be an array",
                     new ErrorDetails.InvalidRequest.InvalidValue("palettes"));
         }
         List<List<DestinationPaletteEntry>> palettes =
@@ -58,14 +61,13 @@ final class SetBlocksRequestDecoder {
         return List.copyOf(palettes);
     }
 
-    private static List<SetBlocks.Placement> placements(JsonElement element)
-            throws OperationException {
-        if (element == null || !element.isJsonArray() || element.getAsJsonArray().isEmpty()) {
+    private static List<Placement> placements(JsonElement element) throws OperationException {
+        if (element == null || !element.isJsonArray()) {
             throw RequestJson.invalid(
-                    "placements must be a non-empty array",
+                    "placements must be an array",
                     new ErrorDetails.InvalidRequest.InvalidValue("placements"));
         }
-        List<SetBlocks.Placement> placements = new ArrayList<>(element.getAsJsonArray().size());
+        List<Placement> placements = new ArrayList<>(element.getAsJsonArray().size());
         for (int index = 0; index < element.getAsJsonArray().size(); index++) {
             JsonElement entry = element.getAsJsonArray().get(index);
             String name = "placements[" + index + "]";
@@ -76,12 +78,40 @@ final class SetBlocksRequestDecoder {
             }
             JsonArray tuple = entry.getAsJsonArray();
             placements.add(
-                    new SetBlocks.Placement(
+                    new Placement(
                             RequestJson.integer(tuple.get(0), name + "[0]"),
                             RequestJson.integer(tuple.get(1), name + "[1]"),
                             RequestJson.integer(tuple.get(2), name + "[2]"),
                             RequestJson.integer(tuple.get(3), name + "[3]")));
         }
         return placements;
+    }
+
+    private static List<Run> runs(JsonElement element) throws OperationException {
+        if (element == null || !element.isJsonArray()) {
+            throw RequestJson.invalid(
+                    "runs must be an array", new ErrorDetails.InvalidRequest.InvalidValue("runs"));
+        }
+        List<Run> runs = new ArrayList<>(element.getAsJsonArray().size());
+        for (int index = 0; index < element.getAsJsonArray().size(); index++) {
+            JsonElement entry = element.getAsJsonArray().get(index);
+            String name = "runs[" + index + "]";
+            if (!entry.isJsonArray() || entry.getAsJsonArray().size() != 7) {
+                throw RequestJson.invalid(
+                        name + " must be a [paletteIndex, x, y, z, toX, toY, toZ] integer tuple",
+                        new ErrorDetails.InvalidRequest.InvalidValue(name));
+            }
+            JsonArray tuple = entry.getAsJsonArray();
+            runs.add(
+                    new Run(
+                            RequestJson.integer(tuple.get(0), name + "[0]"),
+                            RequestJson.integer(tuple.get(1), name + "[1]"),
+                            RequestJson.integer(tuple.get(2), name + "[2]"),
+                            RequestJson.integer(tuple.get(3), name + "[3]"),
+                            RequestJson.integer(tuple.get(4), name + "[4]"),
+                            RequestJson.integer(tuple.get(5), name + "[5]"),
+                            RequestJson.integer(tuple.get(6), name + "[6]")));
+        }
+        return runs;
     }
 }

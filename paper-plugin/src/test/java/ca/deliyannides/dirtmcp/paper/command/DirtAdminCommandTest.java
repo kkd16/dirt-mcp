@@ -145,7 +145,7 @@ final class DirtAdminCommandTest {
         assertTrue(plain.contains("ping_server  true"));
         assertTrue(plain.contains("get_server_status  false"));
         assertTrue(plain.contains("count_region_block_states  true"));
-        assertTrue(plain.contains("get_region_blocks  false"));
+        assertTrue(plain.contains("get_blocks  false"));
         assertTrue(plain.contains("scan_orthographic_view  true"));
         assertTrue(plain.contains("get_player_context  false"));
         assertTrue(plain.contains("replace_region_blocks  false"));
@@ -174,8 +174,7 @@ final class DirtAdminCommandTest {
         assertTrue(plain.contains("max-entries-per-world  10"));
         assertTrue(plain.contains("max-entries-total  50"));
         assertTrue(plain.contains("max-retained-changed-blocks  655360"));
-        assertTrue(plain.contains("region-blocks-include-air  true"));
-        assertTrue(plain.contains("region-blocks-format  runs"));
+        assertTrue(plain.contains("get-blocks-include-air  true"));
         assertTrue(plain.contains("edit-dry-run  true"));
     }
 
@@ -330,7 +329,7 @@ final class DirtAdminCommandTest {
                 new DirtConfig.Limits(
                         262_144, 131_072, 128, 16, 32, 65_536, 8_192, 256, 1_024, 10, 8_192),
                 new DirtConfig.EditHistory(10, 50, 655_360),
-                new DirtConfig.Defaults(true, "runs", true));
+                new DirtConfig.Defaults(true, true));
     }
 
     private static GetServerStatus status() {
@@ -364,7 +363,7 @@ final class DirtAdminCommandTest {
                         new GetServerStatus.EffectiveLogging("warning", 2_000_000, 7),
                         new GetServerStatus.EffectiveLimits(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
                         new GetServerStatus.EffectiveEditHistory(2, 3, 4),
-                        new GetServerStatus.EffectiveDefaults(false, "blocks", false));
+                        new GetServerStatus.EffectiveDefaults(false, false));
         return () -> result;
     }
 

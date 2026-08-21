@@ -495,7 +495,7 @@ final class BridgeServerProtocolTest {
                                                      "origin":{"x":1,"y":2,"z":3},
                                                      "palettes":[[{"blockState":
                                                      "minecraft:secret_gold_block"}]],
-                                                     "placements":[[0,0,0,0]]}
+                                                     "placements":[[0,0,0,0]],"runs":[]}
                                                     """))
                                     .build(),
                             HttpResponse.BodyHandlers.ofString());
@@ -654,7 +654,7 @@ final class BridgeServerProtocolTest {
                         OperationFailure.RESULT_TOO_LARGE,
                         413,
                         "result_too_large",
-                        new ErrorDetails.ResultTooLarge.Blocks(2, 1)),
+                        new ErrorDetails.ResultTooLarge.StructureEntries(2, 1)),
                 Arguments.of(
                         OperationFailure.HISTORY_CAPACITY_EXCEEDED,
                         503,

@@ -3,14 +3,17 @@ package ca.deliyannides.dirtmcp.paper.world.inspection;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks.BlockRun;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks.Format;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks.InspectedBlock;
+import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks.ExactPaletteEntry;
+import ca.deliyannides.dirtmcp.paper.world.inspection.RegionBlockAlgorithms.InspectedBlock;
+import ca.deliyannides.dirtmcp.paper.world.inspection.RegionBlockAlgorithms.PackedBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.BlockSample;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.CapturedRegion;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockStructure.Placement;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockStructure.Run;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import ca.deliyannides.dirtmcp.paper.world.model.RegionGeometry;
 import java.util.List;
@@ -33,68 +36,94 @@ final class RegionBlockAlgorithmsTest {
                         sample("minecraft:glass"));
 
         List<InspectedBlock> blocks =
-                RegionBlockAlgorithms.collectBlocks(
-                        region, captured(samples), false, 2, Format.BLOCKS);
+                RegionBlockAlgorithms.collectBlocks(region, captured(samples), false);
 
         assertEquals(
-                List.of(
-                        new InspectedBlock(new BlockPosition(-1, 0, -1), "minecraft:stone"),
-                        new InspectedBlock(new BlockPosition(0, 1, -1), "minecraft:glass")),
+                List.of(block(-1, 0, -1, "minecraft:stone"), block(0, 1, -1, "minecraft:glass")),
                 blocks);
     }
 
     @Test
-    void appliesTheBlockResultLimitWithoutTruncating() throws Exception {
-        Cuboid region = cuboid(new BlockPosition(0, 0, 0), new BlockPosition(1, 0, 0));
+    void packsFirstSeenPalettesAndGreedyXZYCuboids() throws Exception {
+        List<InspectedBlock> blocks =
+                List.of(
+                        block(0, 0, 0, "stone"),
+                        block(1, 0, 0, "stone"),
+                        block(0, 0, 1, "stone"),
+                        block(1, 0, 1, "stone"),
+                        block(0, 1, 0, "stone"),
+                        block(1, 1, 0, "stone"),
+                        block(0, 1, 1, "stone"),
+                        block(1, 1, 1, "stone"),
+                        block(3, 1, 1, "lantern"));
 
+        PackedBlocks packed =
+                RegionBlockAlgorithms.packBlocks(new BlockPosition(0, 0, 0), blocks, 2, 64);
+
+        assertEquals(
+                List.of(
+                        List.of(new ExactPaletteEntry("stone")),
+                        List.of(new ExactPaletteEntry("lantern"))),
+                packed.palettes());
+        assertEquals(List.of(new Placement(1, 3, 1, 1)), packed.placements());
+        assertEquals(List.of(new Run(0, 0, 0, 0, 1, 1, 1)), packed.runs());
+    }
+
+    @Test
+    void returnsOriginRelativeCoordinates() throws Exception {
+        PackedBlocks packed =
+                RegionBlockAlgorithms.packBlocks(
+                        new BlockPosition(100, 64, 100),
+                        List.of(
+                                block(100, 64, 100, "stone"),
+                                block(115, 64, 100, "stone"),
+                                block(100, 65, 100, "lantern"),
+                                block(100, 72, 100, "lantern")),
+                        4,
+                        64);
+
+        assertEquals(
+                List.of(
+                        new Placement(0, 0, 0, 0),
+                        new Placement(0, 15, 0, 0),
+                        new Placement(1, 0, 1, 0),
+                        new Placement(1, 0, 8, 0)),
+                packed.placements());
+        assertEquals(List.of(), packed.runs());
+    }
+
+    @Test
+    void rejectsStructureEntriesOverTheRequestedCap() {
         OperationException exception =
                 assertThrows(
                         OperationException.class,
                         () ->
-                                RegionBlockAlgorithms.collectBlocks(
-                                        region,
-                                        captured(
-                                                Map.of(
-                                                        new BlockPosition(0, 0, 0), sample("a"),
-                                                        new BlockPosition(1, 0, 0), sample("b"))),
-                                        true,
+                                RegionBlockAlgorithms.packBlocks(
+                                        new BlockPosition(0, 0, 0),
+                                        List.of(block(0, 0, 0, "stone"), block(2, 0, 0, "stone")),
                                         1,
-                                        Format.BLOCKS));
+                                        64));
 
         assertEquals(OperationFailure.RESULT_TOO_LARGE, exception.failure());
-    }
-
-    @Test
-    void groupsIdenticalBlocksAlongTheirLongestAxis() throws Exception {
-        List<InspectedBlock> blocks =
-                List.of(
-                        block(0, 0, 0, "stone"),
-                        block(1, 0, 0, "glass"),
-                        block(2, 0, 0, "glass"),
-                        block(0, 1, 0, "stone"),
-                        block(0, 2, 0, "stone"));
-
-        List<BlockRun> runs = RegionBlockAlgorithms.groupSortedRuns(blocks, 2);
-
         assertEquals(
-                List.of(
-                        new BlockRun(
-                                "stone", new BlockPosition(0, 0, 0), new BlockPosition(0, 2, 0)),
-                        new BlockRun(
-                                "glass", new BlockPosition(1, 0, 0), new BlockPosition(2, 0, 0))),
-                runs);
+                new ErrorDetails.ResultTooLarge.StructureEntries(2, 1),
+                exception.details().orElseThrow());
     }
 
     @Test
-    void rejectsRunResultsOverTheRequestedCap() {
-        List<InspectedBlock> blocks = List.of(block(0, 0, 0, "stone"), block(2, 0, 0, "stone"));
-
+    void rejectsPalettesOverTheConfiguredCap() {
         OperationException exception =
                 assertThrows(
                         OperationException.class,
-                        () -> RegionBlockAlgorithms.groupSortedRuns(blocks, 1));
+                        () ->
+                                RegionBlockAlgorithms.packBlocks(
+                                        new BlockPosition(0, 0, 0),
+                                        List.of(block(0, 0, 0, "stone"), block(1, 0, 0, "dirt")),
+                                        2,
+                                        1));
 
-        assertEquals(OperationFailure.RESULT_TOO_LARGE, exception.failure());
+        assertEquals(
+                new ErrorDetails.ResultTooLarge.Palettes(2, 1), exception.details().orElseThrow());
     }
 
     @Test

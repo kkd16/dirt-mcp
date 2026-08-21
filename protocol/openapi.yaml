@@ -109,23 +109,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /v1/get-region-blocks:
+  /v1/get-blocks:
     post:
-      operationId: getRegionBlocks
-      summary: Return exact filtered block geometry from a bounded region of loaded chunks
+      operationId: getBlocks
+      summary: Return replay-ready exact block structure from a bounded region of loaded chunks
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GetRegionBlocksRequest'
+              $ref: '#/components/schemas/GetBlocksRequest'
       responses:
         '200':
-          description: Exact sparse blocks or deterministic axis-aligned runs
+          description: Exact singleton palettes with origin-relative placements and inclusive cuboids
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GetRegionBlocksResponse'
+                $ref: '#/components/schemas/GetBlocksResponse'
         '400':
           description: Invalid JSON, fields, coordinates, filters, options, or world height
           content:
@@ -434,7 +434,7 @@ paths:
   /v1/set-blocks:
     post:
       operationId: setBlocks
-      summary: Place weighted-palette states at origin-relative offsets in one edit
+      summary: Place weighted-palette states from origin-relative placements and cuboids in one edit
       parameters:
         - $ref: '#/components/parameters/DirtCallId'
       requestBody:
@@ -451,7 +451,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/SetBlocksResponse'
         '400':
-          description: Invalid call ID, JSON, fields, palettes, placements, resolved coordinates, world height, block state, or duplicate position
+          description: Invalid call ID, JSON, fields, palettes, geometry, resolved coordinates, world height, block state, or overlapping block
           content:
             application/json:
               schema:
@@ -473,7 +473,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '413':
-          description: Position count, touched chunks, or changed-block count exceeds its configured limit
+          description: Expanded block count, touched chunks, or changed-block count exceeds its configured limit
           content:
             application/json:
               schema:
@@ -485,7 +485,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          description: A listed position is in an unloaded chunk, editing was interrupted, or bounded history capacity was unavailable before mutation
+          description: A represented block is in an unloaded chunk, editing was interrupted, or bounded history capacity was unavailable before mutation
           content:
             application/json:
               schema:
@@ -1044,8 +1044,8 @@ components:
                 reason:
                   type: string
                   enum:
-                    - blocks
-                    - runs
+                    - structure_entries
+                    - palettes
                     - visible_blocks
                     - perspective_rays
                     - perspective_ray_distance
@@ -1344,16 +1344,17 @@ components:
               $ref: '#/components/schemas/PositiveInt32'
         - type: object
           additionalProperties: false
-          description: requested must be greater than maximum.
+          description: minimumRequired is a known lower bound greater than maximum.
           required:
             - reason
-            - requested
+            - minimumRequired
             - maximum
           properties:
             reason:
               const: block_count
-            requested:
-              $ref: '#/components/schemas/PositiveInt32'
+            minimumRequired:
+              $ref: '#/components/schemas/PositiveJsonSafeInteger'
+              description: Known lower bound on the blocks represented by placements and runs.
             maximum:
               $ref: '#/components/schemas/PositiveInt32'
     HistoryCapacityDetails:
@@ -1611,7 +1612,7 @@ components:
             type: integer
             format: int64
             minimum: 0
-    GetRegionBlocksRequest:
+    GetBlocksRequest:
       type: object
       additionalProperties: false
       required:
@@ -1650,111 +1651,84 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Requested result cap; it cannot exceed the configured maximum.
-        format:
-          type: string
-          enum:
-            - blocks
-            - runs
-          description: Omission uses the configured region-blocks format.
-    RegionBlock:
-      type: object
-      additionalProperties: false
-      required:
-        - position
-        - blockState
-      properties:
-        position:
-          $ref: '#/components/schemas/BlockPosition'
-        blockState:
-          type: string
-          minLength: 1
-    BlockRun:
+          description: Maximum placements plus runs; it cannot exceed the configured inspection-result limit.
+    ExactPaletteEntry:
       type: object
       additionalProperties: false
       required:
         - blockState
-        - from
-        - to
       properties:
         blockState:
           type: string
           minLength: 1
-        from:
-          description: Inclusive first position of the axis-aligned run.
-          $ref: '#/components/schemas/BlockPosition'
-        to:
-          description: Inclusive last position of the axis-aligned run.
-          $ref: '#/components/schemas/BlockPosition'
-    GetRegionBlocksResponse:
-      oneOf:
-        - $ref: '#/components/schemas/GetRegionBlocksListResponse'
-        - $ref: '#/components/schemas/GetRegionBlockRunsResponse'
-      discriminator:
-        propertyName: format
-        mapping:
-          blocks: '#/components/schemas/GetRegionBlocksListResponse'
-          runs: '#/components/schemas/GetRegionBlockRunsResponse'
-    GetRegionBlocksListResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - world
-        - bounds
-        - volume
-        - matchedBlockCount
-        - format
-        - blocks
-      properties:
-        world:
-          type: string
-          minLength: 1
-        bounds:
-          $ref: '#/components/schemas/Bounds'
-        volume:
-          type: integer
-          format: int64
-          minimum: 1
-        matchedBlockCount:
-          type: integer
-          format: int64
+          description: Exact canonical block state represented by this palette.
+    PalettePlacement:
+      type: array
+      minItems: 4
+      maxItems: 4
+      description: Exact [paletteIndex, x, y, z] tuple; paletteIndex is non-negative and coordinates are signed offsets from origin.
+      prefixItems:
+        - type: integer
+          format: int32
           minimum: 0
-        format:
-          const: blocks
-        blocks:
-          type: array
-          items:
-            $ref: '#/components/schemas/RegionBlock'
-    GetRegionBlockRunsResponse:
+          maximum: 2147483647
+        - $ref: '#/components/schemas/Int32'
+        - $ref: '#/components/schemas/Int32'
+        - $ref: '#/components/schemas/Int32'
+      items: false
+    PaletteRun:
+      type: array
+      minItems: 7
+      maxItems: 7
+      description: Exact [paletteIndex, x, y, z, toX, toY, toZ] tuple for a component-wise forward inclusive cuboid; coordinates are signed offsets from origin.
+      prefixItems:
+        - type: integer
+          format: int32
+          minimum: 0
+          maximum: 2147483647
+        - $ref: '#/components/schemas/Int32'
+        - $ref: '#/components/schemas/Int32'
+        - $ref: '#/components/schemas/Int32'
+        - $ref: '#/components/schemas/Int32'
+        - $ref: '#/components/schemas/Int32'
+        - $ref: '#/components/schemas/Int32'
+      items: false
+    GetBlocksResponse:
       type: object
       additionalProperties: false
       required:
         - world
-        - bounds
-        - volume
-        - matchedBlockCount
-        - format
+        - origin
+        - palettes
+        - placements
         - runs
       properties:
         world:
           type: string
           minLength: 1
-        bounds:
-          $ref: '#/components/schemas/Bounds'
-        volume:
-          type: integer
-          format: int64
-          minimum: 1
-        matchedBlockCount:
-          type: integer
-          format: int64
-          minimum: 0
-        format:
-          const: runs
+        origin:
+          description: Normalized minimum requested corner used by every relative tuple.
+          $ref: '#/components/schemas/BlockPosition'
+        palettes:
+          type: array
+          maxItems: 64
+          description: First-seen exact singleton palettes. Empty exactly when placements and runs are both empty.
+          items:
+            type: array
+            minItems: 1
+            maxItems: 1
+            items:
+              $ref: '#/components/schemas/ExactPaletteEntry'
+        placements:
+          type: array
+          description: Non-overlapping singleton blocks represented relative to origin.
+          items:
+            $ref: '#/components/schemas/PalettePlacement'
         runs:
           type: array
+          description: Non-overlapping forward inclusive cuboids represented relative to origin; no run overlaps a placement.
           items:
-            $ref: '#/components/schemas/BlockRun'
+            $ref: '#/components/schemas/PaletteRun'
     ScanOrthographicViewRequest:
       type: object
       additionalProperties: false
@@ -3049,14 +3023,6 @@ components:
           format: int64
           minimum: 0
           description: Blocks changed or that would change; cannot exceed volume.
-    PalettePlacement:
-      type: array
-      minItems: 4
-      maxItems: 4
-      description: Exact [paletteIndex, x, y, z] integer tuple; the index is non-negative and x, y, z are signed offsets from origin.
-      items:
-        type: integer
-        format: int32
     SetBlocksRequest:
       type: object
       additionalProperties: false
@@ -3065,6 +3031,7 @@ components:
         - origin
         - palettes
         - placements
+        - runs
       properties:
         world:
           type: string
@@ -3074,9 +3041,8 @@ components:
           $ref: '#/components/schemas/BlockPosition'
         palettes:
           type: array
-          minItems: 1
           maxItems: 64
-          description: Weighted palettes referenced by zero-based index; at most 64 entries are allowed across all palettes.
+          description: Weighted palettes referenced by zero-based index; empty exactly when placements and runs are both empty, with at most 64 entries across all palettes.
           items:
             type: array
             minItems: 1
@@ -3086,10 +3052,14 @@ components:
               $ref: '#/components/schemas/DestinationPaletteEntry'
         placements:
           type: array
-          minItems: 1
-          description: Palette-indexed origin-relative positions; resolved positions must be distinct.
+          description: Palette-indexed origin-relative singleton positions; all represented blocks across placements and runs must be distinct.
           items:
             $ref: '#/components/schemas/PalettePlacement'
+        runs:
+          type: array
+          description: Palette-indexed origin-relative forward inclusive cuboids; all represented blocks across placements and runs must be distinct.
+          items:
+            $ref: '#/components/schemas/PaletteRun'
         seed:
           type: integer
           format: int32
@@ -3141,13 +3111,14 @@ components:
           type: string
           minLength: 1
         bounds:
-          description: Smallest inclusive bounds containing all requested resolved placements.
-          $ref: '#/components/schemas/Bounds'
+          description: Smallest inclusive bounds containing all requested resolved blocks, or null for empty geometry.
+          oneOf:
+            - $ref: '#/components/schemas/Bounds'
+            - type: 'null'
         palettes:
           type: array
-          minItems: 1
           maxItems: 64
-          description: Canonical palettes used by the edit.
+          description: Canonical palettes used by the edit, or an empty array for empty geometry.
           items:
             type: array
             minItems: 1
@@ -3172,8 +3143,8 @@ components:
         blockCount:
           type: integer
           format: int64
-          minimum: 1
-          description: Number of placements in the request.
+          minimum: 0
+          description: Expanded number of unique blocks represented by placements and runs.
         changedBlockCount:
           type: integer
           format: int64
@@ -3485,17 +3456,11 @@ components:
       type: object
       additionalProperties: false
       required:
-        - regionBlocksIncludeAir
-        - regionBlocksFormat
+        - getBlocksIncludeAir
         - editDryRun
       properties:
-        regionBlocksIncludeAir:
+        getBlocksIncludeAir:
           type: boolean
-        regionBlocksFormat:
-          type: string
-          enum:
-            - blocks
-            - runs
         editDryRun:
           type: boolean
           description: Default dry-run behavior for every Dirt block-edit tool.
@@ -3534,7 +3499,7 @@ components:
         - ping_server
         - get_server_status
         - count_region_block_states
-        - get_region_blocks
+        - get_blocks
         - scan_orthographic_view
         - get_player_context
         - get_perspective_view
@@ -3551,7 +3516,7 @@ components:
           type: boolean
         count_region_block_states:
           type: boolean
-        get_region_blocks:
+        get_blocks:
           type: boolean
         scan_orthographic_view:
           type: boolean

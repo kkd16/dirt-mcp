@@ -202,8 +202,7 @@ public final class DirtAdminCommand {
 
         DirtConfig.Defaults defaults = this.config.defaults();
         appendSection(message, "Defaults");
-        appendValue(message, "region-blocks-include-air", defaults.regionBlocksIncludeAir());
-        appendValue(message, "region-blocks-format", defaults.regionBlocksFormat());
+        appendValue(message, "get-blocks-include-air", defaults.getBlocksIncludeAir());
         appendValue(message, "edit-dry-run", defaults.editDryRun());
 
         sender.sendMessage(message.build());

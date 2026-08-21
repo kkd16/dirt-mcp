@@ -4,22 +4,22 @@ import ca.deliyannides.dirtmcp.paper.bridge.BridgeEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks;
+import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks;
 import java.io.IOException;
 import java.util.Objects;
 
-public final class GetRegionBlocksEndpoint implements BridgeEndpoint {
-    private final GetRegionBlocks operation;
+public final class GetBlocksEndpoint implements BridgeEndpoint {
+    private final GetBlocks operation;
     private final DirtConfig config;
 
-    public GetRegionBlocksEndpoint(GetRegionBlocks operation, DirtConfig config) {
+    public GetBlocksEndpoint(GetBlocks operation, DirtConfig config) {
         this.operation = Objects.requireNonNull(operation, "operation");
         this.config = Objects.requireNonNull(config, "config");
     }
 
     @Override
     public String operation() {
-        return "get_region_blocks";
+        return "get_blocks";
     }
 
     @Override
@@ -29,19 +29,20 @@ public final class GetRegionBlocksEndpoint implements BridgeEndpoint {
 
     @Override
     public String path() {
-        return "/v1/get-region-blocks";
+        return "/v1/get-blocks";
     }
 
     @Override
     public void handle(BridgeExchange exchange) throws IOException, OperationException {
-        GetRegionBlocks.Request request =
-                GetRegionBlocksRequestDecoder.decode(exchange, this.config);
+        GetBlocks.Request request = GetBlocksRequestDecoder.decode(exchange, this.config);
         exchange.world(request.world());
-        exchange.ok(this.operation.getRegionBlocks(request));
+        GetBlocks.Result result = this.operation.getBlocks(request);
+        exchange.bounds(request.min(), request.max());
+        exchange.ok(result);
     }
 
     @Override
     public String internalErrorMessage() {
-        return "The region's blocks could not be returned";
+        return "The blocks could not be returned";
     }
 }

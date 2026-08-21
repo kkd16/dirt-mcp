@@ -150,13 +150,13 @@ final class ErrorDetailsJsonTest {
                         "{reason:'perspective_chunks',requested:9,maximum:8}"),
                 detail(
                         new ErrorDetails.RegionTooLarge.BlockCount(9, 8),
-                        "{reason:'block_count',requested:9,maximum:8}"),
+                        "{reason:'block_count',minimumRequired:9,maximum:8}"),
                 detail(
-                        new ErrorDetails.ResultTooLarge.Blocks(9, 8),
-                        "{reason:'blocks',minimumRequired:9,maximum:8}"),
+                        new ErrorDetails.ResultTooLarge.StructureEntries(9, 8),
+                        "{reason:'structure_entries',minimumRequired:9,maximum:8}"),
                 detail(
-                        new ErrorDetails.ResultTooLarge.Runs(9, 8),
-                        "{reason:'runs',minimumRequired:9,maximum:8}"),
+                        new ErrorDetails.ResultTooLarge.Palettes(9, 8),
+                        "{reason:'palettes',minimumRequired:9,maximum:8}"),
                 detail(
                         new ErrorDetails.ResultTooLarge.VisibleBlocks(9, 8),
                         "{reason:'visible_blocks',minimumRequired:9,maximum:8}"),
@@ -262,7 +262,8 @@ final class ErrorDetailsJsonTest {
                                 "Builder", "feetPosition.x"),
                         "player_unavailable"),
                 Arguments.of(new ErrorDetails.RegionTooLarge.BlockCount(2, 1), "region_too_large"),
-                Arguments.of(new ErrorDetails.ResultTooLarge.Blocks(2, 1), "result_too_large"),
+                Arguments.of(
+                        new ErrorDetails.ResultTooLarge.StructureEntries(2, 1), "result_too_large"),
                 Arguments.of(
                         new ErrorDetails.ServerUnavailable.PaperUnavailable(),
                         "server_unavailable"),

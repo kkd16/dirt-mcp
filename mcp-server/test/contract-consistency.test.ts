@@ -139,13 +139,15 @@ test('OpenAPI error numbers preserve Java ranges and documented relationships', 
   const regionTooLarge = openapiSchema(openapi, 'RegionTooLargeDetails');
   const resultTooLarge = openapiSchema(openapi, 'ResultTooLargeError');
   const perspectiveView = openapiSchema(openapi, 'GetPerspectiveViewResponse');
+  const placement = openapiSchema(openapi, 'PalettePlacement');
+  const run = openapiSchema(openapi, 'PaletteRun');
   assert.equal(schemaReferenceCount(openapiSchema(openapi, 'BridgeBusyError'), 'PositiveInt32'), 1);
   assert.equal(schemaReferenceCount(openapiSchema(openapi, 'ChangeLimitExceededError'), 'PositiveInt32'), 1);
   assert.equal(schemaReferenceCount(invalidRequest, 'PositiveInt32'), 2);
   assert.equal(schemaReferenceCount(invalidRequest, 'JsonSafeInteger'), 3);
   assert.equal(schemaReferenceCount(invalidRequest, 'PositiveJsonSafeInteger'), 1);
-  assert.equal(schemaReferenceCount(regionTooLarge, 'PositiveInt32'), 6);
-  assert.equal(schemaReferenceCount(regionTooLarge, 'PositiveJsonSafeInteger'), 1);
+  assert.equal(schemaReferenceCount(regionTooLarge, 'PositiveInt32'), 5);
+  assert.equal(schemaReferenceCount(regionTooLarge, 'PositiveJsonSafeInteger'), 2);
   assert.equal(schemaReferenceCount(resultTooLarge, 'PositiveInt32'), 1);
   assert.equal(schemaReferenceCount(resultTooLarge, 'PositiveJsonSafeInteger'), 1);
   assert.equal(schemaReferenceCount(openapiSchema(openapi, 'HistoryCapacityDetails'), 'PositiveJsonSafeInteger'), 3);
@@ -154,6 +156,12 @@ test('OpenAPI error numbers preserve Java ranges and documented relationships', 
   assert.equal(schemaReferenceCount(openapiSchema(openapi, 'ChunkPosition'), 'Int32'), 2);
   assert.equal(schemaReferenceCount(openapiSchema(openapi, 'PlayerItemStack'), 'PositiveInt32'), 3);
   assert.equal(schemaReferenceCount(openapiSchema(openapi, 'PlayerInventory'), 'PositiveInt32'), 1);
+  assert.equal(schemaReferenceCount(placement, 'Int32'), 3);
+  assert.equal(schemaReferenceCount(run, 'Int32'), 6);
+  for (const tuple of [placement, run]) {
+    assert.match(tuple, /prefixItems:\n        - type: integer\n          format: int32\n          minimum: 0/);
+    assert.match(tuple, /^      items: false$/m);
+  }
   assert.match(perspectiveView, /checkedChunkCount:\n\s+type: integer\n\s+format: int32\n\s+minimum: 0/);
   assert.equal(schemaReferenceCount(openapiSchema(openapi, 'GetPlayerContextResponse'), 'PlayerEffect'), 1);
   assert.match(openapiSchema(openapi, 'PlayerSelector'), /maxLength: 36/);

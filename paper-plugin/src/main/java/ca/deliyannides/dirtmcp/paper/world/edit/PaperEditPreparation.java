@@ -101,7 +101,7 @@ final class PaperEditPreparation implements AutoCloseable {
     PreparedSet prepareSet(
             PaperWorld world,
             SetBlocks.Request request,
-            List<BlockPosition> resolvedPositions,
+            List<SetBlocks.ResolvedBlock> resolvedBlocks,
             BlockBounds bounds,
             List<ChunkPosition> touchedChunks)
             throws OperationException {
@@ -113,7 +113,7 @@ final class PaperEditPreparation implements AutoCloseable {
                             requireValidHeight(world.bukkitWorld(), bounds);
                             return prepareSetPalettes(request);
                         });
-        List<PreparedBlockChange> changes = prepareChanges(request, resolvedPositions, palettes);
+        List<PreparedBlockChange> changes = prepareChanges(resolvedBlocks, palettes);
         return onMainThread(
                 () -> {
                     requireAvailable(world);
@@ -139,22 +139,13 @@ final class PaperEditPreparation implements AutoCloseable {
     }
 
     private static List<PreparedBlockChange> prepareChanges(
-            SetBlocks.Request request,
-            List<BlockPosition> resolvedPositions,
-            List<PreparedPalette> palettes)
+            List<SetBlocks.ResolvedBlock> resolvedBlocks, List<PreparedPalette> palettes)
             throws OperationException {
-        if (resolvedPositions.size() != request.placements().size()) {
-            throw new IllegalStateException(
-                    "Resolved set-blocks positions do not match the validated request");
-        }
-        List<PreparedBlockChange> changes = new ArrayList<>(request.placements().size());
-        for (int placementIndex = 0;
-                placementIndex < request.placements().size();
-                placementIndex++) {
+        List<PreparedBlockChange> changes = new ArrayList<>(resolvedBlocks.size());
+        for (SetBlocks.ResolvedBlock block : resolvedBlocks) {
             FaweEditExecutor.requireNotInterrupted();
-            SetBlocks.Placement placement = request.placements().get(placementIndex);
-            Pattern pattern = palettes.get(placement.paletteIndex()).pattern();
-            BlockPosition position = resolvedPositions.get(placementIndex);
+            Pattern pattern = palettes.get(block.paletteIndex()).pattern();
+            BlockPosition position = block.position();
             BlockVector3 vector = BlockVector3.at(position.x(), position.y(), position.z());
             changes.add(new PreparedBlockChange(vector, pattern));
         }

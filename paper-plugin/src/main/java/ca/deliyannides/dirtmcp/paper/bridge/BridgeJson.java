@@ -5,8 +5,10 @@ import ca.deliyannides.dirtmcp.paper.world.edit.DestinationPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditOperation;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditOutcome;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditStatus;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockStructure;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonSerializer;
 import java.time.Instant;
@@ -25,6 +27,31 @@ final class BridgeJson {
                                             object.addProperty("weight", entry.weight());
                                         }
                                         return object;
+                                    })
+                    .registerTypeAdapter(
+                            BlockStructure.Placement.class,
+                            (JsonSerializer<BlockStructure.Placement>)
+                                    (placement, ignoredType, ignoredContext) -> {
+                                        JsonArray tuple = new JsonArray(4);
+                                        tuple.add(placement.paletteIndex());
+                                        tuple.add(placement.x());
+                                        tuple.add(placement.y());
+                                        tuple.add(placement.z());
+                                        return tuple;
+                                    })
+                    .registerTypeAdapter(
+                            BlockStructure.Run.class,
+                            (JsonSerializer<BlockStructure.Run>)
+                                    (run, ignoredType, ignoredContext) -> {
+                                        JsonArray tuple = new JsonArray(7);
+                                        tuple.add(run.paletteIndex());
+                                        tuple.add(run.x());
+                                        tuple.add(run.y());
+                                        tuple.add(run.z());
+                                        tuple.add(run.toX());
+                                        tuple.add(run.toY());
+                                        tuple.add(run.toZ());
+                                        return tuple;
                                     })
                     .registerTypeAdapter(
                             EditOperation.class,

@@ -32,6 +32,7 @@ HTTP bridge.
 
 ```ts
 type int32 = number; // integer from -2,147,483,648 to 2,147,483,647
+type nonnegativeInt32 = number; // integer from 0 to 2,147,483,647
 type positiveInt = number; // positive safe integer
 type nonnegativeInt = number; // safe integer >= 0
 type uuid = string; // canonical UUID
@@ -196,8 +197,7 @@ type Success = {
       maxRetainedChangedBlocks: positiveInt;
     };
     defaults: {
-      regionBlocksIncludeAir: boolean;
-      regionBlocksFormat: 'blocks' | 'runs';
+      getBlocksIncludeAir: boolean;
       editDryRun: boolean;
     };
     logging: {
@@ -210,7 +210,7 @@ type Success = {
 };
 ```
 
-`ToolName` is the set of the 12 headings in this document.
+`ToolName` is the set of the 13 headings in this document.
 
 ## Inspection
 
@@ -235,11 +235,12 @@ type Success = {
 };
 ```
 
-### `get_region_blocks`
+### `get_blocks`
 
-Returns filtered exact blocks or a deterministic lossless cover of axis-aligned
-runs. Include patterns are applied first, followed by exclude patterns. The two
-pattern lists may contain at most 64 entries combined.
+Returns a replay-ready exact structure using singleton palettes, individual
+placements, and inclusive cuboids. Include patterns are applied first, followed
+by exclude patterns. The two pattern lists may contain at most 64 entries
+combined.
 
 ```ts
 type Input = {
@@ -249,35 +250,30 @@ type Input = {
   includeBlockStatePatterns?: string[]; // default [], allowing all states
   excludeBlockStatePatterns?: string[]; // default []
   includeAir?: boolean; // plugin default when omitted
-  maxResults?: positiveInt; // fails rather than truncates
-  format?: 'blocks' | 'runs'; // plugin default when omitted
+  maxResults?: positiveInt; // maximum placements plus runs; fails rather than truncates
 };
 
-type Success =
-  | {
-      world: string;
-      bounds: Bounds;
-      volume: positiveInt;
-      matchedBlockCount: nonnegativeInt;
-      format: 'blocks';
-      blocks: Array<{
-        position: BlockPosition;
-        blockState: string;
-      }>;
-    }
-  | {
-      world: string;
-      bounds: Bounds;
-      volume: positiveInt;
-      matchedBlockCount: nonnegativeInt;
-      format: 'runs';
-      runs: Array<{
-        blockState: string;
-        from: BlockPosition;
-        to: BlockPosition;
-      }>;
-    };
+type PalettePlacement = [paletteIndex: nonnegativeInt32, x: int32, y: int32, z: int32];
+type PaletteRun = [paletteIndex: nonnegativeInt32, x: int32, y: int32, z: int32, toX: int32, toY: int32, toZ: int32];
+
+type Success = {
+  world: string;
+  origin: BlockPosition;
+  palettes: Array<[{ blockState: string }]>;
+  placements: PalettePlacement[];
+  runs: PaletteRun[];
+};
 ```
+
+Every tuple coordinate is a signed offset from `origin`; run endpoints are
+component-wise forward and inclusive. Geometry never overlaps. Palettes are
+ordered by first appearance and contain exactly one unweighted state because
+inspection is exact. Blocks are scanned in Y/Z/X order and greedily packed
+along +X, then +Z, then +Y; singletons remain placements. Both geometry arrays
+are always present and may be empty.
+
+The success object is valid `set_blocks` input as-is. Changing only `origin`
+copies the exact structure to another location.
 
 ### `scan_orthographic_view`
 
@@ -614,37 +610,44 @@ type Success = {
 
 ### `set_blocks`
 
-Places blocks from one or more palettes at distinct origin-relative positions as
-one edit. Each placement is `[paletteIndex, x, y, z]`; `paletteIndex` is
-zero-based and the coordinates are signed offsets added to `origin`.
+Places blocks from palettes using origin-relative singleton placements and
+inclusive cuboids as one edit. Palette indices are zero-based. Every coordinate
+in both tuple forms is a signed offset added to `origin`.
 
 ```ts
 type Input = {
   world: string;
   origin: BlockPosition;
-  palettes: DestinationPalette[]; // 1-64 palettes, at most 64 entries total
-  placements: Array<[int32, int32, int32, int32]>; // non-empty
+  palettes: DestinationPalette[]; // at most 64 entries total
+  placements: PalettePlacement[];
+  runs: PaletteRun[];
   seed?: int32;
   dryRun?: boolean; // plugin default when omitted
 };
 
 type Success = {
   world: string;
-  bounds: Bounds;
+  bounds: Bounds | null;
   palettes: DestinationPalette[];
   seed: int32;
   outcome: 'preview' | 'no_change' | 'committed';
   edit: EditRecord | null;
-  blockCount: positiveInt;
+  blockCount: nonnegativeInt;
   changedBlockCount: nonnegativeInt;
   unchangedBlockCount: nonnegativeInt;
 };
 ```
 
-Every palette index must exist, resolved positions must fit signed 32-bit
-coordinates, and resolved positions must be distinct. The configured region
-volume limits the placement count. Placement does not request Minecraft neighbor
-physics.
+Every run uses component-wise forward inclusive corners. Every palette index
+must exist, resolved positions must fit signed 32-bit coordinates, and no block
+represented by a placement or run may overlap another. Limits apply to the
+expanded block count. Palette selection, including weighted selection, happens
+independently at every represented coordinate using the returned seed.
+
+When both geometry arrays are empty, `palettes` must also be empty. This is a
+valid no-op returning null bounds, zero counts, `outcome: 'no_change'`, and no
+edit record. Non-empty geometry requires at least one palette. Placement does
+not request Minecraft neighbor physics.
 
 ### `get_edit_history`
 

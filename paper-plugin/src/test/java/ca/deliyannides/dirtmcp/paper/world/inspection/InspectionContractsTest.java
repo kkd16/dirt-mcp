@@ -3,7 +3,6 @@ package ca.deliyannides.dirtmcp.paper.world.inspection;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks.Format;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockDimensions;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
@@ -18,16 +17,15 @@ final class InspectionContractsTest {
     @Test
     void requestPatternListsAreDefensivelyCopied() {
         List<String> patterns = new ArrayList<>(List.of("stone"));
-        GetRegionBlocks.Request request =
-                new GetRegionBlocks.Request(
+        GetBlocks.Request request =
+                new GetBlocks.Request(
                         "world",
                         new BlockPosition(0, 0, 0),
                         new BlockPosition(0, 0, 0),
                         patterns,
                         List.of(),
                         false,
-                        1,
-                        Format.BLOCKS);
+                        1);
 
         patterns.add("dirt");
 

@@ -33,7 +33,7 @@ final class DirtConfigLoaderTest {
                         262_144, 262_144, 256, 32, 64, 65_536, 16_384, 512, 2_048, 10, 8_192),
                 config.limits());
         assertEquals(new DirtConfig.EditHistory(20, 100, 1_310_720), config.editHistory());
-        assertEquals(new DirtConfig.Defaults(false, "blocks", false), config.defaults());
+        assertEquals(new DirtConfig.Defaults(false, false), config.defaults());
     }
 
     @Test
@@ -165,9 +165,8 @@ final class DirtConfigLoaderTest {
                 Arguments.of("edit-history.max-retained-changed-blocks", 0),
                 Arguments.of("edit-history.max-retained-changed-blocks", 65_535),
                 Arguments.of("limits.not-a-limit", 20),
-                Arguments.of("defaults.region-blocks-format", "summary"),
-                Arguments.of("defaults.region-blocks-format", " "),
-                Arguments.of("defaults.region-blocks-include-air", "false"),
+                Arguments.of("defaults.get-blocks-include-air", "false"),
+                Arguments.of("defaults.not-a-default", false),
                 Arguments.of("defaults.edit-dry-run", "false"));
     }
 

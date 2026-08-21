@@ -135,14 +135,14 @@ final class ErrorDetailsJson {
             }
             case ErrorDetails.RegionTooLarge.BlockCount value -> {
                 JsonObject object = reason("block_count");
-                object.addProperty("requested", value.requested());
+                object.addProperty("minimumRequired", value.minimumRequired());
                 object.addProperty("maximum", value.maximum());
                 yield object;
             }
-            case ErrorDetails.ResultTooLarge.Blocks value ->
-                    result("blocks", value.minimumRequired(), value.maximum());
-            case ErrorDetails.ResultTooLarge.Runs value ->
-                    result("runs", value.minimumRequired(), value.maximum());
+            case ErrorDetails.ResultTooLarge.StructureEntries value ->
+                    result("structure_entries", value.minimumRequired(), value.maximum());
+            case ErrorDetails.ResultTooLarge.Palettes value ->
+                    result("palettes", value.minimumRequired(), value.maximum());
             case ErrorDetails.ResultTooLarge.VisibleBlocks value ->
                     result("visible_blocks", value.minimumRequired(), value.maximum());
             case ErrorDetails.ResultTooLarge.PerspectiveRays value ->

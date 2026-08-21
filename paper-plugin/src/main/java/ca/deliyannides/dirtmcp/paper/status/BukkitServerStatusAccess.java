@@ -123,10 +123,7 @@ public final class BukkitServerStatusAccess implements PaperServerStatusService.
                         editHistory.maxEntriesPerWorld(),
                         editHistory.maxEntriesTotal(),
                         editHistory.maxRetainedChangedBlocks()),
-                new EffectiveDefaults(
-                        defaults.regionBlocksIncludeAir(),
-                        defaults.regionBlocksFormat(),
-                        defaults.editDryRun()));
+                new EffectiveDefaults(defaults.getBlocksIncludeAir(), defaults.editDryRun()));
     }
 
     private static Plugin requireFawe(Server server, OperationFailure failure)

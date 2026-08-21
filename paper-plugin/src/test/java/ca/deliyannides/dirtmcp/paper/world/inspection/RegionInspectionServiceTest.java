@@ -2,7 +2,6 @@ package ca.deliyannides.dirtmcp.paper.world.inspection;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -10,10 +9,7 @@ import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates.Request;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks.BlockListResult;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks.BlockRunsResult;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks.Format;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks.InspectedBlock;
+import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks.ExactPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.BlockSample;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.CapturedRegion;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.Direction;
@@ -21,6 +17,8 @@ import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.ViewB
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockDimensions;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockStructure.Placement;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockStructure.Run;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import java.util.HashMap;
 import java.util.List;
@@ -62,52 +60,50 @@ final class RegionInspectionServiceTest {
         source.samples.put(position(1, 0, 0), new BlockSample("air", true, true));
         source.samples.put(position(2, 0, 0), new BlockSample("dirt", false, false));
         RegionInspectionService service = service(source, 16);
-        GetRegionBlocks.Request request =
-                new GetRegionBlocks.Request(
+        GetBlocks.Request request =
+                new GetBlocks.Request(
                         "world",
                         position(0, 0, 0),
                         position(2, 0, 0),
                         List.of("#mineable"),
                         List.of("minecraft:dirt"),
                         false,
-                        4,
-                        Format.BLOCKS);
+                        4);
 
-        GetRegionBlocks.Result result = service.getRegionBlocks(request);
+        GetBlocks.Result result = service.getBlocks(request);
 
-        BlockListResult blocks = assertInstanceOf(BlockListResult.class, result);
-        assertEquals("blocks", blocks.format());
-        assertEquals(1, blocks.matchedBlockCount());
-        assertEquals(List.of(new InspectedBlock(position(0, 0, 0), "stone")), blocks.blocks());
+        assertEquals("resolved-world", result.world());
+        assertEquals(position(0, 0, 0), result.origin());
+        assertEquals(List.of(List.of(new ExactPaletteEntry("stone"))), result.palettes());
+        assertEquals(List.of(new Placement(0, 0, 0, 0)), result.placements());
+        assertEquals(List.of(), result.runs());
         assertEquals(List.of("#mineable"), source.includes);
         assertEquals(List.of("minecraft:dirt"), source.excludes);
     }
 
     @Test
-    void returnsRunsWithoutApplyingTheLimitToMatchedBlocks() throws Exception {
+    void packsMatchedBlocksWithoutApplyingTheEntryLimitToExpandedBlocks() throws Exception {
         FakeSnapshotSource source = new FakeSnapshotSource();
         source.samples.put(position(0, 0, 0), solid("stone"));
         source.samples.put(position(1, 0, 0), solid("stone"));
         source.samples.put(position(2, 0, 0), solid("stone"));
         RegionInspectionService service = service(source, 16);
-        GetRegionBlocks.Request request =
-                new GetRegionBlocks.Request(
+        GetBlocks.Request request =
+                new GetBlocks.Request(
                         "world",
                         position(0, 0, 0),
                         position(2, 0, 0),
                         List.of(),
                         List.of(),
                         false,
-                        1,
-                        Format.RUNS);
+                        1);
 
-        BlockRunsResult result =
-                assertInstanceOf(BlockRunsResult.class, service.getRegionBlocks(request));
+        GetBlocks.Result result = service.getBlocks(request);
 
-        assertEquals(3, result.matchedBlockCount());
+        assertEquals(3, result.blockCount());
+        assertEquals(List.of(), result.placements());
         assertEquals(1, result.runs().size());
-        assertEquals(position(0, 0, 0), result.runs().getFirst().from());
-        assertEquals(position(2, 0, 0), result.runs().getFirst().to());
+        assertEquals(new Run(0, 0, 0, 0, 2, 0, 0), result.runs().getFirst());
     }
 
     @Test
@@ -156,36 +152,32 @@ final class RegionInspectionServiceTest {
         FakeSnapshotSource source = new FakeSnapshotSource();
         RegionInspectionService service =
                 new RegionInspectionService(source, 100, 2, 2, 16, 8, new InspectionAdmission(1));
-        GetRegionBlocks.Request oversized =
-                new GetRegionBlocks.Request(
+        GetBlocks.Request oversized =
+                new GetBlocks.Request(
                         "world",
                         position(0, 0, 0),
                         position(2, 0, 0),
                         List.of(),
                         List.of(),
                         false,
-                        1,
-                        Format.BLOCKS);
-        GetRegionBlocks.Request tooManyResults =
-                new GetRegionBlocks.Request(
+                        1);
+        GetBlocks.Request tooManyResults =
+                new GetBlocks.Request(
                         "world",
                         position(0, 0, 0),
                         position(0, 0, 0),
                         List.of(),
                         List.of(),
                         false,
-                        3,
-                        Format.BLOCKS);
+                        3);
 
         assertEquals(
                 OperationFailure.REGION_TOO_LARGE,
-                assertThrows(OperationException.class, () -> service.getRegionBlocks(oversized))
+                assertThrows(OperationException.class, () -> service.getBlocks(oversized))
                         .failure());
         assertEquals(
                 OperationFailure.INVALID_REQUEST,
-                assertThrows(
-                                OperationException.class,
-                                () -> service.getRegionBlocks(tooManyResults))
+                assertThrows(OperationException.class, () -> service.getBlocks(tooManyResults))
                         .failure());
         assertFalse(source.captured);
     }
@@ -234,33 +226,30 @@ final class RegionInspectionServiceTest {
         RegionInspectionService service =
                 new RegionInspectionService(
                         source, 100, 100, 10, 16, 2, new InspectionAdmission(1));
-        GetRegionBlocks.Request tooMany =
-                new GetRegionBlocks.Request(
+        GetBlocks.Request tooMany =
+                new GetBlocks.Request(
                         "world",
                         position(0, 0, 0),
                         position(0, 0, 0),
                         List.of("stone", "stone"),
                         List.of("dirt"),
                         false,
-                        1,
-                        Format.BLOCKS);
+                        1);
 
         assertEquals(
                 OperationFailure.INVALID_REQUEST,
-                assertThrows(OperationException.class, () -> service.getRegionBlocks(tooMany))
-                        .failure());
+                assertThrows(OperationException.class, () -> service.getBlocks(tooMany)).failure());
         assertFalse(source.captured);
 
-        service.getRegionBlocks(
-                new GetRegionBlocks.Request(
+        service.getBlocks(
+                new GetBlocks.Request(
                         "world",
                         position(0, 0, 0),
                         position(0, 0, 0),
                         List.of("stone", "stone"),
                         List.of(),
                         false,
-                        1,
-                        Format.BLOCKS));
+                        1));
         assertEquals(List.of("stone"), source.includes);
     }
 
@@ -338,16 +327,15 @@ final class RegionInspectionServiceTest {
                 assertThrows(
                         OperationException.class,
                         () ->
-                                service.getRegionBlocks(
-                                        new GetRegionBlocks.Request(
+                                service.getBlocks(
+                                        new GetBlocks.Request(
                                                 "world",
                                                 position(0, 0, 0),
                                                 position(0, 0, 0),
                                                 java.util.Collections.nCopies(5, "stone"),
                                                 java.util.Collections.nCopies(4, "dirt"),
                                                 false,
-                                                1,
-                                                Format.BLOCKS)));
+                                                1)));
         assertEquals(
                 new ErrorDetails.InvalidRequest.TooManyItems(
                         List.of("includeBlockStatePatterns", "excludeBlockStatePatterns"), 8),
@@ -361,23 +349,21 @@ final class RegionInspectionServiceTest {
                         .failure());
         assertEquals(
                 OperationFailure.INVALID_REQUEST,
-                assertThrows(OperationException.class, () -> service.getRegionBlocks(null))
-                        .failure());
+                assertThrows(OperationException.class, () -> service.getBlocks(null)).failure());
         assertEquals(
                 OperationFailure.INVALID_REQUEST,
                 assertThrows(
                                 OperationException.class,
                                 () ->
-                                        service.getRegionBlocks(
-                                                new GetRegionBlocks.Request(
+                                        service.getBlocks(
+                                                new GetBlocks.Request(
                                                         "world",
                                                         position(0, 0, 0),
                                                         position(0, 0, 0),
                                                         java.util.Collections.singletonList(null),
                                                         List.of(),
                                                         false,
-                                                        1,
-                                                        Format.BLOCKS)))
+                                                        1)))
                         .failure());
         assertEquals(
                 OperationFailure.INVALID_REQUEST,

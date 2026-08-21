@@ -24,12 +24,15 @@ import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
+import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks;
+import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks.ExactPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockStructure.Placement;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockStructure.Run;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -141,7 +144,7 @@ final class BridgeOperationEndpointsTest {
     @Test
     void parsesAndDispatchesInspectionOperations() throws Exception {
         AtomicReference<CountRegionBlockStates.Request> countRequest = new AtomicReference<>();
-        AtomicReference<GetRegionBlocks.Request> blocksRequest = new AtomicReference<>();
+        AtomicReference<GetBlocks.Request> blocksRequest = new AtomicReference<>();
         AtomicReference<ScanOrthographicView.Request> viewRequest = new AtomicReference<>();
         BridgeTestFixture.TestOperations operations =
                 new BridgeTestFixture.TestOperations() {
@@ -153,10 +156,17 @@ final class BridgeOperationEndpointsTest {
                     }
 
                     @Override
-                    public GetRegionBlocks.Result getRegionBlocks(GetRegionBlocks.Request request)
+                    public GetBlocks.Result getBlocks(GetBlocks.Request request)
                             throws OperationException {
                         blocksRequest.set(request);
-                        return super.getRegionBlocks(request);
+                        return new GetBlocks.Result(
+                                request.world(),
+                                request.min(),
+                                List.of(
+                                        List.of(new ExactPaletteEntry("minecraft:stone")),
+                                        List.of(new ExactPaletteEntry("minecraft:dirt"))),
+                                List.of(new Placement(0, 0, 0, 0)),
+                                List.of(new Run(1, 1, 0, 0, 1, 0, 0)));
                     }
 
                     @Override
@@ -185,13 +195,13 @@ final class BridgeOperationEndpointsTest {
                             client,
                             post(
                                     bridge,
-                                    "/v1/get-region-blocks",
+                                    "/v1/get-blocks",
                                     """
                                     {"world":"world","min":{"x":1,"y":2,"z":3},
-                                     "max":{"x":1,"y":2,"z":3},
+                                     "max":{"x":2,"y":2,"z":3},
                                      "includeBlockStatePatterns":["minecraft:stone"],
                                      "excludeBlockStatePatterns":["minecraft:air"],
-                                     "includeAir":true,"maxResults":25,"format":"runs"}
+                                     "includeAir":true,"maxResults":25}
                                     """));
             HttpResponse<String> view =
                     send(
@@ -223,8 +233,17 @@ final class BridgeOperationEndpointsTest {
             assertEquals(List.of("minecraft:air"), blocksRequest.get().excludeBlockStatePatterns());
             assertTrue(blocksRequest.get().includeAir());
             assertEquals(25, blocksRequest.get().maxResults());
-            assertEquals(GetRegionBlocks.Format.RUNS, blocksRequest.get().format());
             assertEquals(200, blocks.statusCode());
+            assertEquals(
+                    json(
+                            """
+                            {"world":"world","origin":{"x":1,"y":2,"z":3},
+                             "palettes":[[{"blockState":"minecraft:stone"}],
+                                         [{"blockState":"minecraft:dirt"}]],
+                             "placements":[[0,0,0,0]],
+                             "runs":[[1,1,0,0,1,0,0]]}
+                            """),
+                    json(blocks.body()));
             assertEquals(ScanOrthographicView.Direction.WEST, viewRequest.get().direction());
             assertEquals(4, viewRequest.get().horizontalRadius());
             assertEquals(3, viewRequest.get().verticalRadius());
@@ -496,7 +515,8 @@ final class BridgeOperationEndpointsTest {
                                     {"world":"world","origin":{"x":7,"y":8,"z":9},
                                      "palettes":[[{"blockState":"minecraft:gold_block","weight":25},
                                      {"blockState":"minecraft:iron_block","weight":75}]],
-                                     "placements":[[0,0,0,0]],"seed":23,"dryRun":true}
+                                     "placements":[[0,0,0,0]],
+                                     "runs":[[0,1,0,0,1,0,0]],"seed":23,"dryRun":true}
                                     """));
             HttpResponse<String> history =
                     send(client, post(bridge, "/v1/get-edit-history", "{\"world\":\"world\"}"));
@@ -526,8 +546,8 @@ final class BridgeOperationEndpointsTest {
                             new DestinationPaletteEntry("minecraft:iron_block", 75)),
                     setRequest.get().palettes().getFirst());
             assertEquals(0, setRequest.get().placements().getFirst().paletteIndex());
-            assertEquals(
-                    new SetBlocks.Placement(0, 0, 0, 0), setRequest.get().placements().getFirst());
+            assertEquals(new Placement(0, 0, 0, 0), setRequest.get().placements().getFirst());
+            assertEquals(new Run(0, 1, 0, 0, 1, 0, 0), setRequest.get().runs().getFirst());
             assertEquals(new GetEditHistory.Request("world"), historyRequest.get());
             assertEquals(200, history.statusCode());
             assertEquals(
@@ -660,24 +680,18 @@ final class BridgeOperationEndpointsTest {
                         standard.logging(),
                         standard.limits(),
                         standard.editHistory(),
-                        new DirtConfig.Defaults(true, "runs", true));
-        AtomicReference<GetRegionBlocks.Request> blocksRequest = new AtomicReference<>();
+                        new DirtConfig.Defaults(true, true));
+        AtomicReference<GetBlocks.Request> blocksRequest = new AtomicReference<>();
         AtomicReference<FillRegion.Request> firstFill = new AtomicReference<>();
         AtomicReference<SetBlocks.Request> setRequest = new AtomicReference<>();
         BridgeTestFixture.TestOperations operations =
                 new BridgeTestFixture.TestOperations() {
                     @Override
-                    public GetRegionBlocks.Result getRegionBlocks(GetRegionBlocks.Request request)
+                    public GetBlocks.Result getBlocks(GetBlocks.Request request)
                             throws OperationException {
                         blocksRequest.set(request);
-                        return new GetRegionBlocks.BlockRunsResult(
-                                request.world(),
-                                new ca.deliyannides.dirtmcp.paper.world.model.BlockBounds(
-                                        request.min(), request.max()),
-                                1,
-                                0,
-                                "runs",
-                                List.of());
+                        return new GetBlocks.Result(
+                                request.world(), request.min(), List.of(), List.of(), List.of());
                     }
 
                     @Override
@@ -702,8 +716,7 @@ final class BridgeOperationEndpointsTest {
                             + "\"max\":{\"x\":0,\"y\":0,\"z\":0}";
             assertEquals(
                     200,
-                    send(client, post(bridge, "/v1/get-region-blocks", "{" + bounds + "}"))
-                            .statusCode());
+                    send(client, post(bridge, "/v1/get-blocks", "{" + bounds + "}")).statusCode());
             String fillBody =
                     "{" + bounds + ",\"destinationPalette\":[{\"blockState\":\"minecraft:dirt\"}]}";
             assertEquals(200, send(client, post(bridge, "/v1/fill-region", fillBody)).statusCode());
@@ -716,11 +729,10 @@ final class BridgeOperationEndpointsTest {
                                     """
                                     {"world":"world","origin":{"x":0,"y":0,"z":0},
                                      "palettes":[[{"blockState":"minecraft:stone"}]],
-                                     "placements":[[0,0,0,0]]}
+                                     "placements":[[0,0,0,0]],"runs":[]}
                                     """));
 
             assertTrue(blocksRequest.get().includeAir());
-            assertEquals(GetRegionBlocks.Format.RUNS, blocksRequest.get().format());
             assertEquals(321, blocksRequest.get().maxResults());
             assertTrue(firstFill.get().dryRun());
             assertTrue(setRequest.get().dryRun());
@@ -791,7 +803,7 @@ final class BridgeOperationEndpointsTest {
     }
 
     @Test
-    void reportsAllowedValuesForUnsupportedInspectionOptions() throws Exception {
+    void rejectsRemovedInspectionFormatAndUnsupportedViewDirection() throws Exception {
         try (BridgeServer bridge =
                         server(config(availablePort(), 4), new BridgeTestFixture.TestOperations());
                 HttpClient client = HttpClient.newHttpClient()) {
@@ -802,7 +814,7 @@ final class BridgeOperationEndpointsTest {
                             client,
                             post(
                                     bridge,
-                                    "/v1/get-region-blocks",
+                                    "/v1/get-blocks",
                                     """
                                     {"world":"world","min":{"x":0,"y":0,"z":0},
                                      "max":{"x":0,"y":0,"z":0},"format":"columns"}
@@ -819,12 +831,8 @@ final class BridgeOperationEndpointsTest {
                                      "verticalRadius":0,"maxDistance":1}
                                     """));
 
-            assertError(format, "format must be blocks or runs");
-            assertEquals(
-                    json(
-                            "{reason:'unsupported_value',target:'format',"
-                                    + "allowedValues:['blocks','runs']}"),
-                    errorDetails(format));
+            assertError(format, "Request contains missing or unknown fields");
+            assertEquals(json("{reason:'unknown_fields',field:'format'}"), errorDetails(format));
             assertError(direction, "direction must be north, east, south, west, up, or down");
             assertEquals(
                     json(
@@ -849,7 +857,7 @@ final class BridgeOperationEndpointsTest {
                                     """
                                     {"world":"world","origin":{"x":0,"y":0,"z":0},
                                      "palettes":[[{"blockState":"minecraft:stone"}]],
-                                     "placements":[[0,1e2147483648,0,0]]}
+                                     "placements":[[0,1e2147483648,0,0]],"runs":[]}
                                     """)),
                     "placements[0][1] must be a signed 32-bit integer");
             assertError(
@@ -861,7 +869,7 @@ final class BridgeOperationEndpointsTest {
                                     """
                                     {"world":"world","origin":{"x":0,"y":0,"z":0},
                                      "palettes":[[{"blockState":"minecraft:stone"}]],
-                                     "placements":[[0,0,0,0]],"unexpected":true}
+                                     "placements":[[0,0,0,0]],"runs":[],"unexpected":true}
                                     """)),
                     "Request contains missing or unknown fields");
         }
