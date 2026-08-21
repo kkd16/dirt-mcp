@@ -1,35 +1,50 @@
 # Dirt MCP
 
-AI access to live Minecraft worlds.
+Dirt MCP gives local AI agents controlled access to a live Minecraft world. It
+connects an MCP host to a Paper server and provides bounded tools for inspecting
+terrain, reading player context, making deterministic bulk edits with
+[FastAsyncWorldEdit (FAWE)](https://modrinth.com/plugin/fastasyncworldedit), and
+undoing recent Dirt edits.
 
-Dirt MCP connects a local MCP client to a running Paper server. It is designed
-for inspecting bounded regions and performing deterministic bulk edits through
-[FastAsyncWorldEdit (FAWE)](https://github.com/IntellectualSites/FastAsyncWorldEdit),
-while Paper remains the owner of the live world.
+The usual workflow is:
 
-The repository ships the Paper plugin, authenticated loopback bridge, and MCP
-tools for server status, bounded inspection, FAWE-backed cuboid and palette-based
-edits, inspectable edit history, ID-checked undo, and bounded ordered Minecraft
-command batches.
+```text
+inspect -> preview -> edit -> verify -> undo if needed
+```
 
-## Platform support
+Paper remains the sole owner of the live world. Dirt never edits region files
+directly, and inspections do not load or generate terrain.
 
-Dirt MCP tracks the latest stable Paper release only. The current baseline is:
+## Features
 
-- [Paper 26.2](https://docs.papermc.io/paper/dev/project-setup/), pinned to API
-  build 112 stable;
-- FAWE 2.15.4;
+- Count or retrieve exact block states in bounded, already-loaded regions.
+- Scan compact orthographic views and capture server-authoritative player views.
+- Replace, fill, or place weighted-palette blocks as one FAWE edit.
+- Preview edits with reproducible seeds before committing them.
+- Inspect bounded in-memory edit history and undo the newest edit by ID.
+- Run bounded command batches through an operator-level, non-player sender.
+- Expose only the MCP tools enabled by the Paper administrator.
+
+See the [tool reference](docs/tools.md) for the complete catalog and schemas.
+
+## Requirements
+
+Dirt MCP tracks the latest stable Paper release rather than supporting older
+Minecraft versions. The current baseline is:
+
+- [Paper 26.2](https://papermc.io/downloads/paper/), API build 112 stable;
 - [Java 25](https://docs.papermc.io/paper/getting-started/#requirements);
-- Node.js 26 or newer;
+- a Paper-compatible [FAWE build](https://modrinth.com/plugin/fastasyncworldedit);
+- Node.js 26 or newer; and
 - pnpm 11.22.0 or a newer 11.x release.
 
-Older Paper or Minecraft versions are not supported.
-Source development also requires GNU Make, curl, tmux, ShellCheck 0.9 or newer,
-and actionlint 1.7.12 or newer.
-The managed development-server commands target Linux or WSL and use Bash and
-GNU coreutils.
+Building from source also requires GNU Make. The full development workflow adds
+curl, tmux, ShellCheck 0.9 or newer, and actionlint 1.7.12 or newer. The
+development scripts target Linux or WSL.
 
-## Installation from source
+## Setup
+
+Clone and build both components:
 
 ```bash
 git clone https://github.com/kkd16/dirt-mcp.git
@@ -37,94 +52,30 @@ cd dirt-mcp
 make build
 ```
 
-The build produces:
+The build creates:
 
 ```text
 paper-plugin/build/libs/dirt-mcp-paper-<version>.jar
 mcp-server/dist/index.js
 ```
 
-Copy the Paper plugin into an existing server:
+Install the Dirt JAR and a compatible FAWE release in the Paper server's
+`plugins/` directory. Dirt will not load without FAWE.
 
-```bash
-cp paper-plugin/build/libs/dirt-mcp-paper-*.jar /path/to/paper/plugins/
-```
-
-Install the matching current FAWE build from the
-[official FAWE download page](https://intellectualsites.github.io/download/fawe.html).
-FAWE is a required runtime dependency; Dirt MCP will not load without it.
-
-## Running on a Paper server
-
-The loopback bridge starts with the plugin and requires a bearer token. Supply
-the token when starting Paper:
+Generate a secret of at least 32 bytes and supply it when starting Paper:
 
 ```bash
 export DIRT_MCP_BRIDGE_TOKEN="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
-DIRT_MCP_BRIDGE_PORT=8765 \
 java -Xms2G -Xmx2G -jar paper.jar --nogui
 ```
 
-The port may instead be set in `plugins/DirtMCP/config.yml`. The
-[shipped configuration](paper-plugin/src/main/resources/config.yml) documents
-every setting and default.
+The plugin creates `plugins/DirtMCP/config.yml` on first run. Its shipped
+[configuration](paper-plugin/src/main/resources/config.yml) documents limits,
+logging, edit-history retention, defaults, the bridge port, and the MCP tool
+allowlist. Restart Paper after changing it.
 
-The bridge always binds to `127.0.0.1`; do not proxy or expose it publicly. Give
-the same `DIRT_MCP_BRIDGE_TOKEN` to the MCP process. Tokens must contain at
-least 32 bytes. Never commit or log tokens. All settings are validated at
-startup; active tool limits, edit-history configuration, defaults, logging
-configuration, and the resolved MCP tool allowlist are reported by
-`get_server_status` when called with `include.configuration=true`. The shipped
-`tools` section explicitly enables every tool. Each recognized entry is an
-independent boolean; an entry omitted from that section resolves to false, while
-unknown or invalid entries stop plugin startup. Other configuration keys remain
-required. Compare an existing file with the shipped `config.yml` after
-upgrading.
-
-`run_minecraft_commands` dispatches registered vanilla, Paper, and plugin
-commands in order with console-equivalent permissions through a non-player
-feedback sender, stopping after the first missing target or dispatch exception.
-Dispatch is synchronous, but arbitrary effects may outlive the response and are
-outside Dirt undo. Inspect the returned attempted prefix, and do not blindly
-retry after a timeout, disconnect, or unexpected internal failure.
-
-Restart Paper after changing the file, then restart the MCP host or process so
-it loads the new catalog. Tool configuration controls the agent-facing MCP
-catalog; authenticated loopback bridge routes remain available to the matching
-local MCP process.
-
-### Paper operator command
-
-Run `/dirt` for the current operator-command help. Its status, configuration,
-and tool views expose the active runtime state and concise MCP tool synopses.
-Restart Paper to apply configuration changes.
-
-The command requires `dirtmcp.command`, which is granted to operators by
-default and may be assigned explicitly through a permission plugin.
-
-### Logs
-
-Subject to `logging.console-level`, Paper's console receives concise lifecycle,
-mutation, undo, warning, and failure events. More detailed structured events are
-written as rotating JSON Lines under `plugins/DirtMCP/logs/`; the shipped
-configuration documents the console threshold and file bounds. A detail-sink
-failure does not stop world operations and is reported prominently in the
-console.
-
-The MCP process writes structured diagnostics to stderr while stdout remains
-reserved for MCP protocol messages. Paper and MCP records carry correlation
-fields without recording bearer tokens, raw request bodies, or complete block
-payloads. See the [v1 behavior guide](docs/v1-design.md#logging) for the precise
-logging contract.
-
-The repository includes a project-scoped Codex configuration in
-`.codex/config.toml`. Run `make up` at least once to build the project and create
-its ignored development token, then start Codex from this trusted repository.
-Codex launches the MCP process when it connects. Rebuild MCP changes and restart
-Codex so it launches the new process and tool catalog.
-
-For an MCP host that uses an `mcpServers` JSON configuration, configure it to
-launch the source build:
+Configure the MCP host to start the built TypeScript server with the same
+secret. Hosts using an `mcpServers` JSON configuration can use:
 
 ```json
 {
@@ -141,74 +92,70 @@ launch the source build:
 }
 ```
 
-The MCP process advertises only tools enabled in the Paper startup snapshot; a
-disabled tool is absent from `tools/list` and cannot be called. See the
-[v1 behavior guide](docs/v1-design.md#tools) for the implemented tool surface
-and workflow semantics, and the [OpenAPI contract](protocol/openapi.yaml) for
-exact bridge schemas.
+Restart the MCP host after rebuilding the TypeScript server or changing the
+Paper tool allowlist. Call `ping_server` to verify the complete MCP, bridge,
+Paper, and FAWE path.
 
-## Local development
+For local development with Codex, the checked-in `.codex/config.toml` already
+launches Dirt through `scripts/run-dirt-mcp`. Run `make up`, then start or
+restart Codex from the trusted checkout.
 
-The checked-in Gradle wrapper supplies Gradle. Verify the local toolchain and
-start the managed development server with:
+## Security and operations
 
-```bash
-make doctor
-make up
-```
+The bridge always binds to `127.0.0.1` and every endpoint requires bearer
+authentication. Do not proxy the bridge, expose it publicly, log its token, or
+commit credentials. Paper console logs contain concise operator events; bounded
+rotating JSON Lines detail logs live under `plugins/DirtMCP/logs/`. MCP stdout is
+reserved for protocol messages and diagnostics go to stderr.
 
-When no healthy managed server is running, `make up` installs locked
-dependencies when needed, incrementally builds both components, downloads the
-pinned Paper and FAWE runtime artifacts when absent, creates an ignored local
-bearer token, and accepts Mojang's EULA on the command line. It starts one
-persistent Paper process in a detached tmux session, waits for the authenticated
-bridge to become healthy, and returns. A healthy existing server is reused
-without rebuilding; use `make reload` after source or configuration changes.
-Paper listens on port `25566` with an IPv4 listener suitable for Windows and WSL.
-Connect at `127.0.0.1:25566`. The authenticated MCP bridge is available to local
-MCP clients at `127.0.0.1:8765`. Only run it if you agree to the
+Edits are synchronous and bounded, with one Dirt mutation at a time per world.
+Undo history is kept only in memory and is cleared on world unload or server
+restart. Command batches are non-atomic, may cause effects outside Dirt's edit
+limits and history, and must not be retried blindly after an ambiguous timeout.
+Keep normal server backups.
+
+Paper operators can run `/dirt` for live status, configuration, and tool
+summaries. It requires `dirtmcp.command`, which operators receive by default.
+
+## Development
+
+The repository includes a disposable managed Paper world under the ignored
+`paper-plugin/run/` directory. Running it means accepting the
 [Minecraft EULA](https://aka.ms/MinecraftEULA).
 
-During development, rebuild and safely cycle Paper with:
-
 ```bash
-make reload
+make doctor   # check the development toolchain
+make up       # build and start or reuse the managed server
+make reload   # rebuild and safely restart after changes
+make verify   # run the complete local gate and live smoke tests
+make down     # stop the managed server
 ```
 
-Paper does not safely support plugin hot reloads, so this performs an
-incremental build, clean `stop`, restart of the same development world, and
-health check. Connected players receive a clear restart message before they are
-disconnected. `make reload` also rebuilds the MCP server, but its host or process
-must be restarted separately to load that build.
-
-Override local ports when needed:
-
-```bash
-make up MC_PORT=25567 BRIDGE_PORT=9876
-```
-
-The selected ports are retained by `make reload`. Restart Codex after changing
-the bridge port so its MCP process reads the new development state.
-
-Run `make help` for the current development-command list.
-
-Generated Paper state lives in `paper-plugin/run/` and is not committed. This is
-the canonical disposable development world: reuse and mutate it freely instead
-of creating temporary Paper servers. Normal builds, reloads, and cleans preserve
-the world.
-
-`make verify` is the standard pre-handoff gate. It runs the offline checks and
-managed Paper/FAWE smoke suite against the disposable development world. The
-smoke fixture is restored afterward; avoid concurrent Dirt MCP edits. The Java
-coverage report is written to
-`paper-plugin/build/reports/jacoco/test/html/index.html`.
+The managed server uses Minecraft port `25566` and bridge port `8765`; override
+new-server ports with `make up MC_PORT=25567 BRIDGE_PORT=9876`. Paper plugin hot
+reload is unsupported, so use `make reload` after Java or plugin configuration
+changes. Run `make help` for the full command list.
 
 ## Contributing
 
-Keep changes focused and vertical across implementation, contract, tests, and
-concise documentation. See [`AGENTS.md`](AGENTS.md) for repository rules and
-[`docs/`](docs/README.md) for product and behavior documentation.
+Keep changes focused and preserve the component boundaries: Paper and FAWE code
+belong in `paper-plugin`, MCP behavior in `mcp-server`, and wire contracts in
+`protocol/openapi.yaml`. Tool changes should land as complete vertical slices
+with Java behavior, OpenAPI, TypeScript schemas, MCP exposure, tests, and concise
+documentation.
+
+During development, run the smallest relevant check. Before handing off code or
+contract changes, run `make verify` once. Do not hand-edit generated runtime
+files or world data, and do not commit secrets. Additional repository rules are
+in [`AGENTS.md`](AGENTS.md).
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [MCP tool reference](docs/tools.md)
+- [Bridge OpenAPI contract](protocol/openapi.yaml)
+- [Plugin configuration](paper-plugin/src/main/resources/config.yml)
 
 ## License
 
-Apache License 2.0. See [`LICENSE`](LICENSE).
+Licensed under the [Apache License 2.0](LICENSE).
