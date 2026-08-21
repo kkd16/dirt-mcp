@@ -214,7 +214,7 @@ paths:
   /v1/get-player-context:
     post:
       operationId: getPlayerContext
-      summary: Capture an online player's pose, selected state, and optional sampled perspective block view
+      summary: Capture an online player's pose and optional state
       requestBody:
         required: true
         content:
@@ -229,7 +229,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetPlayerContextResponse'
         '400':
-          description: Invalid player selector, include flags, or view options
+          description: Invalid player selector or include flags
           content:
             application/json:
               schema:
@@ -244,18 +244,6 @@ paths:
                 $ref: '#/components/schemas/Error'
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
-        '409':
-          description: The requested player camera or player state cannot be represented safely
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '413':
-          description: The requested ray count, ray-distance budget, or checked-chunk count exceeds its inspection limit
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
         '500':
           description: Unexpected player-context failure
           content:
@@ -263,7 +251,64 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          description: The player-view preflight contains an unloaded chunk, Paper access was interrupted, or inspection capacity is exhausted
+          description: Paper access was interrupted or unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/get-perspective-view:
+    post:
+      operationId: getPerspectiveView
+      summary: Trace a bounded perspective block view from a player or arbitrary camera
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetPerspectiveViewRequest'
+      responses:
+        '200':
+          description: Resolved camera pose and exact sparse first block-collision hits
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetPerspectiveViewResponse'
+        '400':
+          description: Invalid source, coordinates, rotation, or perspective options
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The selected player is not online or the selected world is not loaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          $ref: '#/components/responses/PostMethodNotAllowed'
+        '409':
+          description: The selected player camera cannot be represented safely
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: The ray count, ray-distance budget, or checked-chunk count exceeds its inspection limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected perspective-view failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: A required chunk is unloaded, Paper access was interrupted, or inspection capacity is exhausted
           content:
             application/json:
               schema:
@@ -962,9 +1007,9 @@ components:
                         - eyePosition.x
                         - eyePosition.y
                         - eyePosition.z
-                        - view.endpoint.x
-                        - view.endpoint.y
-                        - view.endpoint.z
+                        - perspectiveEndpoint.x
+                        - perspectiveEndpoint.y
+                        - perspectiveEndpoint.z
       unevaluatedProperties: false
     RegionTooLargeError:
       allOf:
@@ -1002,8 +1047,8 @@ components:
                     - blocks
                     - runs
                     - visible_blocks
-                    - view_rays
-                    - view_ray_distance
+                    - perspective_rays
+                    - perspective_ray_distance
                 minimumRequired:
                   $ref: '#/components/schemas/PositiveJsonSafeInteger'
                 maximum:
@@ -1291,7 +1336,7 @@ components:
             - maximum
           properties:
             reason:
-              const: view_chunks
+              const: perspective_chunks
             requested:
               $ref: '#/components/schemas/PositiveInt32'
               description: Exact size of the conservative loaded-chunk preflight for the sampled rays.
@@ -1918,15 +1963,11 @@ components:
       minLength: 1
       maxLength: 36
       pattern: '.*\S.*'
-      description: Exact online player name (available from get_server_status when enabled) or canonical UUID.
+      description: Case-insensitive exact online player name (available from get_server_status when enabled) or canonical UUID.
     PlayerContextIncludeOptions:
       type: object
       additionalProperties: false
       properties:
-        view:
-          type: boolean
-          default: true
-          description: Include the perspective first-block-hit grid.
         equipment:
           type: boolean
           default: true
@@ -1955,73 +1996,9 @@ components:
           type: boolean
           default: false
           description: Include sorted active potion effects.
-    PlayerViewOptions:
-      type: object
-      additionalProperties: false
-      description: Server-authoritative perspective block-collision projection. This object is invalid when include.view is false.
-      properties:
-        width:
-          type: integer
-          format: int32
-          minimum: 1
-          maximum: 255
-          default: 21
-          description: Odd number of left-to-right ray columns.
-          not:
-            multipleOf: 2
-        height:
-          type: integer
-          format: int32
-          minimum: 1
-          maximum: 255
-          default: 13
-          description: Odd number of top-to-bottom ray rows.
-          not:
-            multipleOf: 2
-        verticalFieldOfViewDegrees:
-          type: integer
-          format: int32
-          minimum: 1
-          maximum: 170
-          default: 70
-          description: Vertical projection angle. Paper cannot observe the client's configured or dynamically modified FOV.
-        maxDistance:
-          type: integer
-          format: int32
-          minimum: 1
-          maximum: 128
-          default: 32
-          description: Maximum Euclidean block-ray distance from the eye position.
-        fluidCollision:
-          type: string
-          enum:
-            - never
-            - source_only
-            - always
-          default: never
-        ignorePassableBlocks:
-          type: boolean
-          default: false
-          description: Whether passable but collidable blocks are ignored by Paper ray tracing.
     GetPlayerContextRequest:
       type: object
       additionalProperties: false
-      if:
-        required:
-          - include
-        properties:
-          include:
-            required:
-              - view
-            properties:
-              view:
-                const: false
-      then:
-        not:
-          properties:
-            view: {}
-          required:
-            - view
       required:
         - player
       properties:
@@ -2031,7 +2008,6 @@ components:
           allOf:
             - $ref: '#/components/schemas/PlayerContextIncludeOptions'
           default:
-            view: true
             equipment: true
             inventory: false
             enderChest: false
@@ -2039,8 +2015,6 @@ components:
             movement: false
             client: false
             effects: false
-        view:
-          $ref: '#/components/schemas/PlayerViewOptions'
     ExactPosition:
       type: object
       additionalProperties: false
@@ -2072,7 +2046,7 @@ components:
         uuid:
           type: string
           pattern: '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
-    PlayerRotation:
+    Rotation:
       type: object
       additionalProperties: false
       required:
@@ -2086,10 +2060,120 @@ components:
         pitch:
           type: number
           format: double
-    PlayerViewBasis:
+    PerspectiveInputRotation:
       type: object
       additionalProperties: false
-      description: Orthonormal camera basis captured from the player's eye pose.
+      required:
+        - yaw
+        - pitch
+      properties:
+        yaw:
+          type: number
+          format: double
+          description: Paper yaw in degrees; the resolved response yaw is normalized to [-180, 180).
+        pitch:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+          description: Paper pitch in degrees; positive values look downward.
+    PerspectivePlayerSource:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - player
+      properties:
+        type:
+          const: player
+        player:
+          $ref: '#/components/schemas/PlayerSelector'
+    PerspectiveLocationSource:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - world
+        - cameraPosition
+        - rotation
+      properties:
+        type:
+          const: location
+        world:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+          description: Exact name of an already-loaded Paper world.
+        cameraPosition:
+          allOf:
+            - $ref: '#/components/schemas/ExactPosition'
+          description: Exact camera and ray origin; no player eye height is added.
+        rotation:
+          $ref: '#/components/schemas/PerspectiveInputRotation'
+    PerspectiveSource:
+      oneOf:
+        - $ref: '#/components/schemas/PerspectivePlayerSource'
+        - $ref: '#/components/schemas/PerspectiveLocationSource'
+      discriminator:
+        propertyName: type
+        mapping:
+          player: '#/components/schemas/PerspectivePlayerSource'
+          location: '#/components/schemas/PerspectiveLocationSource'
+    GetPerspectiveViewRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - source
+      properties:
+        source:
+          $ref: '#/components/schemas/PerspectiveSource'
+        width:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 255
+          default: 21
+          description: Odd number of left-to-right ray columns.
+          not:
+            multipleOf: 2
+        height:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 255
+          default: 13
+          description: Odd number of top-to-bottom ray rows.
+          not:
+            multipleOf: 2
+        verticalFieldOfViewDegrees:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 170
+          default: 70
+          description: Vertical projection angle. Paper cannot observe a client's configured or dynamically modified FOV.
+        maxDistance:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 128
+          default: 32
+          description: Maximum Euclidean block-ray distance from cameraPosition.
+        fluidCollision:
+          type: string
+          enum:
+            - never
+            - source_only
+            - always
+          default: never
+        ignorePassableBlocks:
+          type: boolean
+          default: false
+          description: Whether passable but collidable blocks are ignored by Paper ray tracing.
+    PerspectiveViewBasis:
+      type: object
+      additionalProperties: false
+      description: Orthonormal camera basis resolved from the camera rotation.
       required:
         - forward
         - right
@@ -2101,7 +2185,7 @@ components:
           $ref: '#/components/schemas/ExactPosition'
         up:
           $ref: '#/components/schemas/ExactPosition'
-    ResolvedPlayerViewport:
+    ResolvedPerspectiveViewport:
       type: object
       additionalProperties: false
       required:
@@ -2147,7 +2231,7 @@ components:
             - always
         ignorePassableBlocks:
           type: boolean
-    PlayerViewHit:
+    PerspectiveViewHit:
       type: object
       additionalProperties: false
       required:
@@ -2194,48 +2278,7 @@ components:
           type: number
           format: double
           minimum: 0
-          description: Euclidean ray distance from eyePosition.
-    PlayerPerspectiveView:
-      type: object
-      additionalProperties: false
-      description: Exact first Paper block-collision hits for viewport width times height sampled rays; misses are omitted; not a client framebuffer or rendered image.
-      required:
-        - basis
-        - viewport
-        - checkedChunkCount
-        - blockStatePalette
-        - hits
-        - crosshairHitIndex
-      properties:
-        basis:
-          $ref: '#/components/schemas/PlayerViewBasis'
-        viewport:
-          $ref: '#/components/schemas/ResolvedPlayerViewport'
-        checkedChunkCount:
-          type: integer
-          format: int32
-          minimum: 0
-          description: Exact size of the conservative loaded-chunk preflight for the sampled rays.
-        blockStatePalette:
-          type: array
-          uniqueItems: true
-          description: Unique block states ordered by first appearance in hits.
-          items:
-            type: string
-            minLength: 1
-            pattern: '.*\S.*'
-        hits:
-          type: array
-          description: Sparse first hits in strictly increasing row-major viewport order.
-          items:
-            $ref: '#/components/schemas/PlayerViewHit'
-        crosshairHitIndex:
-          oneOf:
-            - type: integer
-              format: int32
-              minimum: 0
-            - type: 'null'
-          description: Zero-based hits index for the center ray, or null when it did not hit a block.
+          description: Euclidean ray distance from cameraPosition.
     PlayerEnchantment:
       type: object
       additionalProperties: false
@@ -2507,6 +2550,99 @@ components:
           type: boolean
         icon:
           type: boolean
+    ResolvedPerspectivePlayerSource:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - player
+      properties:
+        type:
+          const: player
+        player:
+          $ref: '#/components/schemas/PlayerIdentity'
+    ResolvedPerspectiveLocationSource:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+      properties:
+        type:
+          const: location
+    ResolvedPerspectiveSource:
+      oneOf:
+        - $ref: '#/components/schemas/ResolvedPerspectivePlayerSource'
+        - $ref: '#/components/schemas/ResolvedPerspectiveLocationSource'
+      discriminator:
+        propertyName: type
+        mapping:
+          player: '#/components/schemas/ResolvedPerspectivePlayerSource'
+          location: '#/components/schemas/ResolvedPerspectiveLocationSource'
+    GetPerspectiveViewResponse:
+      type: object
+      additionalProperties: false
+      description: Exact first Paper block-collision hits from one resolved camera pose; misses are omitted and the result is not a client framebuffer.
+      required:
+        - capturedAt
+        - source
+        - world
+        - worldId
+        - cameraPosition
+        - rotation
+        - lookDirection
+        - basis
+        - viewport
+        - checkedChunkCount
+        - blockStatePalette
+        - hits
+        - crosshairHitIndex
+      properties:
+        capturedAt:
+          type: string
+          format: date-time
+        source:
+          $ref: '#/components/schemas/ResolvedPerspectiveSource'
+        world:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+        worldId:
+          $ref: '#/components/schemas/Uuid'
+        cameraPosition:
+          $ref: '#/components/schemas/ExactPosition'
+        rotation:
+          $ref: '#/components/schemas/Rotation'
+        lookDirection:
+          $ref: '#/components/schemas/ExactPosition'
+        basis:
+          $ref: '#/components/schemas/PerspectiveViewBasis'
+        viewport:
+          $ref: '#/components/schemas/ResolvedPerspectiveViewport'
+        checkedChunkCount:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Exact size of the conservative loaded-chunk preflight for the sampled rays.
+        blockStatePalette:
+          type: array
+          uniqueItems: true
+          description: Unique block states ordered by first appearance in hits.
+          items:
+            type: string
+            minLength: 1
+            pattern: '.*\S.*'
+        hits:
+          type: array
+          description: Sparse first hits in strictly increasing row-major viewport order.
+          items:
+            $ref: '#/components/schemas/PerspectiveViewHit'
+        crosshairHitIndex:
+          oneOf:
+            - type: integer
+              format: int32
+              minimum: 0
+            - type: 'null'
+          description: Zero-based hits index for the center ray, or null when it did not hit a block.
     GetPlayerContextResponse:
       type: object
       additionalProperties: false
@@ -2524,7 +2660,6 @@ components:
         - lookDirection
         - pose
         - onGround
-        - view
         - equipment
         - inventory
         - enderChest
@@ -2558,7 +2693,7 @@ components:
         eyePosition:
           $ref: '#/components/schemas/ExactPosition'
         rotation:
-          $ref: '#/components/schemas/PlayerRotation'
+          $ref: '#/components/schemas/Rotation'
         lookDirection:
           $ref: '#/components/schemas/ExactPosition'
         pose:
@@ -2584,10 +2719,6 @@ components:
             - inhaling
         onGround:
           type: boolean
-        view:
-          oneOf:
-            - $ref: '#/components/schemas/PlayerPerspectiveView'
-            - type: 'null'
         equipment:
           oneOf:
             - $ref: '#/components/schemas/PlayerEquipment'
@@ -3290,7 +3421,7 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum distinct loaded chunks a region inspection may snapshot or a player-view scan may check; cannot exceed maxTouchedChunks.
+          description: Maximum distinct loaded chunks a region inspection may snapshot or a perspective view may check; cannot exceed maxTouchedChunks.
         maxBlockStatePatterns:
           type: integer
           format: int32
@@ -3306,7 +3437,7 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum blocks scanned by exact block retrieval or an orthographic view, and maximum configured player-view ray-distance budget; cannot exceed maxRegionVolume.
+          description: Maximum blocks scanned by exact block retrieval or an orthographic view, and maximum configured perspective-view ray-distance budget; cannot exceed maxRegionVolume.
         defaultInspectionResultLimit:
           type: integer
           format: int32
@@ -3316,7 +3447,7 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum caller-selectable exact-block, run, or visible-block result limit and maximum player-view ray count; cannot exceed maxInspectionVolume.
+          description: Maximum caller-selectable exact-block, run, or visible-block result limit and maximum perspective-view ray count; cannot exceed maxInspectionVolume.
         maxCommandsPerRequest:
           type: integer
           format: int32
@@ -3406,6 +3537,7 @@ components:
         - get_region_blocks
         - scan_orthographic_view
         - get_player_context
+        - get_perspective_view
         - replace_region_blocks
         - fill_region
         - set_blocks
@@ -3424,6 +3556,8 @@ components:
         scan_orthographic_view:
           type: boolean
         get_player_context:
+          type: boolean
+        get_perspective_view:
           type: boolean
         replace_region_blocks:
           type: boolean

@@ -9,10 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext.FluidCollision;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext.Vector3;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext.ViewRequest;
+import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.FluidCollision;
+import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.ViewRequest;
 import ca.deliyannides.dirtmcp.paper.world.inspection.PerspectiveViewAlgorithms.ChunkCoordinate;
+import ca.deliyannides.dirtmcp.paper.world.model.Vector3;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -59,7 +59,8 @@ final class PerspectiveViewAlgorithmsTest {
                                         8,
                                         100));
         assertEquals(OperationFailure.RESULT_TOO_LARGE, rays.failure());
-        assertInstanceOf(ErrorDetails.ResultTooLarge.ViewRays.class, rays.details().orElseThrow());
+        assertInstanceOf(
+                ErrorDetails.ResultTooLarge.PerspectiveRays.class, rays.details().orElseThrow());
 
         OperationException distance =
                 assertThrows(
@@ -72,7 +73,7 @@ final class PerspectiveViewAlgorithmsTest {
                                         9,
                                         107));
         assertInstanceOf(
-                ErrorDetails.ResultTooLarge.ViewRayDistance.class,
+                ErrorDetails.ResultTooLarge.PerspectiveRayDistance.class,
                 distance.details().orElseThrow());
     }
 
@@ -85,7 +86,7 @@ final class PerspectiveViewAlgorithmsTest {
                                 PerspectiveViewAlgorithms.validate(
                                         view(2, 3, 70, 32, FluidCollision.NEVER, false)));
         assertEquals(
-                new ErrorDetails.InvalidRequest.InvalidValue("view.width"),
+                new ErrorDetails.InvalidRequest.InvalidValue("width"),
                 even.details().orElseThrow());
 
         assertDoesNotThrow(
@@ -190,10 +191,6 @@ final class PerspectiveViewAlgorithmsTest {
                 null,
                 PerspectiveViewAlgorithms.firstOutOfRangeEndpointAxis(
                         nearMaximum, 64.5, 0.5, 1, List.of(new Vector3(-1, 0, 0))));
-        assertTrue(PerspectiveViewAlgorithms.blockCoordinateInRange(nearMaximum));
-        assertEquals(
-                false,
-                PerspectiveViewAlgorithms.blockCoordinateInRange((double) Integer.MAX_VALUE + 1.0));
     }
 
     private static ViewRequest view(

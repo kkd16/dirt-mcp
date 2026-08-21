@@ -20,7 +20,7 @@ inspect -> preview -> edit -> verify -> undo if needed
 | Area     | Capabilities                                                                    |
 | -------- | ------------------------------------------------------------------------------- |
 | Inspect  | Count blocks or retrieve exact block states in bounded, already-loaded regions. |
-| View     | Scan compact orthographic views or capture server-authoritative player views.   |
+| View     | Scan orthographic views or trace from a player or arbitrary camera perspective. |
 | Edit     | Replace, fill, or place weighted-palette blocks as a single FAWE edit.          |
 | Preview  | Preview edits with reproducible seeds before committing them.                   |
 | Undo     | Inspect bounded in-memory edit history and undo the newest edit by ID.          |

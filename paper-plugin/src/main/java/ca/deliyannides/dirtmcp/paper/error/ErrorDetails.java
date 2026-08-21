@@ -195,9 +195,9 @@ public sealed interface ErrorDetails extends Serializable {
                             "eyePosition.x",
                             "eyePosition.y",
                             "eyePosition.z",
-                            "view.endpoint.x",
-                            "view.endpoint.y",
-                            "view.endpoint.z");
+                            "perspectiveEndpoint.x",
+                            "perspectiveEndpoint.y",
+                            "perspectiveEndpoint.z");
 
             public PositionOutOfRange {
                 player = requirePlayerSelector(player);
@@ -254,8 +254,8 @@ public sealed interface ErrorDetails extends Serializable {
             }
         }
 
-        record ViewChunks(int requested, int maximum) implements RegionTooLarge {
-            public ViewChunks {
+        record PerspectiveChunks(int requested, int maximum) implements RegionTooLarge {
+            public PerspectiveChunks {
                 requirePositive(requested, "requested");
                 requirePositive(maximum, "maximum");
                 if (requested <= maximum) {
@@ -298,14 +298,14 @@ public sealed interface ErrorDetails extends Serializable {
             }
         }
 
-        record ViewRays(long minimumRequired, int maximum) implements ResultTooLarge {
-            public ViewRays {
+        record PerspectiveRays(long minimumRequired, int maximum) implements ResultTooLarge {
+            public PerspectiveRays {
                 validateResultLimit(minimumRequired, maximum);
             }
         }
 
-        record ViewRayDistance(long minimumRequired, int maximum) implements ResultTooLarge {
-            public ViewRayDistance {
+        record PerspectiveRayDistance(long minimumRequired, int maximum) implements ResultTooLarge {
+            public PerspectiveRayDistance {
                 validateResultLimit(minimumRequired, maximum);
             }
         }

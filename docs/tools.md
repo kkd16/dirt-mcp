@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Dirt MCP exposes 12 synchronous tools for a live Paper server. Tool availability
+Dirt MCP exposes 13 synchronous tools for a live Paper server. Tool availability
 comes from the Paper plugin's `tools` allowlist and is snapshotted when Paper and
 the MCP process start. A disabled tool is absent from MCP discovery.
 
@@ -354,15 +354,10 @@ Captures one online player by exact case-insensitive name or canonical UUID.
 Identity, pose, and positioning are always returned. Optional sections come from
 the same main-thread capture and are `null` when excluded.
 
-The optional view is an odd-sized perspective ray grid sampled from the captured
-eye pose using Paper collision shapes. It reports first block hits, not a client
-framebuffer, and cannot observe entities or client-only presentation state.
-
 ```ts
 type Input = {
-  player: string; // exact online name or canonical UUID, at most 36 characters
+  player: string; // exact case-insensitive online name or canonical UUID, at most 36 characters
   include?: {
-    view?: boolean; // default true
     equipment?: boolean; // default true
     inventory?: boolean; // default false
     enderChest?: boolean; // default false
@@ -370,14 +365,6 @@ type Input = {
     movement?: boolean; // default false
     client?: boolean; // default false
     effects?: boolean; // default false
-  };
-  view?: {
-    width?: number; // odd integer 1-255, default 21
-    height?: number; // odd integer 1-255, default 13
-    verticalFieldOfViewDegrees?: number; // integer 1-170, default 70
-    maxDistance?: number; // integer 1-128, default 32
-    fluidCollision?: 'never' | 'source_only' | 'always'; // default "never"
-    ignorePassableBlocks?: boolean; // default false
   };
 };
 
@@ -394,35 +381,6 @@ type PlayerItem = {
 type Inventory = {
   size: positiveInt;
   slots: Array<{ slot: nonnegativeInt; item: PlayerItem }>;
-};
-
-type PlayerView = {
-  basis: {
-    forward: UnitVector;
-    right: UnitVector;
-    up: UnitVector;
-  };
-  viewport: {
-    width: number;
-    height: number;
-    verticalFieldOfViewDegrees: number;
-    horizontalFieldOfViewDegrees: number;
-    maxDistance: number;
-    fluidCollision: 'never' | 'source_only' | 'always';
-    ignorePassableBlocks: boolean;
-  };
-  checkedChunkCount: nonnegativeInt;
-  blockStatePalette: string[];
-  hits: Array<{
-    row: nonnegativeInt;
-    column: nonnegativeInt;
-    blockStateIndex: positiveInt;
-    blockPosition: BlockPosition;
-    hitPosition: ExactPosition;
-    face: 'up' | 'down' | 'north' | 'east' | 'south' | 'west' | null;
-    distance: number;
-  }>;
-  crosshairHitIndex: nonnegativeInt | null;
 };
 
 type Success = {
@@ -456,7 +414,6 @@ type Success = {
     | 'shooting'
     | 'inhaling';
   onGround: boolean;
-  view: PlayerView | null;
   equipment: {
     selectedHotbarSlot: number; // integer 0-8
     mainHand: PlayerItem | null;
@@ -514,10 +471,78 @@ type Success = {
 };
 ```
 
-`view` must be omitted when `include.view=false`. A spectating player whose
-camera is attached to another entity can be captured only with the view
-disabled. Hits are sparse and row-major; `blockStateIndex` is one-based and
-`crosshairHitIndex` addresses the `hits` array.
+### `get_perspective_view`
+
+Traces an odd-sized grid of first Paper block-collision hits from either an
+online player's current eye pose or a synthetic camera. Synthetic coordinates
+are the exact camera and ray origin; no player eye-height offset is added.
+
+```ts
+type Input = {
+  source:
+    | {
+        type: 'player';
+        player: string; // exact case-insensitive online name or canonical UUID
+      }
+    | {
+        type: 'location';
+        world: string; // exact loaded-world name
+        cameraPosition: ExactPosition;
+        rotation: {
+          yaw: number; // any finite angle; resolved output is normalized to [-180, 180)
+          pitch: number; // -90 through 90
+        };
+      };
+  width?: number; // odd integer 1-255, default 21
+  height?: number; // odd integer 1-255, default 13
+  verticalFieldOfViewDegrees?: number; // integer 1-170, default 70
+  maxDistance?: number; // integer 1-128, default 32
+  fluidCollision?: 'never' | 'source_only' | 'always'; // default "never"
+  ignorePassableBlocks?: boolean; // default false
+};
+
+type Success = {
+  capturedAt: timestamp;
+  source: { type: 'player'; player: { name: string; uuid: uuid } } | { type: 'location' };
+  world: string;
+  worldId: uuid;
+  cameraPosition: ExactPosition;
+  rotation: { yaw: number; pitch: number };
+  lookDirection: UnitVector;
+  basis: {
+    forward: UnitVector;
+    right: UnitVector;
+    up: UnitVector;
+  };
+  viewport: {
+    width: number;
+    height: number;
+    verticalFieldOfViewDegrees: number;
+    horizontalFieldOfViewDegrees: number;
+    maxDistance: number;
+    fluidCollision: 'never' | 'source_only' | 'always';
+    ignorePassableBlocks: boolean;
+  };
+  checkedChunkCount: nonnegativeInt;
+  blockStatePalette: string[];
+  hits: Array<{
+    row: nonnegativeInt;
+    column: nonnegativeInt;
+    blockStateIndex: positiveInt; // one-based palette index
+    blockPosition: BlockPosition;
+    hitPosition: ExactPosition;
+    face: 'up' | 'down' | 'north' | 'east' | 'south' | 'west' | null;
+    distance: number;
+  }>;
+  crosshairHitIndex: nonnegativeInt | null;
+};
+```
+
+Hits are sparse and row-major. `crosshairHitIndex` addresses the `hits` array
+and is `null` when the center ray misses. The tool preflights loaded chunks and
+never loads terrain. A player source fails while that player is spectating
+another entity. Results describe server collision geometry, not entities,
+lighting, particles, resource packs, third-person state, or a client framebuffer.
 
 ## Editing and undo
 

@@ -12,6 +12,7 @@ import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
+import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView;
@@ -294,11 +295,10 @@ public final class BridgeExchange {
                 this.bounds = bounds(result.bounds());
                 this.resultCount = result.visibleBlockCount();
             }
-            case GetPlayerContext.Result result -> {
-                if (result.view() != null) {
-                    this.resultCount = (long) result.view().hits().size();
-                }
+            case GetPlayerContext.Result ignored -> {
+                // Player context does not expose a result collection.
             }
+            case GetPerspectiveView.Result result -> this.resultCount = (long) result.hits().size();
             case RunMinecraftCommands.Result result -> {
                 this.resultCount = (long) result.results().size();
                 this.outcome =

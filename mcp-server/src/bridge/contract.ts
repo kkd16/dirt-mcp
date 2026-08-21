@@ -26,6 +26,11 @@ export const BRIDGE_ROUTES = {
     path: '/v1/get-player-context',
     timeoutMilliseconds: 30_000,
   },
+  getPerspectiveView: {
+    method: 'POST',
+    path: '/v1/get-perspective-view',
+    timeoutMilliseconds: 30_000,
+  },
   replaceRegionBlocks: {
     method: 'POST',
     path: '/v1/replace-region-blocks',
@@ -189,11 +194,11 @@ const RegionTooLargeDetailsSchema = z.discriminatedUnion('reason', [
     minimumRequired: PositiveJsonSafeIntegerSchema.describe('Known lower bound on the number of touched chunks.'),
     maximum: PositiveInt32Schema.describe('Maximum accepted touched-chunk count.'),
   }).refine((details) => details.minimumRequired > details.maximum, 'minimumRequired must exceed maximum.'),
-  reasonWith('view_chunks', {
+  reasonWith('perspective_chunks', {
     requested: PositiveInt32Schema.describe(
       'Exact size of the conservative loaded-chunk preflight for the sampled rays.',
     ),
-    maximum: PositiveInt32Schema.describe('Maximum accepted player-view checked-chunk count.'),
+    maximum: PositiveInt32Schema.describe('Maximum accepted perspective-view checked-chunk count.'),
   }).refine((details) => details.requested > details.maximum, 'requested must exceed maximum.'),
   reasonWith('block_count', {
     requested: PositiveInt32Schema.describe('Requested block placement count.'),
@@ -214,11 +219,11 @@ const ResultTooLargeDetailsSchema = z.discriminatedUnion('reason', [
     minimumRequired: PositiveJsonSafeIntegerSchema.describe('Known lower bound on the required result entries.'),
     maximum: PositiveInt32Schema.describe('Maximum accepted result entries.'),
   }).refine((details) => details.minimumRequired > details.maximum, 'minimumRequired must exceed maximum.'),
-  reasonWith('view_rays', {
+  reasonWith('perspective_rays', {
     minimumRequired: PositiveJsonSafeIntegerSchema.describe('Requested perspective-ray count.'),
     maximum: PositiveInt32Schema.describe('Maximum accepted perspective-ray count.'),
   }).refine((details) => details.minimumRequired > details.maximum, 'minimumRequired must exceed maximum.'),
-  reasonWith('view_ray_distance', {
+  reasonWith('perspective_ray_distance', {
     minimumRequired: PositiveJsonSafeIntegerSchema.describe('Requested perspective ray-distance budget.'),
     maximum: PositiveInt32Schema.describe('Maximum accepted perspective ray-distance budget.'),
   }).refine((details) => details.minimumRequired > details.maximum, 'minimumRequired must exceed maximum.'),
@@ -308,9 +313,9 @@ const PlayerUnavailableDetailsSchema = z.discriminatedUnion('reason', [
       'eyePosition.x',
       'eyePosition.y',
       'eyePosition.z',
-      'view.endpoint.x',
-      'view.endpoint.y',
-      'view.endpoint.z',
+      'perspectiveEndpoint.x',
+      'perspectiveEndpoint.y',
+      'perspectiveEndpoint.z',
     ]),
   }),
 ]);

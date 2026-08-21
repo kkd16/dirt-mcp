@@ -8,9 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext.FluidCollision;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext.Includes;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext.ViewRequest;
+import ca.deliyannides.dirtmcp.paper.world.model.Vector3;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -24,8 +23,6 @@ import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Server;
 import org.bukkit.World;
-import org.bukkit.block.Block;
-import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Pose;
@@ -42,149 +39,6 @@ final class BukkitPlayerContextAccessTest {
     private static final UUID WORLD_ID = UUID.fromString("223e4567-e89b-42d3-a456-426614174000");
 
     @Test
-    void reportsAnExactSparseFirstHitFromTheBodyEyePose() throws Exception {
-        AtomicInteger rayCalls = new AtomicInteger();
-        BlockData blockData =
-                proxy(BlockData.class, (ignored, method, arguments) -> "minecraft:stone");
-        Block block =
-                proxy(
-                        Block.class,
-                        (ignored, method, arguments) ->
-                                switch (method.getName()) {
-                                    case "getBlockData" -> blockData;
-                                    case "getX" -> 0;
-                                    case "getY" -> 65;
-                                    case "getZ" -> 1;
-                                    default -> defaultValue(method);
-                                });
-        RayTraceResult hit = new RayTraceResult(new Vector(0.5, 65.62, 1), block, null);
-        World world = world(hit, rayCalls);
-        List<String> playerCalls = new ArrayList<>();
-        Player player = player(world, null, null, playerCalls);
-        BukkitPlayerContextAccess access = new BukkitPlayerContextAccess(server(player), 1, 1, 4);
-
-        GetPlayerContext.Result result =
-                access.capture(
-                        request(
-                                new Includes(true, false, false, false, false, false, false, false),
-                                new ViewRequest(1, 1, 70, 1, FluidCollision.NEVER, false)));
-
-        assertEquals("Builder", result.player().name());
-        assertEquals(0.5, result.eyePosition().x());
-        assertEquals(1, result.view().checkedChunkCount());
-        assertEquals(List.of("minecraft:stone"), result.view().blockStatePalette());
-        assertEquals(1, result.view().hits().size());
-        assertEquals(0, result.view().crosshairHitIndex());
-        assertNull(result.view().hits().getFirst().face());
-        assertEquals(1, rayCalls.get());
-        assertTrue(playerCalls.contains("getSpectatorTarget"));
-    }
-
-    @Test
-    void rejectsASpectatorTargetOnlyWhenAViewWasRequested() throws Exception {
-        World world = world(null, new AtomicInteger());
-        Entity target = proxy(Entity.class, BukkitPlayerContextAccessTest::defaultValue);
-        Player player = player(world, target, null, new ArrayList<>());
-        BukkitPlayerContextAccess access = new BukkitPlayerContextAccess(server(player), 1, 1, 4);
-        Includes withView = new Includes(true, false, false, false, false, false, false, false);
-
-        OperationException unavailable =
-                assertThrows(
-                        OperationException.class,
-                        () ->
-                                access.capture(
-                                        request(
-                                                withView,
-                                                new ViewRequest(
-                                                        1,
-                                                        1,
-                                                        70,
-                                                        1,
-                                                        FluidCollision.NEVER,
-                                                        false))));
-        assertEquals(OperationFailure.PLAYER_UNAVAILABLE, unavailable.failure());
-        assertEquals(
-                new ErrorDetails.PlayerUnavailable.SpectatingEntity("Builder"),
-                unavailable.details().orElseThrow());
-
-        GetPlayerContext.Result base = access.capture(request(baseOnly(), null));
-        assertNull(base.view());
-    }
-
-    @Test
-    void rejectsAnUnloadedRayChunkBeforeTracing() {
-        AtomicInteger rayCalls = new AtomicInteger();
-        World world =
-                proxy(
-                        World.class,
-                        (ignored, method, arguments) ->
-                                switch (method.getName()) {
-                                    case "getName" -> "world";
-                                    case "getUID" -> WORLD_ID;
-                                    case "getMinHeight" -> -64;
-                                    case "getMaxHeight" -> 320;
-                                    case "isChunkLoaded" -> false;
-                                    case "rayTraceBlocks" -> {
-                                        rayCalls.incrementAndGet();
-                                        yield null;
-                                    }
-                                    default -> defaultValue(method);
-                                });
-        List<String> playerCalls = new ArrayList<>();
-        Player player = player(world, null, null, playerCalls);
-        BukkitPlayerContextAccess access = new BukkitPlayerContextAccess(server(player), 1, 1, 4);
-
-        OperationException unavailable =
-                assertThrows(
-                        OperationException.class,
-                        () ->
-                                access.capture(
-                                        request(
-                                                new Includes(
-                                                        true, false, false, true, false, false,
-                                                        false, false),
-                                                new ViewRequest(
-                                                        1,
-                                                        1,
-                                                        70,
-                                                        1,
-                                                        FluidCollision.NEVER,
-                                                        false))));
-
-        assertEquals(OperationFailure.WORLD_UNAVAILABLE, unavailable.failure());
-        assertEquals(
-                new ErrorDetails.WorldUnavailable.ChunkUnloaded(
-                        "world", new ErrorDetails.Chunk(0, 0)),
-                unavailable.details().orElseThrow());
-        assertEquals(0, rayCalls.get());
-        assertEquals(false, playerCalls.contains("getEnderChest"));
-    }
-
-    @Test
-    void permitsAViewWhoseTraversalIsEntirelyOutsideBuildHeight() throws Exception {
-        AtomicInteger rayCalls = new AtomicInteger();
-        World world = world(null, rayCalls);
-        Player player =
-                player(
-                        world,
-                        null,
-                        null,
-                        new ArrayList<>(),
-                        Map.of("getEyeLocation", new Location(world, 0.5, 400, 0.5, 0, 0)));
-        BukkitPlayerContextAccess access = new BukkitPlayerContextAccess(server(player), 1, 1, 4);
-
-        GetPlayerContext.Result result =
-                access.capture(
-                        request(
-                                new Includes(true, false, false, false, false, false, false, false),
-                                new ViewRequest(1, 1, 70, 1, FluidCollision.NEVER, false)));
-
-        assertEquals(0, result.view().checkedChunkCount());
-        assertEquals(0, result.view().hits().size());
-        assertEquals(1, rayCalls.get());
-    }
-
-    @Test
     void excludesOptionalPaperAccessAndReadsOnlyRequestedEnderChest() throws Exception {
         World world = world(null, new AtomicInteger());
         Inventory enderChest =
@@ -197,18 +51,17 @@ final class BukkitPlayerContextAccessTest {
                                 });
         List<String> calls = new ArrayList<>();
         Player player = player(world, null, enderChest, calls);
-        BukkitPlayerContextAccess access = new BukkitPlayerContextAccess(server(player), 1, 1, 4);
+        BukkitPlayerContextAccess access = new BukkitPlayerContextAccess(server(player));
 
-        GetPlayerContext.Result base = access.capture(request(baseOnly(), null));
+        GetPlayerContext.Result base = access.capture(request(baseOnly()));
         assertNull(base.enderChest());
         assertEquals(false, calls.contains("getInventory"));
         assertEquals(false, calls.contains("getEnderChest"));
         assertEquals(false, calls.contains("getActivePotionEffects"));
         assertEquals(false, calls.contains("getPing"));
 
-        Includes includeEnderChest =
-                new Includes(false, false, false, true, false, false, false, false);
-        GetPlayerContext.Result selected = access.capture(request(includeEnderChest, null));
+        Includes includeEnderChest = new Includes(false, false, true, false, false, false, false);
+        GetPlayerContext.Result selected = access.capture(request(includeEnderChest));
         assertEquals(27, selected.enderChest().size());
         assertTrue(calls.contains("getEnderChest"));
         assertEquals(false, calls.contains("getInventory"));
@@ -220,9 +73,9 @@ final class BukkitPlayerContextAccessTest {
         Player invalidVitals =
                 player(world, null, null, new ArrayList<>(), Map.of("getSaturation", Float.NaN));
         BukkitPlayerContextAccess vitalsAccess =
-                new BukkitPlayerContextAccess(server(invalidVitals), 1, 1, 4);
+                new BukkitPlayerContextAccess(server(invalidVitals));
 
-        assertNull(vitalsAccess.capture(request(baseOnly(), null)).vitals());
+        assertNull(vitalsAccess.capture(request(baseOnly())).vitals());
         OperationException vitalsUnavailable =
                 assertThrows(
                         OperationException.class,
@@ -230,9 +83,8 @@ final class BukkitPlayerContextAccessTest {
                                 vitalsAccess.capture(
                                         request(
                                                 new Includes(
-                                                        false, false, false, false, true, false,
-                                                        false, false),
-                                                null)));
+                                                        false, false, false, true, false, false,
+                                                        false))));
         assertEquals(OperationFailure.PLAYER_UNAVAILABLE, vitalsUnavailable.failure());
         assertEquals(
                 new ErrorDetails.PlayerUnavailable.NonFiniteState("Builder", "vitals.saturation"),
@@ -250,7 +102,7 @@ final class BukkitPlayerContextAccessTest {
                                 "getFallDistance",
                                 Float.POSITIVE_INFINITY));
         BukkitPlayerContextAccess movementAccess =
-                new BukkitPlayerContextAccess(server(invalidMovement), 1, 1, 4);
+                new BukkitPlayerContextAccess(server(invalidMovement));
 
         OperationException movementUnavailable =
                 assertThrows(
@@ -259,9 +111,8 @@ final class BukkitPlayerContextAccessTest {
                                 movementAccess.capture(
                                         request(
                                                 new Includes(
-                                                        false, false, false, false, false, true,
-                                                        false, false),
-                                                null)));
+                                                        false, false, false, false, true, false,
+                                                        false))));
         assertEquals(
                 new ErrorDetails.PlayerUnavailable.NonFiniteState(
                         "Builder", "movement.fallDistance"),
@@ -269,7 +120,7 @@ final class BukkitPlayerContextAccessTest {
     }
 
     @Test
-    void reportsNonFiniteBasePoseBeforeDerivingTheView() {
+    void reportsNonFiniteBasePose() {
         AtomicInteger rayCalls = new AtomicInteger();
         World world = world(null, rayCalls);
         Player invalidPose =
@@ -279,25 +130,10 @@ final class BukkitPlayerContextAccessTest {
                         null,
                         new ArrayList<>(),
                         Map.of("getLocation", new Location(world, Double.NaN, 64, 0.5)));
-        BukkitPlayerContextAccess access =
-                new BukkitPlayerContextAccess(server(invalidPose), 1, 1, 4);
+        BukkitPlayerContextAccess access = new BukkitPlayerContextAccess(server(invalidPose));
 
         OperationException unavailable =
-                assertThrows(
-                        OperationException.class,
-                        () ->
-                                access.capture(
-                                        request(
-                                                new Includes(
-                                                        true, false, false, false, false, false,
-                                                        false, false),
-                                                new ViewRequest(
-                                                        1,
-                                                        1,
-                                                        70,
-                                                        1,
-                                                        FluidCollision.NEVER,
-                                                        false))));
+                assertThrows(OperationException.class, () -> access.capture(request(baseOnly())));
 
         assertEquals(OperationFailure.PLAYER_UNAVAILABLE, unavailable.failure());
         assertEquals(
@@ -307,7 +143,7 @@ final class BukkitPlayerContextAccessTest {
     }
 
     @Test
-    void rejectsOutOfRangeBaseAndViewCoordinatesBeforeBlockAccess() throws Exception {
+    void rejectsOutOfRangeFeetButPreservesExactEyePosition() throws Exception {
         World world = world(null, new AtomicInteger());
         Player invalidFeet =
                 player(
@@ -316,13 +152,11 @@ final class BukkitPlayerContextAccessTest {
                         null,
                         new ArrayList<>(),
                         Map.of("getLocation", new Location(world, 3_000_000_000D, 64, 0.5)));
-        BukkitPlayerContextAccess feetAccess =
-                new BukkitPlayerContextAccess(server(invalidFeet), 1, 1, 4);
+        BukkitPlayerContextAccess feetAccess = new BukkitPlayerContextAccess(server(invalidFeet));
 
         OperationException feetUnavailable =
                 assertThrows(
-                        OperationException.class,
-                        () -> feetAccess.capture(request(baseOnly(), null)));
+                        OperationException.class, () -> feetAccess.capture(request(baseOnly())));
         assertEquals(
                 new ErrorDetails.PlayerUnavailable.PositionOutOfRange("Builder", "feetPosition.x"),
                 feetUnavailable.details().orElseThrow());
@@ -335,68 +169,9 @@ final class BukkitPlayerContextAccessTest {
                         new ArrayList<>(),
                         Map.of("getEyeLocation", new Location(world, 3_000_000_000D, 65.62, 0.5)));
         BukkitPlayerContextAccess stateOnlyAccess =
-                new BukkitPlayerContextAccess(server(outOfRangeEye), 1, 1, 4);
+                new BukkitPlayerContextAccess(server(outOfRangeEye));
         assertEquals(
-                3_000_000_000D,
-                stateOnlyAccess.capture(request(baseOnly(), null)).eyePosition().x());
-
-        OperationException eyeUnavailable =
-                assertThrows(
-                        OperationException.class,
-                        () ->
-                                stateOnlyAccess.capture(
-                                        request(
-                                                new Includes(
-                                                        true, false, false, false, false, false,
-                                                        false, false),
-                                                new ViewRequest(
-                                                        1,
-                                                        1,
-                                                        70,
-                                                        1,
-                                                        FluidCollision.NEVER,
-                                                        false))));
-        assertEquals(
-                new ErrorDetails.PlayerUnavailable.PositionOutOfRange("Builder", "eyePosition.x"),
-                eyeUnavailable.details().orElseThrow());
-
-        AtomicInteger rayCalls = new AtomicInteger();
-        World viewWorld = world(null, rayCalls);
-        double nearMaximum = (double) Integer.MAX_VALUE + 0.5;
-        Player invalidView =
-                player(
-                        viewWorld,
-                        null,
-                        null,
-                        new ArrayList<>(),
-                        Map.of(
-                                "getLocation",
-                                new Location(viewWorld, nearMaximum, 64, 0.5),
-                                "getEyeLocation",
-                                new Location(viewWorld, nearMaximum, 65.62, 0.5, -90, 0)));
-        BukkitPlayerContextAccess viewAccess =
-                new BukkitPlayerContextAccess(server(invalidView), 1, 1, 4);
-
-        OperationException viewUnavailable =
-                assertThrows(
-                        OperationException.class,
-                        () ->
-                                viewAccess.capture(
-                                        request(
-                                                new Includes(
-                                                        true, false, false, false, false, false,
-                                                        false, false),
-                                                new ViewRequest(
-                                                        1,
-                                                        1,
-                                                        70,
-                                                        1,
-                                                        FluidCollision.NEVER,
-                                                        false))));
-        assertEquals(
-                new ErrorDetails.PlayerUnavailable.PositionOutOfRange("Builder", "view.endpoint.x"),
-                viewUnavailable.details().orElseThrow());
-        assertEquals(0, rayCalls.get());
+                3_000_000_000D, stateOnlyAccess.capture(request(baseOnly())).eyePosition().x());
     }
 
     @Test
@@ -430,19 +205,16 @@ final class BukkitPlayerContextAccessTest {
                                 Map.entry("getViewDistance", -1),
                                 Map.entry("getSendViewDistance", 10),
                                 Map.entry("getActivePotionEffects", List.of())));
-        BukkitPlayerContextAccess access = new BukkitPlayerContextAccess(server(player), 1, 1, 4);
+        BukkitPlayerContextAccess access = new BukkitPlayerContextAccess(server(player));
 
         GetPlayerContext.Result result =
-                access.capture(
-                        request(
-                                new Includes(false, true, true, false, false, true, true, true),
-                                null));
+                access.capture(request(new Includes(true, true, false, false, true, true, true)));
 
         assertEquals(4, result.equipment().selectedHotbarSlot());
         assertNull(result.equipment().mainHand());
         assertEquals(36, result.inventory().size());
         assertEquals(List.of(), result.inventory().slots());
-        assertEquals(new GetPlayerContext.Vector3(1, 2, 3), result.movement().velocity());
+        assertEquals(new Vector3(1, 2, 3), result.movement().velocity());
         assertEquals(4, result.movement().fallDistance());
         assertTrue(result.movement().allowFlight());
         assertTrue(result.movement().flying());
@@ -457,11 +229,10 @@ final class BukkitPlayerContextAccessTest {
 
     @Test
     void reportsMissingPlayersWithoutBroadeningTheSelector() {
-        BukkitPlayerContextAccess access = new BukkitPlayerContextAccess(server(null), 1, 1, 1);
+        BukkitPlayerContextAccess access = new BukkitPlayerContextAccess(server(null));
 
         OperationException missing =
-                assertThrows(
-                        OperationException.class, () -> access.capture(request(baseOnly(), null)));
+                assertThrows(OperationException.class, () -> access.capture(request(baseOnly())));
 
         assertEquals(OperationFailure.PLAYER_NOT_FOUND, missing.failure());
         assertEquals("Player is not online: Builder", missing.getMessage());
@@ -487,16 +258,16 @@ final class BukkitPlayerContextAccessTest {
                             }
                             return defaultValue(method);
                         });
-        BukkitPlayerContextAccess access = new BukkitPlayerContextAccess(trackingServer, 1, 1, 1);
+        BukkitPlayerContextAccess access = new BukkitPlayerContextAccess(trackingServer);
 
         access.capture(
                 new GetPlayerContext.Request(
-                        PLAYER_ID.toString().toUpperCase(Locale.ROOT), baseOnly(), null));
+                        PLAYER_ID.toString().toUpperCase(Locale.ROOT), baseOnly()));
         assertEquals(List.of("uuid:" + PLAYER_ID), lookups);
 
         lookups.clear();
-        access.capture(new GetPlayerContext.Request("1-1-1-1-1", baseOnly(), null));
-        assertEquals(List.of("name:1-1-1-1-1"), lookups);
+        access.capture(new GetPlayerContext.Request("builder", baseOnly()));
+        assertEquals(List.of("name:builder"), lookups);
     }
 
     @Test
@@ -526,12 +297,12 @@ final class BukkitPlayerContextAccessTest {
                 BukkitPlayerContextAccess.durability(null, 0));
     }
 
-    private static GetPlayerContext.Request request(Includes includes, ViewRequest view) {
-        return new GetPlayerContext.Request("Builder", includes, view);
+    private static GetPlayerContext.Request request(Includes includes) {
+        return new GetPlayerContext.Request("Builder", includes);
     }
 
     private static Includes baseOnly() {
-        return new Includes(false, false, false, false, false, false, false, false);
+        return new Includes(false, false, false, false, false, false, false);
     }
 
     private static Server server(Player player) {

@@ -3,6 +3,7 @@ package ca.deliyannides.dirtmcp.paper.bridge;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.CountRegionBlockStatesEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.FillRegionEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetEditHistoryEndpoint;
+import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetPerspectiveViewEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetPlayerContextEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetRegionBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.PingEndpoint;
@@ -29,12 +30,17 @@ import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
+import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks;
+import ca.deliyannides.dirtmcp.paper.world.inspection.PlayerIdentity;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockDimensions;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
+import ca.deliyannides.dirtmcp.paper.world.model.ExactPosition;
+import ca.deliyannides.dirtmcp.paper.world.model.Rotation;
+import ca.deliyannides.dirtmcp.paper.world.model.Vector3;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import java.io.IOException;
@@ -87,6 +93,7 @@ final class BridgeTestFixture {
                         new GetRegionBlocksEndpoint(operations, config),
                         new ScanOrthographicViewEndpoint(operations, config),
                         new GetPlayerContextEndpoint(operations),
+                        new GetPerspectiveViewEndpoint(operations),
                         new ReplaceRegionBlocksEndpoint(operations, config),
                         new FillRegionEndpoint(operations, config),
                         new SetBlocksEndpoint(operations, config),
@@ -129,6 +136,7 @@ final class BridgeTestFixture {
                     GetRegionBlocks,
                     ScanOrthographicView,
                     GetPlayerContext,
+                    GetPerspectiveView,
                     ReplaceRegionBlocks,
                     FillRegion,
                     SetBlocks,
@@ -215,33 +223,6 @@ final class BridgeTestFixture {
         public GetPlayerContext.Result getPlayerContext(GetPlayerContext.Request request)
                 throws OperationException {
             GetPlayerContext.Includes include = request.include();
-            GetPlayerContext.PerspectiveView view = null;
-            if (include.view()) {
-                GetPlayerContext.ViewRequest options = request.view();
-                double verticalScale =
-                        Math.tan(Math.toRadians(options.verticalFieldOfViewDegrees()) / 2.0);
-                double horizontalFov =
-                        Math.toDegrees(
-                                2 * Math.atan(verticalScale * options.width() / options.height()));
-                view =
-                        new GetPlayerContext.PerspectiveView(
-                                new GetPlayerContext.ViewBasis(
-                                        new GetPlayerContext.Vector3(0, 0, -1),
-                                        new GetPlayerContext.Vector3(1, 0, 0),
-                                        new GetPlayerContext.Vector3(0, 1, 0)),
-                                new GetPlayerContext.Viewport(
-                                        options.width(),
-                                        options.height(),
-                                        options.verticalFieldOfViewDegrees(),
-                                        horizontalFov,
-                                        options.maxDistance(),
-                                        options.fluidCollision().name().toLowerCase(Locale.ROOT),
-                                        options.ignorePassableBlocks()),
-                                1,
-                                List.of(),
-                                List.of(),
-                                null);
-            }
             GetPlayerContext.Equipment equipment =
                     include.equipment()
                             ? new GetPlayerContext.Equipment(0, null, null, null, null, null, null)
@@ -262,7 +243,7 @@ final class BridgeTestFixture {
             GetPlayerContext.PlayerMovement movement =
                     include.movement()
                             ? new GetPlayerContext.PlayerMovement(
-                                    new GetPlayerContext.Vector3(0, 0, 0),
+                                    new Vector3(0, 0, 0),
                                     0,
                                     true,
                                     false,
@@ -281,19 +262,18 @@ final class BridgeTestFixture {
             List<GetPlayerContext.Effect> effects = include.effects() ? List.of() : null;
             return new GetPlayerContext.Result(
                     Instant.parse("2026-08-19T12:00:00Z"),
-                    new GetPlayerContext.PlayerIdentity(
+                    new PlayerIdentity(
                             "Builder", UUID.fromString("423e4567-e89b-42d3-a456-426614174000")),
                     "world",
                     WORLD_ID,
-                    new GetPlayerContext.Position(12.5, 70, -3.25),
+                    new ExactPosition(12.5, 70, -3.25),
                     new BlockPosition(12, 70, -4),
-                    new GetPlayerContext.Position(12.5, 71.62, -3.25),
-                    new GetPlayerContext.Rotation(180, 0),
-                    new GetPlayerContext.Vector3(0, 0, -1),
+                    new ExactPosition(12.5, 71.62, -3.25),
+                    new Rotation(180, 0),
+                    new Vector3(0, 0, -1),
                     "creative",
                     "standing",
                     true,
-                    view,
                     equipment,
                     inventory,
                     enderChest,
@@ -301,6 +281,55 @@ final class BridgeTestFixture {
                     movement,
                     playerClient,
                     effects);
+        }
+
+        @Override
+        public GetPerspectiveView.Result getPerspectiveView(GetPerspectiveView.Request request)
+                throws OperationException {
+            GetPerspectiveView.ViewRequest options = request.options();
+            double verticalScale =
+                    Math.tan(Math.toRadians(options.verticalFieldOfViewDegrees()) / 2.0);
+            double horizontalFov =
+                    Math.toDegrees(
+                            2 * Math.atan(verticalScale * options.width() / options.height()));
+            GetPerspectiveView.ResolvedSource source =
+                    request.source() instanceof GetPerspectiveView.PlayerSource
+                            ? new GetPerspectiveView.ResolvedPlayerSource(
+                                    new PlayerIdentity(
+                                            "Builder",
+                                            UUID.fromString(
+                                                    "423e4567-e89b-42d3-a456-426614174000")))
+                            : new GetPerspectiveView.ResolvedLocationSource();
+            ExactPosition cameraPosition =
+                    request.source() instanceof GetPerspectiveView.LocationSource location
+                            ? location.cameraPosition()
+                            : new ExactPosition(12.5, 71.62, -3.25);
+            Rotation rotation =
+                    request.source() instanceof GetPerspectiveView.LocationSource location
+                            ? location.rotation()
+                            : new Rotation(180, 0);
+            return new GetPerspectiveView.Result(
+                    Instant.parse("2026-08-19T12:00:00Z"),
+                    source,
+                    "world",
+                    WORLD_ID,
+                    cameraPosition,
+                    rotation,
+                    new Vector3(0, 0, -1),
+                    new GetPerspectiveView.ViewBasis(
+                            new Vector3(0, 0, -1), new Vector3(1, 0, 0), new Vector3(0, 1, 0)),
+                    new GetPerspectiveView.Viewport(
+                            options.width(),
+                            options.height(),
+                            options.verticalFieldOfViewDegrees(),
+                            horizontalFov,
+                            options.maxDistance(),
+                            options.fluidCollision().name().toLowerCase(Locale.ROOT),
+                            options.ignorePassableBlocks()),
+                    1,
+                    List.of(),
+                    List.of(),
+                    null);
         }
 
         @Override

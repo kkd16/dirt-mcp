@@ -61,7 +61,7 @@ const LimitConfigurationSchema = z
     maxRegionVolume: PositiveInt32Schema.describe('Maximum cuboid mutation/count volume or explicit block placements.'),
     maxTouchedChunks: PositiveInt32Schema.describe('Maximum distinct loaded chunks one mutation may touch.'),
     maxInspectionTouchedChunks: PositiveInt32Schema.describe(
-      'Maximum loaded chunks a region inspection may snapshot or a player-view scan may check.',
+      'Maximum loaded chunks a region inspection may snapshot or a perspective view may check.',
     ),
     maxBlockStatePatterns: PositiveInt32Schema.max(MAX_BLOCK_STATE_ENTRIES).describe(
       'Maximum block-state patterns or palette entries in one operation; inspection include and exclude lists share this cap.',
@@ -74,7 +74,7 @@ const LimitConfigurationSchema = z
       'Default exact-block, run, or visible-block result limit when maxResults is omitted.',
     ),
     maxInspectionResultLimit: PositiveInt32Schema.describe(
-      'Maximum caller-selected detailed-inspection result limit or player-view ray count.',
+      'Maximum caller-selected detailed-inspection result limit or perspective-view ray count.',
     ),
     maxCommandsPerRequest: PositiveInt32Schema.describe(
       'Maximum commands accepted in one ordered Minecraft command batch.',

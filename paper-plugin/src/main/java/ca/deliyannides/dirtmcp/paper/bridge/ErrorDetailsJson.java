@@ -127,8 +127,8 @@ final class ErrorDetailsJson {
                 object.addProperty("maximum", value.maximum());
                 yield object;
             }
-            case ErrorDetails.RegionTooLarge.ViewChunks value -> {
-                JsonObject object = reason("view_chunks");
+            case ErrorDetails.RegionTooLarge.PerspectiveChunks value -> {
+                JsonObject object = reason("perspective_chunks");
                 object.addProperty("requested", value.requested());
                 object.addProperty("maximum", value.maximum());
                 yield object;
@@ -145,10 +145,10 @@ final class ErrorDetailsJson {
                     result("runs", value.minimumRequired(), value.maximum());
             case ErrorDetails.ResultTooLarge.VisibleBlocks value ->
                     result("visible_blocks", value.minimumRequired(), value.maximum());
-            case ErrorDetails.ResultTooLarge.ViewRays value ->
-                    result("view_rays", value.minimumRequired(), value.maximum());
-            case ErrorDetails.ResultTooLarge.ViewRayDistance value ->
-                    result("view_ray_distance", value.minimumRequired(), value.maximum());
+            case ErrorDetails.ResultTooLarge.PerspectiveRays value ->
+                    result("perspective_rays", value.minimumRequired(), value.maximum());
+            case ErrorDetails.ResultTooLarge.PerspectiveRayDistance value ->
+                    result("perspective_ray_distance", value.minimumRequired(), value.maximum());
             case ErrorDetails.ServerUnavailable.DependencyUnavailable ignored ->
                     reason("dependency_unavailable");
             case ErrorDetails.ServerUnavailable.PaperUnavailable ignored ->

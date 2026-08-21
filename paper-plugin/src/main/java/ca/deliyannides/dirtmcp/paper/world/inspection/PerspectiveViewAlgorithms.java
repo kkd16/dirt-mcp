@@ -3,8 +3,9 @@ package ca.deliyannides.dirtmcp.paper.world.inspection;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext.Vector3;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext.ViewRequest;
+import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.ViewRequest;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockCoordinates;
+import ca.deliyannides.dirtmcp.paper.world.model.Vector3;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -37,21 +38,21 @@ final class PerspectiveViewAlgorithms {
         if (rayCount > maximumRays) {
             throw new OperationException(
                     OperationFailure.RESULT_TOO_LARGE,
-                    "Player view requires "
+                    "Perspective view requires "
                             + rayCount
                             + " rays, exceeding the maximum of "
                             + maximumRays,
-                    new ErrorDetails.ResultTooLarge.ViewRays(rayCount, maximumRays));
+                    new ErrorDetails.ResultTooLarge.PerspectiveRays(rayCount, maximumRays));
         }
         long rayDistanceBudget = rayCount * request.maxDistance();
         if (rayDistanceBudget > maximumRayDistanceBudget) {
             throw new OperationException(
                     OperationFailure.RESULT_TOO_LARGE,
-                    "Player view requires "
+                    "Perspective view requires "
                             + rayDistanceBudget
                             + " ray-distance units, exceeding the maximum of "
                             + maximumRayDistanceBudget,
-                    new ErrorDetails.ResultTooLarge.ViewRayDistance(
+                    new ErrorDetails.ResultTooLarge.PerspectiveRayDistance(
                             rayDistanceBudget, maximumRayDistanceBudget));
         }
 
@@ -80,31 +81,31 @@ final class PerspectiveViewAlgorithms {
     static void validate(ViewRequest request) throws OperationException {
         if (request == null) {
             throw invalid(
-                    "view is required when include.view is true",
-                    new ErrorDetails.InvalidRequest.Missing("view"));
+                    "Perspective view options are required",
+                    new ErrorDetails.InvalidRequest.Missing("options"));
         }
-        requireRange("view.width", request.width(), 1, MAX_DIMENSION);
-        requireRange("view.height", request.height(), 1, MAX_DIMENSION);
+        requireRange("width", request.width(), 1, MAX_DIMENSION);
+        requireRange("height", request.height(), 1, MAX_DIMENSION);
         if ((request.width() & 1) == 0) {
             throw invalid(
-                    "view.width must be odd so the raster has a center ray",
-                    new ErrorDetails.InvalidRequest.InvalidValue("view.width"));
+                    "width must be odd so the raster has a center ray",
+                    new ErrorDetails.InvalidRequest.InvalidValue("width"));
         }
         if ((request.height() & 1) == 0) {
             throw invalid(
-                    "view.height must be odd so the raster has a center ray",
-                    new ErrorDetails.InvalidRequest.InvalidValue("view.height"));
+                    "height must be odd so the raster has a center ray",
+                    new ErrorDetails.InvalidRequest.InvalidValue("height"));
         }
         requireRange(
-                "view.verticalFieldOfViewDegrees",
+                "verticalFieldOfViewDegrees",
                 request.verticalFieldOfViewDegrees(),
                 MIN_FIELD_OF_VIEW,
                 MAX_FIELD_OF_VIEW);
-        requireRange("view.maxDistance", request.maxDistance(), 1, MAX_DISTANCE);
+        requireRange("maxDistance", request.maxDistance(), 1, MAX_DISTANCE);
         if (request.fluidCollision() == null) {
             throw invalid(
-                    "view.fluidCollision is required",
-                    new ErrorDetails.InvalidRequest.Missing("view.fluidCollision"));
+                    "fluidCollision is required",
+                    new ErrorDetails.InvalidRequest.Missing("fluidCollision"));
         }
     }
 
@@ -154,26 +155,20 @@ final class PerspectiveViewAlgorithms {
             double endX = originX + normalized.x() * maxDistance;
             double endY = originY + normalized.y() * maxDistance;
             double endZ = originZ + normalized.z() * maxDistance;
-            if (!blockCoordinateInRange(lerp(-PAPER_TRAVERSAL_EPSILON, originX, endX))
-                    || !blockCoordinateInRange(lerp(-PAPER_TRAVERSAL_EPSILON, endX, originX))) {
+            if (!BlockCoordinates.contains(lerp(-PAPER_TRAVERSAL_EPSILON, originX, endX))
+                    || !BlockCoordinates.contains(lerp(-PAPER_TRAVERSAL_EPSILON, endX, originX))) {
                 return "x";
             }
-            if (!blockCoordinateInRange(lerp(-PAPER_TRAVERSAL_EPSILON, originY, endY))
-                    || !blockCoordinateInRange(lerp(-PAPER_TRAVERSAL_EPSILON, endY, originY))) {
+            if (!BlockCoordinates.contains(lerp(-PAPER_TRAVERSAL_EPSILON, originY, endY))
+                    || !BlockCoordinates.contains(lerp(-PAPER_TRAVERSAL_EPSILON, endY, originY))) {
                 return "y";
             }
-            if (!blockCoordinateInRange(lerp(-PAPER_TRAVERSAL_EPSILON, originZ, endZ))
-                    || !blockCoordinateInRange(lerp(-PAPER_TRAVERSAL_EPSILON, endZ, originZ))) {
+            if (!BlockCoordinates.contains(lerp(-PAPER_TRAVERSAL_EPSILON, originZ, endZ))
+                    || !BlockCoordinates.contains(lerp(-PAPER_TRAVERSAL_EPSILON, endZ, originZ))) {
                 return "z";
             }
         }
         return null;
-    }
-
-    static boolean blockCoordinateInRange(double value) {
-        return Double.isFinite(value)
-                && value >= Integer.MIN_VALUE
-                && value < (double) Integer.MAX_VALUE + 1.0;
     }
 
     private static void addTraversedChunks(

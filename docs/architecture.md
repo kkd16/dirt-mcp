@@ -77,12 +77,12 @@ thread-safe Paper chunk snapshots on the main thread. Counting, filtering,
 exact geometry extraction, and orthographic scanning then run off-thread.
 Results fail rather than truncate when a configured ceiling would be exceeded.
 
-Player context is captured as one coherent main-thread snapshot. Optional
-perspective views use Paper block-collision ray tracing from the captured eye
-pose after a conservative loaded-chunk preflight. They describe the documented
-server projection, not a client framebuffer: entities, particles, lighting,
-resource packs, third-person camera state, and other client-only presentation
-are outside Dirt's view.
+Player context is captured as one coherent main-thread snapshot. Perspective
+views are a separate operation using either an online player's eye pose or an
+explicit world position and yaw/pitch. They use Paper block-collision ray tracing
+after a conservative loaded-chunk preflight and describe a server projection,
+not entities, particles, lighting, resource packs, third-person camera state, or
+other client-only presentation.
 
 ## Edits and undo
 

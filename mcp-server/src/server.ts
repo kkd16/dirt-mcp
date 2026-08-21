@@ -6,6 +6,7 @@ import type { McpToolConfiguration } from './tools/configuration.ts';
 import { registerCommandTools } from './tools/commands.ts';
 import { registerEditingTools } from './tools/editing.ts';
 import { registerInspectionTools } from './tools/inspection.ts';
+import { registerPerspectiveTools } from './tools/perspective.ts';
 import { registerPlayerTools } from './tools/player.ts';
 import { registerStatusTools } from './tools/status.ts';
 
@@ -18,7 +19,8 @@ function serverInstructions(configuration: McpToolConfiguration): string {
     configuration.count_region_block_states ||
     configuration.get_region_blocks ||
     configuration.scan_orthographic_view ||
-    configuration.get_player_context;
+    configuration.get_player_context ||
+    configuration.get_perspective_view;
   const hasMutation = configuration.replace_region_blocks || configuration.fill_region || configuration.set_blocks;
   const hasRegion =
     configuration.count_region_block_states ||
@@ -26,7 +28,7 @@ function serverInstructions(configuration: McpToolConfiguration): string {
     configuration.replace_region_blocks ||
     configuration.fill_region;
   const hasDetailedInspection =
-    configuration.get_region_blocks || configuration.scan_orthographic_view || configuration.get_player_context;
+    configuration.get_region_blocks || configuration.scan_orthographic_view || configuration.get_perspective_view;
   const hasWorldTool = hasInspection || hasMutation || configuration.get_edit_history || configuration.undo_edit;
   const instructions: string[] = [];
 
@@ -60,7 +62,12 @@ function serverInstructions(configuration: McpToolConfiguration): string {
 
   if (configuration.get_player_context) {
     instructions.push(
-      'Player context is point-in-time; recapture it before a POV-dependent edit if the player may have moved.',
+      'Player context is point-in-time; recapture it before relying on player state that may have changed.',
+    );
+  }
+  if (configuration.get_perspective_view) {
+    instructions.push(
+      'Perspective views are point-in-time block-collision projections; recapture a player source before a POV-dependent edit if the player may have moved.',
     );
   }
 
@@ -117,6 +124,7 @@ export function createDirtServer(
   registerStatusTools(server, bridge, toolConfiguration, logger);
   registerInspectionTools(server, bridge, toolConfiguration, logger);
   registerPlayerTools(server, bridge, toolConfiguration, logger);
+  registerPerspectiveTools(server, bridge, toolConfiguration, logger);
   registerEditingTools(server, bridge, toolConfiguration, logger);
   registerCommandTools(server, bridge, toolConfiguration, logger);
   return server;

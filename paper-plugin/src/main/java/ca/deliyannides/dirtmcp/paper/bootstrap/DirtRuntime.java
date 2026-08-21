@@ -4,6 +4,7 @@ import ca.deliyannides.dirtmcp.paper.bridge.BridgeServer;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.CountRegionBlockStatesEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.FillRegionEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetEditHistoryEndpoint;
+import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetPerspectiveViewEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetPlayerContextEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetRegionBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.PingEndpoint;
@@ -24,8 +25,10 @@ import ca.deliyannides.dirtmcp.paper.status.BukkitServerStatusAccess;
 import ca.deliyannides.dirtmcp.paper.status.PaperServerStatusService;
 import ca.deliyannides.dirtmcp.paper.world.edit.FaweWorldEditor;
 import ca.deliyannides.dirtmcp.paper.world.edit.WorldEditLifecycleListener;
+import ca.deliyannides.dirtmcp.paper.world.inspection.BukkitPerspectiveViewAccess;
 import ca.deliyannides.dirtmcp.paper.world.inspection.BukkitPlayerContextAccess;
 import ca.deliyannides.dirtmcp.paper.world.inspection.InspectionAdmission;
+import ca.deliyannides.dirtmcp.paper.world.inspection.PaperPerspectiveViewService;
 import ca.deliyannides.dirtmcp.paper.world.inspection.PaperPlayerContextService;
 import ca.deliyannides.dirtmcp.paper.world.inspection.PaperRegionSnapshotSource;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionInspectionService;
@@ -90,8 +93,11 @@ public final class DirtRuntime implements AutoCloseable {
                             inspectionAdmission);
             PaperPlayerContextService playerContext =
                     new PaperPlayerContextService(
+                            mainThread, new BukkitPlayerContextAccess(plugin.getServer()));
+            PaperPerspectiveViewService perspectiveView =
+                    new PaperPerspectiveViewService(
                             mainThread,
-                            new BukkitPlayerContextAccess(
+                            new BukkitPerspectiveViewAccess(
                                     plugin.getServer(),
                                     limits.maxInspectionResultLimit(),
                                     limits.maxInspectionVolume(),
@@ -119,6 +125,7 @@ public final class DirtRuntime implements AutoCloseable {
                                     new GetRegionBlocksEndpoint(inspection, config),
                                     new ScanOrthographicViewEndpoint(inspection, config),
                                     new GetPlayerContextEndpoint(playerContext),
+                                    new GetPerspectiveViewEndpoint(perspectiveView),
                                     new ReplaceRegionBlocksEndpoint(worldEditor, config),
                                     new FillRegionEndpoint(worldEditor, config),
                                     new SetBlocksEndpoint(worldEditor, config),

@@ -273,20 +273,20 @@ test('accepts every reason-discriminated bridge detail variant', () => {
       { reason: 'spectating_entity', player: 'Builder' },
       { reason: 'non_finite_state', player: 'Builder', field: 'feetPosition.x' },
       { reason: 'non_finite_state', player: 'Builder', field: 'movement.velocity.x' },
-      { reason: 'position_out_of_range', player: 'Builder', field: 'view.endpoint.z' },
+      { reason: 'position_out_of_range', player: 'Builder', field: 'perspectiveEndpoint.z' },
     ],
     region_too_large: [
       { reason: 'volume', dimensions: { x: 10, y: 20, z: 30 }, maximum: 5_000 },
       { reason: 'touched_chunks', minimumRequired: 101, maximum: 100 },
-      { reason: 'view_chunks', requested: 101, maximum: 100 },
+      { reason: 'perspective_chunks', requested: 101, maximum: 100 },
       { reason: 'block_count', requested: 101, maximum: 100 },
     ],
     result_too_large: [
       { reason: 'blocks', minimumRequired: 101, maximum: 100 },
       { reason: 'runs', minimumRequired: 101, maximum: 100 },
       { reason: 'visible_blocks', minimumRequired: 101, maximum: 100 },
-      { reason: 'view_rays', minimumRequired: 101, maximum: 100 },
-      { reason: 'view_ray_distance', minimumRequired: 101, maximum: 100 },
+      { reason: 'perspective_rays', minimumRequired: 101, maximum: 100 },
+      { reason: 'perspective_ray_distance', minimumRequired: 101, maximum: 100 },
     ],
     history_capacity_exceeded: [
       { reason: 'entries_per_world', maximum: 100 },
@@ -391,7 +391,7 @@ test('enforces Java-aligned numeric ranges and cross-field invariants', () => {
     },
     {
       code: 'region_too_large',
-      details: { reason: 'view_chunks', requested: INT32_MAX, maximum: INT32_MAX - 1 },
+      details: { reason: 'perspective_chunks', requested: INT32_MAX, maximum: INT32_MAX - 1 },
     },
     {
       code: 'region_too_large',
@@ -527,11 +527,11 @@ test('enforces Java-aligned numeric ranges and cross-field invariants', () => {
     },
     {
       code: 'region_too_large',
-      details: { reason: 'view_chunks', requested: INT32_MAX + 1, maximum: INT32_MAX },
+      details: { reason: 'perspective_chunks', requested: INT32_MAX + 1, maximum: INT32_MAX },
     },
     {
       code: 'region_too_large',
-      details: { reason: 'view_chunks', requested: 100, maximum: 100 },
+      details: { reason: 'perspective_chunks', requested: 100, maximum: 100 },
     },
     {
       code: 'region_too_large',

@@ -10,33 +10,8 @@ import {
 type PlayerInput = Parameters<typeof requireMatchingPlayerContextResponse>[0];
 type PlayerOutput = Parameters<typeof requireMatchingPlayerContextResponse>[1];
 
-const horizontalFov = (2 * Math.atan(Math.tan((70 * Math.PI) / 360) * (21 / 13)) * 180) / Math.PI;
 const eyePosition = { x: 10.25, y: 65.62, z: -2.5 };
 const INT32_MAX = 2_147_483_647;
-
-function perspectiveHit(row: number, column: number, blockStateIndex: number, distance: number) {
-  const horizontal = ((2 * (column + 0.5)) / 21 - 1) * (21 / 13) * Math.tan((70 * Math.PI) / 360);
-  const vertical = (1 - (2 * (row + 0.5)) / 13) * Math.tan((70 * Math.PI) / 360);
-  const length = Math.hypot(-horizontal, vertical, 1);
-  const hitPosition = {
-    x: eyePosition.x - (horizontal / length) * distance,
-    y: eyePosition.y + (vertical / length) * distance,
-    z: eyePosition.z + (1 / length) * distance,
-  };
-  return {
-    row,
-    column,
-    blockStateIndex,
-    blockPosition: {
-      x: Math.floor(hitPosition.x),
-      y: Math.floor(hitPosition.y),
-      z: Math.floor(hitPosition.z),
-    },
-    hitPosition,
-    face: null,
-    distance,
-  };
-}
 
 function input(player = 'Builder'): PlayerInput {
   return GetPlayerContextInputSchema.parse({ player });
@@ -56,26 +31,6 @@ function output(): PlayerOutput {
     lookDirection: { x: 0, y: 0, z: 1 },
     pose: 'standing',
     onGround: true,
-    view: {
-      basis: {
-        forward: { x: 0, y: 0, z: 1 },
-        right: { x: -1, y: 0, z: 0 },
-        up: { x: 0, y: 1, z: 0 },
-      },
-      viewport: {
-        width: 21,
-        height: 13,
-        verticalFieldOfViewDegrees: 70,
-        horizontalFieldOfViewDegrees: horizontalFov,
-        maxDistance: 32,
-        fluidCollision: 'never',
-        ignorePassableBlocks: false,
-      },
-      checkedChunkCount: 4,
-      blockStatePalette: ['minecraft:stone', 'minecraft:oak_planks'],
-      hits: [perspectiveHit(0, 0, 1, 10), perspectiveHit(6, 10, 2, 7.5)],
-      crosshairHitIndex: 1,
-    },
     equipment: {
       selectedHotbarSlot: 2,
       mainHand: {
@@ -110,11 +65,10 @@ function assertInvalidResponse(action: () => void): void {
   assert.throws(action, (error) => error instanceof ToolFailure && error.code === 'bridge_invalid_response');
 }
 
-test('applies player context defaults and enforces dependent view options', () => {
+test('applies player context defaults and rejects removed view options', () => {
   assert.deepEqual(input(), {
     player: 'Builder',
     include: {
-      view: true,
       equipment: true,
       inventory: false,
       enderChest: false,
@@ -127,7 +81,6 @@ test('applies player context defaults and enforces dependent view options', () =
   assert.deepEqual(GetPlayerContextInputSchema.parse({ player: '123e4567-e89b-32d3-a456-426614174001' }), {
     player: '123e4567-e89b-32d3-a456-426614174001',
     include: {
-      view: true,
       equipment: true,
       inventory: false,
       enderChest: false,
@@ -143,7 +96,6 @@ test('applies player context defaults and enforces dependent view options', () =
   assert.equal(GetPlayerContextInputSchema.safeParse({ player: 'x'.repeat(37) }).success, false);
 
   assert.deepEqual(GetPlayerContextInputSchema.parse({ player: 'Builder', include: { vitals: true } }).include, {
-    view: true,
     equipment: true,
     inventory: false,
     enderChest: false,
@@ -152,30 +104,16 @@ test('applies player context defaults and enforces dependent view options', () =
     client: false,
     effects: false,
   });
-  assert.equal(
-    GetPlayerContextInputSchema.safeParse({ player: 'Builder', view: { verticalFieldOfViewDegrees: 1 } }).success,
-    true,
-  );
-  assert.equal(
-    GetPlayerContextInputSchema.safeParse({
-      player: 'Builder',
-      view: { fluidCollision: 'always', ignorePassableBlocks: true },
-    }).success,
-    true,
-  );
-
   for (const candidate of [
-    { player: 'Builder', view: { width: 20 } },
-    { player: 'Builder', view: { height: 12 } },
-    { player: 'Builder', include: { view: false }, view: {} },
-    { player: 'Builder', view: { verticalFieldOfViewDegrees: 0 } },
+    { player: 'Builder', view: {} },
+    { player: 'Builder', include: { view: false } },
     { player: '   ' },
   ]) {
     assert.equal(GetPlayerContextInputSchema.safeParse(candidate).success, false);
   }
 });
 
-test('accepts and correlates a complete default player view', () => {
+test('accepts and correlates complete player context', () => {
   const result = output();
   assert.doesNotThrow(() => requireMatchingPlayerContextResponse(input('builder'), result));
   assert.doesNotThrow(() =>
@@ -189,60 +127,10 @@ test('accepts and correlates a complete default player view', () => {
   assert.doesNotThrow(() => requireMatchingPlayerContextResponse(input(arbitraryUuid), arbitraryUuidResult));
 });
 
-test('accepts a view whose build-height preflight checks no chunks', () => {
-  const candidate = cloneOutput();
-  candidate.view!.checkedChunkCount = 0;
-  candidate.view!.blockStatePalette = [];
-  candidate.view!.hits = [];
-  candidate.view!.crosshairHitIndex = null;
-
-  const result = PlayerContextOutputSchema.parse(candidate);
-  assert.doesNotThrow(() => requireMatchingPlayerContextResponse(input(), result));
-
-  candidate.view!.checkedChunkCount = -1;
-  assert.equal(PlayerContextOutputSchema.safeParse(candidate).success, false);
-});
-
-test('correlates player-view hit geometry near the signed-int32 coordinate boundary', () => {
-  const result = cloneOutput();
-  result.view!.hits[0] = perspectiveHit(0, 0, 1, result.view!.viewport.maxDistance);
-  const xOffset = INT32_MAX - 64 - result.eyePosition.x;
-  result.feetPosition.x += xOffset;
-  result.blockPosition.x = Math.floor(result.feetPosition.x);
-  result.eyePosition.x += xOffset;
-  for (const hit of result.view!.hits) {
-    hit.hitPosition.x += xOffset;
-    hit.blockPosition.x = Math.floor(hit.hitPosition.x);
-  }
-
-  const boundaryHit = result.view!.hits[0]!;
-  boundaryHit.hitPosition.x +=
-    Number.EPSILON * Math.max(Math.abs(result.eyePosition.x), Math.abs(boundaryHit.hitPosition.x));
-  boundaryHit.blockPosition.x = Math.floor(boundaryHit.hitPosition.x);
-  boundaryHit.distance = Math.hypot(
-    boundaryHit.hitPosition.x - result.eyePosition.x,
-    boundaryHit.hitPosition.y - result.eyePosition.y,
-    boundaryHit.hitPosition.z - result.eyePosition.z,
-  );
-  assert.ok(boundaryHit.distance > result.view!.viewport.maxDistance);
-  assert.doesNotThrow(() => requireMatchingPlayerContextResponse(input(), result));
-});
-
-test('accepts collision hits outside the owning block cube', () => {
-  const result = cloneOutput();
-  const extendedShapeHit = perspectiveHit(0, 0, 1, 9);
-  extendedShapeHit.blockPosition.y--;
-  result.view!.hits[0] = extendedShapeHit;
-  assert.ok(extendedShapeHit.hitPosition.y > extendedShapeHit.blockPosition.y + 1);
-  assert.ok(extendedShapeHit.hitPosition.y <= extendedShapeHit.blockPosition.y + 1.5);
-  assert.doesNotThrow(() => requireMatchingPlayerContextResponse(input(), result));
-});
-
-test('accepts excluded view and all bounded optional player-state sections', () => {
+test('accepts all bounded optional player-state sections', () => {
   const request = GetPlayerContextInputSchema.parse({
     player: 'Builder',
     include: {
-      view: false,
       equipment: false,
       inventory: true,
       enderChest: true,
@@ -254,7 +142,6 @@ test('accepts excluded view and all bounded optional player-state sections', () 
   });
   const result = PlayerContextOutputSchema.parse({
     ...output(),
-    view: null,
     equipment: null,
     inventory: {
       size: 36,
@@ -329,10 +216,9 @@ test('accepts excluded view and all bounded optional player-state sections', () 
 test('correlates main-hand equipment with the selected hotbar inventory slot', () => {
   const request = GetPlayerContextInputSchema.parse({
     player: 'Builder',
-    include: { view: false, inventory: true },
+    include: { inventory: true },
   });
   const result = cloneOutput();
-  result.view = null;
   assert.ok(result.equipment);
   assert.ok(result.equipment.mainHand);
   result.inventory = {
@@ -355,7 +241,7 @@ test('correlates main-hand equipment with the selected hotbar inventory slot', (
   assert.doesNotThrow(() => requireMatchingPlayerContextResponse(request, omitted));
 });
 
-test('rejects player identity, positioning, section, and viewport mismatches', () => {
+test('rejects player identity, positioning, section, and direction mismatches', () => {
   const wrongName = cloneOutput();
   wrongName.player.name = 'SomeoneElse';
   assertInvalidResponse(() => requireMatchingPlayerContextResponse(input(), wrongName));
@@ -368,57 +254,14 @@ test('rejects player identity, positioning, section, and viewport mismatches', (
   wrongSection.equipment = null;
   assertInvalidResponse(() => requireMatchingPlayerContextResponse(input(), wrongSection));
 
-  const wrongViewport = cloneOutput();
-  wrongViewport.view!.viewport.maxDistance--;
-  assertInvalidResponse(() => requireMatchingPlayerContextResponse(input(), wrongViewport));
-
-  const wrongHorizontalFov = cloneOutput();
-  wrongHorizontalFov.view!.viewport.horizontalFieldOfViewDegrees++;
-  assertInvalidResponse(() => requireMatchingPlayerContextResponse(input(), wrongHorizontalFov));
-
   const wrongLookDirection = cloneOutput();
   wrongLookDirection.lookDirection = { x: 1, y: 0, z: 0 };
   assertInvalidResponse(() => requireMatchingPlayerContextResponse(input(), wrongLookDirection));
-
-  const wrongForward = cloneOutput();
-  wrongForward.view!.basis.forward = { x: 1, y: 0, z: 0 };
-  assertInvalidResponse(() => requireMatchingPlayerContextResponse(input(), wrongForward));
-
-  const wrongRight = cloneOutput();
-  wrongRight.view!.basis.right = { x: 1, y: 0, z: 0 };
-  assertInvalidResponse(() => requireMatchingPlayerContextResponse(input(), wrongRight));
-});
-
-test('rejects inconsistent player-view hits, palette, order, and crosshair metadata', () => {
-  const outsideHit = cloneOutput();
-  outsideHit.view!.hits[0]!.column = 21;
-  assertInvalidResponse(() => requireMatchingPlayerContextResponse(input(), outsideHit));
-
-  const fabricatedHit = cloneOutput();
-  fabricatedHit.view!.hits[0]!.hitPosition.x += 0.01;
-  assertInvalidResponse(() => requireMatchingPlayerContextResponse(input(), fabricatedHit));
-
-  const wrongOrder = cloneOutput();
-  wrongOrder.view!.hits.reverse();
-  assertInvalidResponse(() => requireMatchingPlayerContextResponse(input(), wrongOrder));
-
-  const skippedPalette = cloneOutput();
-  skippedPalette.view!.hits[0]!.blockStateIndex = 2;
-  assertInvalidResponse(() => requireMatchingPlayerContextResponse(input(), skippedPalette));
-
-  const unusedPalette = cloneOutput();
-  unusedPalette.view!.hits[1]!.blockStateIndex = 1;
-  assertInvalidResponse(() => requireMatchingPlayerContextResponse(input(), unusedPalette));
-
-  const wrongCrosshair = cloneOutput();
-  wrongCrosshair.view!.crosshairHitIndex = 0;
-  assertInvalidResponse(() => requireMatchingPlayerContextResponse(input(), wrongCrosshair));
 });
 
 test('validates sparse inventory ordering and bounded item metadata at the wire boundary', () => {
   const base = {
     ...output(),
-    view: null,
     equipment: null,
     enderChest: null,
     vitals: null,
@@ -516,7 +359,6 @@ test('validates sparse inventory ordering and bounded item metadata at the wire 
 test('rejects unsorted or duplicate active effects at the wire boundary', () => {
   const base = {
     ...output(),
-    view: null,
     equipment: null,
     effects: [
       {

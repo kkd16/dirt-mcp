@@ -24,6 +24,7 @@ import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
+import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView;
@@ -257,23 +258,11 @@ final class BridgeOperationEndpointsTest {
 
             assertEquals(200, defaults.statusCode());
             assertEquals(
-                    new GetPlayerContext.Includes(
-                            true, true, false, false, false, false, false, false),
+                    new GetPlayerContext.Includes(true, false, false, false, false, false, false),
                     playerRequest.get().include());
-            assertEquals(21, playerRequest.get().view().width());
-            assertEquals(13, playerRequest.get().view().height());
-            assertEquals(70, playerRequest.get().view().verticalFieldOfViewDegrees());
-            assertEquals(32, playerRequest.get().view().maxDistance());
-            assertEquals(
-                    GetPlayerContext.FluidCollision.NEVER,
-                    playerRequest.get().view().fluidCollision());
             var defaultBody = json(defaults.body()).getAsJsonObject();
-            var defaultView = defaultBody.getAsJsonObject("view");
-            assertEquals(1, defaultView.get("checkedChunkCount").getAsInt());
             assertFalse(defaultBody.has("included"));
-            assertFalse(defaultView.has("rayCount"));
-            assertFalse(defaultView.has("rayDistanceBudget"));
-            assertFalse(defaultView.has("hitCount"));
+            assertFalse(defaultBody.has("view"));
             assertTrue(defaultBody.has("equipment"));
             assertTrue(defaultBody.get("inventory").isJsonNull());
 
@@ -284,18 +273,17 @@ final class BridgeOperationEndpointsTest {
                                     bridge,
                                     "/v1/get-player-context",
                                     """
-                                    {"player":"Builder","include":{"view":false,
-                                     "equipment":false,"inventory":true,"enderChest":true,
+                                    {"player":"Builder","include":{"equipment":false,
+                                     "inventory":true,"enderChest":true,
                                      "vitals":true,"movement":true,"client":true,"effects":true}}
                                     """));
 
             assertEquals(200, granular.statusCode());
             assertEquals(
-                    new GetPlayerContext.Includes(false, false, true, true, true, true, true, true),
+                    new GetPlayerContext.Includes(false, true, true, true, true, true, true),
                     playerRequest.get().include());
-            assertEquals(null, playerRequest.get().view());
             var granularBody = json(granular.body()).getAsJsonObject();
-            assertTrue(granularBody.get("view").isJsonNull());
+            assertFalse(granularBody.has("view"));
             assertEquals(36, granularBody.getAsJsonObject("inventory").get("size").getAsInt());
             assertEquals(27, granularBody.getAsJsonObject("enderChest").get("size").getAsInt());
             assertEquals(
@@ -337,14 +325,89 @@ final class BridgeOperationEndpointsTest {
             assertEquals(37, oversizedDetails.get("value").getAsInt());
             assertEquals(36, oversizedDetails.get("maximum").getAsInt());
 
-            HttpResponse<String> conflictingView =
+            HttpResponse<String> removedViewInput =
                     send(
                             client,
                             post(
                                     bridge,
                                     "/v1/get-player-context",
                                     "{\"player\":\"Builder\",\"include\":{\"view\":false},\"view\":{}}"));
-            assertEquals(400, conflictingView.statusCode());
+            assertEquals(400, removedViewInput.statusCode());
+        }
+    }
+
+    @Test
+    void parsesPlayerAndSyntheticPerspectiveSources() throws Exception {
+        AtomicReference<GetPerspectiveView.Request> perspectiveRequest = new AtomicReference<>();
+        BridgeTestFixture.TestOperations operations =
+                new BridgeTestFixture.TestOperations() {
+                    @Override
+                    public GetPerspectiveView.Result getPerspectiveView(
+                            GetPerspectiveView.Request request) throws OperationException {
+                        perspectiveRequest.set(request);
+                        return super.getPerspectiveView(request);
+                    }
+                };
+        try (BridgeServer bridge = server(config(availablePort(), 4), operations);
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+
+            HttpResponse<String> player =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/get-perspective-view",
+                                    "{\"source\":{\"type\":\"player\",\"player\":\"builder\"}}"));
+
+            assertEquals(200, player.statusCode());
+            assertEquals(
+                    new GetPerspectiveView.PlayerSource("builder"),
+                    perspectiveRequest.get().source());
+            assertEquals(21, perspectiveRequest.get().options().width());
+            assertEquals(13, perspectiveRequest.get().options().height());
+            assertEquals(
+                    GetPerspectiveView.FluidCollision.NEVER,
+                    perspectiveRequest.get().options().fluidCollision());
+            var playerBody = json(player.body()).getAsJsonObject();
+            assertEquals("player", playerBody.getAsJsonObject("source").get("type").getAsString());
+            assertEquals(
+                    "Builder",
+                    playerBody
+                            .getAsJsonObject("source")
+                            .getAsJsonObject("player")
+                            .get("name")
+                            .getAsString());
+            assertEquals(1, playerBody.get("checkedChunkCount").getAsInt());
+
+            HttpResponse<String> location =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/get-perspective-view",
+                                    """
+                                    {"source":{"type":"location","world":"world",
+                                     "cameraPosition":{"x":1.25,"y":72,"z":-8.5},
+                                     "rotation":{"yaw":45,"pitch":-15}},
+                                     "width":5,"height":3,"maxDistance":12,
+                                     "fluidCollision":"always","ignorePassableBlocks":true}
+                                    """));
+
+            assertEquals(200, location.statusCode());
+            var source = (GetPerspectiveView.LocationSource) perspectiveRequest.get().source();
+            assertEquals("world", source.world());
+            assertEquals(1.25, source.cameraPosition().x());
+            assertEquals(45, source.rotation().yaw());
+            assertEquals(5, perspectiveRequest.get().options().width());
+            assertEquals(
+                    GetPerspectiveView.FluidCollision.ALWAYS,
+                    perspectiveRequest.get().options().fluidCollision());
+            var locationBody = json(location.body()).getAsJsonObject();
+            assertEquals(
+                    "location", locationBody.getAsJsonObject("source").get("type").getAsString());
+            assertEquals(
+                    1.25, locationBody.getAsJsonObject("cameraPosition").get("x").getAsDouble());
         }
     }
 

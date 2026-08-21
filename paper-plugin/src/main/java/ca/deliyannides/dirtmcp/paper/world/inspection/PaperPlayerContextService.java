@@ -10,19 +10,16 @@ import java.util.Objects;
 public final class PaperPlayerContextService implements GetPlayerContext {
     private final MainThread mainThread;
     private final PlayerContextAccess paperAccess;
-    private final InspectionAdmission admission;
 
-    public PaperPlayerContextService(
-            MainThread mainThread, PlayerContextAccess paperAccess, InspectionAdmission admission) {
+    public PaperPlayerContextService(MainThread mainThread, PlayerContextAccess paperAccess) {
         this.mainThread = Objects.requireNonNull(mainThread, "mainThread");
         this.paperAccess = Objects.requireNonNull(paperAccess, "paperAccess");
-        this.admission = Objects.requireNonNull(admission, "admission");
     }
 
     @Override
     public Result getPlayerContext(Request request) throws OperationException {
         validate(request);
-        return this.admission.execute(() -> captureOnMainThread(request));
+        return captureOnMainThread(request);
     }
 
     private Result captureOnMainThread(Request request) throws OperationException {
@@ -55,7 +52,7 @@ public final class PaperPlayerContextService implements GetPlayerContext {
         }
         if (request.player() == null || request.player().isBlank()) {
             throw invalid(
-                    "player must be a non-empty exact online name or canonical UUID",
+                    "player must be a non-empty case-insensitive exact online name or canonical UUID",
                     new ErrorDetails.InvalidRequest.InvalidValue("player"));
         }
         if (request.player().length() > MAX_PLAYER_SELECTOR_LENGTH) {
@@ -71,15 +68,6 @@ public final class PaperPlayerContextService implements GetPlayerContext {
             throw invalid(
                     "include is required", new ErrorDetails.InvalidRequest.Missing("include"));
         }
-        if (!request.include().view()) {
-            if (request.view() != null) {
-                throw invalid(
-                        "view must be omitted when include.view is false",
-                        new ErrorDetails.InvalidRequest.InvalidValue("view"));
-            }
-            return;
-        }
-        PerspectiveViewAlgorithms.validate(request.view());
     }
 
     private static OperationException invalid(String message, ErrorDetails.InvalidRequest details) {

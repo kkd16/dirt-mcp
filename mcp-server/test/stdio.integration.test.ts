@@ -255,36 +255,6 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     lookDirection: { x: 0, y: 0, z: 1 },
     pose: 'standing',
     onGround: true,
-    view: {
-      basis: {
-        forward: { x: 0, y: 0, z: 1 },
-        right: { x: -1, y: 0, z: 0 },
-        up: { x: 0, y: 1, z: 0 },
-      },
-      viewport: {
-        width: 21,
-        height: 13,
-        verticalFieldOfViewDegrees: 70,
-        horizontalFieldOfViewDegrees: perspectiveHorizontalFov,
-        maxDistance: 32,
-        fluidCollision: 'never',
-        ignorePassableBlocks: false,
-      },
-      checkedChunkCount: 4,
-      blockStatePalette: ['minecraft:stone'],
-      hits: [
-        {
-          row: 6,
-          column: 10,
-          blockStateIndex: 1,
-          blockPosition: { x: 12, y: 71, z: 5 },
-          hitPosition: { x: 12.25, y: 71.62, z: 5 },
-          face: 'north',
-          distance: 8.5,
-        },
-      ],
-      crosshairHitIndex: 0,
-    },
     equipment: {
       selectedHotbarSlot: 0,
       mainHand: {
@@ -308,6 +278,43 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     movement: null,
     client: null,
     effects: null,
+  };
+  const perspectiveView = {
+    capturedAt: playerContext.capturedAt,
+    source: { type: 'player', player: playerContext.player },
+    world: playerContext.world,
+    worldId: playerContext.worldId,
+    cameraPosition: playerContext.eyePosition,
+    rotation: playerContext.rotation,
+    lookDirection: playerContext.lookDirection,
+    basis: {
+      forward: { x: 0, y: 0, z: 1 },
+      right: { x: -1, y: 0, z: 0 },
+      up: { x: 0, y: 1, z: 0 },
+    },
+    viewport: {
+      width: 21,
+      height: 13,
+      verticalFieldOfViewDegrees: 70,
+      horizontalFieldOfViewDegrees: perspectiveHorizontalFov,
+      maxDistance: 32,
+      fluidCollision: 'never',
+      ignorePassableBlocks: false,
+    },
+    checkedChunkCount: 4,
+    blockStatePalette: ['minecraft:stone'],
+    hits: [
+      {
+        row: 6,
+        column: 10,
+        blockStateIndex: 1,
+        blockPosition: { x: 12, y: 71, z: 5 },
+        hitPosition: { x: 12.25, y: 71.62, z: 5 },
+        face: 'north',
+        distance: 8.5,
+      },
+    ],
+    crosshairHitIndex: 0,
   };
   const setBlocks = {
     world: 'world',
@@ -366,6 +373,8 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       response.end(JSON.stringify(view));
     } else if (request.url === '/v1/get-player-context') {
       response.end(JSON.stringify(playerContext));
+    } else if (request.url === '/v1/get-perspective-view') {
+      response.end(JSON.stringify(perspectiveView));
     } else if (request.url === '/v1/fill-region') {
       response.statusCode = 413;
       response.end(
@@ -445,6 +454,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { name: 'get_region_blocks', annotations: readAnnotations() },
       { name: 'scan_orthographic_view', annotations: readAnnotations() },
       { name: 'get_player_context', annotations: readAnnotations() },
+      { name: 'get_perspective_view', annotations: readAnnotations() },
       { name: 'replace_region_blocks', annotations: mutationAnnotations(false) },
       { name: 'fill_region', annotations: mutationAnnotations(false) },
       { name: 'set_blocks', annotations: mutationAnnotations(false) },
@@ -538,7 +548,10 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   });
   const listedPlayerContext = listedTools.find((tool) => tool.name === 'get_player_context');
   assert.ok(listedPlayerContext);
-  assert.match(String(listedPlayerContext.description ?? ''), /not a client framebuffer/);
+  assert.match(String(listedPlayerContext.description ?? ''), /case-insensitively/);
+  const listedPerspective = listedTools.find((tool) => tool.name === 'get_perspective_view');
+  assert.ok(listedPerspective);
+  assert.match(String(listedPerspective.description ?? ''), /arbitrary loaded-world camera/);
 
   send(child, {
     jsonrpc: '2.0',
@@ -841,10 +854,33 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       content: [
         {
           type: 'text',
-          text: 'Builder in world at 12.25, 70, -3.5; 1/273 view rays hit blocks.',
+          text: 'Builder in world at 12.25, 70, -3.5.',
         },
       ],
       structuredContent: playerContext,
+    }),
+  );
+
+  send(child, {
+    jsonrpc: '2.0',
+    id: 15,
+    method: 'tools/call',
+    params: requestParams({
+      name: 'get_perspective_view',
+      arguments: { source: { type: 'player', player: 'builder' } },
+    }),
+  });
+  const perspective = await waitFor(messages, 15);
+  assert.deepEqual(
+    perspective.result,
+    completeResult({
+      content: [
+        {
+          type: 'text',
+          text: 'Builder in world at 12.25, 71.62, -3.5; 1/273 rays hit blocks.',
+        },
+      ],
+      structuredContent: perspectiveView,
     }),
   );
 
@@ -864,6 +900,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { method: 'POST', path: '/v1/get-edit-history' },
       { method: 'POST', path: '/v1/undo-edit' },
       { method: 'POST', path: '/v1/get-player-context' },
+      { method: 'POST', path: '/v1/get-perspective-view' },
     ],
   );
   for (const request of requests) {
@@ -878,7 +915,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     assert.equal(typeof callId, 'string');
     return callId;
   });
-  assert.equal(new Set(callIds).size, 13);
+  assert.equal(new Set(callIds).size, 14);
   const toolCallIds = callIds.slice(1);
   assert.equal(failedFillCallId, toolCallIds[4]);
   assert.equal(setBlocks.edit.callId, toolCallIds[6]);
@@ -916,7 +953,6 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.deepEqual(requestAt(requests, 12).body, {
     player: 'Builder',
     include: {
-      view: true,
       equipment: true,
       inventory: false,
       enderChest: false,
@@ -925,6 +961,15 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       client: false,
       effects: false,
     },
+  });
+  assert.deepEqual(requestAt(requests, 13).body, {
+    source: { type: 'player', player: 'builder' },
+    width: 21,
+    height: 13,
+    verticalFieldOfViewDegrees: 70,
+    maxDistance: 32,
+    fluidCollision: 'never',
+    ignorePassableBlocks: false,
   });
 
   const auditRecords = logs.values.filter((record) => record.event === 'tool.completed');
@@ -941,6 +986,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     ['get_edit_history', 12, true, true],
     ['undo_edit', 13, true, true],
     ['get_player_context', 14, false, true],
+    ['get_perspective_view', 15, false, true],
   ];
   assert.equal(auditRecords.length, expectedAudits.length);
   expectedAudits.forEach(([operation, requestId, includesWorld, success], index) => {

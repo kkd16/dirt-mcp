@@ -188,7 +188,7 @@ final class DirtAdminCommandTest {
         Component message = fixture.messages.getFirst();
         String plain = PLAIN.serialize(message);
         assertTrue(plain.contains("DIRT MCP  /  MCP Tools"));
-        assertTrue(plain.contains("Paper startup snapshot  •  5 of 12 configured ON"));
+        assertTrue(plain.contains("Paper startup snapshot  •  5 of 13 configured ON"));
         assertTrue(plain.contains("restart Paper, then the MCP host"));
         Set<String> expectedCommands = new HashSet<>();
         for (McpTool tool : McpTool.values()) {

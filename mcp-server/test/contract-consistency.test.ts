@@ -138,7 +138,7 @@ test('OpenAPI error numbers preserve Java ranges and documented relationships', 
   const paletteWeightTotal = openapiObjectVariant(invalidRequest, 'palette_weight_total');
   const regionTooLarge = openapiSchema(openapi, 'RegionTooLargeDetails');
   const resultTooLarge = openapiSchema(openapi, 'ResultTooLargeError');
-  const playerPerspectiveView = openapiSchema(openapi, 'PlayerPerspectiveView');
+  const perspectiveView = openapiSchema(openapi, 'GetPerspectiveViewResponse');
   assert.equal(schemaReferenceCount(openapiSchema(openapi, 'BridgeBusyError'), 'PositiveInt32'), 1);
   assert.equal(schemaReferenceCount(openapiSchema(openapi, 'ChangeLimitExceededError'), 'PositiveInt32'), 1);
   assert.equal(schemaReferenceCount(invalidRequest, 'PositiveInt32'), 2);
@@ -154,7 +154,7 @@ test('OpenAPI error numbers preserve Java ranges and documented relationships', 
   assert.equal(schemaReferenceCount(openapiSchema(openapi, 'ChunkPosition'), 'Int32'), 2);
   assert.equal(schemaReferenceCount(openapiSchema(openapi, 'PlayerItemStack'), 'PositiveInt32'), 3);
   assert.equal(schemaReferenceCount(openapiSchema(openapi, 'PlayerInventory'), 'PositiveInt32'), 1);
-  assert.match(playerPerspectiveView, /checkedChunkCount:\n\s+type: integer\n\s+format: int32\n\s+minimum: 0/);
+  assert.match(perspectiveView, /checkedChunkCount:\n\s+type: integer\n\s+format: int32\n\s+minimum: 0/);
   assert.equal(schemaReferenceCount(openapiSchema(openapi, 'GetPlayerContextResponse'), 'PlayerEffect'), 1);
   assert.match(openapiSchema(openapi, 'PlayerSelector'), /maxLength: 36/);
   assert.equal(schemaReferenceCount(outOfRange, 'JsonSafeInteger'), 3);

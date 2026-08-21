@@ -58,7 +58,7 @@ final class ErrorDetailsJsonTest {
                 IllegalArgumentException.class,
                 () ->
                         new ErrorDetails.PlayerUnavailable.PositionOutOfRange(
-                                "Builder", "view.endpoint.unknown"));
+                                "Builder", "perspectiveEndpoint.unknown"));
     }
 
     @Test
@@ -146,8 +146,8 @@ final class ErrorDetailsJsonTest {
                         new ErrorDetails.RegionTooLarge.TouchedChunks(9, 8),
                         "{reason:'touched_chunks',minimumRequired:9,maximum:8}"),
                 detail(
-                        new ErrorDetails.RegionTooLarge.ViewChunks(9, 8),
-                        "{reason:'view_chunks',requested:9,maximum:8}"),
+                        new ErrorDetails.RegionTooLarge.PerspectiveChunks(9, 8),
+                        "{reason:'perspective_chunks',requested:9,maximum:8}"),
                 detail(
                         new ErrorDetails.RegionTooLarge.BlockCount(9, 8),
                         "{reason:'block_count',requested:9,maximum:8}"),
@@ -161,11 +161,11 @@ final class ErrorDetailsJsonTest {
                         new ErrorDetails.ResultTooLarge.VisibleBlocks(9, 8),
                         "{reason:'visible_blocks',minimumRequired:9,maximum:8}"),
                 detail(
-                        new ErrorDetails.ResultTooLarge.ViewRays(9, 8),
-                        "{reason:'view_rays',minimumRequired:9,maximum:8}"),
+                        new ErrorDetails.ResultTooLarge.PerspectiveRays(9, 8),
+                        "{reason:'perspective_rays',minimumRequired:9,maximum:8}"),
                 detail(
-                        new ErrorDetails.ResultTooLarge.ViewRayDistance(9, 8),
-                        "{reason:'view_ray_distance',minimumRequired:9,maximum:8}"),
+                        new ErrorDetails.ResultTooLarge.PerspectiveRayDistance(9, 8),
+                        "{reason:'perspective_ray_distance',minimumRequired:9,maximum:8}"),
                 detail(new ErrorDetails.PlayerNotFound("Builder"), "{player:'Builder'}"),
                 detail(
                         new ErrorDetails.PlayerUnavailable.SpectatingEntity("Builder"),
@@ -176,8 +176,8 @@ final class ErrorDetailsJsonTest {
                         "{reason:'non_finite_state',player:'Builder',field:'vitals.saturation'}"),
                 detail(
                         new ErrorDetails.PlayerUnavailable.PositionOutOfRange(
-                                "Builder", "view.endpoint.x"),
-                        "{reason:'position_out_of_range',player:'Builder',field:'view.endpoint.x'}"),
+                                "Builder", "perspectiveEndpoint.x"),
+                        "{reason:'position_out_of_range',player:'Builder',field:'perspectiveEndpoint.x'}"),
                 detail(
                         new ErrorDetails.ServerUnavailable.DependencyUnavailable(),
                         "{reason:'dependency_unavailable'}"),

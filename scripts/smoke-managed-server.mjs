@@ -41,6 +41,7 @@ const longRunningMutationPaths = new Set([...editMutationPaths, '/v1/run-minecra
 const inspectionPaths = new Set([
   '/v1/count-region-block-states',
   '/v1/get-player-context',
+  '/v1/get-perspective-view',
   '/v1/get-region-blocks',
   '/v1/scan-orthographic-view',
 ]);
@@ -486,6 +487,7 @@ try {
     ping_server: true,
     get_server_status: true,
     get_player_context: true,
+    get_perspective_view: true,
     count_region_block_states: true,
     get_region_blocks: true,
     scan_orthographic_view: true,
@@ -504,6 +506,15 @@ try {
   });
   assert.equal(missingPlayerContext.status, 404);
   assert.deepEqual(missingPlayerContext.body.error, {
+    code: 'player_not_found',
+    message: `Player is not online: ${missingPlayer}`,
+    details: { player: missingPlayer },
+  });
+  const missingPlayerPerspective = await bridgeResponse('/v1/get-perspective-view', {
+    source: { type: 'player', player: missingPlayer },
+  });
+  assert.equal(missingPlayerPerspective.status, 404);
+  assert.deepEqual(missingPlayerPerspective.body.error, {
     code: 'player_not_found',
     message: `Player is not online: ${missingPlayer}`,
     details: { player: missingPlayer },
@@ -830,6 +841,39 @@ try {
 
   const exactBlocks = await bridgeRequest('/v1/get-region-blocks', region);
   assertExactBlocks(exactBlocks, filledState);
+
+  const syntheticCamera = { x: 0.5, y: 3, z: 0.5 };
+  const perspective = await bridgeRequest('/v1/get-perspective-view', {
+    source: {
+      type: 'location',
+      world,
+      cameraPosition: syntheticCamera,
+      rotation: { yaw: 0, pitch: 90 },
+    },
+    width: 1,
+    height: 1,
+    maxDistance: 8,
+  });
+  assert.deepEqual(perspective.source, { type: 'location' });
+  assert.equal(perspective.world, world);
+  assert.deepEqual(perspective.cameraPosition, syntheticCamera);
+  assert.deepEqual(perspective.rotation, { yaw: 0, pitch: 90 });
+  assert.ok(Math.abs(perspective.lookDirection.x) < 1e-12);
+  assert.ok(Math.abs(perspective.lookDirection.y + 1) < 1e-12);
+  assert.ok(Math.abs(perspective.lookDirection.z) < 1e-12);
+  assert.deepEqual(perspective.basis.forward, perspective.lookDirection);
+  assert.equal(perspective.viewport.width, 1);
+  assert.equal(perspective.viewport.height, 1);
+  assert.equal(perspective.viewport.maxDistance, 8);
+  assert.equal(perspective.checkedChunkCount, 1);
+  assert.equal(perspective.blockStatePalette.length, 1);
+  assert.ok(perspective.blockStatePalette[0].startsWith('minecraft:'));
+  assert.equal(perspective.hits.length, 1);
+  assert.equal(perspective.hits[0].blockStateIndex, 1);
+  assert.equal(perspective.hits[0].blockPosition.x, 0);
+  assert.equal(perspective.hits[0].blockPosition.z, 0);
+  assert.ok(perspective.hits[0].blockPosition.y <= syntheticCamera.y);
+  assert.equal(perspective.crosshairHitIndex, 0);
 
   const viewRequest = {
     world,

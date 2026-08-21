@@ -32,16 +32,25 @@ final class McpToolHelp {
                     new ToolSpec(
                             "Get player context",
                             ToolKind.READ_ONLY,
-                            "Captures an online player's exact pose and optional perspective, items, vitals, movement, client state, and effects.",
-                            "player (exact online name or UUID); optional include flags (view and "
-                                    + "equipment default true; all others false) and bounded view width, "
-                                    + "height, verticalFieldOfViewDegrees, maxDistance, fluidCollision, "
-                                    + "and ignorePassableBlocks.",
-                            "One coherent player snapshot; requested sections are non-null, excluded "
-                                    + "sections are null, and the view contains sparse first "
-                                    + "block-collision hits from the captured eye pose.",
-                            "Read-only; the view is a server-side ray projection, not the client's "
-                                    + "framebuffer, third-person camera, resource-pack rendering, or FOV setting.");
+                            "Captures an online player's exact pose, items, vitals, movement, client state, and effects.",
+                            "player (case-insensitive exact online name or UUID); optional include "
+                                    + "flags (equipment defaults true; all others false).",
+                            "One coherent player snapshot; requested sections are non-null and "
+                                    + "excluded sections are null.",
+                            "Read-only and point-in-time; use get_perspective_view for block-collision sightlines.");
+            case GET_PERSPECTIVE_VIEW ->
+                    new ToolSpec(
+                            "Get perspective view",
+                            ToolKind.READ_ONLY,
+                            "Traces a bounded perspective grid from an online player's eye or an arbitrary camera location.",
+                            "source = player with a case-insensitive exact online name or UUID, or "
+                                    + "location with world, cameraPosition, and yaw/pitch rotation; "
+                                    + "optional width, height, verticalFieldOfViewDegrees, maxDistance, "
+                                    + "fluidCollision, and ignorePassableBlocks.",
+                            "Resolved source, world, camera pose and basis, viewport, palette, sparse "
+                                    + "first block-collision hits, and center-ray hit index.",
+                            "Read-only; block collisions only, from already-loaded chunks. It is not "
+                                    + "a client framebuffer, entity view, resource-pack rendering, or FOV setting.");
             case COUNT_REGION_BLOCK_STATES ->
                     new ToolSpec(
                             "Count region block states",
