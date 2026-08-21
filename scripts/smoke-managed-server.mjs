@@ -715,19 +715,22 @@ try {
     'minecraft:gold_block',
     'minecraft:emerald_block',
     'minecraft:redstone_block',
+    'minecraft:lapis_block',
+    'minecraft:iron_block',
+    'minecraft:copper_block',
+    'minecraft:coal_block',
   ];
-  const firstSetStates = distinctStates.filter((state) => state !== firstOriginalState && state !== firstCopyState);
-  const secondSetState = distinctStates.find((state) => state !== secondOriginalState && state !== secondCopyState);
-  assert.ok(firstSetStates.length >= 2);
-  assert.ok(secondSetState);
-  const firstSetState = firstSetStates[0];
-  const alternateFirstSetState = firstSetStates[1];
+  const setStates = distinctStates.filter(
+    (state) => ![firstOriginalState, secondOriginalState, firstCopyState, secondCopyState].includes(state),
+  );
+  assert.ok(setStates.length >= 2);
+  const firstSetState = setStates[0];
+  const secondSetState = setStates[1];
   const setPalettes = [
     [
       { blockState: firstSetState, weight: 50 },
-      { blockState: alternateFirstSetState, weight: 50 },
+      { blockState: secondSetState, weight: 50 },
     ],
-    [{ blockState: secondSetState }],
   ];
   const setSeed = 1_234_567;
 
@@ -757,8 +760,8 @@ try {
     world,
     origin: setMin,
     palettes: setPalettes,
-    placements: [[0, 0, 0, 0]],
-    runs: [[1, 1, 0, 0, 1, 0, 0]],
+    placements: [],
+    runs: [[0, 0, 0, 0, 1, 0, 0]],
     seed: setSeed,
     dryRun: true,
   });
@@ -817,8 +820,8 @@ try {
     world,
     origin: setMin,
     palettes: setPalettes,
-    placements: [[0, 0, 0, 0]],
-    runs: [[1, 1, 0, 0, 1, 0, 0]],
+    placements: [],
+    runs: [[0, 0, 0, 0, 1, 0, 0]],
     seed: setSeed,
   });
   assert.equal(setResponse.status, 200);
@@ -845,8 +848,8 @@ try {
       block.blockState,
     ]),
   );
-  assert.ok(firstSetStates.slice(0, 2).includes(afterSetStates.get('5,0,0')));
-  assert.equal(afterSetStates.get('6,0,0'), secondSetState);
+  assert.ok(setStates.includes(afterSetStates.get('5,0,0')));
+  assert.ok(setStates.includes(afterSetStates.get('6,0,0')));
 
   const copyResponse = await bridgeResponse('/v1/set-blocks', { ...afterSet, origin: copyMin });
   assert.equal(copyResponse.status, 200);

@@ -34,8 +34,6 @@ public interface SetBlocks {
         }
     }
 
-    record ResolvedBlock(int paletteIndex, BlockPosition position) {}
-
     record Result(
             String world,
             BlockBounds bounds,

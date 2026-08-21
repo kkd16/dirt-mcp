@@ -162,7 +162,7 @@ final class FaweWorldEditorTest {
     }
 
     @Test
-    void expandsRunsAndPassesResolvedSetGeometryToThePlatformInWireOrder() throws Exception {
+    void passesCompactAbsoluteSetGeometryToThePlatformInWireOrder() throws Exception {
         FakePlatform platform = new FakePlatform();
         FaweWorldEditor editor = editor(platform, 3);
 
@@ -173,18 +173,55 @@ final class FaweWorldEditorTest {
                         position(15, 64, -17),
                         palettes(),
                         List.of(placement(-1, 2, 3)),
-                        List.of(new Run(0, 2, -3, 20, 3, -3, 20)),
+                        List.of(new Run(0, 2, -3, 20, 3, -3, 20), new Run(0, 4, -3, 20, 5, -3, 20)),
                         13,
                         true));
 
         assertEquals(
-                List.of(position(14, 66, -14), position(17, 61, 3), position(18, 61, 3)),
-                platform.lastSetPositions);
+                List.of(new SetBlockGeometry.ResolvedPlacement(0, position(14, 66, -14))),
+                platform.lastSetGeometry.placements());
         assertEquals(
-                new BlockBounds(position(14, 61, -14), position(18, 66, 3)),
-                platform.lastSetBounds);
+                List.of(
+                        new SetBlockGeometry.ResolvedRun(
+                                0, new Cuboid(position(17, 61, 3), position(18, 61, 3))),
+                        new SetBlockGeometry.ResolvedRun(
+                                0, new Cuboid(position(19, 61, 3), position(20, 61, 3)))),
+                platform.lastSetGeometry.runs());
+        assertEquals(5, platform.lastSetGeometry.blockCount());
         assertEquals(
-                List.of(new ChunkPosition(0, -1), new ChunkPosition(1, 0)), platform.lastSetChunks);
+                new BlockBounds(position(14, 61, -14), position(20, 66, 3)),
+                platform.lastSetGeometry.bounds());
+        assertEquals(
+                List.of(new ChunkPosition(0, -1), new ChunkPosition(1, 0)),
+                platform.lastSetGeometry.chunks());
+    }
+
+    @Test
+    void retainsLargeRunsAsSingleCuboids() throws Exception {
+        FakePlatform platform = new FakePlatform();
+        FaweWorldEditor editor =
+                new FaweWorldEditor(
+                        platform, 64 * 64 * 64, 16, MAX_BLOCK_STATE_PATTERNS, 100, history(3));
+
+        set(
+                editor,
+                new SetBlocks.Request(
+                        "world",
+                        position(0, 0, 0),
+                        palettes(),
+                        List.of(),
+                        List.of(new Run(0, 0, 0, 0, 63, 63, 63)),
+                        13,
+                        true));
+
+        assertEquals(64 * 64 * 64, platform.lastSetGeometry.blockCount());
+        assertEquals(List.of(), platform.lastSetGeometry.placements());
+        assertEquals(
+                List.of(
+                        new SetBlockGeometry.ResolvedRun(
+                                0, new Cuboid(position(0, 0, 0), position(63, 63, 63)))),
+                platform.lastSetGeometry.runs());
+        assertEquals(16, platform.lastSetGeometry.chunks().size());
     }
 
     @Test
@@ -558,6 +595,25 @@ final class FaweWorldEditorTest {
         assertEquals(
                 new ErrorDetails.InvalidRequest.Duplicate("runs[0]"),
                 overlap.details().orElseThrow());
+        OperationException runOverlap =
+                assertThrows(
+                        OperationException.class,
+                        () ->
+                                set(
+                                        editor,
+                                        new SetBlocks.Request(
+                                                "world",
+                                                origin,
+                                                palettes(),
+                                                List.of(),
+                                                List.of(
+                                                        new Run(0, 0, 0, 0, 16, 0, 0),
+                                                        new Run(0, 16, 0, 0, 17, 0, 0)),
+                                                0,
+                                                false)));
+        assertEquals(
+                new ErrorDetails.InvalidRequest.Duplicate("runs[1]"),
+                runOverlap.details().orElseThrow());
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
@@ -1102,9 +1158,7 @@ final class FaweWorldEditorTest {
         private int preparedBlockCountDelta;
         private int preparedRollbackCalls;
         private int undoCountDelta;
-        private List<BlockPosition> lastSetPositions;
-        private BlockBounds lastSetBounds;
-        private List<ChunkPosition> lastSetChunks;
+        private SetBlockGeometry lastSetGeometry;
         private FakePrepared lastPrepared;
         private FakeUndo lastUndo;
 
@@ -1148,16 +1202,9 @@ final class FaweWorldEditorTest {
 
         @Override
         public PreparedSet prepareSet(
-                WorldHandle world,
-                SetBlocks.Request request,
-                List<SetBlocks.ResolvedBlock> resolvedBlocks,
-                BlockBounds bounds,
-                List<ChunkPosition> touchedChunks) {
-            this.lastSetPositions =
-                    resolvedBlocks.stream().map(SetBlocks.ResolvedBlock::position).toList();
-            this.lastSetBounds = bounds;
-            this.lastSetChunks = List.copyOf(touchedChunks);
-            return prepared(world, List.of(), resolvedBlocks.size());
+                WorldHandle world, SetBlocks.Request request, SetBlockGeometry geometry) {
+            this.lastSetGeometry = geometry;
+            return prepared(world, List.of(), geometry.blockCount());
         }
 
         private FakePrepared prepared(

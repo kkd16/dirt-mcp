@@ -15,9 +15,11 @@ import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import ca.deliyannides.dirtmcp.paper.world.model.RegionGeometry;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.BitSet;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -250,11 +252,11 @@ public final class FaweWorldEditor
     public SetBlocks.Result setBlocks(SetBlocks.Request request, UUID callId)
             throws OperationException {
         requireCallId(callId);
-        SetRequestGeometry geometry = validateSetRequest(request);
+        SetBlockGeometry geometry = validateSetRequest(request);
         EditPlatform.WorldHandle world = resolveWorld(request.world());
         try (EditCoordinator.Lease lease =
                 this.coordinator.enterMutation(world.id(), world.name())) {
-            if (geometry.blocks().isEmpty()) {
+            if (geometry.isEmpty()) {
                 return new SetBlocks.Result(
                         world.name(),
                         null,
@@ -272,14 +274,9 @@ public final class FaweWorldEditor
             int blockCount;
             List<List<DestinationPaletteEntry>> palettes;
             try (EditPlatform.PreparedSet prepared =
-                    this.platform.prepareSet(
-                            world,
-                            request,
-                            geometry.blocks(),
-                            geometry.bounds(),
-                            geometry.chunks())) {
+                    this.platform.prepareSet(world, request, geometry)) {
                 blockCount = prepared.blockCount();
-                if (blockCount != geometry.blocks().size()) {
+                if (blockCount != geometry.blockCount()) {
                     throw new IllegalStateException(
                             "Prepared set-blocks count does not match its validated request");
                 }
@@ -754,7 +751,7 @@ public final class FaweWorldEditor
         return region;
     }
 
-    private SetRequestGeometry validateSetRequest(SetBlocks.Request request)
+    private SetBlockGeometry validateSetRequest(SetBlocks.Request request)
             throws OperationException {
         if (request == null || request.origin() == null) {
             throw invalid(
@@ -774,13 +771,16 @@ public final class FaweWorldEditor
                         "palettes must be empty when placements and runs are empty",
                         new ErrorDetails.InvalidRequest.InvalidValue("palettes"));
             }
-            return new SetRequestGeometry(List.of(), List.of(), null);
+            return new SetBlockGeometry(List.of(), List.of(), List.of(), null, 0);
         }
         validateSetPalettes(request.palettes());
 
         Set<ChunkPosition> chunks = new LinkedHashSet<>();
-        Set<BlockPosition> positions = new HashSet<>();
-        List<SetBlocks.ResolvedBlock> blocks = new ArrayList<>();
+        SetBlockOccupancy occupancy = new SetBlockOccupancy();
+        List<SetBlockGeometry.ResolvedPlacement> placements =
+                new ArrayList<>(request.placements().size());
+        List<SetBlockGeometry.ResolvedRun> runs = new ArrayList<>(request.runs().size());
+        SetBounds bounds = new SetBounds();
         long requestedBlockCount = request.placements().size();
         enforceSetBlockCount(requestedBlockCount);
         for (int placementIndex = 0;
@@ -802,12 +802,11 @@ public final class FaweWorldEditor
                             placement.y(),
                             placement.z(),
                             placementName);
-            addResolvedBlock(
-                    blocks,
-                    positions,
-                    chunks,
-                    new SetBlocks.ResolvedBlock(placement.paletteIndex(), position),
-                    placementName);
+            addTouchedChunk(chunks, ChunkPosition.containing(position.x(), position.z()));
+            occupancy.add(position, placementName);
+            placements.add(
+                    new SetBlockGeometry.ResolvedPlacement(placement.paletteIndex(), position));
+            bounds.include(position);
         }
         for (int runIndex = 0; runIndex < request.runs().size(); runIndex++) {
             Run run = request.runs().get(runIndex);
@@ -827,46 +826,19 @@ public final class FaweWorldEditor
                     resolvePosition(request.origin(), run.x(), run.y(), run.z(), runName);
             BlockPosition to =
                     resolvePosition(request.origin(), run.toX(), run.toY(), run.toZ(), runName);
-            for (long y = from.y(); y <= to.y(); y++) {
-                for (long z = from.z(); z <= to.z(); z++) {
-                    for (long x = from.x(); x <= to.x(); x++) {
-                        addResolvedBlock(
-                                blocks,
-                                positions,
-                                chunks,
-                                new SetBlocks.ResolvedBlock(
-                                        run.paletteIndex(),
-                                        new BlockPosition((int) x, (int) y, (int) z)),
-                                runName);
-                    }
-                }
-            }
+            Cuboid region = new Cuboid(from, to);
+            addTouchedChunks(chunks, region);
+            occupancy.add(region, runName);
+            runs.add(new SetBlockGeometry.ResolvedRun(run.paletteIndex(), region));
+            bounds.include(region);
         }
 
-        BlockPosition min = null;
-        BlockPosition max = null;
-        for (BlockPosition position : positions) {
-            min =
-                    min == null
-                            ? position
-                            : new BlockPosition(
-                                    Math.min(min.x(), position.x()),
-                                    Math.min(min.y(), position.y()),
-                                    Math.min(min.z(), position.z()));
-            max =
-                    max == null
-                            ? position
-                            : new BlockPosition(
-                                    Math.max(max.x(), position.x()),
-                                    Math.max(max.y(), position.y()),
-                                    Math.max(max.z(), position.z()));
-        }
-        return new SetRequestGeometry(
-                blocks,
+        return new SetBlockGeometry(
+                placements,
+                runs,
                 List.copyOf(chunks),
-                new BlockBounds(
-                        Objects.requireNonNull(min, "minimum position"),
-                        Objects.requireNonNull(max, "maximum position")));
+                bounds.build(),
+                Math.toIntExact(requestedBlockCount));
     }
 
     private void validateSetPalettes(List<List<DestinationPaletteEntry>> palettes)
@@ -935,20 +907,22 @@ public final class FaweWorldEditor
                         (long) this.maxRegionVolume + 1, this.maxRegionVolume));
     }
 
-    private void addResolvedBlock(
-            List<SetBlocks.ResolvedBlock> blocks,
-            Set<BlockPosition> positions,
-            Set<ChunkPosition> chunks,
-            SetBlocks.ResolvedBlock block,
-            String field)
+    private void addTouchedChunks(Set<ChunkPosition> chunks, Cuboid region)
             throws OperationException {
-        if (!positions.add(block.position())) {
-            throw invalid(
-                    field + " resolves to a duplicate block position",
-                    new ErrorDetails.InvalidRequest.Duplicate(field));
+        int minChunkX = region.min().x() >> 4;
+        int maxChunkX = region.max().x() >> 4;
+        int minChunkZ = region.min().z() >> 4;
+        int maxChunkZ = region.max().z() >> 4;
+        for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+            for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+                addTouchedChunk(chunks, new ChunkPosition(chunkX, chunkZ));
+            }
         }
-        blocks.add(block);
-        chunks.add(ChunkPosition.containing(block.position().x(), block.position().z()));
+    }
+
+    private void addTouchedChunk(Set<ChunkPosition> chunks, ChunkPosition chunk)
+            throws OperationException {
+        chunks.add(chunk);
         if (chunks.size() > this.maxTouchedChunks) {
             throw new OperationException(
                     OperationFailure.REGION_TOO_LARGE,
@@ -1104,15 +1078,94 @@ public final class FaweWorldEditor
         return new OperationException(OperationFailure.INVALID_REQUEST, message, details);
     }
 
-    private record SetRequestGeometry(
-            List<SetBlocks.ResolvedBlock> blocks, List<ChunkPosition> chunks, BlockBounds bounds) {
-        private SetRequestGeometry {
-            blocks = List.copyOf(Objects.requireNonNull(blocks, "blocks"));
-            chunks = List.copyOf(Objects.requireNonNull(chunks, "chunks"));
-            if (blocks.isEmpty() != (bounds == null)) {
-                throw new IllegalArgumentException(
-                        "bounds must be null exactly when set-blocks geometry is empty");
+    /** Detects overlap in 16-cubed sections without retaining one object per covered block. */
+    private static final class SetBlockOccupancy {
+        private final Map<SectionPosition, BitSet> sections = new HashMap<>();
+
+        private void add(BlockPosition position, String field) throws OperationException {
+            BitSet occupied = section(position.x() >> 4, position.y() >> 4, position.z() >> 4);
+            int index =
+                    ((position.y() & 15) << 8) | ((position.z() & 15) << 4) | (position.x() & 15);
+            if (occupied.get(index)) {
+                throw duplicatePosition(field);
+            }
+            occupied.set(index);
+        }
+
+        private void add(Cuboid region, String field) throws OperationException {
+            int minSectionX = region.min().x() >> 4;
+            int maxSectionX = region.max().x() >> 4;
+            int minSectionY = region.min().y() >> 4;
+            int maxSectionY = region.max().y() >> 4;
+            int minSectionZ = region.min().z() >> 4;
+            int maxSectionZ = region.max().z() >> 4;
+            for (int sectionY = minSectionY; sectionY <= maxSectionY; sectionY++) {
+                int fromY = sectionY == minSectionY ? region.min().y() & 15 : 0;
+                int toY = sectionY == maxSectionY ? region.max().y() & 15 : 15;
+                for (int sectionZ = minSectionZ; sectionZ <= maxSectionZ; sectionZ++) {
+                    int fromZ = sectionZ == minSectionZ ? region.min().z() & 15 : 0;
+                    int toZ = sectionZ == maxSectionZ ? region.max().z() & 15 : 15;
+                    for (int sectionX = minSectionX; sectionX <= maxSectionX; sectionX++) {
+                        int fromX = sectionX == minSectionX ? region.min().x() & 15 : 0;
+                        int toX = sectionX == maxSectionX ? region.max().x() & 15 : 15;
+                        BitSet occupied = section(sectionX, sectionY, sectionZ);
+                        for (int localY = fromY; localY <= toY; localY++) {
+                            for (int localZ = fromZ; localZ <= toZ; localZ++) {
+                                int row = (localY << 8) | (localZ << 4);
+                                int fromIndex = row | fromX;
+                                int toIndex = (row | toX) + 1;
+                                int overlap = occupied.nextSetBit(fromIndex);
+                                if (overlap >= 0 && overlap < toIndex) {
+                                    throw duplicatePosition(field);
+                                }
+                                occupied.set(fromIndex, toIndex);
+                            }
+                        }
+                    }
+                }
             }
         }
+
+        private BitSet section(int x, int y, int z) {
+            return this.sections.computeIfAbsent(
+                    new SectionPosition(x, y, z), ignored -> new BitSet());
+        }
     }
+
+    private static OperationException duplicatePosition(String field) {
+        return invalid(
+                field + " resolves to a duplicate block position",
+                new ErrorDetails.InvalidRequest.Duplicate(field));
+    }
+
+    private static final class SetBounds {
+        private int minX = Integer.MAX_VALUE;
+        private int minY = Integer.MAX_VALUE;
+        private int minZ = Integer.MAX_VALUE;
+        private int maxX = Integer.MIN_VALUE;
+        private int maxY = Integer.MIN_VALUE;
+        private int maxZ = Integer.MIN_VALUE;
+
+        private void include(BlockPosition position) {
+            this.minX = Math.min(this.minX, position.x());
+            this.minY = Math.min(this.minY, position.y());
+            this.minZ = Math.min(this.minZ, position.z());
+            this.maxX = Math.max(this.maxX, position.x());
+            this.maxY = Math.max(this.maxY, position.y());
+            this.maxZ = Math.max(this.maxZ, position.z());
+        }
+
+        private void include(Cuboid region) {
+            include(region.min());
+            include(region.max());
+        }
+
+        private BlockBounds build() {
+            return new BlockBounds(
+                    new BlockPosition(this.minX, this.minY, this.minZ),
+                    new BlockPosition(this.maxX, this.maxY, this.maxZ));
+        }
+    }
+
+    private record SectionPosition(int x, int y, int z) {}
 }

@@ -12,7 +12,6 @@ import com.fastasyncworldedit.core.math.random.SimpleRandom;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.function.pattern.Pattern;
 import com.sk89q.worldedit.function.pattern.RandomPattern;
-import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldedit.world.block.BlockState;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -98,29 +97,17 @@ final class PaperEditPreparation implements AutoCloseable {
                 });
     }
 
-    PreparedSet prepareSet(
-            PaperWorld world,
-            SetBlocks.Request request,
-            List<SetBlocks.ResolvedBlock> resolvedBlocks,
-            BlockBounds bounds,
-            List<ChunkPosition> touchedChunks)
+    PreparedSet prepareSet(PaperWorld world, SetBlocks.Request request, SetBlockGeometry geometry)
             throws OperationException {
-        List<ChunkPosition> chunks = List.copyOf(touchedChunks);
-        List<PreparedPalette> palettes =
-                onMainThread(
-                        () -> {
-                            requireAvailable(world);
-                            requireValidHeight(world.bukkitWorld(), bounds);
-                            return prepareSetPalettes(request);
-                        });
-        List<PreparedBlockChange> changes = prepareChanges(resolvedBlocks, palettes);
         return onMainThread(
                 () -> {
                     requireAvailable(world);
+                    requireValidHeight(world.bukkitWorld(), geometry.bounds());
+                    List<PreparedPalette> palettes = prepareSetPalettes(request);
                     ChunkTicketManager.Lease lease =
-                            this.tickets.acquire(world, chunks, "Set-blocks edit");
+                            this.tickets.acquire(world, geometry.chunks(), "Set-blocks edit");
                     try {
-                        return new PreparedSet(world, palettes, changes, chunks, lease);
+                        return new PreparedSet(world, palettes, geometry, lease);
                     } catch (RuntimeException | Error failure) {
                         releaseAfterFailure(lease, failure);
                         throw failure;
@@ -136,20 +123,6 @@ final class PaperEditPreparation implements AutoCloseable {
     @Override
     public void close() {
         this.tickets.close();
-    }
-
-    private static List<PreparedBlockChange> prepareChanges(
-            List<SetBlocks.ResolvedBlock> resolvedBlocks, List<PreparedPalette> palettes)
-            throws OperationException {
-        List<PreparedBlockChange> changes = new ArrayList<>(resolvedBlocks.size());
-        for (SetBlocks.ResolvedBlock block : resolvedBlocks) {
-            FaweEditExecutor.requireNotInterrupted();
-            Pattern pattern = palettes.get(block.paletteIndex()).pattern();
-            BlockPosition position = block.position();
-            BlockVector3 vector = BlockVector3.at(position.x(), position.y(), position.z());
-            changes.add(new PreparedBlockChange(vector, pattern));
-        }
-        return List.copyOf(changes);
     }
 
     private static void releaseAfterFailure(ChunkTicketManager.Lease lease, Throwable failure) {
@@ -342,8 +315,6 @@ final class PaperEditPreparation implements AutoCloseable {
 
     record PreparedPalette(List<DestinationPaletteEntry> entries, Pattern pattern) {}
 
-    record PreparedBlockChange(BlockVector3 position, Pattern pattern) {}
-
     record PreparedReplace(
             PaperWorld paperWorld,
             PreparedSources sources,
@@ -387,8 +358,7 @@ final class PaperEditPreparation implements AutoCloseable {
     record PreparedSet(
             PaperWorld paperWorld,
             List<PreparedPalette> preparedPalettes,
-            List<PreparedBlockChange> changes,
-            List<ChunkPosition> chunks,
+            SetBlockGeometry geometry,
             ChunkTicketManager.Lease lease)
             implements EditPlatform.PreparedSet {
         @Override
@@ -398,7 +368,7 @@ final class PaperEditPreparation implements AutoCloseable {
 
         @Override
         public int blockCount() {
-            return this.changes.size();
+            return this.geometry.blockCount();
         }
 
         @Override

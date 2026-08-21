@@ -5,12 +5,14 @@ import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import com.sk89q.worldedit.EditSession;
 import com.sk89q.worldedit.MaxChangedBlocksException;
 import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.function.mask.BlockMask;
 import com.sk89q.worldedit.function.operation.ChangeSetExecutor;
+import com.sk89q.worldedit.function.pattern.Pattern;
 import com.sk89q.worldedit.history.changeset.ChangeSet;
 import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldedit.regions.CuboidRegion;
@@ -155,52 +157,78 @@ final class FaweEditExecutor {
             EditPlatform.MutationAdmission admission)
             throws OperationException {
         Objects.requireNonNull(admission, "admission");
-        EditSession session = newEditSession(edit.paperWorld().worldEditWorld(), !dryRun);
-        List<SetBlockChange> pending = new ArrayList<>();
-        long expectedChanges;
+        var paperWorld = edit.paperWorld();
+        var world = paperWorld.worldEditWorld();
+        SetBlockGeometry geometry = edit.geometry();
+        var palettes = edit.preparedPalettes();
+        List<ChunkPosition> chunks = geometry.chunks();
+        EditSession session = newEditSession(world, !dryRun);
+        List<SetBlockGeometry.ResolvedPlacement> changedPlacements = new ArrayList<>();
+        List<SetBlockGeometry.ResolvedRun> changedRuns = new ArrayList<>();
+        long expectedChanges = 0;
         long changes;
         StoredUndo undo = null;
         try {
             try (session) {
-                for (PaperEditPreparation.PreparedBlockChange change : edit.changes()) {
+                for (SetBlockGeometry.ResolvedPlacement placement : geometry.placements()) {
                     requireNotInterrupted();
-                    BlockState blockState =
-                            change.pattern().applyBlock(change.position()).toBlockState();
-                    if (!session.getBlock(change.position()).equals(blockState)) {
-                        pending.add(new SetBlockChange(change.position(), blockState));
+                    BlockVector3 position = vector(placement.position());
+                    Pattern pattern = palettes.get(placement.paletteIndex()).pattern();
+                    if (!session.getBlock(position)
+                            .equals(pattern.applyBlock(position).toBlockState())) {
+                        changedPlacements.add(placement);
+                        expectedChanges++;
                     }
                 }
-                expectedChanges = pending.size();
+                for (SetBlockGeometry.ResolvedRun run : geometry.runs()) {
+                    Pattern pattern = palettes.get(run.paletteIndex()).pattern();
+                    boolean changed = false;
+                    for (BlockVector3 position : selection(world, run.region())) {
+                        requireNotInterrupted();
+                        if (!session.getBlock(position)
+                                .equals(pattern.applyBlock(position).toBlockState())) {
+                            changed = true;
+                            expectedChanges++;
+                        }
+                    }
+                    if (changed) {
+                        changedRuns.add(run);
+                    }
+                }
                 enforceChangeLimit(expectedChanges);
                 if (!dryRun && expectedChanges > 0) {
                     requireNotInterrupted();
                     admission.beforeMutation();
                     requireNotInterrupted();
-                    for (SetBlockChange change : pending) {
+                    for (SetBlockGeometry.ResolvedPlacement placement : changedPlacements) {
                         requireNotInterrupted();
                         session.setBlock(
-                                change.position().x(),
-                                change.position().y(),
-                                change.position().z(),
-                                change.blockState());
+                                vector(placement.position()),
+                                palettes.get(placement.paletteIndex()).pattern());
+                    }
+                    for (SetBlockGeometry.ResolvedRun run : changedRuns) {
+                        requireNotInterrupted();
+                        session.setBlocks(
+                                (com.sk89q.worldedit.regions.Region) selection(world, run.region()),
+                                palettes.get(run.paletteIndex()).pattern());
                     }
                     requireNotInterrupted();
                 }
             }
             changes = dryRun ? expectedChanges : session.getChangeSet().longSize();
             if (!dryRun && changes > 0) {
-                undo = retainedUndo(session, edit.chunks());
+                undo = retainedUndo(session, chunks);
                 changes = undo.changedBlockCount();
             }
         } catch (MaxChangedBlocksException exception) {
             OperationException failure = changeLimit(exception);
-            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, failure);
+            rollbackAfterFailure(paperWorld, session, chunks, dryRun, failure);
             throw failure;
         } catch (OperationException exception) {
-            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
+            rollbackAfterFailure(paperWorld, session, chunks, dryRun, exception);
             throw exception;
         } catch (RuntimeException exception) {
-            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
+            rollbackAfterFailure(paperWorld, session, chunks, dryRun, exception);
             throw exception;
         }
         return new EditPlatform.EditResult(0, changes, undo);
@@ -325,10 +353,11 @@ final class FaweEditExecutor {
     }
 
     private static CuboidRegion selection(com.sk89q.worldedit.world.World world, Cuboid region) {
-        return new CuboidRegion(
-                world,
-                BlockVector3.at(region.min().x(), region.min().y(), region.min().z()),
-                BlockVector3.at(region.max().x(), region.max().y(), region.max().z()));
+        return new CuboidRegion(world, vector(region.min()), vector(region.max()));
+    }
+
+    private static BlockVector3 vector(BlockPosition position) {
+        return BlockVector3.at(position.x(), position.y(), position.z());
     }
 
     private StoredUndo retainedUndo(EditSession session, List<ChunkPosition> chunks) {
@@ -445,6 +474,4 @@ final class FaweEditExecutor {
             }
         }
     }
-
-    private record SetBlockChange(BlockVector3 position, BlockState blockState) {}
 }
