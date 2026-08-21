@@ -149,8 +149,7 @@ final class DirtAdminCommandTest {
         assertTrue(plain.contains("scan_orthographic_view  true"));
         assertTrue(plain.contains("get_player_context  false"));
         assertTrue(plain.contains("replace_region_blocks  false"));
-        assertTrue(plain.contains("fill_region  true"));
-        assertTrue(plain.contains("set_blocks  false"));
+        assertTrue(plain.contains("set_blocks  true"));
         assertTrue(plain.contains("get_edit_history  true"));
         assertTrue(plain.contains("undo_edit  false"));
         assertTrue(plain.contains("run_minecraft_commands  false"));
@@ -187,7 +186,11 @@ final class DirtAdminCommandTest {
         Component message = fixture.messages.getFirst();
         String plain = PLAIN.serialize(message);
         assertTrue(plain.contains("DIRT MCP  /  MCP Tools"));
-        assertTrue(plain.contains("Paper startup snapshot  •  5 of 13 configured ON"));
+        assertTrue(
+                plain.contains(
+                        "Paper startup snapshot  •  5 of "
+                                + McpTool.values().length
+                                + " configured ON"));
         assertTrue(plain.contains("restart Paper, then the MCP host"));
         Set<String> expectedCommands = new HashSet<>();
         for (McpTool tool : McpTool.values()) {
@@ -323,7 +326,7 @@ final class DirtAdminCommandTest {
                                 McpTool.PING_SERVER,
                                 McpTool.COUNT_REGION_BLOCK_STATES,
                                 McpTool.SCAN_ORTHOGRAPHIC_VIEW,
-                                McpTool.FILL_REGION,
+                                McpTool.SET_BLOCKS,
                                 McpTool.GET_EDIT_HISTORY)),
                 new DirtConfig.Logging(DirtConfig.ConsoleLogLevel.WARNING, 2_000_000, 7),
                 new DirtConfig.Limits(

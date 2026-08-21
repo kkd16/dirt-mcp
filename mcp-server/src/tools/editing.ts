@@ -104,7 +104,7 @@ const EditOptionsInputShape = {
     .describe('True previews without mutation, false executes the edit, and omission uses the plugin default.'),
 };
 
-const EditOperationSchema = z.enum(['replace_region_blocks', 'fill_region', 'set_blocks']);
+const EditOperationSchema = z.enum(['replace_region_blocks', 'set_blocks']);
 
 export const EditRecordSchema = z
   .object({
@@ -241,33 +241,6 @@ export const ReplaceRegionBlocksOutputSchema = z
     'changedBlockCount must not exceed matchedBlockCount.',
   )
   .describe('Completed or previewed property-aware block-state replacement.');
-
-const FillRegionInputSchema = z
-  .object({
-    world: NonBlankStringSchema.describe('Exact name of an already loaded Paper world.'),
-    min: BlockPositionSchema.describe('One inclusive corner; ordering relative to max does not matter.'),
-    max: BlockPositionSchema.describe('The other inclusive corner; ordering relative to min does not matter.'),
-    destinationPalette: DestinationPaletteSchema,
-    ...EditOptionsInputShape,
-  })
-  .strict()
-  .describe('Weighted block-state palette fill of an inclusive region.');
-
-export const FillRegionOutputSchema = z
-  .object({
-    world: z.string().min(1).describe('Edited world name.'),
-    bounds: BoundsSchema.describe('Normalized inclusive bounds from the requested corners.'),
-    destinationPalette: DestinationPaletteSchema,
-    seed: SeedSchema.describe('Supplied request seed, or the generated seed when the request omitted one.'),
-    outcome: EditOutcomeSchema.describe('Explicit dryRun=true requires preview; false excludes preview.'),
-    edit: EditRecordSchema.nullable().describe('Retained edit metadata, present only for a committed outcome.'),
-    volume: z.number().int().positive().describe('Exact inclusive volume of the requested normalized bounds.'),
-    changedBlockCount: z.number().int().nonnegative().describe('Blocks changed, or that would change in a dry run.'),
-  })
-  .strict()
-  .refine((result) => hasConsistentEditResult(result, 'fill_region'), EditResultMessage)
-  .refine((result) => result.changedBlockCount <= result.volume, 'changedBlockCount must not exceed volume.')
-  .describe('Completed or previewed region fill.');
 
 const SetBlocksPalettesSchema = z
   .array(DestinationPaletteSchema)
@@ -512,15 +485,6 @@ export function requireReplaceCountsWithinBounds(
   }
 }
 
-export function requireMatchingFillVolume(
-  expectedBounds: z.infer<typeof BoundsSchema>,
-  actual: EditResultMetadata & { readonly volume: number },
-): void {
-  if (BigInt(actual.volume) !== inclusiveBlockVolume(expectedBounds)) {
-    invalidEditResult(actual, 'Paper bridge fill volume did not match the requested inclusive region volume.');
-  }
-}
-
 export function requireMatchingSetBlockCount(
   expectedCount: bigint,
   actual: EditResultMetadata & {
@@ -595,37 +559,6 @@ export function registerEditingTools(
       ),
   );
   if (!toolConfiguration.replace_region_blocks) replaceRegionBlocks.disable();
-
-  const fillRegion = server.registerTool(
-    'fill_region',
-    {
-      title: 'Fill a region',
-      description:
-        'Fill an inclusive region from a destination palette of exact block states. Omit every weight for equal probability or provide whole percentages totaling 100. Reuse the returned seed to reproduce a preview. Set dryRun=true to preview without mutation. Every committed non-empty edit returns retained edit metadata including its edit ID.',
-      inputSchema: FillRegionInputSchema,
-      outputSchema: toolOutputSchema(FillRegionOutputSchema),
-      annotations: NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
-    },
-    async (input, context) =>
-      executeToolCall(
-        logger,
-        { operation: 'fill_region', world: input.world, context, failureContext: 'Could not fill the region' },
-        async (callId) => {
-          const result = await bridge.request(BRIDGE_ROUTES.fillRegion, callId, FillRegionOutputSchema, input);
-          const bounds = normalizedBounds(input.min, input.max);
-          requireMatchingEditIdentity(input.world, bounds, callId, result);
-          requireMatchingEditOptions(input.seed, input.dryRun, result);
-          requireMatchingFillVolume(bounds, result);
-          const verb = result.outcome === 'preview' ? 'Would change' : 'Changed';
-          const editSummary = result.edit === null ? '' : ` Edit ID: ${result.edit.editId}.`;
-          return successResult(
-            result,
-            `${verb} ${result.changedBlockCount} of ${result.volume} blocks in ${result.world} using seed ${result.seed}.${editSummary}`,
-          );
-        },
-      ),
-  );
-  if (!toolConfiguration.fill_region) fillRegion.disable();
 
   const setBlocks = server.registerTool(
     'set_blocks',

@@ -100,20 +100,6 @@ final class McpToolHelp {
                             "Successful results use outcome preview, no_change, or committed; "
                                     + "committed non-empty edits enter undo history. A failed edit "
                                     + "can retain a recovery_required record.");
-            case FILL_REGION ->
-                    new ToolSpec(
-                            "Fill a region",
-                            ToolKind.WORLD_MUTATION,
-                            "Fills inclusive bounds from a weighted palette of exact block states.",
-                            "world, min, max, destinationPalette entries {blockState,weight?}; "
-                                    + "optional seed and dryRun. Omit all weights for equal choice or "
-                                    + "make them total 100. An omitted seed is generated and returned; "
-                                    + "dryRun uses the Paper default.",
-                            "world, bounds, destinationPalette, seed, outcome, edit, volume, and "
-                                    + "changedBlockCount.",
-                            "Successful results use outcome preview, no_change, or committed; "
-                                    + "committed non-empty edits enter undo history. A failed edit "
-                                    + "can retain a recovery_required record.");
             case SET_BLOCKS ->
                     new ToolSpec(
                             "Set blocks",

@@ -38,7 +38,7 @@ const uuidV4Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[
 const editIdsToUndo = [];
 const observedEditIds = new Set();
 const mutationCallIds = new Set();
-const editMutationPaths = new Set(['/v1/replace-region-blocks', '/v1/fill-region', '/v1/set-blocks']);
+const editMutationPaths = new Set(['/v1/replace-region-blocks', '/v1/set-blocks']);
 const longRunningMutationPaths = new Set([...editMutationPaths, '/v1/run-minecraft-commands']);
 const inspectionPaths = new Set([
   '/v1/count-region-block-states',
@@ -510,7 +510,6 @@ try {
     get_blocks: true,
     scan_orthographic_view: true,
     replace_region_blocks: true,
-    fill_region: true,
     set_blocks: true,
     get_edit_history: true,
     undo_edit: true,
@@ -903,42 +902,44 @@ try {
   originalSetFixture = undefined;
 
   const originalStates = Object.keys(original.blockStateCounts);
-  const fillBlockState =
+  const regionBlockState =
     originalStates.length === 1 && originalStates[0].startsWith('minecraft:barrier')
       ? 'minecraft:amethyst_block'
       : 'minecraft:barrier';
+  const regionSetInput = {
+    world,
+    origin: min,
+    palettes: [[{ blockState: regionBlockState }]],
+    placements: [],
+    runs: [[0, 0, 0, 0, max.x - min.x, max.y - min.y, max.z - min.z]],
+  };
 
-  const preview = await bridgeRequest('/v1/fill-region', {
-    ...region,
-    destinationPalette: [{ blockState: fillBlockState }],
-    dryRun: true,
-  });
-  const previewState = preview.destinationPalette[0].blockState;
+  const regionPreview = await bridgeRequest('/v1/set-blocks', { ...regionSetInput, dryRun: true });
+  const previewState = regionPreview.palettes[0][0].blockState;
   const alreadyMatching = original.blockStateCounts[previewState] ?? 0;
-  assert.equal(preview.outcome, 'preview');
-  assert.equal(preview.edit, null);
-  assert.equal(preview.volume, original.volume);
-  assert.equal(preview.changedBlockCount, original.volume - alreadyMatching);
-  assert.ok(preview.changedBlockCount > 0, 'Smoke destination must change at least one block');
+  assert.equal(regionPreview.outcome, 'preview');
+  assert.equal(regionPreview.edit, null);
+  assert.equal(regionPreview.blockCount, original.volume);
+  assert.equal(regionPreview.changedBlockCount, original.volume - alreadyMatching);
+  assert.ok(regionPreview.changedBlockCount > 0, 'Smoke destination must change at least one block');
   await assertEditHistory([]);
 
-  const filled = await bridgeRequest('/v1/fill-region', {
-    ...region,
-    destinationPalette: [{ blockState: fillBlockState }],
-    seed: preview.seed,
+  const regionSet = await bridgeRequest('/v1/set-blocks', {
+    ...regionSetInput,
+    seed: regionPreview.seed,
   });
-  retainEdit(filled, 'fill_region');
-  const filledState = filled.destinationPalette[0].blockState;
-  assert.equal(filled.seed, preview.seed);
-  assert.deepEqual(filled.destinationPalette, preview.destinationPalette);
-  assert.equal(filled.changedBlockCount, preview.changedBlockCount);
-  await assertEditHistory([filled.edit]);
+  retainEdit(regionSet, 'set_blocks');
+  const regionState = regionSet.palettes[0][0].blockState;
+  assert.equal(regionSet.seed, regionPreview.seed);
+  assert.deepEqual(regionSet.palettes, regionPreview.palettes);
+  assert.equal(regionSet.changedBlockCount, regionPreview.changedBlockCount);
+  await assertEditHistory([regionSet.edit]);
 
-  const afterFill = await bridgeRequest('/v1/count-region-block-states', region);
-  assert.deepEqual(afterFill.blockStateCounts, { [filledState]: filled.volume });
+  const afterRegionSet = await bridgeRequest('/v1/count-region-block-states', region);
+  assert.deepEqual(afterRegionSet.blockStateCounts, { [regionState]: regionSet.blockCount });
 
   const exactBlocks = await bridgeRequest('/v1/get-blocks', region);
-  assertExactBlocks(exactBlocks, filledState);
+  assertExactBlocks(exactBlocks, regionState);
 
   const syntheticCamera = { x: 0.5, y: 3, z: 0.5 };
   const perspective = await bridgeRequest('/v1/get-perspective-view', {
@@ -1005,7 +1006,7 @@ try {
     {
       position: { x: 0, y: 0, z: 1 },
       offset: { horizontal: 0, vertical: 0, distance: 1 },
-      blockState: filledState,
+      blockState: regionState,
     },
   ]);
 
@@ -1024,7 +1025,7 @@ try {
     {
       position: { x: 0, y: 0, z: 0 },
       offset: { horizontal: 0, vertical: 0, distance: 2 },
-      blockState: filledState,
+      blockState: regionState,
     },
   ]);
 
@@ -1044,17 +1045,17 @@ try {
 
   const exactRuns = await bridgeRequest('/v1/get-blocks', {
     ...region,
-    includeBlockStatePatterns: [filledState],
+    includeBlockStatePatterns: [regionState],
     maxResults: 8,
   });
   assert.deepEqual(exactRuns.origin, min);
   assert.deepEqual(exactRuns.placements, []);
   assert.equal(exactRuns.runs.length, 1);
-  assert.deepEqual(sortedBlockKeys(expandStructure(exactRuns)), expectedBlockKeys(filledState));
+  assert.deepEqual(sortedBlockKeys(expandStructure(exactRuns)), expectedBlockKeys(regionState));
 
   const excluded = await bridgeRequest('/v1/get-blocks', {
     ...region,
-    excludeBlockStatePatterns: [filledState],
+    excludeBlockStatePatterns: [regionState],
   });
   assert.deepEqual(excluded, { world, origin: min, palettes: [], placements: [], runs: [] });
 
@@ -1065,7 +1066,7 @@ try {
   const replacementDestination = 'minecraft:gold_block';
   const replacePreview = await bridgeRequest('/v1/replace-region-blocks', {
     ...region,
-    sourceBlockStatePatterns: [filledState],
+    sourceBlockStatePatterns: [regionState],
     destinationPalette: [{ blockState: replacementDestination }],
     dryRun: true,
   });
@@ -1076,40 +1077,37 @@ try {
 
   const replaced = await bridgeRequest('/v1/replace-region-blocks', {
     ...region,
-    sourceBlockStatePatterns: [filledState],
+    sourceBlockStatePatterns: [regionState],
     destinationPalette: [{ blockState: replacementDestination }],
     seed: replacePreview.seed,
   });
   retainEdit(replaced, 'replace_region_blocks');
   assert.equal(replaced.matchedBlockCount, replacePreview.matchedBlockCount);
   assert.equal(replaced.changedBlockCount, replacePreview.changedBlockCount);
-  await assertEditHistory([replaced.edit, filled.edit]);
+  await assertEditHistory([replaced.edit, regionSet.edit]);
   assertExactBlocks(await bridgeRequest('/v1/get-blocks', region), replaced.destinationPalette[0].blockState);
 
-  const nonLatestUndo = await bridgeResponse('/v1/undo-edit', { world, editId: filled.edit.editId });
+  const nonLatestUndo = await bridgeResponse('/v1/undo-edit', { world, editId: regionSet.edit.editId });
   assert.equal(nonLatestUndo.status, 409);
   assert.equal(nonLatestUndo.body.error.code, 'edit_not_latest');
   assert.deepEqual(nonLatestUndo.body.error.details, {
     world,
-    requestedEditId: filled.edit.editId,
+    requestedEditId: regionSet.edit.editId,
     newestEditId: replaced.edit.editId,
   });
-  await assertEditHistory([replaced.edit, filled.edit]);
+  await assertEditHistory([replaced.edit, regionSet.edit]);
 
   await undoRetained(replaced);
-  await assertEditHistory([filled.edit]);
-  assertExactBlocks(await bridgeRequest('/v1/get-blocks', region), filledState);
+  await assertEditHistory([regionSet.edit]);
+  assertExactBlocks(await bridgeRequest('/v1/get-blocks', region), regionState);
 
-  const noOp = await bridgeRequest('/v1/fill-region', {
-    ...region,
-    destinationPalette: [{ blockState: filledState }],
-  });
+  const noOp = await bridgeRequest('/v1/set-blocks', regionSetInput);
   assert.equal(noOp.changedBlockCount, 0);
   assert.equal(noOp.outcome, 'no_change');
   assert.equal(noOp.edit, null);
-  await assertEditHistory([filled.edit]);
+  await assertEditHistory([regionSet.edit]);
 
-  await undoRetained(filled);
+  await undoRetained(regionSet);
   await assertEditHistory([]);
 
   const restored = await bridgeRequest('/v1/count-region-block-states', region);
@@ -1191,35 +1189,33 @@ try {
   assert.deepEqual(sortedBlockKeys(expandStructure(replayedBlocks)), firstSeededLayout);
   await undoRetained(replayedReplacement);
 
-  const propertyFillPreview = await bridgeRequest('/v1/fill-region', {
+  const propertySetInput = {
     world,
-    min: stairMin,
-    max: stairMin,
-    destinationPalette: [{ blockState: southStairs }],
-    dryRun: true,
-  });
-  assert.equal(propertyFillPreview.changedBlockCount, 1);
+    origin: stairMin,
+    palettes: [[{ blockState: southStairs }]],
+    placements: [],
+    runs: [[0, 0, 0, 0, 0, 0, 0]],
+  };
+  const propertySetPreview = await bridgeRequest('/v1/set-blocks', { ...propertySetInput, dryRun: true });
+  assert.equal(propertySetPreview.changedBlockCount, 1);
 
-  const propertyFill = await bridgeRequest('/v1/fill-region', {
-    world,
-    min: stairMin,
-    max: stairMin,
-    destinationPalette: [{ blockState: southStairs }],
-    seed: propertyFillPreview.seed,
+  const propertySet = await bridgeRequest('/v1/set-blocks', {
+    ...propertySetInput,
+    seed: propertySetPreview.seed,
   });
-  retainEdit(propertyFill, 'fill_region');
-  assert.equal(propertyFill.changedBlockCount, 1);
-  await assertDetailedMutationLog(propertyFill);
-  const propertyFillBlocks = await bridgeRequest('/v1/get-blocks', {
+  retainEdit(propertySet, 'set_blocks');
+  assert.equal(propertySet.changedBlockCount, 1);
+  await assertDetailedMutationLog(propertySet);
+  const propertySetBlocks = await bridgeRequest('/v1/get-blocks', {
     world,
     min: stairMin,
     max: stairMin,
   });
-  assert.deepEqual(sortedBlockKeys(expandStructure(propertyFillBlocks)), [
+  assert.deepEqual(sortedBlockKeys(expandStructure(propertySetBlocks)), [
     `${stairMin.x},${stairMin.y},${stairMin.z}:${southStairs}`,
   ]);
 
-  await undoRetained(propertyFill);
+  await undoRetained(propertySet);
 
   await restoreBlocks(expandStructure(originalStairFixture));
   const restoredStairFixture = await bridgeRequest('/v1/get-blocks', {

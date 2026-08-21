@@ -2,7 +2,6 @@ package ca.deliyannides.dirtmcp.paper.bootstrap;
 
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeServer;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.CountRegionBlockStatesEndpoint;
-import ca.deliyannides.dirtmcp.paper.bridge.endpoint.FillRegionEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetEditHistoryEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetPerspectiveViewEndpoint;
@@ -127,7 +126,6 @@ public final class DirtRuntime implements AutoCloseable {
                                     new GetPlayerContextEndpoint(playerContext),
                                     new GetPerspectiveViewEndpoint(perspectiveView),
                                     new ReplaceRegionBlocksEndpoint(worldEditor, config),
-                                    new FillRegionEndpoint(worldEditor, config),
                                     new SetBlocksEndpoint(worldEditor, config),
                                     new GetEditHistoryEndpoint(worldEditor),
                                     new UndoEditEndpoint(worldEditor),

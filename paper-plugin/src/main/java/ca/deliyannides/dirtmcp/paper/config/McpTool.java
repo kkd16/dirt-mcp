@@ -10,7 +10,6 @@ public enum McpTool {
     GET_PLAYER_CONTEXT("get_player_context"),
     GET_PERSPECTIVE_VIEW("get_perspective_view"),
     REPLACE_REGION_BLOCKS("replace_region_blocks"),
-    FILL_REGION("fill_region"),
     SET_BLOCKS("set_blocks"),
     GET_EDIT_HISTORY("get_edit_history"),
     UNDO_EDIT("undo_edit"),

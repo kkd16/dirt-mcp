@@ -51,7 +51,7 @@ type PaletteEntry = {
 };
 type DestinationPalette = PaletteEntry[]; // 1-64 distinct exact states
 
-type EditOperation = 'replace_region_blocks' | 'fill_region' | 'set_blocks';
+type EditOperation = 'replace_region_blocks' | 'set_blocks';
 
 type EditRecord = {
   editId: uuidV4;
@@ -542,7 +542,7 @@ lighting, particles, resource packs, third-person state, or a client framebuffer
 
 ## Editing and undo
 
-All three block-edit tools accept an optional signed 32-bit `seed`. Omission
+Both block-edit tools accept an optional signed 32-bit `seed`. Omission
 generates a seed returned in the result. Reusing it with the same ordered
 palettes and unchanged world reproduces per-coordinate choices, allowing an
 exact preview to be replayed.
@@ -577,33 +577,6 @@ type Success = {
   outcome: 'preview' | 'no_change' | 'committed';
   edit: EditRecord | null;
   matchedBlockCount: nonnegativeInt;
-  changedBlockCount: nonnegativeInt;
-};
-```
-
-### `fill_region`
-
-Fills every block in an inclusive region from one exact-state destination
-palette.
-
-```ts
-type Input = {
-  world: string;
-  min: BlockPosition;
-  max: BlockPosition;
-  destinationPalette: DestinationPalette;
-  seed?: int32;
-  dryRun?: boolean; // plugin default when omitted
-};
-
-type Success = {
-  world: string;
-  bounds: Bounds;
-  destinationPalette: DestinationPalette;
-  seed: int32;
-  outcome: 'preview' | 'no_change' | 'committed';
-  edit: EditRecord | null;
-  volume: positiveInt;
   changedBlockCount: nonnegativeInt;
 };
 ```

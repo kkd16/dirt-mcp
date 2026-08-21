@@ -552,7 +552,7 @@ final class EditCoordinatorTest {
                 new EditRecord(
                         UUID.randomUUID(),
                         CALL_ID,
-                        EditOperation.FILL_REGION,
+                        EditOperation.SET_BLOCKS,
                         world,
                         worldId,
                         new BlockBounds(position, position),

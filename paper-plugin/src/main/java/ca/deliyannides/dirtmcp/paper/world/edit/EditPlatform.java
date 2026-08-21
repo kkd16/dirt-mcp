@@ -12,18 +12,11 @@ interface EditPlatform extends AutoCloseable {
             WorldHandle world, ReplaceRegionBlocks.Request request, Cuboid region)
             throws OperationException;
 
-    PreparedFill prepareFill(WorldHandle world, FillRegion.Request request, Cuboid region)
-            throws OperationException;
-
     PreparedSet prepareSet(WorldHandle world, SetBlocks.Request request, SetBlockGeometry geometry)
             throws OperationException;
 
     EditResult replace(
             PreparedReplace prepared, Cuboid region, boolean dryRun, MutationAdmission admission)
-            throws OperationException;
-
-    EditResult fill(
-            PreparedFill prepared, Cuboid region, boolean dryRun, MutationAdmission admission)
             throws OperationException;
 
     EditResult set(PreparedSet prepared, boolean dryRun, MutationAdmission admission)
@@ -58,10 +51,6 @@ interface EditPlatform extends AutoCloseable {
     interface PreparedReplace extends PreparedOperation {
         List<String> sourcePatterns();
 
-        List<DestinationPaletteEntry> destinationPalette();
-    }
-
-    interface PreparedFill extends PreparedOperation {
         List<DestinationPaletteEntry> destinationPalette();
     }
 

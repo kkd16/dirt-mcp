@@ -373,7 +373,10 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       response.end(JSON.stringify(playerContext));
     } else if (request.url === '/v1/get-perspective-view') {
       response.end(JSON.stringify(perspectiveView));
-    } else if (request.url === '/v1/fill-region') {
+    } else if (
+      request.url === '/v1/replace-region-blocks' &&
+      JSON.parse(rawBody).sourceBlockStatePatterns[0] === 'minecraft:bedrock'
+    ) {
       response.statusCode = 413;
       response.end(
         JSON.stringify({
@@ -454,7 +457,6 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { name: 'get_player_context', annotations: readAnnotations() },
       { name: 'get_perspective_view', annotations: readAnnotations() },
       { name: 'replace_region_blocks', annotations: mutationAnnotations(false) },
-      { name: 'fill_region', annotations: mutationAnnotations(false) },
       { name: 'set_blocks', annotations: mutationAnnotations(false) },
       { name: 'get_edit_history', annotations: readAnnotations() },
       { name: 'undo_edit', annotations: mutationAnnotations(false) },
@@ -652,30 +654,31 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     id: 6,
     method: 'tools/call',
     params: requestParams({
-      name: 'fill_region',
+      name: 'replace_region_blocks',
       arguments: {
         ...region,
+        sourceBlockStatePatterns: ['minecraft:bedrock'],
         destinationPalette: [{ blockState: 'minecraft:dirt' }],
       },
     }),
   });
-  const failedFill = await waitFor(messages, 6);
-  assert.ok(failedFill.result);
-  const failedFillCallId = failedFill.result.structuredContent?.callId;
-  assert.ok(typeof failedFillCallId === 'string');
-  assert.match(failedFillCallId, uuidV4Pattern);
+  const failedReplacement = await waitFor(messages, 6);
+  assert.ok(failedReplacement.result);
+  const failedReplacementCallId = failedReplacement.result.structuredContent?.callId;
+  assert.ok(typeof failedReplacementCallId === 'string');
+  assert.match(failedReplacementCallId, uuidV4Pattern);
   assert.deepEqual(
-    failedFill.result,
+    failedReplacement.result,
     completeResult({
       isError: true,
       content: [
         {
           type: 'text',
-          text: 'Could not fill the region: Too many changes',
+          text: 'Could not replace region blocks: Too many changes',
         },
       ],
       structuredContent: {
-        callId: failedFillCallId,
+        callId: failedReplacementCallId,
         error: {
           code: 'change_limit_exceeded',
           message: 'Too many changes',
@@ -686,8 +689,9 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   );
   await waitForValue(
     logs,
-    (record) => record.event === 'tool.completed' && record.operation === 'fill_region',
-    'fill_region tool.completed log',
+    (record) =>
+      record.event === 'tool.completed' && record.operation === 'replace_region_blocks' && record.success === false,
+    'failed replace_region_blocks tool.completed log',
   );
 
   send(child, {
@@ -902,7 +906,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { method: 'POST', path: '/v1/get-blocks' },
       { method: 'POST', path: '/v1/scan-orthographic-view' },
       { method: 'POST', path: '/v1/scan-orthographic-view' },
-      { method: 'POST', path: '/v1/fill-region' },
+      { method: 'POST', path: '/v1/replace-region-blocks' },
       { method: 'GET', path: '/v1/server-status' },
       { method: 'POST', path: '/v1/set-blocks' },
       { method: 'POST', path: '/v1/count-region-block-states' },
@@ -927,7 +931,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   });
   assert.equal(new Set(callIds).size, 14);
   const toolCallIds = callIds.slice(1);
-  assert.equal(failedFillCallId, toolCallIds[4]);
+  assert.equal(failedReplacementCallId, toolCallIds[4]);
   assert.equal(setBlocks.edit.callId, toolCallIds[6]);
   assert.equal(undone.undoCallId, toolCallIds[10]);
   assert.deepEqual(requestAt(requests, 2).body, {
@@ -942,6 +946,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.equal(requestAt(requests, 4).headers['content-type'], 'application/json');
   assert.deepEqual(requestAt(requests, 5).body, {
     ...region,
+    sourceBlockStatePatterns: ['minecraft:bedrock'],
     destinationPalette: [{ blockState: 'minecraft:dirt' }],
   });
   assert.equal(requestAt(requests, 5).headers['content-type'], 'application/json');
@@ -988,7 +993,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     ['get_blocks', 3, true, true],
     ['scan_orthographic_view', 4, true, true],
     ['scan_orthographic_view', 5, true, true],
-    ['fill_region', 6, true, false],
+    ['replace_region_blocks', 6, true, false],
     ['get_server_status', 7, false, true],
     ['set_blocks', 8, true, true],
     ['count_region_block_states', 10, true, true],

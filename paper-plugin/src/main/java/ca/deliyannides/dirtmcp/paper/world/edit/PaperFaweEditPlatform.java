@@ -29,12 +29,6 @@ final class PaperFaweEditPlatform implements EditPlatform {
     }
 
     @Override
-    public PreparedFill prepareFill(WorldHandle world, FillRegion.Request request, Cuboid region)
-            throws OperationException {
-        return this.preparation.prepareFill(requireWorld(world), request, region);
-    }
-
-    @Override
     public PreparedSet prepareSet(
             WorldHandle world, SetBlocks.Request request, SetBlockGeometry geometry)
             throws OperationException {
@@ -46,13 +40,6 @@ final class PaperFaweEditPlatform implements EditPlatform {
             PreparedReplace prepared, Cuboid region, boolean dryRun, MutationAdmission admission)
             throws OperationException {
         return this.executor.replace(requireReplace(prepared), region, dryRun, admission);
-    }
-
-    @Override
-    public EditResult fill(
-            PreparedFill prepared, Cuboid region, boolean dryRun, MutationAdmission admission)
-            throws OperationException {
-        return this.executor.fill(requireFill(prepared), region, dryRun, admission);
     }
 
     @Override
@@ -102,13 +89,6 @@ final class PaperFaweEditPlatform implements EditPlatform {
         throw new IllegalArgumentException("Prepared edit belongs to another platform");
     }
 
-    private static PaperEditPreparation.PreparedFill requireFill(PreparedFill prepared) {
-        if (prepared instanceof PaperEditPreparation.PreparedFill edit) {
-            return edit;
-        }
-        throw new IllegalArgumentException("Prepared edit belongs to another platform");
-    }
-
     private static PaperEditPreparation.PreparedSet requireSet(PreparedSet prepared) {
         if (prepared instanceof PaperEditPreparation.PreparedSet edit) {
             return edit;
@@ -127,7 +107,6 @@ final class PaperFaweEditPlatform implements EditPlatform {
             PreparedOperation prepared) {
         return switch (prepared) {
             case PaperEditPreparation.PreparedReplace edit -> edit.paperWorld();
-            case PaperEditPreparation.PreparedFill edit -> edit.paperWorld();
             case PaperEditPreparation.PreparedSet edit -> edit.paperWorld();
             default ->
                     throw new IllegalArgumentException(

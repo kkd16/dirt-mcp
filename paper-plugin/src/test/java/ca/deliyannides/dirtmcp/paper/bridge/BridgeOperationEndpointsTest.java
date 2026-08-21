@@ -18,7 +18,6 @@ import ca.deliyannides.dirtmcp.paper.world.edit.DestinationPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditOperation;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditRecord;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditStatus;
-import ca.deliyannides.dirtmcp.paper.world.edit.FillRegion;
 import ca.deliyannides.dirtmcp.paper.world.edit.GetEditHistory;
 import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
@@ -433,7 +432,6 @@ final class BridgeOperationEndpointsTest {
     @Test
     void parsesAndDispatchesEditingOperations() throws Exception {
         AtomicReference<ReplaceRegionBlocks.Request> replaceRequest = new AtomicReference<>();
-        AtomicReference<FillRegion.Request> fillRequest = new AtomicReference<>();
         AtomicReference<SetBlocks.Request> setRequest = new AtomicReference<>();
         AtomicReference<GetEditHistory.Request> historyRequest = new AtomicReference<>();
         AtomicReference<UndoEdit.Request> undoRequest = new AtomicReference<>();
@@ -445,13 +443,6 @@ final class BridgeOperationEndpointsTest {
                             throws OperationException {
                         replaceRequest.set(request);
                         return super.replaceRegionBlocks(request, callId);
-                    }
-
-                    @Override
-                    public FillRegion.Result fillRegion(FillRegion.Request request, UUID callId)
-                            throws OperationException {
-                        fillRequest.set(request);
-                        return super.fillRegion(request, callId);
                     }
 
                     @Override
@@ -493,18 +484,6 @@ final class BridgeOperationEndpointsTest {
                                      {"blockState":"minecraft:grass_block","weight":60}],
                                      "seed":17,"dryRun":true}
                                     """));
-            HttpResponse<String> fill =
-                    send(
-                            client,
-                            post(
-                                    bridge,
-                                    "/v1/fill-region",
-                                    """
-                                    {"world":"world","min":{"x":0,"y":1,"z":2},
-                                     "max":{"x":0,"y":1,"z":2},
-                                     "destinationPalette":[{"blockState":"minecraft:dirt"}],
-                                     "seed":19,"dryRun":true}
-                                    """));
             HttpResponse<String> set =
                     send(
                             client,
@@ -533,10 +512,6 @@ final class BridgeOperationEndpointsTest {
             assertEquals(17, replaceRequest.get().seed());
             assertTrue(replaceRequest.get().dryRun());
             assertEquals(40, replaceRequest.get().destinationPalette().getFirst().weight());
-            assertEquals(200, fill.statusCode());
-            assertEquals(19, fillRequest.get().seed());
-            assertTrue(fillRequest.get().dryRun());
-            assertFalse(json(fill.body()).toString().contains("weight"));
             assertEquals(200, set.statusCode());
             assertEquals(new BlockPosition(7, 8, 9), setRequest.get().origin());
             assertEquals(23, setRequest.get().seed());
@@ -574,7 +549,7 @@ final class BridgeOperationEndpointsTest {
                 new EditRecord(
                         BridgeTestFixture.EDIT_ID,
                         UUID.fromString("623e4567-e89b-42d3-a456-426614174000"),
-                        EditOperation.FILL_REGION,
+                        EditOperation.REPLACE_REGION_BLOCKS,
                         "world",
                         BridgeTestFixture.WORLD_ID,
                         new BlockBounds(new BlockPosition(0, 60, 0), new BlockPosition(1, 61, 1)),
@@ -631,7 +606,7 @@ final class BridgeOperationEndpointsTest {
                                 {
                                   "editId":"223e4567-e89b-42d3-a456-426614174000",
                                   "callId":"623e4567-e89b-42d3-a456-426614174000",
-                                  "operation":"fill_region",
+                                  "operation":"replace_region_blocks",
                                   "world":"world",
                                   "worldId":"323e4567-e89b-42d3-a456-426614174000",
                                   "bounds":{"min":{"x":0,"y":60,"z":0},
@@ -682,7 +657,6 @@ final class BridgeOperationEndpointsTest {
                         standard.editHistory(),
                         new DirtConfig.Defaults(true, true));
         AtomicReference<GetBlocks.Request> blocksRequest = new AtomicReference<>();
-        AtomicReference<FillRegion.Request> firstFill = new AtomicReference<>();
         AtomicReference<SetBlocks.Request> setRequest = new AtomicReference<>();
         BridgeTestFixture.TestOperations operations =
                 new BridgeTestFixture.TestOperations() {
@@ -692,13 +666,6 @@ final class BridgeOperationEndpointsTest {
                         blocksRequest.set(request);
                         return new GetBlocks.Result(
                                 request.world(), request.min(), List.of(), List.of(), List.of());
-                    }
-
-                    @Override
-                    public FillRegion.Result fillRegion(FillRegion.Request request, UUID callId)
-                            throws OperationException {
-                        firstFill.set(request);
-                        return super.fillRegion(request, callId);
                     }
 
                     @Override
@@ -717,9 +684,6 @@ final class BridgeOperationEndpointsTest {
             assertEquals(
                     200,
                     send(client, post(bridge, "/v1/get-blocks", "{" + bounds + "}")).statusCode());
-            String fillBody =
-                    "{" + bounds + ",\"destinationPalette\":[{\"blockState\":\"minecraft:dirt\"}]}";
-            assertEquals(200, send(client, post(bridge, "/v1/fill-region", fillBody)).statusCode());
             HttpResponse<String> set =
                     send(
                             client,
@@ -734,7 +698,6 @@ final class BridgeOperationEndpointsTest {
 
             assertTrue(blocksRequest.get().includeAir());
             assertEquals(321, blocksRequest.get().maxResults());
-            assertTrue(firstFill.get().dryRun());
             assertTrue(setRequest.get().dryRun());
             assertEquals(
                     setRequest.get().seed(),
@@ -881,26 +844,26 @@ final class BridgeOperationEndpointsTest {
                         server(config(availablePort(), 4), new BridgeTestFixture.TestOperations());
                 HttpClient client = HttpClient.newHttpClient()) {
             bridge.start();
-            String fill =
+            String setBlocks =
                     """
-                    {"world":"world","min":{"x":0,"y":0,"z":0},
-                     "max":{"x":0,"y":0,"z":0},
-                     "destinationPalette":[{"blockState":"minecraft:stone"}]}
+                    {"world":"world","origin":{"x":0,"y":0,"z":0},
+                     "palettes":[[{"blockState":"minecraft:stone"}]],
+                     "placements":[[0,0,0,0]],"runs":[]}
                     """;
             HttpResponse<String> missingCallId =
                     send(
                             client,
-                            authorized(bridge, "/v1/fill-region")
+                            authorized(bridge, "/v1/set-blocks")
                                     .header("Content-Type", "application/json")
-                                    .POST(HttpRequest.BodyPublishers.ofString(fill))
+                                    .POST(HttpRequest.BodyPublishers.ofString(setBlocks))
                                     .build());
             HttpResponse<String> invalidCallId =
                     send(
                             client,
-                            authorized(bridge, "/v1/fill-region")
+                            authorized(bridge, "/v1/set-blocks")
                                     .header("Content-Type", "application/json")
                                     .header("X-Dirt-Call-Id", "not-a-uuid")
-                                    .POST(HttpRequest.BodyPublishers.ofString(fill))
+                                    .POST(HttpRequest.BodyPublishers.ofString(setBlocks))
                                     .build());
             HttpResponse<String> missingCommandCallId =
                     send(
@@ -914,20 +877,20 @@ final class BridgeOperationEndpointsTest {
             HttpResponse<String> nonCanonicalCallId =
                     send(
                             client,
-                            authorized(bridge, "/v1/fill-region")
+                            authorized(bridge, "/v1/set-blocks")
                                     .header("Content-Type", "application/json")
                                     .header("X-Dirt-Call-Id", "1-1-4000-8000-1")
-                                    .POST(HttpRequest.BodyPublishers.ofString(fill))
+                                    .POST(HttpRequest.BodyPublishers.ofString(setBlocks))
                                     .build());
             HttpResponse<String> wrongVersionCallId =
                     send(
                             client,
-                            authorized(bridge, "/v1/fill-region")
+                            authorized(bridge, "/v1/set-blocks")
                                     .header("Content-Type", "application/json")
                                     .header(
                                             "X-Dirt-Call-Id",
                                             "123e4567-e89b-12d3-a456-426614174000")
-                                    .POST(HttpRequest.BodyPublishers.ofString(fill))
+                                    .POST(HttpRequest.BodyPublishers.ofString(setBlocks))
                                     .build());
             HttpResponse<String> invalidEditId =
                     send(
@@ -950,7 +913,7 @@ final class BridgeOperationEndpointsTest {
                                     bridge,
                                     "/v1/undo-edit",
                                     "{\"world\":\"world\",\"editId\":\"123e4567-e89b-12d3-a456-426614174000\"}"));
-            HttpResponse<String> valid = send(client, post(bridge, "/v1/fill-region", fill));
+            HttpResponse<String> valid = send(client, post(bridge, "/v1/set-blocks", setBlocks));
 
             assertError(missingCallId, "X-Dirt-Call-Id must be a UUID version 4");
             assertError(missingCommandCallId, "X-Dirt-Call-Id must be a UUID version 4");

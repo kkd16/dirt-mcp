@@ -25,7 +25,6 @@ tools:
   get_player_context: true
   get_perspective_view: true
   replace_region_blocks: true
-  fill_region: true
   set_blocks: true
   get_edit_history: true
   undo_edit: true

@@ -102,12 +102,12 @@ final class FaweWorldEditorTest {
     }
 
     @Test
-    void fillReturnsVolumeAndSetReturnsUnchangedCount() throws Exception {
+    void setReturnsCountsForRunsAndPlacements() throws Exception {
         FakePlatform platform = new FakePlatform();
         platform.nextChanges = 2;
         FaweWorldEditor editor = editor(platform, 10);
 
-        FillRegion.Result fill = fill(editor, fillRequest("world", false));
+        SetBlocks.Result cuboid = set(editor, cuboidSetRequest("world", false));
         SetBlocks.Result set =
                 set(
                         editor,
@@ -116,8 +116,9 @@ final class FaweWorldEditorTest {
                                 List.of(placement(0, 0, 0), placement(1, 0, 0), placement(2, 0, 0)),
                                 false));
 
-        assertEquals(8, fill.volume());
-        assertEquals(2, fill.changedBlockCount());
+        assertEquals(8, cuboid.blockCount());
+        assertEquals(2, cuboid.changedBlockCount());
+        assertEquals(6, cuboid.unchangedBlockCount());
         assertEquals(3, set.blockCount());
         assertEquals(position(0, 0, 0), set.bounds().min());
         assertEquals(position(2, 0, 0), set.bounds().max());
@@ -234,13 +235,14 @@ final class FaweWorldEditorTest {
                 assertThrows(
                         OperationException.class,
                         () ->
-                                fill(
+                                set(
                                         editor,
-                                        new FillRegion.Request(
+                                        new SetBlocks.Request(
                                                 "world",
                                                 position(0, 0, 0),
-                                                position(32, 0, 0),
-                                                palette(),
+                                                palettes(),
+                                                List.of(),
+                                                List.of(new Run(0, 0, 0, 0, 32, 0, 0)),
                                                 0,
                                                 false)));
 
@@ -278,7 +280,8 @@ final class FaweWorldEditorTest {
         FaweWorldEditor editor = editor(platform, 3);
 
         assertFailure(
-                OperationFailure.WORLD_NOT_FOUND, () -> fill(editor, fillRequest("WORLD", false)));
+                OperationFailure.WORLD_NOT_FOUND,
+                () -> set(editor, cuboidSetRequest("WORLD", false)));
 
         assertEquals(1, platform.resolveCalls);
         assertEquals(0, platform.prepareCalls);
@@ -288,15 +291,7 @@ final class FaweWorldEditorTest {
     void validatesRequestsWithoutLeakingRuntimeExceptions() {
         FaweWorldEditor editor = editor(new FakePlatform(), 3);
 
-        assertFailure(OperationFailure.INVALID_REQUEST, () -> fill(editor, null));
         assertFailure(OperationFailure.INVALID_REQUEST, () -> set(editor, null));
-        assertFailure(
-                OperationFailure.INVALID_REQUEST,
-                () ->
-                        fill(
-                                editor,
-                                new FillRegion.Request(
-                                        "world", null, position(0, 0, 0), palette(), 0, false)));
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
@@ -390,50 +385,6 @@ final class FaweWorldEditorTest {
                                         palette(),
                                         0,
                                         false)));
-        OperationException wrongWeightTotal =
-                assertThrows(
-                        OperationException.class,
-                        () ->
-                                fill(
-                                        editor,
-                                        new FillRegion.Request(
-                                                "world",
-                                                position(0, 0, 0),
-                                                position(0, 0, 0),
-                                                List.of(
-                                                        new DestinationPaletteEntry(
-                                                                "minecraft:stone", 40)),
-                                                0,
-                                                false)));
-        assertEquals(OperationFailure.INVALID_REQUEST, wrongWeightTotal.failure());
-        assertEquals("destinationPalette weights must total 100", wrongWeightTotal.getMessage());
-        assertEquals(
-                new ErrorDetails.InvalidRequest.PaletteWeightTotal("destinationPalette", 40),
-                wrongWeightTotal.details().orElseThrow());
-        OperationException mixedWeights =
-                assertThrows(
-                        OperationException.class,
-                        () ->
-                                fill(
-                                        editor,
-                                        new FillRegion.Request(
-                                                "world",
-                                                position(0, 0, 0),
-                                                position(0, 0, 0),
-                                                List.of(
-                                                        new DestinationPaletteEntry(
-                                                                "minecraft:stone", 50),
-                                                        new DestinationPaletteEntry(
-                                                                "minecraft:dirt", null)),
-                                                0,
-                                                false)));
-        assertEquals(OperationFailure.INVALID_REQUEST, mixedWeights.failure());
-        assertEquals(
-                "destinationPalette weights must be provided for every entry or omitted from every entry",
-                mixedWeights.getMessage());
-        assertEquals(
-                new ErrorDetails.InvalidRequest.PaletteWeightsMixed("destinationPalette"),
-                mixedWeights.details().orElseThrow());
     }
 
     @Test
@@ -454,6 +405,27 @@ final class FaweWorldEditorTest {
                                         List.of(),
                                         0,
                                         false)));
+        OperationException wrongWeightTotal =
+                assertThrows(
+                        OperationException.class,
+                        () ->
+                                set(
+                                        editor,
+                                        new SetBlocks.Request(
+                                                "world",
+                                                origin,
+                                                List.of(
+                                                        List.of(
+                                                                new DestinationPaletteEntry(
+                                                                        "minecraft:stone", 40))),
+                                                List.of(placement(0, 0, 0)),
+                                                List.of(),
+                                                0,
+                                                false)));
+        assertEquals(OperationFailure.INVALID_REQUEST, wrongWeightTotal.failure());
+        assertEquals(
+                new ErrorDetails.InvalidRequest.PaletteWeightTotal("palettes[0]", 40),
+                wrongWeightTotal.details().orElseThrow());
         assertFailure(
                 OperationFailure.INVALID_REQUEST,
                 () ->
@@ -657,7 +629,7 @@ final class FaweWorldEditorTest {
         platform.failExecution = true;
         FaweWorldEditor editor = editor(platform, 3);
 
-        assertThrows(OperationException.class, () -> fill(editor, fillRequest("world", false)));
+        assertThrows(OperationException.class, () -> set(editor, cuboidSetRequest("world", false)));
 
         assertNotNull(platform.lastPrepared);
         assertTrue(platform.lastPrepared.closed);
@@ -668,10 +640,11 @@ final class FaweWorldEditorTest {
         FakePlatform metadataFailure = new FakePlatform();
         metadataFailure.nextChanges = 1;
         metadataFailure.failPreparedAccess = true;
-        FaweWorldEditor fillEditor = editor(metadataFailure, 3);
+        FaweWorldEditor metadataEditor = editor(metadataFailure, 3);
 
         assertThrows(
-                IllegalStateException.class, () -> fill(fillEditor, fillRequest("world", false)));
+                IllegalStateException.class,
+                () -> set(metadataEditor, cuboidSetRequest("world", false)));
 
         assertEquals(0, metadataFailure.executeCalls);
         assertNull(metadataFailure.lastUndo);
@@ -700,7 +673,8 @@ final class FaweWorldEditorTest {
 
         OperationException failure =
                 assertThrows(
-                        OperationException.class, () -> fill(editor, fillRequest("world", false)));
+                        OperationException.class,
+                        () -> set(editor, cuboidSetRequest("world", false)));
 
         assertEquals(OperationFailure.INTERNAL_ERROR, failure.failure());
         assertTrue(failure.editId().isPresent());
@@ -719,7 +693,8 @@ final class FaweWorldEditorTest {
 
         OperationException failure =
                 assertThrows(
-                        OperationException.class, () -> fill(editor, fillRequest("world", false)));
+                        OperationException.class,
+                        () -> set(editor, cuboidSetRequest("world", false)));
 
         EditRecord recovery = history(editor, "world").getFirst();
         assertEquals(OperationFailure.INTERNAL_ERROR, failure.failure());
@@ -743,7 +718,8 @@ final class FaweWorldEditorTest {
 
         OperationException failure =
                 assertThrows(
-                        OperationException.class, () -> fill(editor, fillRequest("world", false)));
+                        OperationException.class,
+                        () -> set(editor, cuboidSetRequest("world", false)));
         platform.failClose = false;
 
         EditRecord retained = history(editor, "world").getFirst();
@@ -761,10 +737,12 @@ final class FaweWorldEditorTest {
 
         OperationException failure =
                 assertThrows(
-                        OperationException.class, () -> fill(editor, fillRequest("world", false)));
+                        OperationException.class,
+                        () -> set(editor, cuboidSetRequest("world", false)));
         platform.failWithRecovery = false;
 
-        assertFailure(OperationFailure.WORLD_BUSY, () -> fill(editor, fillRequest("world", false)));
+        assertFailure(
+                OperationFailure.WORLD_BUSY, () -> set(editor, cuboidSetRequest("world", false)));
 
         EditRecord recovery = history(editor, "world").getFirst();
         assertEquals(java.util.Optional.of(recovery.editId()), failure.editId());
@@ -774,7 +752,7 @@ final class FaweWorldEditorTest {
         assertEquals(EditStatus.RECOVERY_REQUIRED, recovery.status());
         UndoEdit.Result result = undo(editor, "world", recovery.editId());
         assertEquals(3, result.edit().changedBlockCount());
-        assertEquals(3, fill(editor, fillRequest("world", false)).changedBlockCount());
+        assertEquals(3, set(editor, cuboidSetRequest("world", false)).changedBlockCount());
     }
 
     @Test
@@ -790,12 +768,13 @@ final class FaweWorldEditorTest {
                         MAX_BLOCK_STATE_PATTERNS,
                         1,
                         new DirtConfig.EditHistory(1, 1, 1));
-        assertThrows(OperationException.class, () -> fill(editor, fillRequest("world", false)));
+        assertThrows(OperationException.class, () -> set(editor, cuboidSetRequest("world", false)));
         platform.failWithRecovery = false;
 
         OperationException capacity =
                 assertThrows(
-                        OperationException.class, () -> fill(editor, fillRequest("other", false)));
+                        OperationException.class,
+                        () -> set(editor, cuboidSetRequest("other", false)));
 
         assertEquals(OperationFailure.HISTORY_CAPACITY_EXCEEDED, capacity.failure());
         assertTrue(capacity.editId().isEmpty());
@@ -810,13 +789,13 @@ final class FaweWorldEditorTest {
         platform.nextChanges = 1;
         FaweWorldEditor editor = editor(platform, 3);
 
-        FillRegion.Result preview = fill(editor, fillRequest("world", true));
+        SetBlocks.Result preview = set(editor, cuboidSetRequest("world", true));
         assertEquals(EditOutcome.PREVIEW, preview.outcome());
         assertNull(preview.edit());
         assertTrue(history(editor, "world").isEmpty());
 
         platform.nextChanges = 0;
-        FillRegion.Result noChange = fill(editor, fillRequest("world", false));
+        SetBlocks.Result noChange = set(editor, cuboidSetRequest("world", false));
         assertEquals(EditOutcome.NO_CHANGE, noChange.outcome());
         assertNull(noChange.edit());
         assertTrue(history(editor, "world").isEmpty());
@@ -829,9 +808,9 @@ final class FaweWorldEditorTest {
         FaweWorldEditor bounded =
                 new FaweWorldEditor(
                         boundedPlatform, 100, 10, MAX_BLOCK_STATE_PATTERNS, 100, history(2));
-        EditRecord first = fill(bounded, fillRequest("world", false)).edit();
-        EditRecord second = fill(bounded, fillRequest("world", false)).edit();
-        EditRecord third = fill(bounded, fillRequest("world", false)).edit();
+        EditRecord first = set(bounded, cuboidSetRequest("world", false)).edit();
+        EditRecord second = set(bounded, cuboidSetRequest("world", false)).edit();
+        EditRecord third = set(bounded, cuboidSetRequest("world", false)).edit();
 
         assertEquals(List.of(third, second), history(bounded, "world"));
         assertFailure(
@@ -851,7 +830,7 @@ final class FaweWorldEditorTest {
         FakePlatform platform = new FakePlatform();
         platform.nextChanges = 7;
         FaweWorldEditor editor = editor(platform, 3);
-        EditRecord edit = fill(editor, fillRequest("world", false)).edit();
+        EditRecord edit = set(editor, cuboidSetRequest("world", false)).edit();
         platform.failUndo = true;
 
         OperationException failure =
@@ -871,7 +850,7 @@ final class FaweWorldEditorTest {
         FakePlatform platform = new FakePlatform();
         platform.nextChanges = 1;
         FaweWorldEditor editor = editor(platform, 3);
-        EditRecord edit = fill(editor, fillRequest("world", false)).edit();
+        EditRecord edit = set(editor, cuboidSetRequest("world", false)).edit();
 
         editor.invalidateWorld(WORLD_ID);
 
@@ -886,7 +865,7 @@ final class FaweWorldEditorTest {
         FaweWorldEditor editor = editor(platform, 3);
 
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var edit = executor.submit(() -> fill(editor, fillRequest("world", false)));
+            var edit = executor.submit(() -> set(editor, cuboidSetRequest("world", false)));
             platform.entered.await();
             editor.invalidateWorld(WORLD_ID);
             platform.release.countDown();
@@ -917,7 +896,7 @@ final class FaweWorldEditorTest {
         FaweWorldEditor editor = editor(platform, 3);
 
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var edit = executor.submit(() -> fill(editor, fillRequest("world", false)));
+            var edit = executor.submit(() -> set(editor, cuboidSetRequest("world", false)));
             platform.entered.await();
             editor.invalidateWorld(WORLD_ID);
             platform.release.countDown();
@@ -949,7 +928,7 @@ final class FaweWorldEditorTest {
         FaweWorldEditor editor = editor(platform, 3);
 
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var edit = executor.submit(() -> fill(editor, fillRequest("world", false)));
+            var edit = executor.submit(() -> set(editor, cuboidSetRequest("world", false)));
             platform.entered.await();
             editor.invalidateWorld(WORLD_ID);
             platform.release.countDown();
@@ -980,12 +959,13 @@ final class FaweWorldEditorTest {
         FaweWorldEditor editor = editor(platform, 3);
 
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var first = executor.submit(() -> fill(editor, fillRequest("world", false)));
+            var first = executor.submit(() -> set(editor, cuboidSetRequest("world", false)));
             platform.entered.await();
 
             assertFailure(
-                    OperationFailure.WORLD_BUSY, () -> fill(editor, fillRequest("world", false)));
-            FillRegion.Result other = fill(editor, fillRequest("other", false));
+                    OperationFailure.WORLD_BUSY,
+                    () -> set(editor, cuboidSetRequest("world", false)));
+            SetBlocks.Result other = set(editor, cuboidSetRequest("other", false));
             assertEquals("other", other.world());
 
             platform.release.countDown();
@@ -1005,7 +985,7 @@ final class FaweWorldEditorTest {
         assertTrue(platform.closed);
         assertFailure(
                 OperationFailure.WORLD_UNAVAILABLE,
-                () -> fill(editor, fillRequest("world", false)));
+                () -> set(editor, cuboidSetRequest("world", false)));
     }
 
     @Test
@@ -1016,7 +996,7 @@ final class FaweWorldEditorTest {
         FaweWorldEditor editor = editor(platform, 3);
 
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var edit = executor.submit(() -> fill(editor, fillRequest("world", false)));
+            var edit = executor.submit(() -> set(editor, cuboidSetRequest("world", false)));
             platform.entered.await();
 
             assertFalse(editor.closeIfQuiescent());
@@ -1073,11 +1053,6 @@ final class FaweWorldEditorTest {
         return new DirtConfig.EditHistory(perWorld, Math.max(perWorld, 10), 1_000);
     }
 
-    private static FillRegion.Result fill(FaweWorldEditor editor, FillRegion.Request request)
-            throws OperationException {
-        return editor.fillRegion(request, CALL_ID);
-    }
-
     private static SetBlocks.Result set(FaweWorldEditor editor, SetBlocks.Request request)
             throws OperationException {
         return editor.setBlocks(request, CALL_ID);
@@ -1098,9 +1073,15 @@ final class FaweWorldEditorTest {
         return editor.undoEdit(new UndoEdit.Request(world, editId), CALL_ID);
     }
 
-    private static FillRegion.Request fillRequest(String world, boolean dryRun) {
-        return new FillRegion.Request(
-                world, position(0, 0, 0), position(1, 1, 1), palette(), 13, dryRun);
+    private static SetBlocks.Request cuboidSetRequest(String world, boolean dryRun) {
+        return new SetBlocks.Request(
+                world,
+                position(0, 0, 0),
+                palettes(),
+                List.of(),
+                List.of(new Run(0, 0, 0, 0, 1, 1, 1)),
+                13,
+                dryRun);
     }
 
     private static List<DestinationPaletteEntry> palette() {
@@ -1191,26 +1172,19 @@ final class FaweWorldEditorTest {
         @Override
         public PreparedReplace prepareReplace(
                 WorldHandle world, ReplaceRegionBlocks.Request request, Cuboid region) {
-            return prepared(world, request.destinationPalette(), region.volume());
-        }
-
-        @Override
-        public PreparedFill prepareFill(
-                WorldHandle world, FillRegion.Request request, Cuboid region) {
-            return prepared(world, request.destinationPalette(), region.volume());
+            return prepared(world, region.volume());
         }
 
         @Override
         public PreparedSet prepareSet(
                 WorldHandle world, SetBlocks.Request request, SetBlockGeometry geometry) {
             this.lastSetGeometry = geometry;
-            return prepared(world, List.of(), geometry.blockCount());
+            return prepared(world, geometry.blockCount());
         }
 
-        private FakePrepared prepared(
-                WorldHandle world, List<DestinationPaletteEntry> palette, long count) {
+        private FakePrepared prepared(WorldHandle world, long count) {
             this.prepareCalls++;
-            this.lastPrepared = new FakePrepared(world, palette, Math.toIntExact(count));
+            this.lastPrepared = new FakePrepared(world, Math.toIntExact(count));
             return this.lastPrepared;
         }
 
@@ -1220,13 +1194,6 @@ final class FaweWorldEditorTest {
                 Cuboid region,
                 boolean dryRun,
                 MutationAdmission admission)
-                throws OperationException {
-            return execute((FakePrepared) prepared, dryRun, admission);
-        }
-
-        @Override
-        public EditResult fill(
-                PreparedFill prepared, Cuboid region, boolean dryRun, MutationAdmission admission)
                 throws OperationException {
             return execute((FakePrepared) prepared, dryRun, admission);
         }
@@ -1318,17 +1285,14 @@ final class FaweWorldEditorTest {
             this.closed = true;
         }
 
-        private final class FakePrepared implements PreparedReplace, PreparedFill, PreparedSet {
+        private final class FakePrepared implements PreparedReplace, PreparedSet {
             private final WorldHandle world;
-            private final List<DestinationPaletteEntry> palette;
             private final int count;
             private boolean executedBeforeClose;
             private boolean closed;
 
-            private FakePrepared(
-                    WorldHandle world, List<DestinationPaletteEntry> palette, int count) {
+            private FakePrepared(WorldHandle world, int count) {
                 this.world = world;
-                this.palette = palette;
                 this.count = count;
             }
 

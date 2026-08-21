@@ -16,7 +16,7 @@ import ca.deliyannides.dirtmcp.paper.world.edit.EditOperation;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditOutcome;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditRecord;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditStatus;
-import ca.deliyannides.dirtmcp.paper.world.edit.FillRegion;
+import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import com.sun.net.httpserver.Headers;
@@ -169,7 +169,7 @@ final class BridgeDispatcherTest {
                 new BridgeEndpoint() {
                     @Override
                     public String operation() {
-                        return "fill_region";
+                        return "set_blocks";
                     }
 
                     @Override
@@ -184,7 +184,7 @@ final class BridgeDispatcherTest {
 
                     @Override
                     public void handle(BridgeExchange exchange) throws IOException {
-                        exchange.ok(committedFillResult());
+                        exchange.ok(committedSetResult());
                     }
 
                     @Override
@@ -337,7 +337,7 @@ final class BridgeDispatcherTest {
                 new BridgeEndpoint() {
                     @Override
                     public String operation() {
-                        return "fill_region";
+                        return "set_blocks";
                     }
 
                     @Override
@@ -353,7 +353,7 @@ final class BridgeDispatcherTest {
                     @Override
                     public void handle(BridgeExchange exchange) throws IOException {
                         exchange.ok(
-                                committedFillResult(
+                                committedSetResult(
                                         UUID.fromString("123e4567-e89b-12d3-a456-426614174000")));
                     }
 
@@ -494,32 +494,33 @@ final class BridgeDispatcherTest {
                                 "private-raw-message")));
     }
 
-    private static FillRegion.Result committedFillResult() {
-        return committedFillResult(EDIT_ID);
+    private static SetBlocks.Result committedSetResult() {
+        return committedSetResult(EDIT_ID);
     }
 
-    private static FillRegion.Result committedFillResult(UUID editId) {
+    private static SetBlocks.Result committedSetResult(UUID editId) {
         BlockBounds bounds =
                 new BlockBounds(new BlockPosition(0, 0, 0), new BlockPosition(0, 0, 0));
         EditRecord edit =
                 new EditRecord(
                         editId,
                         UUID.fromString("22222222-2222-4222-8222-222222222222"),
-                        EditOperation.FILL_REGION,
+                        EditOperation.SET_BLOCKS,
                         "world",
                         UUID.fromString("33333333-3333-4333-8333-333333333333"),
                         bounds,
                         1,
                         Instant.parse("2026-08-20T00:00:00Z"),
                         EditStatus.COMMITTED);
-        return new FillRegion.Result(
+        return new SetBlocks.Result(
                 "world",
                 bounds,
-                List.of(new DestinationPaletteEntry("minecraft:stone", null)),
+                List.of(List.of(new DestinationPaletteEntry("minecraft:stone", null))),
                 0,
                 EditOutcome.COMMITTED,
                 1,
                 1,
+                0,
                 edit);
     }
 

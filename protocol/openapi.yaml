@@ -372,65 +372,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /v1/fill-region:
-    post:
-      operationId: fillRegion
-      summary: Fill a bounded region of loaded chunks with a weighted palette
-      parameters:
-        - $ref: '#/components/parameters/DirtCallId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/FillRegionRequest'
-      responses:
-        '200':
-          description: Executed edit or exact dry-run result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FillRegionResponse'
-        '400':
-          description: Invalid call ID, JSON, fields, coordinates, world height, or block state
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          description: World is not loaded
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '405':
-          $ref: '#/components/responses/PostMethodNotAllowed'
-        '409':
-          description: Another Dirt MCP world operation is active or the newest retained edit requires recovery
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '413':
-          description: Region volume, touched chunks, or exact changed-block count exceeds its configured limit
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          description: Unexpected edit failure
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '503':
-          description: Region contains an unloaded chunk, editing was interrupted, or bounded history capacity was unavailable before mutation
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
   /v1/set-blocks:
     post:
       operationId: setBlocks
@@ -2763,7 +2704,6 @@ components:
           type: string
           enum:
             - replace_region_blocks
-            - fill_region
             - set_blocks
         world:
           type: string
@@ -2916,113 +2856,6 @@ components:
           format: int64
           minimum: 0
           description: Blocks changed or that would change; cannot exceed matchedBlockCount.
-    FillRegionRequest:
-      type: object
-      additionalProperties: false
-      required:
-        - world
-        - min
-        - max
-        - destinationPalette
-      properties:
-        world:
-          type: string
-          minLength: 1
-          pattern: '.*\S.*'
-        min:
-          $ref: '#/components/schemas/BlockPosition'
-        max:
-          $ref: '#/components/schemas/BlockPosition'
-        destinationPalette:
-          type: array
-          minItems: 1
-          maxItems: 64
-          description: Exact destination states; weights are all omitted for equal probability or all total 100.
-          items:
-            $ref: '#/components/schemas/DestinationPaletteEntry'
-        seed:
-          type: integer
-          format: int32
-          description: A supplied seed is echoed in the response; omission generates and returns a fresh seed.
-        dryRun:
-          type: boolean
-          description: True requires a preview outcome, false excludes preview, and omission uses the configured fill default.
-    FillRegionResponse:
-      type: object
-      additionalProperties: false
-      oneOf:
-        - properties:
-            outcome:
-              const: preview
-            edit:
-              type: 'null'
-        - properties:
-            outcome:
-              const: no_change
-            changedBlockCount:
-              const: 0
-            edit:
-              type: 'null'
-        - properties:
-            outcome:
-              const: committed
-            changedBlockCount:
-              minimum: 1
-            edit:
-              allOf:
-                - $ref: '#/components/schemas/EditRecord'
-                - properties:
-                    operation:
-                      const: fill_region
-                    status:
-                      const: committed
-      required:
-        - world
-        - bounds
-        - destinationPalette
-        - seed
-        - outcome
-        - edit
-        - volume
-        - changedBlockCount
-      properties:
-        world:
-          type: string
-          minLength: 1
-        bounds:
-          description: Normalized inclusive bounds from the requested corners.
-          $ref: '#/components/schemas/Bounds'
-        destinationPalette:
-          type: array
-          minItems: 1
-          maxItems: 64
-          items:
-            $ref: '#/components/schemas/DestinationPaletteEntry'
-        seed:
-          type: integer
-          format: int32
-          description: Supplied request seed, or the generated seed when the request omitted one.
-        outcome:
-          type: string
-          description: Explicit dryRun=true requires preview; false excludes preview.
-          enum:
-            - preview
-            - no_change
-            - committed
-        edit:
-          oneOf:
-            - $ref: '#/components/schemas/EditRecord'
-            - type: 'null'
-        volume:
-          type: integer
-          format: int64
-          minimum: 1
-          description: Exact inclusive volume of the requested normalized bounds.
-        changedBlockCount:
-          type: integer
-          format: int64
-          minimum: 0
-          description: Blocks changed or that would change; cannot exceed volume.
     SetBlocksRequest:
       type: object
       additionalProperties: false
@@ -3504,7 +3337,6 @@ components:
         - get_player_context
         - get_perspective_view
         - replace_region_blocks
-        - fill_region
         - set_blocks
         - get_edit_history
         - undo_edit
@@ -3525,8 +3357,6 @@ components:
         get_perspective_view:
           type: boolean
         replace_region_blocks:
-          type: boolean
-        fill_region:
           type: boolean
         set_blocks:
           type: boolean

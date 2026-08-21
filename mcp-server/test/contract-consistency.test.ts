@@ -247,7 +247,7 @@ test('OpenAPI command patterns preserve Java control and outer-whitespace semant
 
 test('requires a UUIDv4 call ID on mutations and only salvages retained edit IDs', () => {
   const openapi = read('../../protocol/openapi.yaml');
-  const editPaths = ['/v1/replace-region-blocks', '/v1/fill-region', '/v1/set-blocks', '/v1/undo-edit'];
+  const editPaths = ['/v1/replace-region-blocks', '/v1/set-blocks', '/v1/undo-edit'];
   const callIdPaths = [...editPaths, '/v1/run-minecraft-commands'];
   for (const path of callIdPaths) {
     assert.match(openapiPath(openapi, path), /#\/components\/parameters\/DirtCallId/);
@@ -272,7 +272,6 @@ test('pins every committed edit response to its operation and committed status',
   const openapi = read('../../protocol/openapi.yaml');
   for (const [schemaName, operation] of [
     ['ReplaceRegionBlocksResponse', 'replace_region_blocks'],
-    ['FillRegionResponse', 'fill_region'],
     ['SetBlocksResponse', 'set_blocks'],
   ] as const) {
     const schema = openapiSchema(openapi, schemaName);

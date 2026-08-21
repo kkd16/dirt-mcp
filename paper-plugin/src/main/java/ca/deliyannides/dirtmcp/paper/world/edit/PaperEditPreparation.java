@@ -80,23 +80,6 @@ final class PaperEditPreparation implements AutoCloseable {
                 });
     }
 
-    PreparedFill prepareFill(PaperWorld world, FillRegion.Request request, Cuboid region)
-            throws OperationException {
-        return onMainThread(
-                () -> {
-                    requireAvailable(world);
-                    requireValidHeight(world.bukkitWorld(), region);
-                    PreparedPalette palette =
-                            preparePalette(
-                                    request.destinationPalette(),
-                                    request.seed(),
-                                    "destinationPalette");
-                    List<ChunkPosition> chunks = chunks(region);
-                    ChunkTicketManager.Lease lease = this.tickets.acquire(world, chunks, "Region");
-                    return new PreparedFill(world, palette, chunks, lease);
-                });
-    }
-
     PreparedSet prepareSet(PaperWorld world, SetBlocks.Request request, SetBlockGeometry geometry)
             throws OperationException {
         return onMainThread(
@@ -327,23 +310,6 @@ final class PaperEditPreparation implements AutoCloseable {
             return this.sources.patterns();
         }
 
-        @Override
-        public List<DestinationPaletteEntry> destinationPalette() {
-            return this.palette.entries();
-        }
-
-        @Override
-        public void close() {
-            this.lease.close();
-        }
-    }
-
-    record PreparedFill(
-            PaperWorld paperWorld,
-            PreparedPalette palette,
-            List<ChunkPosition> chunks,
-            ChunkTicketManager.Lease lease)
-            implements EditPlatform.PreparedFill {
         @Override
         public List<DestinationPaletteEntry> destinationPalette() {
             return this.palette.entries();

@@ -77,12 +77,12 @@ final class DirtConfigLoaderTest {
     @Test
     void explicitFalseDisablesOnlyThatTool() {
         YamlConfiguration configuration = defaultConfiguration();
-        configuration.set("tools.fill_region", false);
+        configuration.set("tools.set_blocks", false);
 
         DirtConfig config = DirtConfigLoader.load(configuration, null);
 
-        assertFalse(config.tools().isEnabled(McpTool.FILL_REGION));
-        assertTrue(config.tools().isEnabled(McpTool.SET_BLOCKS));
+        assertFalse(config.tools().isEnabled(McpTool.SET_BLOCKS));
+        assertTrue(config.tools().isEnabled(McpTool.REPLACE_REGION_BLOCKS));
     }
 
     @ParameterizedTest
@@ -128,7 +128,7 @@ final class DirtConfigLoaderTest {
                 Arguments.of("limits.max-request-bytes", null),
                 Arguments.of("bridge.unknown", 1),
                 Arguments.of("tools", true),
-                Arguments.of("tools.fill_region", "true"),
+                Arguments.of("tools.set_blocks", "true"),
                 Arguments.of("tools.not_a_tool", true),
                 Arguments.of("logging.console-level", null),
                 Arguments.of("logging.console-level", "warn"),

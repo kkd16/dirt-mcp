@@ -37,7 +37,6 @@ export const BRIDGE_ROUTES = {
     timeoutMilliseconds: 120_000,
     salvageEditId: true,
   },
-  fillRegion: { method: 'POST', path: '/v1/fill-region', timeoutMilliseconds: 120_000, salvageEditId: true },
   setBlocks: { method: 'POST', path: '/v1/set-blocks', timeoutMilliseconds: 120_000, salvageEditId: true },
   getEditHistory: {
     method: 'POST',

@@ -5,13 +5,11 @@ import { BlockPositionSchema, BoundsSchema, INT32_MAX, NonBlankStringSchema } fr
 import {
   DestinationPaletteSchema,
   EditRecordSchema,
-  FillRegionOutputSchema,
   GetEditHistoryOutputSchema,
   ReplaceRegionBlocksOutputSchema,
   requireMatchingCallId,
   requireMatchingEditIdentity,
   requireMatchingEditOptions,
-  requireMatchingFillVolume,
   requireMatchingSetBlockCount,
   requireMatchingUndoIdentity,
   requireReplaceCountsWithinBounds,
@@ -459,7 +457,7 @@ test('validates retained edit metadata and edit-result outcome invariants', () =
 
   for (const inconsistentEdit of [
     { ...edit, status: 'recovery_required' },
-    { ...edit, operation: 'fill_region' },
+    { ...edit, operation: 'set_blocks' },
     { ...edit, world: 'other_world' },
     { ...edit, bounds: { ...edit.bounds, max: { x: 2, y: 1, z: 1 } } },
     { ...edit, changedBlockCount: 2 },
@@ -476,19 +474,6 @@ test('validates retained edit metadata and edit-result outcome invariants', () =
       outcome: 'preview',
       edit: null,
       matchedBlockCount: 0,
-    }).success,
-    false,
-  );
-  assert.equal(
-    FillRegionOutputSchema.safeParse({
-      world: 'world',
-      bounds: edit.bounds,
-      destinationPalette: [{ blockState: 'minecraft:dirt' }],
-      seed: 42,
-      outcome: 'preview',
-      edit: null,
-      volume: 1,
-      changedBlockCount: 2,
     }).success,
     false,
   );
@@ -660,9 +645,6 @@ test('correlates edit options and counts with the originating request', () => {
       { ...result, matchedBlockCount: Number.MAX_SAFE_INTEGER },
     ),
   );
-
-  assert.doesNotThrow(() => requireMatchingFillVolume(bounds, { ...result, volume: 8 }));
-  assert.throws(() => requireMatchingFillVolume(bounds, { ...result, volume: 7 }), isInvalidBridgeResponse);
 
   assert.doesNotThrow(() => requireMatchingSetBlockCount(2n, { ...result, blockCount: 2 }));
   assert.throws(() => requireMatchingSetBlockCount(2n, { ...result, blockCount: 3 }), isInvalidBridgeResponse);

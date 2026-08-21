@@ -21,12 +21,9 @@ function serverInstructions(configuration: McpToolConfiguration): string {
     configuration.scan_orthographic_view ||
     configuration.get_player_context ||
     configuration.get_perspective_view;
-  const hasMutation = configuration.replace_region_blocks || configuration.fill_region || configuration.set_blocks;
+  const hasMutation = configuration.replace_region_blocks || configuration.set_blocks;
   const hasRegion =
-    configuration.count_region_block_states ||
-    configuration.get_blocks ||
-    configuration.replace_region_blocks ||
-    configuration.fill_region;
+    configuration.count_region_block_states || configuration.get_blocks || configuration.replace_region_blocks;
   const hasDetailedInspection =
     configuration.get_blocks || configuration.scan_orthographic_view || configuration.get_perspective_view;
   const hasWorldTool = hasInspection || hasMutation || configuration.get_edit_history || configuration.undo_edit;

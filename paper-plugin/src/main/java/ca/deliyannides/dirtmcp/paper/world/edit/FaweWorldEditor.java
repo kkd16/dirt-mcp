@@ -26,12 +26,7 @@ import java.util.UUID;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class FaweWorldEditor
-        implements ReplaceRegionBlocks,
-                FillRegion,
-                SetBlocks,
-                GetEditHistory,
-                UndoEdit,
-                AutoCloseable {
+        implements ReplaceRegionBlocks, SetBlocks, GetEditHistory, UndoEdit, AutoCloseable {
     private final EditPlatform platform;
     private final EditCoordinator coordinator;
     private final int maxRegionVolume;
@@ -167,82 +162,6 @@ public final class FaweWorldEditor
                     request.seed(),
                     outcome(request.dryRun(), execution.changedBlockCount()),
                     execution.matchedBlockCount(),
-                    execution.changedBlockCount(),
-                    edit);
-        }
-    }
-
-    @Override
-    public FillRegion.Result fillRegion(FillRegion.Request request, UUID callId)
-            throws OperationException {
-        requireCallId(callId);
-        if (request == null || request.min() == null || request.max() == null) {
-            throw invalid(
-                    "min and max are required",
-                    new ErrorDetails.InvalidRequest.Missing(missingBoundsField(request)));
-        }
-        validatePalette(request.destinationPalette(), "destinationPalette");
-        Cuboid region = boundedRegion(request.min(), request.max());
-        EditPlatform.WorldHandle world = resolveWorld(request.world());
-        UUID editId = pendingEditId(request.dryRun());
-        try (EditCoordinator.Lease lease =
-                this.coordinator.enterMutation(world.id(), world.name())) {
-            EditPlatform.EditResult execution;
-            EditRecord edit = null;
-            List<DestinationPaletteEntry> destinationPalette;
-            try (EditPlatform.PreparedFill prepared =
-                    this.platform.prepareFill(world, request, region)) {
-                destinationPalette = List.copyOf(prepared.destinationPalette());
-                try {
-                    execution =
-                            this.platform.fill(
-                                    prepared,
-                                    region,
-                                    request.dryRun(),
-                                    () ->
-                                            lease.reserveHistory(
-                                                    Math.min(
-                                                            (long) this.maxChangedBlocks,
-                                                            region.volume())));
-                } catch (EditRecoveryException failure) {
-                    retainOrRollbackRecovery(
-                            lease,
-                            prepared,
-                            world,
-                            region.bounds(),
-                            callId,
-                            editId,
-                            EditOperation.FILL_REGION,
-                            failure);
-                    throw recoveryFailure(failure, editId);
-                }
-                edit =
-                        retainCommitted(
-                                lease,
-                                prepared,
-                                world,
-                                region.bounds(),
-                                callId,
-                                editId,
-                                EditOperation.FILL_REGION,
-                                request.dryRun(),
-                                region.volume(),
-                                execution);
-            } catch (OperationException failure) {
-                throw retainedFailure(failure, edit);
-            } catch (RuntimeException failure) {
-                if (edit == null) {
-                    throw failure;
-                }
-                throw retainedFailure(failure, edit);
-            }
-            return new FillRegion.Result(
-                    world.name(),
-                    region.bounds(),
-                    destinationPalette,
-                    request.seed(),
-                    outcome(request.dryRun(), execution.changedBlockCount()),
-                    region.volume(),
                     execution.changedBlockCount(),
                     edit);
         }
@@ -1061,13 +980,6 @@ public final class FaweWorldEditor
     }
 
     private static String missingBoundsField(ReplaceRegionBlocks.Request request) {
-        if (request == null) {
-            return "request";
-        }
-        return request.min() == null ? "min" : "max";
-    }
-
-    private static String missingBoundsField(FillRegion.Request request) {
         if (request == null) {
             return "request";
         }

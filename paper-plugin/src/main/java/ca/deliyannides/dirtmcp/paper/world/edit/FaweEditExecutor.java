@@ -97,60 +97,6 @@ final class FaweEditExecutor {
         return new EditPlatform.EditResult(matches, changes, undo);
     }
 
-    EditPlatform.EditResult fill(
-            PaperEditPreparation.PreparedFill edit,
-            Cuboid region,
-            boolean dryRun,
-            EditPlatform.MutationAdmission admission)
-            throws OperationException {
-        Objects.requireNonNull(admission, "admission");
-        CuboidRegion selection = selection(edit.paperWorld().worldEditWorld(), region);
-        EditSession session = newEditSession(edit.paperWorld().worldEditWorld(), !dryRun);
-        long expectedChanges = 0;
-        long changes;
-        StoredUndo undo = null;
-        try {
-            try (session) {
-                for (BlockVector3 position : selection) {
-                    requireNotInterrupted();
-                    if (!session.getBlock(position)
-                            .equals(edit.palette().pattern().applyBlock(position).toBlockState())) {
-                        expectedChanges++;
-                    }
-                }
-                enforceChangeLimit(expectedChanges);
-                changes = expectedChanges;
-                if (!dryRun && expectedChanges > 0) {
-                    requireNotInterrupted();
-                    admission.beforeMutation();
-                    requireNotInterrupted();
-                    session.setBlocks(
-                            (com.sk89q.worldedit.regions.Region) selection,
-                            edit.palette().pattern());
-                    requireNotInterrupted();
-                }
-            }
-            if (!dryRun && expectedChanges > 0) {
-                changes = session.getChangeSet().longSize();
-                if (changes > 0) {
-                    undo = retainedUndo(session, edit.chunks());
-                    changes = undo.changedBlockCount();
-                }
-            }
-        } catch (MaxChangedBlocksException exception) {
-            OperationException failure = changeLimit(exception);
-            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, failure);
-            throw failure;
-        } catch (OperationException exception) {
-            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
-            throw exception;
-        } catch (RuntimeException exception) {
-            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
-            throw exception;
-        }
-        return new EditPlatform.EditResult(0, changes, undo);
-    }
-
     EditPlatform.EditResult set(
             PaperEditPreparation.PreparedSet edit,
             boolean dryRun,

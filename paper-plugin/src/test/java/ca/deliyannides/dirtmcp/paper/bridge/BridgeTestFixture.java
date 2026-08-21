@@ -1,7 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.bridge;
 
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.CountRegionBlockStatesEndpoint;
-import ca.deliyannides.dirtmcp.paper.bridge.endpoint.FillRegionEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetEditHistoryEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetPerspectiveViewEndpoint;
@@ -24,7 +23,6 @@ import ca.deliyannides.dirtmcp.paper.world.edit.EditOperation;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditOutcome;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditRecord;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditStatus;
-import ca.deliyannides.dirtmcp.paper.world.edit.FillRegion;
 import ca.deliyannides.dirtmcp.paper.world.edit.GetEditHistory;
 import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
@@ -95,7 +93,6 @@ final class BridgeTestFixture {
                         new GetPlayerContextEndpoint(operations),
                         new GetPerspectiveViewEndpoint(operations),
                         new ReplaceRegionBlocksEndpoint(operations, config),
-                        new FillRegionEndpoint(operations, config),
                         new SetBlocksEndpoint(operations, config),
                         new GetEditHistoryEndpoint(operations),
                         new UndoEditEndpoint(operations),
@@ -138,7 +135,6 @@ final class BridgeTestFixture {
                     GetPlayerContext,
                     GetPerspectiveView,
                     ReplaceRegionBlocks,
-                    FillRegion,
                     SetBlocks,
                     GetEditHistory,
                     UndoEdit,
@@ -366,26 +362,6 @@ final class BridgeTestFixture {
         }
 
         @Override
-        public FillRegion.Result fillRegion(FillRegion.Request request, UUID callId)
-                throws OperationException {
-            BlockBounds bounds = new BlockBounds(request.min(), request.max());
-            return new FillRegion.Result(
-                    request.world(),
-                    bounds,
-                    request.destinationPalette(),
-                    request.seed(),
-                    outcome(request.dryRun()),
-                    1,
-                    1,
-                    edit(
-                            request.dryRun(),
-                            request.world(),
-                            bounds,
-                            callId,
-                            EditOperation.FILL_REGION));
-        }
-
-        @Override
         public SetBlocks.Result setBlocks(SetBlocks.Request request, UUID callId)
                 throws OperationException {
             long blockCount = request.placements().size();
@@ -418,7 +394,7 @@ final class BridgeTestFixture {
                                     new BlockBounds(
                                             new BlockPosition(0, 0, 0), new BlockPosition(0, 0, 0)),
                                     UUID.fromString(CALL_ID),
-                                    EditOperation.FILL_REGION,
+                                    EditOperation.SET_BLOCKS,
                                     EDIT_ID)));
         }
 
@@ -430,7 +406,7 @@ final class BridgeTestFixture {
                             request.world(),
                             new BlockBounds(new BlockPosition(0, 0, 0), new BlockPosition(0, 0, 0)),
                             UUID.fromString(CALL_ID),
-                            EditOperation.FILL_REGION,
+                            EditOperation.SET_BLOCKS,
                             request.editId()),
                     callId,
                     Instant.parse("2026-08-19T12:01:00Z"));

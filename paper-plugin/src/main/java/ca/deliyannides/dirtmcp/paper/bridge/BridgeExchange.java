@@ -6,7 +6,6 @@ import ca.deliyannides.dirtmcp.paper.command.RunMinecraftCommands;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.validation.UuidV4;
-import ca.deliyannides.dirtmcp.paper.world.edit.FillRegion;
 import ca.deliyannides.dirtmcp.paper.world.edit.GetEditHistory;
 import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
@@ -278,13 +277,6 @@ public final class BridgeExchange {
                             result.changedBlockCount(),
                             result.edit() == null ? null : result.edit().editId(),
                             result.matchedBlockCount());
-            case FillRegion.Result result ->
-                    captureEdit(
-                            result.bounds(),
-                            result.outcome().wireName(),
-                            result.changedBlockCount(),
-                            result.edit() == null ? null : result.edit().editId(),
-                            null);
             case SetBlocks.Result result ->
                     captureEdit(
                             result.bounds(),

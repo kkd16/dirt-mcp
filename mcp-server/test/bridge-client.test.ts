@@ -579,13 +579,12 @@ test('salvages a valid edit ID from a malformed mutation error response', async 
   );
 
   await Promise.all(
-    [BRIDGE_ROUTES.replaceRegionBlocks, BRIDGE_ROUTES.fillRegion, BRIDGE_ROUTES.setBlocks, BRIDGE_ROUTES.undoEdit].map(
-      (route) =>
-        assert.rejects(
-          malformed.request(route, CALL_ID, ResponseSchema, { world: 'world' }),
-          (error: unknown) =>
-            error instanceof ToolFailure && error.code === 'bridge_http_error' && error.editId === EDIT_ID,
-        ),
+    [BRIDGE_ROUTES.replaceRegionBlocks, BRIDGE_ROUTES.setBlocks, BRIDGE_ROUTES.undoEdit].map((route) =>
+      assert.rejects(
+        malformed.request(route, CALL_ID, ResponseSchema, { world: 'world' }),
+        (error: unknown) =>
+          error instanceof ToolFailure && error.code === 'bridge_http_error' && error.editId === EDIT_ID,
+      ),
     ),
   );
 
@@ -628,7 +627,7 @@ test('salvages edit IDs from mutation envelopes with the wrong HTTP shape', asyn
     Response.json({ edit: { editId: EDIT_ID } }, { status: 500 }),
   );
   await assert.rejects(
-    failureWithEdit.request(BRIDGE_ROUTES.fillRegion, CALL_ID, ResponseSchema, { world: 'world' }),
+    failureWithEdit.request(BRIDGE_ROUTES.replaceRegionBlocks, CALL_ID, ResponseSchema, { world: 'world' }),
     (error: unknown) => error instanceof ToolFailure && error.code === 'bridge_http_error' && error.editId === EDIT_ID,
   );
 });
