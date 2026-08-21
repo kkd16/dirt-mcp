@@ -37,6 +37,7 @@ const editIdsToUndo = [];
 const observedEditIds = new Set();
 const mutationCallIds = new Set();
 const editMutationPaths = new Set(['/v1/replace-region-blocks', '/v1/fill-region', '/v1/set-blocks']);
+const longRunningMutationPaths = new Set([...editMutationPaths, '/v1/run-minecraft-commands']);
 const inspectionPaths = new Set([
   '/v1/count-region-block-states',
   '/v1/get-player-context',
@@ -45,7 +46,7 @@ const inspectionPaths = new Set([
 ]);
 
 function bridgeTimeoutMilliseconds(path) {
-  if (editMutationPaths.has(path) || path === '/v1/undo-edit') return 120_000;
+  if (longRunningMutationPaths.has(path) || path === '/v1/undo-edit') return 120_000;
   return inspectionPaths.has(path) ? 30_000 : 3_000;
 }
 
@@ -189,6 +190,20 @@ async function assertDetailedMutationLog(result) {
   assert.equal(record.edit_id, result.edit.editId);
   assert.equal(record.outcome, 'committed');
   assert.equal(record.changed_block_count, result.changedBlockCount);
+}
+
+async function assertDetailedCommandLog(callId, commandMarker, expectedResultCount) {
+  const record = await waitForDetailedLogRecord(
+    (candidate) => sameUuid(candidate.call_id, callId),
+    `Paper detail log did not record command call ${callId}`,
+  );
+  assertDetailedLogEnvelope(record);
+  assert.equal(record.call_id, callId);
+  assert.equal(record.operation, 'run_minecraft_commands');
+  assert.equal(record.http_status, 200);
+  assert.equal(record.result_count, expectedResultCount);
+  const records = await readDetailedLogRecords();
+  assert.equal(JSON.stringify(records).includes(commandMarker), false, 'Paper detail logs contain raw command input');
 }
 
 async function paperCommand(command) {
@@ -457,6 +472,8 @@ try {
   assert.ok(serverStatus.limits.maxRegionVolume > 0);
   assert.ok(serverStatus.limits.maxTouchedChunks > 0);
   assert.ok(serverStatus.limits.defaultInspectionResultLimit <= serverStatus.limits.maxInspectionResultLimit);
+  assert.ok(serverStatus.limits.maxCommandsPerRequest > 0);
+  assert.ok(serverStatus.limits.maxCommandFeedbackCharacters > 0);
   assert.ok(serverStatus.editHistory.maxEntriesPerWorld > 0);
   assert.ok(serverStatus.editHistory.maxEntriesTotal >= serverStatus.editHistory.maxEntriesPerWorld);
   assert.ok(serverStatus.editHistory.maxRetainedChangedBlocks >= serverStatus.limits.maxChangedBlocks);
@@ -477,6 +494,7 @@ try {
     set_blocks: true,
     get_edit_history: true,
     undo_edit: true,
+    run_minecraft_commands: true,
   });
   await assertEditHistory([]);
 
@@ -532,6 +550,128 @@ try {
   const secondOriginalState = originalSetStates.get('6,0,0');
   assert.ok(firstOriginalState);
   assert.ok(secondOriginalState);
+  const commandStates = ['minecraft:stone', 'minecraft:gold_block', 'minecraft:diamond_block'].filter(
+    (state) => state !== firstOriginalState,
+  );
+  const commandFirstState = commandStates[0];
+  const commandSecondState = commandStates[1];
+  assert.ok(commandFirstState);
+  assert.ok(commandSecondState);
+
+  const oversizedCommandBatch = await bridgeResponse('/v1/run-minecraft-commands', {
+    commands: [
+      `setblock ${setMin.x} ${setMin.y} ${setMin.z} ${commandFirstState} replace`,
+      ...Array.from({ length: serverStatus.limits.maxCommandsPerRequest }, () => 'time query gametime'),
+    ],
+  });
+  assert.equal(oversizedCommandBatch.status, 400);
+  assert.deepEqual(oversizedCommandBatch.body.error.details, {
+    reason: 'too_many_items',
+    fields: ['commands'],
+    maximum: serverStatus.limits.maxCommandsPerRequest,
+  });
+  const afterOversizedCommandBatch = await bridgeRequest('/v1/get-region-blocks', {
+    world,
+    min: setMin,
+    max: setMin,
+    includeAir: true,
+  });
+  assert.equal(afterOversizedCommandBatch.blocks[0].blockState, firstOriginalState);
+
+  const commandRunResponse = await bridgeResponse('/v1/run-minecraft-commands', {
+    commands: [
+      'dirt version',
+      `/setblock ${setMin.x} ${setMin.y} ${setMin.z} ${commandFirstState} replace`,
+      `setblock ${setMin.x} ${setMin.y} ${setMin.z} ${commandSecondState} replace`,
+      'time query gametime',
+    ],
+  });
+  assert.equal(commandRunResponse.status, 200);
+  const commandRun = commandRunResponse.body;
+  assert.equal(typeof commandRun.sender.name, 'string');
+  assert.ok(commandRun.sender.name.length > 0);
+  assert.equal(commandRun.sender.isOperator, true);
+  assert.equal(commandRun.sender.isPlayer, false);
+  assert.equal(commandRun.feedbackTruncated, false);
+  assert.deepEqual(
+    commandRun.results.map(({ command, outcome }) => ({ command, outcome })),
+    [
+      { command: 'dirt version', outcome: 'dispatched' },
+      {
+        command: `setblock ${setMin.x} ${setMin.y} ${setMin.z} ${commandFirstState} replace`,
+        outcome: 'dispatched',
+      },
+      {
+        command: `setblock ${setMin.x} ${setMin.y} ${setMin.z} ${commandSecondState} replace`,
+        outcome: 'dispatched',
+      },
+      { command: 'time query gametime', outcome: 'dispatched' },
+    ],
+  );
+  const [versionFeedback, , , timeFeedback] = commandRun.results.map(({ feedback }) => feedback.join('\n'));
+  assert.ok(versionFeedback.includes(serverStatus.builds.dirtMcp));
+  assert.ok(timeFeedback.length > 0);
+  assert.ok(commandRun.results.every(({ message, rawMessage }) => message === null && rawMessage === null));
+  const afterOrderedCommands = await bridgeRequest('/v1/get-region-blocks', {
+    world,
+    min: setMin,
+    max: setMin,
+  });
+  assert.equal(afterOrderedCommands.blocks[0].blockState, commandSecondState);
+
+  const commandMarker = `dirt_smoke_missing_${randomUUID().replaceAll('-', '')}`;
+  const missingCommandRun = await bridgeResponse('/v1/run-minecraft-commands', {
+    commands: [commandMarker, `setblock ${setMin.x} ${setMin.y} ${setMin.z} ${commandFirstState} replace`],
+  });
+  assert.equal(missingCommandRun.status, 200);
+  assert.deepEqual(
+    missingCommandRun.body.results.map(({ outcome }) => outcome),
+    ['not_found'],
+  );
+  assert.ok(missingCommandRun.body.results[0].message.length > 0);
+  assert.equal(missingCommandRun.body.results[0].rawMessage, null);
+  await assertDetailedCommandLog(missingCommandRun.callId, commandMarker, 1);
+  const afterMissingCommand = await bridgeRequest('/v1/get-region-blocks', {
+    world,
+    min: setMin,
+    max: setMin,
+  });
+  assert.equal(afterMissingCommand.blocks[0].blockState, commandSecondState);
+
+  const invalidTimeQuery = `time query dirt_smoke_invalid_${randomUUID().replaceAll('-', '')}`;
+  const failedCommandRun = await bridgeRequest('/v1/run-minecraft-commands', {
+    commands: [invalidTimeQuery, `setblock ${setMin.x} ${setMin.y} ${setMin.z} ${firstOriginalState} replace`],
+  });
+  assert.deepEqual(
+    failedCommandRun.results.map(({ outcome }) => outcome),
+    ['dispatch_failed'],
+  );
+  assert.ok(failedCommandRun.results[0].message.length > 0);
+  assert.ok(failedCommandRun.results[0].rawMessage.length > 0);
+  const afterFailedCommand = await bridgeRequest('/v1/get-region-blocks', {
+    world,
+    min: setMin,
+    max: setMin,
+    includeAir: true,
+  });
+  assert.equal(afterFailedCommand.blocks[0].blockState, commandSecondState);
+
+  const restoredCommandRun = await bridgeRequest('/v1/run-minecraft-commands', {
+    commands: [`setblock ${setMin.x} ${setMin.y} ${setMin.z} ${firstOriginalState} replace`],
+  });
+  assert.deepEqual(
+    restoredCommandRun.results.map(({ outcome }) => outcome),
+    ['dispatched'],
+  );
+  const afterCommandRestore = await bridgeRequest('/v1/get-region-blocks', {
+    world,
+    min: setMin,
+    max: setMin,
+    includeAir: true,
+  });
+  assert.equal(afterCommandRestore.blocks[0].blockState, firstOriginalState);
+  await assertEditHistory([]);
+
   const firstSetState =
     firstOriginalState === 'minecraft:diamond_block' ? 'minecraft:gold_block' : 'minecraft:diamond_block';
   const secondSetState =

@@ -140,7 +140,9 @@ public record DirtConfig(
             int maxChangedBlocks,
             int maxInspectionVolume,
             int defaultInspectionResultLimit,
-            int maxInspectionResultLimit) {
+            int maxInspectionResultLimit,
+            int maxCommandsPerRequest,
+            int maxCommandFeedbackCharacters) {
         public Limits {
             if (maxRequestBytes < 1 || maxRequestBytes == Integer.MAX_VALUE) {
                 throw new IllegalArgumentException(
@@ -155,6 +157,8 @@ public record DirtConfig(
             requirePositive("limits.max-inspection-volume", maxInspectionVolume);
             requirePositive("limits.default-inspection-results", defaultInspectionResultLimit);
             requirePositive("limits.max-inspection-results", maxInspectionResultLimit);
+            requirePositive("limits.max-commands-per-request", maxCommandsPerRequest);
+            requirePositive("limits.max-command-feedback-characters", maxCommandFeedbackCharacters);
             requireAtMost(
                     "limits.max-inspection-touched-chunks",
                     maxInspectionTouchedChunks,

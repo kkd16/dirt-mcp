@@ -549,13 +549,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /v1/run-minecraft-commands:
+    post:
+      operationId: runMinecraftCommands
+      summary: Run registered Minecraft commands sequentially with operator-level permissions
+      parameters:
+        - $ref: '#/components/parameters/DirtCallId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunMinecraftCommandsRequest'
+      responses:
+        '200':
+          description: Complete ordered dispatch results, or the attempted prefix through the first per-command failure, with bounded synchronous feedback
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunMinecraftCommandsResponse'
+        '400':
+          description: Invalid call ID, JSON, fields, command strings, or command count
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/PostMethodNotAllowed'
+        '500':
+          description: Unexpected command-runner failure; earlier commands may already have taken effect
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Bridge admission capacity or Paper command execution is unavailable, or the main-thread scheduler boundary could not be crossed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 components:
   parameters:
     DirtCallId:
       name: X-Dirt-Call-Id
       in: header
       required: true
-      description: UUIDv4 correlation ID. Creating edits retain it as callId; successful undo returns it as undoCallId.
+      description: UUIDv4 mutation correlation ID. Creating edits retain it as callId; successful undo returns it as undoCallId.
       schema:
         $ref: '#/components/schemas/UuidV4'
   responses:
@@ -3067,6 +3108,152 @@ components:
         undoneAt:
           type: string
           format: date-time
+    RunMinecraftCommandsRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - commands
+      properties:
+        commands:
+          type: array
+          minItems: 1
+          description: Commands in execution order. The active maximum count is reported by server status. Each entry may include one in-game leading slash and must not contain control characters.
+          items:
+            $ref: '#/components/schemas/MinecraftCommandInput'
+    MinecraftCommandInput:
+      type: string
+      minLength: 1
+      pattern: '^(?![ \u1680\u2000-\u2006\u2008-\u200A\u2028\u2029\u205F\u3000]*\/?[ \u1680\u2000-\u2006\u2008-\u200A\u2028\u2029\u205F\u3000]*$)[^\u0000-\u001F\u007F-\u009F]+$'
+      description: A command containing no ISO control characters and remaining non-empty after Java whitespace and at most one leading slash are removed.
+    NormalizedMinecraftCommand:
+      type: string
+      minLength: 1
+      pattern: '^[^ \u0000-\u001F\u007F-\u009F\u1680\u2000-\u2006\u2008-\u200A\u2028\u2029\u205F\u3000](?:[^\u0000-\u001F\u007F-\u009F]*[^ \u0000-\u001F\u007F-\u009F\u1680\u2000-\u2006\u2008-\u200A\u2028\u2029\u205F\u3000])?$'
+      description: A control-free command after Dirt removes Java outer whitespace and at most one leading slash.
+    CommandSender:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - isOperator
+        - isPlayer
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Actual Paper feedback-forwarding sender name.
+        isOperator:
+          const: true
+          description: The sender has console-equivalent permissions.
+        isPlayer:
+          const: false
+          description: The sender has no player entity or location context.
+    CommandResult:
+      description: Outcome and bounded synchronous feedback for one normalized command.
+      oneOf:
+        - $ref: '#/components/schemas/DispatchedCommandResult'
+        - $ref: '#/components/schemas/CommandNotFoundResult'
+        - $ref: '#/components/schemas/CommandDispatchFailedResult'
+    DispatchedCommandResult:
+      type: object
+      additionalProperties: false
+      required:
+        - command
+        - outcome
+        - feedback
+        - message
+        - rawMessage
+      properties:
+        command:
+          $ref: '#/components/schemas/NormalizedMinecraftCommand'
+        outcome:
+          const: dispatched
+          description: Paper found and invoked a target without a dispatch exception; this does not assert semantic command success.
+        feedback:
+          type: array
+          description: Bounded non-empty plain-text messages synchronously sent to this command's feedback sender.
+          items:
+            type: string
+            minLength: 1
+        message:
+          type: 'null'
+        rawMessage:
+          type: 'null'
+    CommandNotFoundResult:
+      type: object
+      additionalProperties: false
+      required:
+        - command
+        - outcome
+        - feedback
+        - message
+        - rawMessage
+      properties:
+        command:
+          $ref: '#/components/schemas/NormalizedMinecraftCommand'
+        outcome:
+          const: not_found
+          description: Paper found no command target; this result ends the batch and later commands are not attempted.
+        feedback:
+          type: array
+          description: Bounded non-empty plain-text messages synchronously sent to this command's feedback sender.
+          items:
+            type: string
+            minLength: 1
+        message:
+          type: string
+          minLength: 1
+          description: Actionable explanation of the missing target.
+        rawMessage:
+          type: 'null'
+    CommandDispatchFailedResult:
+      type: object
+      additionalProperties: false
+      required:
+        - command
+        - outcome
+        - feedback
+        - message
+        - rawMessage
+      properties:
+        command:
+          $ref: '#/components/schemas/NormalizedMinecraftCommand'
+        outcome:
+          const: dispatch_failed
+          description: The command target raised a Paper CommandException; this result ends the batch and later commands are not attempted.
+        feedback:
+          type: array
+          description: Bounded non-empty plain-text messages synchronously sent to this command's feedback sender.
+          items:
+            type: string
+            minLength: 1
+        message:
+          type: string
+          minLength: 1
+          description: Deepest non-empty cause message found within bounded traversal of the dispatch failure.
+        rawMessage:
+          type: string
+          minLength: 1
+          description: Original non-empty Paper CommandException message, or a stable fallback when Paper supplies none.
+    RunMinecraftCommandsResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - sender
+        - feedbackTruncated
+        - results
+      properties:
+        sender:
+          $ref: '#/components/schemas/CommandSender'
+        feedbackTruncated:
+          type: boolean
+          description: Whether synchronous feedback exceeded the active request-wide Unicode-code-point limit.
+        results:
+          type: array
+          minItems: 1
+          description: Non-empty attempted prefix in original order. All non-final results are dispatched; the final result is the first failure, or every supplied command was dispatched.
+          items:
+            $ref: '#/components/schemas/CommandResult'
     LimitConfiguration:
       type: object
       additionalProperties: false
@@ -3080,6 +3267,8 @@ components:
         - maxInspectionVolume
         - defaultInspectionResultLimit
         - maxInspectionResultLimit
+        - maxCommandsPerRequest
+        - maxCommandFeedbackCharacters
       properties:
         maxRequestBytes:
           type: integer
@@ -3128,6 +3317,16 @@ components:
           format: int32
           minimum: 1
           description: Maximum caller-selectable exact-block, run, or visible-block result limit and maximum player-view ray count; cannot exceed maxInspectionVolume.
+        maxCommandsPerRequest:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Maximum commands accepted in one ordered command batch.
+        maxCommandFeedbackCharacters:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Maximum Unicode code points of synchronous plain-text feedback retained across one command batch.
     EditHistoryConfiguration:
       type: object
       additionalProperties: false
@@ -3212,6 +3411,7 @@ components:
         - set_blocks
         - get_edit_history
         - undo_edit
+        - run_minecraft_commands
       properties:
         ping_server:
           type: boolean
@@ -3234,6 +3434,8 @@ components:
         get_edit_history:
           type: boolean
         undo_edit:
+          type: boolean
+        run_minecraft_commands:
           type: boolean
     PingResponse:
       type: object

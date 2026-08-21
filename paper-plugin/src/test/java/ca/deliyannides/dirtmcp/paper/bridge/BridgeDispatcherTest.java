@@ -1,9 +1,12 @@
 package ca.deliyannides.dirtmcp.paper.bridge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ca.deliyannides.dirtmcp.paper.command.RunMinecraftCommands;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
@@ -216,6 +219,119 @@ final class BridgeDispatcherTest {
     }
 
     @Test
+    void warnsWithoutPayloadsWhenACompletedCommandResponseCannotBeDelivered() {
+        List<LogRecord> records = new ArrayList<>();
+        DirtLog log = recordingLog(records);
+        BridgeDispatcher dispatcher = commandDispatcher(log);
+        FailingExchange exchange = new FailingExchange(DeliveryFailure.ALWAYS_IO);
+        exchange.requestHeaders.add("X-Dirt-Call-Id", BridgeTestFixture.CALL_ID);
+
+        try (log;
+                dispatcher) {
+            assertThrows(IOException.class, () -> dispatcher.handle(exchange));
+
+            LogRecord audit = records.getFirst();
+            assertEquals(Level.WARNING, audit.getLevel());
+            assertTrue(audit.getMessage().contains("2 commands"));
+            assertTrue(audit.getMessage().contains(BridgeTestFixture.CALL_ID));
+            assertTrue(audit.getMessage().contains("inspect server state before retrying"));
+            assertNoCommandPayload(audit.getMessage());
+            LogContext context = (LogContext) audit.getParameters()[0];
+            assertEquals(2L, context.values().get("result_count"));
+            assertEquals("partial_failure", context.values().get("outcome"));
+            assertEquals(true, context.values().get("aborted"));
+        }
+    }
+
+    @Test
+    void keepsUnexpectedCommandResponseFinalizationFailuresSevere() throws IOException {
+        List<LogRecord> records = new ArrayList<>();
+        DirtLog log = recordingLog(records);
+        BridgeDispatcher dispatcher = commandDispatcher(log);
+        FailingExchange exchange = new FailingExchange(DeliveryFailure.FIRST_RUNTIME);
+        exchange.requestHeaders.add("X-Dirt-Call-Id", BridgeTestFixture.CALL_ID);
+
+        try (log;
+                dispatcher) {
+            dispatcher.handle(exchange);
+
+            assertEquals(500, exchange.getResponseCode());
+            LogRecord audit = records.getFirst();
+            assertEquals(Level.SEVERE, audit.getLevel());
+            assertTrue(audit.getMessage().contains("2 commands"));
+            assertTrue(audit.getMessage().contains(BridgeTestFixture.CALL_ID));
+            assertTrue(audit.getMessage().contains("inspect server state before retrying"));
+            assertNoCommandPayload(audit.getMessage());
+            LogContext context = (LogContext) audit.getParameters()[0];
+            assertEquals(2L, context.values().get("result_count"));
+            assertEquals("partial_failure", context.values().get("outcome"));
+            assertEquals("internal_error", context.values().get("error_code"));
+        }
+    }
+
+    @Test
+    void treatsUnexpectedCommandExecutionFailuresAsAmbiguousWithoutLoggingPayloads()
+            throws IOException {
+        List<LogRecord> records = new ArrayList<>();
+        DirtLog log = recordingLog(records);
+        BridgeEndpoint endpoint =
+                new BridgeEndpoint() {
+                    @Override
+                    public String operation() {
+                        return "run_minecraft_commands";
+                    }
+
+                    @Override
+                    public String method() {
+                        return "GET";
+                    }
+
+                    @Override
+                    public String path() {
+                        return "/v1/ping";
+                    }
+
+                    @Override
+                    public void handle(BridgeExchange exchange) {
+                        throw new IllegalStateException("private-command-runtime-payload");
+                    }
+
+                    @Override
+                    public String internalErrorMessage() {
+                        return "safe failure";
+                    }
+                };
+        BridgeDispatcher dispatcher =
+                new BridgeDispatcher(
+                        List.of(endpoint),
+                        new BearerAuthenticator(BridgeTestFixture.TOKEN),
+                        1,
+                        1_024,
+                        1,
+                        log);
+        FailingExchange exchange = new FailingExchange(DeliveryFailure.NONE);
+        exchange.requestHeaders.add("X-Dirt-Call-Id", BridgeTestFixture.CALL_ID);
+
+        try (log;
+                dispatcher) {
+            dispatcher.handle(exchange);
+
+            assertEquals(500, exchange.getResponseCode());
+            LogRecord audit = records.getFirst();
+            assertEquals(Level.SEVERE, audit.getLevel());
+            assertTrue(audit.getMessage().contains("commands may have taken effect"));
+            assertTrue(audit.getMessage().contains(BridgeTestFixture.CALL_ID));
+            assertTrue(audit.getMessage().contains("inspect server state before retrying"));
+            assertFalse(audit.getMessage().contains("private-command-runtime-payload"));
+            assertNull(audit.getThrown());
+            LogContext context = (LogContext) audit.getParameters()[0];
+            assertEquals("internal_error", context.values().get("error_code"));
+            assertFalse(context.values().containsKey("result_count"));
+            assertFalse(context.values().containsKey("outcome"));
+        }
+    }
+
+    @Test
     void invalidSuccessEditMetadataFallsBackToAnUncorrelatedInternalError() throws IOException {
         BridgeEndpoint endpoint =
                 new BridgeEndpoint() {
@@ -313,6 +429,69 @@ final class BridgeDispatcherTest {
                 return "failure";
             }
         };
+    }
+
+    private static BridgeDispatcher commandDispatcher(DirtLog log) {
+        BridgeEndpoint endpoint =
+                new BridgeEndpoint() {
+                    @Override
+                    public String operation() {
+                        return "run_minecraft_commands";
+                    }
+
+                    @Override
+                    public String method() {
+                        return "GET";
+                    }
+
+                    @Override
+                    public String path() {
+                        return "/v1/ping";
+                    }
+
+                    @Override
+                    public void handle(BridgeExchange exchange) throws IOException {
+                        exchange.ok(commandResult());
+                    }
+
+                    @Override
+                    public String internalErrorMessage() {
+                        return "safe failure";
+                    }
+                };
+        return new BridgeDispatcher(
+                List.of(endpoint),
+                new BearerAuthenticator(BridgeTestFixture.TOKEN),
+                1,
+                1_024,
+                1,
+                log);
+    }
+
+    private static void assertNoCommandPayload(String message) {
+        assertFalse(message.contains("private-command"));
+        assertFalse(message.contains("private-feedback"));
+        assertFalse(message.contains("private-message"));
+        assertFalse(message.contains("private-raw-message"));
+    }
+
+    private static RunMinecraftCommands.Result commandResult() {
+        return new RunMinecraftCommands.Result(
+                new RunMinecraftCommands.Sender("DirtMCP", true, false),
+                false,
+                List.of(
+                        new RunMinecraftCommands.CommandResult(
+                                "private-command-one",
+                                RunMinecraftCommands.Outcome.DISPATCHED,
+                                List.of("private-feedback"),
+                                null,
+                                null),
+                        new RunMinecraftCommands.CommandResult(
+                                "private-command-two",
+                                RunMinecraftCommands.Outcome.DISPATCH_FAILED,
+                                List.of(),
+                                "private-message",
+                                "private-raw-message")));
     }
 
     private static FillRegion.Result committedFillResult() {

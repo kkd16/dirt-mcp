@@ -3,6 +3,7 @@ import packageMetadata from '../package.json' with { type: 'json' };
 import type { BridgeClient } from './bridge/client.ts';
 import type { DirtLogger } from './logging.ts';
 import type { McpToolConfiguration } from './tools/configuration.ts';
+import { registerCommandTools } from './tools/commands.ts';
 import { registerEditingTools } from './tools/editing.ts';
 import { registerInspectionTools } from './tools/inspection.ts';
 import { registerPlayerTools } from './tools/player.ts';
@@ -47,6 +48,12 @@ function serverInstructions(configuration: McpToolConfiguration): string {
     );
   }
 
+  if (configuration.get_server_status && configuration.run_minecraft_commands) {
+    instructions.push(
+      'Call get_server_status with include.configuration=true before large command batches. Keep batch size and encoded request size within its active limits; captured feedback is truncated at its request-wide limit.',
+    );
+  }
+
   if (hasDetailedInspection) {
     instructions.push('Inspection result limits fail the call instead of truncating data.');
   }
@@ -54,6 +61,15 @@ function serverInstructions(configuration: McpToolConfiguration): string {
   if (configuration.get_player_context) {
     instructions.push(
       'Player context is point-in-time; recapture it before a POV-dependent edit if the player may have moved.',
+    );
+  }
+
+  if (configuration.run_minecraft_commands) {
+    instructions.push(
+      'run_minecraft_commands attempts commands in order, no more than once each, as an operator-level non-player sender and stops at the first per-command failure; structuredContent.results is the non-empty attempted prefix, and remaining commands were not attempted. Dispatch is synchronous, but arbitrary non-atomic effects may outlive the response and are outside Dirt edit history and undo. A timeout, disconnect, or unexpected internal failure can leave completion ambiguous, so inspect server or world state before deciding whether to retry.',
+    );
+    instructions.push(
+      'For run_minecraft_commands, a final not_found or dispatch_failed outcome is preserved in the attempted-prefix structuredContent.results and sets isError=true without replacing it with structuredContent.error.',
     );
   }
 
@@ -102,5 +118,6 @@ export function createDirtServer(
   registerInspectionTools(server, bridge, toolConfiguration, logger);
   registerPlayerTools(server, bridge, toolConfiguration, logger);
   registerEditingTools(server, bridge, toolConfiguration, logger);
+  registerCommandTools(server, bridge, toolConfiguration, logger);
   return server;
 }

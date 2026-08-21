@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ca.deliyannides.dirtmcp.paper.command.RunMinecraftCommands;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
@@ -451,14 +452,33 @@ final class BridgeServerProtocolTest {
     @Test
     void keepsAuditMetadataRequestLocalAndNeverLogsRequestBodies() throws Exception {
         List<LogRecord> records = new CopyOnWriteArrayList<>();
-        CountDownLatch audited = new CountDownLatch(1);
+        CountDownLatch audited = new CountDownLatch(2);
         DirtLog log = recordingLog(records, audited);
+        BridgeTestFixture.TestOperations operations =
+                new BridgeTestFixture.TestOperations() {
+                    @Override
+                    public RunMinecraftCommands.Result runCommands(
+                            RunMinecraftCommands.Request request) {
+                        return new RunMinecraftCommands.Result(
+                                new RunMinecraftCommands.Sender("DirtMCP", true, false),
+                                false,
+                                List.of(
+                                        new RunMinecraftCommands.CommandResult(
+                                                request.commands().get(0),
+                                                RunMinecraftCommands.Outcome.DISPATCHED,
+                                                List.of("private-feedback-payload"),
+                                                null,
+                                                null),
+                                        new RunMinecraftCommands.CommandResult(
+                                                request.commands().get(1),
+                                                RunMinecraftCommands.Outcome.DISPATCH_FAILED,
+                                                List.of(),
+                                                "private-message-payload",
+                                                "private-raw-message-payload")));
+                    }
+                };
         try (log;
-                BridgeServer bridge =
-                        server(
-                                config(availablePort(), 4),
-                                new BridgeTestFixture.TestOperations(),
-                                log);
+                BridgeServer bridge = server(config(availablePort(), 4), operations, log);
                 HttpClient client = HttpClient.newHttpClient()) {
             bridge.start();
             HttpResponse<String> edit =
@@ -480,18 +500,72 @@ final class BridgeServerProtocolTest {
                                     .build(),
                             HttpResponse.BodyHandlers.ofString());
             assertEquals(200, edit.statusCode());
+            HttpResponse<String> commands =
+                    client.send(
+                            authorized(bridge, "/v1/run-minecraft-commands")
+                                    .header("Content-Type", "application/json")
+                                    .header(
+                                            "X-Dirt-Call-Id",
+                                            "223e4567-e89b-42d3-a456-426614174000")
+                                    .POST(
+                                            HttpRequest.BodyPublishers.ofString(
+                                                    "{\"commands\":[\"say private-command-payload\","
+                                                            + "\"missing private-command-payload\","
+                                                            + "\"must-not-run private-command-payload\"]}"))
+                                    .build(),
+                            HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, commands.statusCode());
             assertTrue(audited.await(2, TimeUnit.SECONDS));
 
             List<LogRecord> calls = requestRecords(records);
-            assertEquals(1, calls.size());
-            assertEquals(Level.INFO, calls.getFirst().getLevel());
-            LogContext context = context(calls.getFirst());
-            assertEquals("audit-world", context.values().get("world"));
-            assertEquals("123e4567-e89b-42d3-a456-426614174000", context.values().get("call_id"));
-            assertEquals("committed", context.values().get("outcome"));
-            assertEquals(1L, context.values().get("changed_block_count"));
-            assertFalse(context.values().toString().contains("secret_gold_block"));
-            assertFalse(calls.getFirst().getMessage().contains("secret_gold_block"));
+            assertEquals(2, calls.size());
+            LogRecord editAudit =
+                    calls.stream()
+                            .filter(
+                                    record ->
+                                            "set_blocks"
+                                                    .equals(
+                                                            context(record)
+                                                                    .values()
+                                                                    .get("operation")))
+                            .findFirst()
+                            .orElseThrow();
+            assertEquals(Level.INFO, editAudit.getLevel());
+            LogContext editContext = context(editAudit);
+            assertEquals("audit-world", editContext.values().get("world"));
+            assertEquals(
+                    "123e4567-e89b-42d3-a456-426614174000", editContext.values().get("call_id"));
+            assertEquals("committed", editContext.values().get("outcome"));
+            assertEquals(1L, editContext.values().get("changed_block_count"));
+
+            LogRecord commandAudit =
+                    calls.stream()
+                            .filter(
+                                    record ->
+                                            "run_minecraft_commands"
+                                                    .equals(
+                                                            context(record)
+                                                                    .values()
+                                                                    .get("operation")))
+                            .findFirst()
+                            .orElseThrow();
+            assertEquals(Level.WARNING, commandAudit.getLevel());
+            assertTrue(commandAudit.getMessage().contains("2 attempted; stopped at first failure"));
+            assertEquals("partial_failure", context(commandAudit).values().get("outcome"));
+            assertEquals(2L, context(commandAudit).values().get("result_count"));
+            assertEquals(
+                    "223e4567-e89b-42d3-a456-426614174000",
+                    context(commandAudit).values().get("call_id"));
+
+            String auditText =
+                    calls.stream()
+                            .map(record -> record.getMessage() + context(record).values())
+                            .reduce("", String::concat);
+            assertFalse(auditText.contains("secret_gold_block"));
+            assertFalse(auditText.contains("private-command-payload"));
+            assertFalse(auditText.contains("private-feedback-payload"));
+            assertFalse(auditText.contains("private-message-payload"));
+            assertFalse(auditText.contains("private-raw-message-payload"));
         }
     }
 

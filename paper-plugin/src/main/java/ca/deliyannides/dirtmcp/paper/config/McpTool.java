@@ -12,7 +12,8 @@ public enum McpTool {
     FILL_REGION("fill_region"),
     SET_BLOCKS("set_blocks"),
     GET_EDIT_HISTORY("get_edit_history"),
-    UNDO_EDIT("undo_edit");
+    UNDO_EDIT("undo_edit"),
+    RUN_MINECRAFT_COMMANDS("run_minecraft_commands");
 
     private final String id;
 

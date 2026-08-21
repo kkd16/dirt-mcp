@@ -45,6 +45,11 @@ export const BRIDGE_ROUTES = {
     timeoutMilliseconds: 120_000,
     salvageEditId: true,
   },
+  runMinecraftCommands: {
+    method: 'POST',
+    path: '/v1/run-minecraft-commands',
+    timeoutMilliseconds: 120_000,
+  },
 } as const satisfies Record<string, BridgeRoute>;
 
 export const BRIDGE_ERROR_CODES = [

@@ -12,6 +12,7 @@ export const MCP_TOOL_NAMES = [
   'set_blocks',
   'get_edit_history',
   'undo_edit',
+  'run_minecraft_commands',
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];
@@ -29,6 +30,7 @@ const toolConfigurationShape = {
   set_blocks: enabledSchema,
   get_edit_history: enabledSchema,
   undo_edit: enabledSchema,
+  run_minecraft_commands: enabledSchema,
 } satisfies Record<McpToolName, z.ZodBoolean>;
 
 export const McpToolConfigurationSchema = z

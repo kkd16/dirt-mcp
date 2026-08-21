@@ -28,6 +28,12 @@ function schemaReferenceCount(schema: string, name: string): number {
   return schema.split(`#/components/schemas/${name}`).length - 1;
 }
 
+function openapiPattern(openapi: string, schemaName: string): RegExp {
+  const pattern = /^      pattern: '([^']+)'$/m.exec(openapiSchema(openapi, schemaName))?.[1];
+  assert.ok(pattern, `${schemaName} is missing its validation pattern`);
+  return new RegExp(pattern, 'u');
+}
+
 function openapiObjectVariant(schema: string, discriminatorValue: string): string {
   const marker = `              const: ${discriminatorValue}\n`;
   const markerIndex = schema.indexOf(marker);
@@ -213,10 +219,29 @@ test('Paper, OpenAPI, shipped YAML, and MCP expose one exact tool catalog', () =
   assert.deepEqual(javaIds, [...MCP_TOOL_NAMES]);
 });
 
-test('requires a UUIDv4 call ID on edits and undo but not history lookup', () => {
+test('OpenAPI command patterns preserve Java control and outer-whitespace semantics', () => {
+  const openapi = read('../../protocol/openapi.yaml');
+  const input = openapiPattern(openapi, 'MinecraftCommandInput');
+  const normalized = openapiPattern(openapi, 'NormalizedMinecraftCommand');
+
+  for (const command of ['say hello', ' say hello ', '//help', ' / / ', '\u00a0']) {
+    assert.match(command, input);
+  }
+  for (const command of ['', ' ', '\u1680', ' / ', '\u3000/\u3000', 'say\nstop', 'say\u0085stop']) {
+    assert.doesNotMatch(command, input);
+  }
+
+  for (const command of ['say hello', '/help', '\u00a0']) assert.match(command, normalized);
+  for (const command of [' say hello', 'say hello ', '\u1680say hello', 'say hello\u3000', 'say\nstop']) {
+    assert.doesNotMatch(command, normalized);
+  }
+});
+
+test('requires a UUIDv4 call ID on mutations and only salvages retained edit IDs', () => {
   const openapi = read('../../protocol/openapi.yaml');
   const editPaths = ['/v1/replace-region-blocks', '/v1/fill-region', '/v1/set-blocks', '/v1/undo-edit'];
-  for (const path of editPaths) {
+  const callIdPaths = [...editPaths, '/v1/run-minecraft-commands'];
+  for (const path of callIdPaths) {
     assert.match(openapiPath(openapi, path), /#\/components\/parameters\/DirtCallId/);
   }
   assert.deepEqual(

@@ -138,11 +138,26 @@ final class McpToolHelp {
                             "edit (the consumed pre-undo EditRecord), undoCallId, and undoneAt.",
                             "Newest-only identity checking prevents an intervening edit from being "
                                     + "undone accidentally.");
+            case RUN_MINECRAFT_COMMANDS ->
+                    new ToolSpec(
+                            "Run Minecraft commands",
+                            ToolKind.SERVER_MUTATION,
+                            "Runs an ordered batch of registered Minecraft commands with operator authority.",
+                            "commands (one to the active per-request limit); each command may have "
+                                    + "surrounding whitespace and one leading slash, which are removed.",
+                            "sender, feedbackTruncated, and an ordered attempted-prefix result with "
+                                    + "each normalized command, lower-case outcome, captured feedback, "
+                                    + "and failure details when applicable.",
+                            "Commands use a non-player sender and stop after the first not-found or "
+                                    + "dispatch failure. Dispatch is synchronous, but command-defined "
+                                    + "effects are non-atomic and may outlive the response; they remain "
+                                    + "outside Dirt's FAWE edit locks and undo history.");
         };
     }
 
     enum ToolKind {
         READ_ONLY("Read-only"),
+        SERVER_MUTATION("Server mutation"),
         WORLD_MUTATION("World mutation");
 
         private final String label;

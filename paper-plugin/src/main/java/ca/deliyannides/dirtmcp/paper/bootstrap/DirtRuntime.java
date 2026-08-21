@@ -8,11 +8,14 @@ import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetPlayerContextEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetRegionBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.PingEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ReplaceRegionBlocksEndpoint;
+import ca.deliyannides.dirtmcp.paper.bridge.endpoint.RunMinecraftCommandsEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ScanOrthographicViewEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ServerStatusEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.SetBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.UndoEditEndpoint;
+import ca.deliyannides.dirtmcp.paper.command.BukkitCommandAccess;
 import ca.deliyannides.dirtmcp.paper.command.DirtAdminCommand;
+import ca.deliyannides.dirtmcp.paper.command.PaperCommandService;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.logging.LogContext;
@@ -94,6 +97,12 @@ public final class DirtRuntime implements AutoCloseable {
                                     limits.maxInspectionVolume(),
                                     limits.maxInspectionTouchedChunks()),
                             inspectionAdmission);
+            PaperCommandService commands =
+                    new PaperCommandService(
+                            mainThread,
+                            new BukkitCommandAccess(plugin),
+                            limits.maxCommandsPerRequest(),
+                            limits.maxCommandFeedbackCharacters());
             worldEditor =
                     new FaweWorldEditor(plugin, mainThread, limits, config.editHistory(), log);
             worldLifecycle = new WorldEditLifecycleListener(worldEditor);
@@ -114,7 +123,8 @@ public final class DirtRuntime implements AutoCloseable {
                                     new FillRegionEndpoint(worldEditor, config),
                                     new SetBlocksEndpoint(worldEditor, config),
                                     new GetEditHistoryEndpoint(worldEditor),
-                                    new UndoEditEndpoint(worldEditor)),
+                                    new UndoEditEndpoint(worldEditor),
+                                    new RunMinecraftCommandsEndpoint(commands)),
                             log);
             bridge.start();
             registerAdminCommand(plugin, config, status, log);

@@ -45,6 +45,8 @@ function minimalServerStatus(tools: McpToolConfiguration = allToolsEnabled): Rec
       maxInspectionVolume: 1,
       defaultInspectionResultLimit: 1,
       maxInspectionResultLimit: 1,
+      maxCommandsPerRequest: 1,
+      maxCommandFeedbackCharacters: 1,
     },
     editHistory: { maxEntriesPerWorld: 1, maxEntriesTotal: 1, maxRetainedChangedBlocks: 1 },
     defaults: { regionBlocksIncludeAir: false, regionBlocksFormat: 'blocks', editDryRun: false },
@@ -139,6 +141,8 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       maxInspectionVolume: 32_768,
       defaultInspectionResultLimit: 512,
       maxInspectionResultLimit: 2_048,
+      maxCommandsPerRequest: 10,
+      maxCommandFeedbackCharacters: 8_192,
     },
     editHistory: {
       maxEntriesPerWorld: 20,
@@ -446,6 +450,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { name: 'set_blocks', annotations: mutationAnnotations(false) },
       { name: 'get_edit_history', annotations: readAnnotations() },
       { name: 'undo_edit', annotations: mutationAnnotations(false) },
+      { name: 'run_minecraft_commands', annotations: mutationAnnotations(false) },
     ],
   );
   const listedStatus = listedTools.find((tool) => tool.name === 'get_server_status');
@@ -966,6 +971,324 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.equal(undoAudit?.outcome, 'undone');
   assert.equal(undoAudit?.changed_block_count, 1);
   assert.equal(JSON.stringify(logs.values).includes(bridgeToken), false);
+
+  const exited = once(child, 'exit');
+  child.stdin.end();
+  const [exitCode] = await exited;
+  assert.equal(exitCode, 0);
+});
+
+test('runs fail-fast Minecraft command batches with in-band failures and strict response correlation', async (context) => {
+  const configuredTools = toolConfiguration(false);
+  configuredTools.run_minecraft_commands = true;
+  const requests: BridgeRequestRecord[] = [];
+  let commandRequestCount = 0;
+  const secretCommand = 'say SUPER_SECRET_COMMAND_PAYLOAD_73';
+  const secretFeedback = 'SUPER_SECRET_FEEDBACK_91';
+  const bridge = createServer(async (request, response) => {
+    let rawBody = '';
+    for await (const chunk of request) rawBody += chunk;
+    requests.push({
+      method: request.method,
+      path: request.url,
+      headers: request.headers,
+      body: rawBody.length === 0 ? undefined : JSON.parse(rawBody),
+    });
+    response.setHeader('Content-Type', 'application/json');
+    if (request.url === '/v1/server-status') {
+      response.end(JSON.stringify(minimalServerStatus(configuredTools)));
+      return;
+    }
+
+    assert.equal(request.url, '/v1/run-minecraft-commands');
+    commandRequestCount++;
+    if (commandRequestCount === 1) {
+      response.end(
+        JSON.stringify({
+          sender: { name: 'FeedbackForwardingSender', isOperator: true, isPlayer: false },
+          feedbackTruncated: false,
+          results: [
+            {
+              command: secretCommand,
+              outcome: 'dispatched',
+              feedback: [secretFeedback],
+              message: null,
+              rawMessage: null,
+            },
+          ],
+        }),
+      );
+    } else if (commandRequestCount === 2) {
+      response.end(
+        JSON.stringify({
+          sender: { name: 'FeedbackForwardingSender', isOperator: true, isPlayer: false },
+          feedbackTruncated: true,
+          results: [
+            {
+              command: 'say ready',
+              outcome: 'dispatched',
+              feedback: [],
+              message: null,
+              rawMessage: null,
+            },
+            {
+              command: 'bad syntax',
+              outcome: 'dispatch_failed',
+              feedback: ['Usage: /bad'],
+              message: 'Incorrect argument',
+              rawMessage: 'Unhandled exception executing command',
+            },
+          ],
+        }),
+      );
+    } else if (commandRequestCount === 3) {
+      response.end(
+        JSON.stringify({
+          sender: { name: 'FeedbackForwardingSender', isOperator: true, isPlayer: false },
+          feedbackTruncated: false,
+          results: [
+            {
+              command: 'missing final',
+              outcome: 'not_found',
+              feedback: [],
+              message: 'Paper found no target for this command',
+              rawMessage: null,
+            },
+          ],
+        }),
+      );
+    } else {
+      response.end(
+        JSON.stringify({
+          sender: { name: 'FeedbackForwardingSender', isOperator: true, isPlayer: false },
+          feedbackTruncated: false,
+          results: [
+            {
+              command: 'say wrong',
+              outcome: 'dispatched',
+              feedback: [],
+              message: null,
+              rawMessage: null,
+            },
+          ],
+        }),
+      );
+    }
+  });
+  bridge.listen(0, '127.0.0.1');
+  await once(bridge, 'listening');
+  context.after(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        bridge.close((error) => (error === undefined ? resolve() : reject(error)));
+      }),
+  );
+
+  const child = spawn(process.execPath, [join(packageDirectory, 'dist/index.js')], {
+    env: {
+      ...process.env,
+      DIRT_MCP_BRIDGE_TOKEN: bridgeToken,
+      DIRT_MCP_BRIDGE_URL: `http://127.0.0.1:${serverAddressPort(bridge.address())}`,
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  context.after(() => {
+    if (child.exitCode === null) child.kill();
+  });
+  const messages = collectLines(child.stdout, (line) => JSON.parse(line) as JsonRpcResponse);
+  const logs = collectLines(child.stderr, parseLogRecord);
+
+  send(child, { jsonrpc: '2.0', id: 60, method: 'server/discover', params: requestParams({}) });
+  const discovered = await waitFor(messages, 60);
+  assert.match(String(discovered.result?.instructions), /operator-level non-player sender/);
+  assert.match(String(discovered.result?.instructions), /stops at the first per-command failure/);
+  assert.match(String(discovered.result?.instructions), /non-empty attempted prefix/);
+  assert.match(String(discovered.result?.instructions), /outside Dirt edit history and undo/);
+  assert.match(
+    String(discovered.result?.instructions),
+    /timeout, disconnect, or unexpected internal failure can leave completion ambiguous/i,
+  );
+  assert.doesNotMatch(String(discovered.result?.instructions), /dryRun|get_server_status/);
+
+  send(child, { jsonrpc: '2.0', id: 61, method: 'tools/list', params: requestParams({}) });
+  const catalog = await waitFor(messages, 61);
+  assert.deepEqual(
+    catalog.result?.tools?.map((tool) => tool.name),
+    ['run_minecraft_commands'],
+  );
+  configuredTools.run_minecraft_commands = false;
+  send(child, { jsonrpc: '2.0', id: 62, method: 'tools/list', params: requestParams({}) });
+  const fixedCatalog = await waitFor(messages, 62);
+  assert.deepEqual(
+    fixedCatalog.result?.tools?.map((tool) => tool.name),
+    ['run_minecraft_commands'],
+  );
+
+  const firstInput = { commands: [` /${secretCommand} `] };
+  send(child, {
+    jsonrpc: '2.0',
+    id: 63,
+    method: 'tools/call',
+    params: requestParams({ name: 'run_minecraft_commands', arguments: firstInput }),
+  });
+  const succeeded = await waitFor(messages, 63);
+  const successfulCommandOutput = {
+    sender: { name: 'FeedbackForwardingSender', isOperator: true, isPlayer: false },
+    feedbackTruncated: false,
+    results: [
+      {
+        command: secretCommand,
+        outcome: 'dispatched',
+        feedback: [secretFeedback],
+        message: null,
+        rawMessage: null,
+      },
+    ],
+  };
+  assert.deepEqual(
+    succeeded.result,
+    completeResult({
+      content: [{ type: 'text', text: 'Dispatched 1 command in order.' }],
+      structuredContent: successfulCommandOutput,
+    }),
+  );
+
+  const mixedInput = { commands: ['say ready', 'bad syntax', 'say skipped'] };
+  send(child, {
+    jsonrpc: '2.0',
+    id: 64,
+    method: 'tools/call',
+    params: requestParams({ name: 'run_minecraft_commands', arguments: mixedInput }),
+  });
+  const mixed = await waitFor(messages, 64);
+  assert.equal(mixed.result?.isError, true);
+  assert.deepEqual(mixed.result?.content, [
+    {
+      type: 'text',
+      text: 'Command 2 of 3 failed during dispatch. 1 prior command was dispatched. 1 remaining command was not attempted.',
+    },
+  ]);
+  assert.deepEqual(mixed.result?.structuredContent, {
+    sender: { name: 'FeedbackForwardingSender', isOperator: true, isPlayer: false },
+    feedbackTruncated: true,
+    results: [
+      {
+        command: 'say ready',
+        outcome: 'dispatched',
+        feedback: [],
+        message: null,
+        rawMessage: null,
+      },
+      {
+        command: 'bad syntax',
+        outcome: 'dispatch_failed',
+        feedback: ['Usage: /bad'],
+        message: 'Incorrect argument',
+        rawMessage: 'Unhandled exception executing command',
+      },
+    ],
+  });
+
+  const finalFailureInput = { commands: ['missing final'] };
+  send(child, {
+    jsonrpc: '2.0',
+    id: 65,
+    method: 'tools/call',
+    params: requestParams({ name: 'run_minecraft_commands', arguments: finalFailureInput }),
+  });
+  const finalFailure = await waitFor(messages, 65);
+  assert.equal(finalFailure.result?.isError, true);
+  assert.deepEqual(finalFailure.result?.content, [
+    { type: 'text', text: 'Command 1 of 1 was not found. No prior commands were dispatched.' },
+  ]);
+  assert.deepEqual(finalFailure.result?.structuredContent, {
+    sender: { name: 'FeedbackForwardingSender', isOperator: true, isPlayer: false },
+    feedbackTruncated: false,
+    results: [
+      {
+        command: 'missing final',
+        outcome: 'not_found',
+        feedback: [],
+        message: 'Paper found no target for this command',
+        rawMessage: null,
+      },
+    ],
+  });
+
+  send(child, {
+    jsonrpc: '2.0',
+    id: 66,
+    method: 'tools/call',
+    params: requestParams({ name: 'run_minecraft_commands', arguments: { commands: ['say expected'] } }),
+  });
+  const mismatched = await waitFor(messages, 66);
+  assert.equal(mismatched.result?.isError, true);
+  assert.equal(mismatched.result?.structuredContent?.error?.code, 'bridge_invalid_response');
+  assert.equal(
+    mismatched.result?.structuredContent?.error?.message,
+    'Paper bridge response was not the requested fail-fast command prefix.',
+  );
+
+  const requestCountBeforeInvalidInput = requests.length;
+  send(child, {
+    jsonrpc: '2.0',
+    id: 67,
+    method: 'tools/call',
+    params: requestParams({
+      name: 'run_minecraft_commands',
+      arguments: { commands: ['say first\nsay second'] },
+    }),
+  });
+  const invalid = await waitFor(messages, 67);
+  assert.equal(invalid.result?.isError, true);
+  assert.equal(invalid.result?.structuredContent, undefined);
+  assert.equal(requests.length, requestCountBeforeInvalidInput);
+
+  assert.deepEqual(
+    requests.map(({ method, path }) => ({ method, path })),
+    [
+      { method: 'GET', path: '/v1/server-status' },
+      { method: 'POST', path: '/v1/run-minecraft-commands' },
+      { method: 'POST', path: '/v1/run-minecraft-commands' },
+      { method: 'POST', path: '/v1/run-minecraft-commands' },
+      { method: 'POST', path: '/v1/run-minecraft-commands' },
+    ],
+  );
+  assert.deepEqual(requestAt(requests, 1).body, firstInput);
+  assert.deepEqual(requestAt(requests, 2).body, mixedInput);
+  assert.deepEqual(requestAt(requests, 3).body, finalFailureInput);
+  for (const request of requests.slice(1)) {
+    assert.equal(request.headers['content-type'], 'application/json');
+    assert.equal(typeof request.headers['x-dirt-call-id'], 'string');
+  }
+
+  await waitForValue(
+    logs,
+    (record) =>
+      record.event === 'tool.completed' && record.operation === 'run_minecraft_commands' && record.request_id === 66,
+    'mismatched command response audit',
+  );
+  const commandAudits = logs.values.filter(
+    (record) => record.event === 'tool.completed' && record.operation === 'run_minecraft_commands',
+  );
+  assert.deepEqual(
+    commandAudits.map((record) => ({
+      level: record.level,
+      requestId: record.request_id,
+      success: record.success,
+      outcome: record.outcome,
+      resultCount: record.result_count,
+    })),
+    [
+      { level: 'info', requestId: 63, success: true, outcome: 'dispatched', resultCount: 1 },
+      { level: 'warning', requestId: 64, success: false, outcome: 'partial_failure', resultCount: 2 },
+      { level: 'warning', requestId: 65, success: false, outcome: 'partial_failure', resultCount: 1 },
+      { level: 'error', requestId: 66, success: false, outcome: undefined, resultCount: undefined },
+    ],
+  );
+  const serializedLogs = JSON.stringify(logs.values);
+  assert.equal(serializedLogs.includes(secretCommand), false);
+  assert.equal(serializedLogs.includes(secretFeedback), false);
 
   const exited = once(child, 'exit');
   child.stdin.end();

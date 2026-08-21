@@ -153,6 +153,7 @@ final class DirtAdminCommandTest {
         assertTrue(plain.contains("set_blocks  false"));
         assertTrue(plain.contains("get_edit_history  true"));
         assertTrue(plain.contains("undo_edit  false"));
+        assertTrue(plain.contains("run_minecraft_commands  false"));
         assertTrue(plain.contains("LOGGING"));
         assertTrue(plain.contains("console-level  warning"));
         assertTrue(plain.contains("detail-file  logs/dirt-detail.%g.jsonl"));
@@ -167,6 +168,8 @@ final class DirtAdminCommandTest {
         assertTrue(plain.contains("max-inspection-volume  8192"));
         assertTrue(plain.contains("default-inspection-results  256"));
         assertTrue(plain.contains("max-inspection-results  1024"));
+        assertTrue(plain.contains("max-commands-per-request  10"));
+        assertTrue(plain.contains("max-command-feedback-characters  8192"));
         assertTrue(plain.contains("EDIT HISTORY"));
         assertTrue(plain.contains("max-entries-per-world  10"));
         assertTrue(plain.contains("max-entries-total  50"));
@@ -185,7 +188,7 @@ final class DirtAdminCommandTest {
         Component message = fixture.messages.getFirst();
         String plain = PLAIN.serialize(message);
         assertTrue(plain.contains("DIRT MCP  /  MCP Tools"));
-        assertTrue(plain.contains("Paper startup snapshot  •  5 of 11 configured ON"));
+        assertTrue(plain.contains("Paper startup snapshot  •  5 of 12 configured ON"));
         assertTrue(plain.contains("restart Paper, then the MCP host"));
         Set<String> expectedCommands = new HashSet<>();
         for (McpTool tool : McpTool.values()) {
@@ -324,7 +327,8 @@ final class DirtAdminCommandTest {
                                 McpTool.FILL_REGION,
                                 McpTool.GET_EDIT_HISTORY)),
                 new DirtConfig.Logging(DirtConfig.ConsoleLogLevel.WARNING, 2_000_000, 7),
-                new DirtConfig.Limits(262_144, 131_072, 128, 16, 32, 65_536, 8_192, 256, 1_024),
+                new DirtConfig.Limits(
+                        262_144, 131_072, 128, 16, 32, 65_536, 8_192, 256, 1_024, 10, 8_192),
                 new DirtConfig.EditHistory(10, 50, 655_360),
                 new DirtConfig.Defaults(true, "runs", true));
     }
@@ -358,7 +362,7 @@ final class DirtAdminCommandTest {
                                         1)),
                         config().tools().flags(),
                         new GetServerStatus.EffectiveLogging("warning", 2_000_000, 7),
-                        new GetServerStatus.EffectiveLimits(1, 1, 1, 1, 1, 1, 1, 1, 1),
+                        new GetServerStatus.EffectiveLimits(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
                         new GetServerStatus.EffectiveEditHistory(2, 3, 4),
                         new GetServerStatus.EffectiveDefaults(false, "blocks", false));
         return () -> result;

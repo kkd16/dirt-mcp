@@ -7,10 +7,12 @@ import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetPlayerContextEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetRegionBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.PingEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ReplaceRegionBlocksEndpoint;
+import ca.deliyannides.dirtmcp.paper.bridge.endpoint.RunMinecraftCommandsEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ScanOrthographicViewEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ServerStatusEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.SetBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.UndoEditEndpoint;
+import ca.deliyannides.dirtmcp.paper.command.RunMinecraftCommands;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.config.McpTool;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
@@ -61,7 +63,8 @@ final class BridgeTestFixture {
                 new DirtConfig.Bridge(port, 1, 1, maximumConcurrentRequests, 1),
                 allTools(),
                 new DirtConfig.Logging(DirtConfig.ConsoleLogLevel.INFO, 10_485_760, 5),
-                new DirtConfig.Limits(262_144, 1_000_000, 256, 32, 64, 250_000, 32_768, 321, 654),
+                new DirtConfig.Limits(
+                        262_144, 1_000_000, 256, 32, 64, 250_000, 32_768, 321, 654, 10, 8_192),
                 new DirtConfig.EditHistory(20, 100, 1_000_000),
                 new DirtConfig.Defaults(false, "blocks", false));
     }
@@ -88,7 +91,8 @@ final class BridgeTestFixture {
                         new FillRegionEndpoint(operations, config),
                         new SetBlocksEndpoint(operations, config),
                         new GetEditHistoryEndpoint(operations),
-                        new UndoEditEndpoint(operations)),
+                        new UndoEditEndpoint(operations),
+                        new RunMinecraftCommandsEndpoint(operations)),
                 log);
     }
 
@@ -129,7 +133,8 @@ final class BridgeTestFixture {
                     FillRegion,
                     SetBlocks,
                     GetEditHistory,
-                    UndoEdit {
+                    UndoEdit,
+                    RunMinecraftCommands {
         @Override
         public PingServer.Result ping() throws OperationException {
             return new PingServer.Result("ok");
@@ -154,7 +159,7 @@ final class BridgeTestFixture {
                     allTools().flags(),
                     new GetServerStatus.EffectiveLogging("info", 10_485_760, 5),
                     new GetServerStatus.EffectiveLimits(
-                            262_144, 1_000_000, 256, 32, 64, 250_000, 32_768, 321, 654),
+                            262_144, 1_000_000, 256, 32, 64, 250_000, 32_768, 321, 654, 10, 8_192),
                     new GetServerStatus.EffectiveEditHistory(20, 100, 1_000_000),
                     new GetServerStatus.EffectiveDefaults(false, "blocks", false));
         }
@@ -296,6 +301,24 @@ final class BridgeTestFixture {
                     movement,
                     playerClient,
                     effects);
+        }
+
+        @Override
+        public RunMinecraftCommands.Result runCommands(RunMinecraftCommands.Request request)
+                throws OperationException {
+            return new RunMinecraftCommands.Result(
+                    new RunMinecraftCommands.Sender("DirtMCP", true, false),
+                    false,
+                    request.commands().stream()
+                            .map(
+                                    command ->
+                                            new RunMinecraftCommands.CommandResult(
+                                                    command,
+                                                    RunMinecraftCommands.Outcome.DISPATCHED,
+                                                    List.of("ran " + command),
+                                                    null,
+                                                    null))
+                            .toList());
         }
 
         @Override

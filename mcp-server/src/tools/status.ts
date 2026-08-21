@@ -76,6 +76,12 @@ const LimitConfigurationSchema = z
     maxInspectionResultLimit: PositiveInt32Schema.describe(
       'Maximum caller-selected detailed-inspection result limit or player-view ray count.',
     ),
+    maxCommandsPerRequest: PositiveInt32Schema.describe(
+      'Maximum commands accepted in one ordered Minecraft command batch.',
+    ),
+    maxCommandFeedbackCharacters: PositiveInt32Schema.describe(
+      'Maximum Unicode code points of synchronous plain-text feedback retained across one command batch.',
+    ),
   })
   .strict()
   .refine((limits) => limits.maxInspectionTouchedChunks <= limits.maxTouchedChunks, {
@@ -98,7 +104,7 @@ const LimitConfigurationSchema = z
     message: 'maxInspectionResultLimit must not exceed maxInspectionVolume.',
     path: ['maxInspectionResultLimit'],
   })
-  .describe('Active limits that constrain Dirt inspection and mutation tools.');
+  .describe('Active limits that constrain Dirt inspection, mutation, and command tools.');
 
 export const EditHistoryConfigurationSchema = z
   .object({

@@ -57,6 +57,8 @@ function serverStatusFixture() {
       maxInspectionVolume: 80,
       defaultInspectionResultLimit: 10,
       maxInspectionResultLimit: 20,
+      maxCommandsPerRequest: 10,
+      maxCommandFeedbackCharacters: 8_192,
     },
     editHistory: { maxEntriesPerWorld: 1, maxEntriesTotal: 1, maxRetainedChangedBlocks: 50 },
     defaults: { regionBlocksIncludeAir: false, regionBlocksFormat: 'blocks', editDryRun: false },

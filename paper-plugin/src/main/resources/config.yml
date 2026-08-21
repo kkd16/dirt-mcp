@@ -28,6 +28,7 @@ tools:
   set_blocks: true
   get_edit_history: true
   undo_edit: true
+  run_minecraft_commands: true
 
 logging:
   # Minimum severity shown in the Paper console: info, warning, or error.
@@ -60,6 +61,10 @@ limits:
   # Highest region maxResults and player-view ray count; cannot exceed
   # max-inspection-volume.
   max-inspection-results: 2048
+  # Maximum commands accepted in one ordered batch.
+  max-commands-per-request: 10
+  # Maximum plain-text feedback Unicode code points retained across one command batch.
+  max-command-feedback-characters: 8192
 
 edit-history:
   # Maximum undoable edits per world; cannot exceed max-entries-total.

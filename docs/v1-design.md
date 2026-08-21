@@ -1,8 +1,9 @@
 # Version 1 behavior
 
-V1 is a synchronous, local tool surface for loaded Paper worlds. Mutation tools
-execute immediately unless `dryRun` is enabled. The authoritative HTTP request,
-response, and error schemas are in
+V1 is a synchronous, local tool surface for loaded Paper worlds. Block-edit
+tools execute immediately unless `dryRun` is enabled; command batches always
+execute immediately. The authoritative HTTP request, response, and error schemas
+are in
 [`protocol/openapi.yaml`](../protocol/openapi.yaml); this document records the
 behavior that matters when choosing and combining tools.
 
@@ -21,6 +22,7 @@ behavior that matters when choosing and combining tools.
 | `set_blocks`                | `POST /v1/set-blocks`                | Place weighted-palette states at relative offsets as one edit.        |
 | `get_edit_history`          | `POST /v1/get-edit-history`          | List retained undoable edits for one loaded world, newest first.      |
 | `undo_edit`                 | `POST /v1/undo-edit`                 | Undo the identified newest retained edit in one loaded world.         |
+| `run_minecraft_commands`    | `POST /v1/run-minecraft-commands`    | Dispatch an ordered command batch with operator-level permissions.    |
 
 The table is the implemented surface. The `tools` configuration section is an
 explicit allowlist for the agent-facing MCP catalog. The shipped file sets every
@@ -142,11 +144,12 @@ are canonicalized at the Paper boundary. A `set_blocks` request may not contain
 more placements than the configured region-volume limit, and all edits must stay
 within the changed-block limit.
 
-Every `replace_region_blocks`, `fill_region`, `set_blocks`, and `undo_edit`
-bridge request requires a canonical UUIDv4 `X-Dirt-Call-Id` header. The MCP
-server creates it; direct bridge clients must do the same. Each executed
-non-empty edit uses one recording FAWE edit session. A world accepts one Dirt
-edit or undo at a time, and competing work fails with `world_busy`.
+Every `replace_region_blocks`, `fill_region`, `set_blocks`, `undo_edit`, and
+`run_minecraft_commands` bridge request requires a canonical UUIDv4
+`X-Dirt-Call-Id` header. The MCP server creates it; direct bridge clients must
+do the same. Separately, each executed non-empty edit uses one recording FAWE
+edit session. A world accepts one Dirt edit or undo at a time, and competing
+work fails with `world_busy`.
 
 Every block-edit response includes `outcome` and `edit`. The possible outcomes
 are:
@@ -241,8 +244,47 @@ neighbor updates. This is appropriate for large deterministic builds, but
 redstone and other physics-sensitive structures may require a separate,
 explicit update mechanism.
 
-`undo_edit` restores only a retained Dirt replacement, fill, or palette-based set.
-It does not undo player actions, WorldEdit actions, or other plugin activity.
+`undo_edit` restores only a retained Dirt replacement, fill, or palette-based
+set. It does not undo command batches, player actions, WorldEdit actions, or
+other plugin activity.
+
+## Command dispatch
+
+`run_minecraft_commands` accepts a non-empty `commands` array, including for a
+single command. Dirt validates the entire batch before executing any entry. It
+rejects ISO control characters, strips Java outer whitespace, removes at most
+one leading in-game slash, and applies the active command-count limit.
+Duplicates are preserved.
+
+Paper attempts validated commands once in supplied order until the first
+failure. The failing command is included as the final result, and later commands
+are not attempted. Each result contains the normalized `command`, bounded
+synchronous plain-text `feedback`, and one outcome:
+
+- `dispatched`: Paper found and invoked a target without a dispatch exception;
+  `message` and `rawMessage` are null;
+- `not_found`: Paper found no target; `message` explains the failure and
+  `rawMessage` is null; or
+- `dispatch_failed`: `message` is the deepest actionable cause available and
+  `rawMessage` contains Paper's non-empty wrapper message or a stable fallback.
+
+`dispatched` is not a semantic success signal because Bukkit does not expose
+the command's Brigadier result value. HTTP returns the ordered attempted prefix
+with status 200 for a per-command failure; the MCP result sets `isError=true`
+and retains the failing final result so callers inspect earlier effects before
+deciding what to do next.
+
+The feedback sender has console-equivalent permissions but is not a player or
+the literal console sender. Player-only commands, `@s`, relative-position
+context, and plugins that require a concrete console sender can therefore
+behave differently. Only synchronous messages sent to that sender are captured;
+server logs, broadcasts, player-directed output, and delayed feedback are not.
+
+Commands are dispatched synchronously on Paper's main thread, but their
+arbitrary, non-atomic effects may outlive the response and remain outside FAWE
+limits, per-world mutation locks, and Dirt undo history. If a timeout,
+disconnect, or unexpected internal failure occurs after the batch begins,
+completion is ambiguous and automatic retry can duplicate effects.
 
 ## Logging
 
@@ -259,14 +301,16 @@ The MCP process reserves stdout for MCP protocol traffic and writes structured
 JSON Lines to stderr. Applicable `call_id`, `edit_id`, operation, world, outcome,
 status or error code, and duration fields correlate MCP calls with Paper detail
 records. Dirt logs bounded summaries, never bearer tokens, raw request bodies,
-or complete block payloads.
+complete block payloads, command strings, command feedback, or raw command
+failure messages.
 
 ## Limits and security
 
 Startup-validated limits bound region volume, touched, snapshotted, and
 player-view checked chunks, changed blocks, detailed scans and player-view ray
-budgets, result sizes and ray counts, request bodies, concurrent bridge and
-inspection work, and retained history. Active operation
+budgets, result sizes and ray counts, command count, retained command feedback,
+request bodies, concurrent bridge and inspection work, and retained history.
+Active operation
 limits, the separate `editHistory` object, `logging` configuration, and every
 resolved per-tool boolean in `tools` are available through `get_server_status`
 with `include.configuration=true`;
@@ -277,6 +321,9 @@ settings live in
 the plugin's
 [configuration file](../paper-plugin/src/main/resources/config.yml).
 
-Limits bound resource use; they are not a permissions or land-policy system.
+The shipped command limits allow 10 entries per batch and 8,192 retained
+feedback code points across the request. The bridge's request-body limit bounds
+the complete encoded batch. Limits bound resource use; they are not a
+permissions or land-policy system.
 Every bridge endpoint requires the shared bearer token, the bridge binds only to
 `127.0.0.1`, and the operator remains responsible for access and backups.

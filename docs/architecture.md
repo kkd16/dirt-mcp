@@ -21,6 +21,7 @@ The Java plugin owns everything that touches the Minecraft server:
 
 - plugin lifecycle and configuration;
 - bearer authentication and request validation;
+- bounded operator-level Minecraft command dispatch;
 - world lookup, bounds, and configured limits;
 - coordination of reads and edits;
 - FAWE edit sessions and bounded, retryable in-memory edit history; and
@@ -33,8 +34,8 @@ parses MCP messages.
 The plugin remains one deployable JAR but is organized as cohesive feature
 packages. A small bootstrap owns lifecycle; the bridge dispatcher owns exact
 routing, authentication, admission, and error mapping; narrow operation
-interfaces connect endpoints to status, inspection, player-context, and edit
-services.
+interfaces connect endpoints to status, command, inspection, player-context,
+and edit services.
 Focused static request decoders sit beside their endpoints without a shared
 decoder interface or hierarchy, while the exchange object owns common body and
 response mechanics.
@@ -66,11 +67,11 @@ reserved for MCP; process diagnostics are structured JSON Lines on stderr.
 The process entry point validates its environment and starts the current MCP
 stdio transport. When the connection opens, a composition root reads the
 authenticated Paper status snapshot and registers its enabled tool catalog.
-Tool schemas stay with their cohesive status, inspection, player-context, and
-editing registrars; one concrete bridge client owns authenticated HTTP and response
-validation; one execution helper owns call IDs, error mapping, and auditing. The
-design uses functions and concrete modules rather than a tool class hierarchy
-or dependency-injection framework.
+Tool schemas stay with their cohesive status, command, inspection,
+player-context, and editing registrars; one concrete bridge client owns
+authenticated HTTP and response validation; one execution helper owns call IDs,
+error mapping, and auditing. The design uses functions and concrete modules
+rather than a tool class hierarchy or dependency-injection framework.
 
 Each accepted tool call carries explicit context across asynchronous boundaries
 and writes one completion object to stderr. Its generated call ID is forwarded
@@ -122,6 +123,30 @@ status endpoint. The MCP process snapshots it again while building its tool
 catalog, so changing YAML requires a Paper restart followed by an MCP host or
 process restart. Bridge routes remain an internal authenticated transport and
 are not removed when their agent-facing tool is disabled.
+
+## Command execution
+
+`run_minecraft_commands` validates the complete bounded batch before crossing
+once onto Paper's main thread. It rejects ISO control characters, strips Java
+outer whitespace, removes at most one in-game leading slash, rejects entries
+that are empty after normalization, and dispatches commands once in order through
+`Server.dispatchCommand` until the first failure.
+
+Each dispatch uses Paper's supported feedback-forwarding sender and a fresh
+capture scope. The sender has console-equivalent permissions but is neither a
+player nor the literal console sender. Synchronous Adventure feedback is
+converted to plain text under one Unicode-code-point budget for the request;
+late feedback is ignored after that command's dispatch returns.
+
+A missing target or `CommandException` becomes the final in-band per-command
+outcome and stops the batch before later entries are dispatched. A reported
+`dispatched` outcome means only that Paper found and invoked a target without a
+dispatch exception. Command batches are non-atomic: effects from earlier
+commands remain. Dispatch is synchronous, but arbitrary command effects may
+outlive the response and sit outside FAWE limits, per-world edit locks, and Dirt
+undo history. A timeout, disconnect, or unexpected internal failure can
+therefore be ambiguous after main-thread execution begins and must not be
+retried blindly.
 
 ## Edit execution
 

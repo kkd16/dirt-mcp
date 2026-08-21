@@ -39,7 +39,9 @@ V1 provides these world capabilities:
 - set weighted-palette block states at origin-relative offsets as one edit;
 - receive identity and bounds metadata for every committed non-empty edit;
 - inspect the retained, undoable edit history for a loaded world;
-- undo the identified newest retained edit.
+- undo the identified newest retained edit; and
+- run bounded ordered batches of registered Minecraft commands through a
+  console-permission, non-player Paper sender.
 
 [FastAsyncWorldEdit (FAWE)](https://github.com/IntellectualSites/FastAsyncWorldEdit)
 is a required server dependency. Dirt MCP validates inputs and enforces
@@ -50,6 +52,11 @@ V1 edit history is deliberately bounded and in memory. Positive per-world,
 global-entry, and aggregate changed-block limits keep every listed record backed
 by live undo data. History survives chunk unloads but not world unloads or Paper
 restarts; it is not a substitute for backups.
+
+Command dispatch is the explicit operator-level escape hatch for server behavior
+that Dirt's semantic world tools do not cover. Dispatch is synchronous, but its
+arbitrary effects may outlive the response and are not tracked by Dirt edit
+history.
 
 ## Outside v1
 

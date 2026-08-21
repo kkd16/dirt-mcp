@@ -36,7 +36,7 @@ export async function executeToolCall(
   try {
     const result = await call(callId);
     success = result.isError !== true;
-    if (success) resultFields = successfulResultLogFields(result);
+    resultFields = resultLogFields(result);
     return result;
   } catch (error: unknown) {
     failure = toolFailure(error);
@@ -66,7 +66,7 @@ export async function executeToolCall(
       ...resultFields,
       ...failureFields,
     };
-    const level = failure === undefined ? 'info' : toolFailureLogLevel(failure);
+    const level = failure === undefined ? (success ? 'info' : 'warning') : toolFailureLogLevel(failure);
     switch (level) {
       case 'error':
         callLogger.error('tool.completed', 'Tool call completed.', completionFields);
@@ -87,7 +87,7 @@ function toolFailure(error: unknown): ToolFailure {
     : new ToolFailure({ code: 'dirt_internal_error', message: INTERNAL_ERROR_MESSAGE });
 }
 
-function successfulResultLogFields(result: CallToolResult): LogFields {
+function resultLogFields(result: CallToolResult): LogFields {
   const content = objectValue(result.structuredContent);
   if (content === undefined) return {};
 
@@ -102,7 +102,16 @@ function successfulResultLogFields(result: CallToolResult): LogFields {
 
   let resultCount: number | undefined;
   const edits = propertyValue(content, 'edits');
-  if (Array.isArray(edits)) {
+  const commandResults = propertyValue(content, 'results');
+  if (Array.isArray(commandResults)) {
+    resultCount = commandResults.length;
+    const finalCommandResult = objectValue(commandResults.at(-1));
+    const finalCommandOutcome = stringValue(propertyValue(finalCommandResult, 'outcome'));
+    if (finalCommandOutcome === 'dispatched') outcome = 'dispatched';
+    else if (finalCommandOutcome === 'not_found' || finalCommandOutcome === 'dispatch_failed') {
+      outcome = 'partial_failure';
+    }
+  } else if (Array.isArray(edits)) {
     resultCount = edits.length;
   } else {
     const blockStateCounts = objectValue(propertyValue(content, 'blockStateCounts'));

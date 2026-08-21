@@ -9,7 +9,8 @@ while Paper remains the owner of the live world.
 
 The repository ships the Paper plugin, authenticated loopback bridge, and MCP
 tools for server status, bounded inspection, FAWE-backed cuboid and palette-based
-edits, inspectable edit history, and ID-checked undo.
+edits, inspectable edit history, ID-checked undo, and bounded ordered Minecraft
+command batches.
 
 ## Platform support
 
@@ -79,6 +80,13 @@ independent boolean; an entry omitted from that section resolves to false, while
 unknown or invalid entries stop plugin startup. Other configuration keys remain
 required. Compare an existing file with the shipped `config.yml` after
 upgrading.
+
+`run_minecraft_commands` dispatches registered vanilla, Paper, and plugin
+commands in order with console-equivalent permissions through a non-player
+feedback sender, stopping after the first missing target or dispatch exception.
+Dispatch is synchronous, but arbitrary effects may outlive the response and are
+outside Dirt undo. Inspect the returned attempted prefix, and do not blindly
+retry after a timeout, disconnect, or unexpected internal failure.
 
 Restart Paper after changing the file, then restart the MCP host or process so
 it loads the new catalog. Tool configuration controls the agent-facing MCP

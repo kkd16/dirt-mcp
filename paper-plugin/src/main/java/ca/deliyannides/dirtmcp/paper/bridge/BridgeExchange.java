@@ -2,6 +2,7 @@ package ca.deliyannides.dirtmcp.paper.bridge;
 
 import static ca.deliyannides.dirtmcp.paper.bridge.RequestJson.invalid;
 
+import ca.deliyannides.dirtmcp.paper.command.RunMinecraftCommands;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.validation.UuidV4;
@@ -297,6 +298,14 @@ public final class BridgeExchange {
                 if (result.view() != null) {
                     this.resultCount = (long) result.view().hits().size();
                 }
+            }
+            case RunMinecraftCommands.Result result -> {
+                this.resultCount = (long) result.results().size();
+                this.outcome =
+                        result.results().getLast().outcome()
+                                        == RunMinecraftCommands.Outcome.DISPATCHED
+                                ? "dispatched"
+                                : "partial_failure";
             }
             default -> {
                 // Ping, status, and error envelopes do not add result metadata.

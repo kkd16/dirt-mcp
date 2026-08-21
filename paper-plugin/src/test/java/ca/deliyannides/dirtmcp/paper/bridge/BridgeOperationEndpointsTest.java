@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ca.deliyannides.dirtmcp.paper.command.RunMinecraftCommands;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.config.McpTool;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
@@ -68,6 +69,71 @@ final class BridgeOperationEndpointsTest {
             assertEquals("info", logging.get("consoleLevel").getAsString());
             assertEquals(10_485_760, logging.get("detailFileMaxBytes").getAsInt());
             assertEquals(5, logging.get("detailFileRetainedFiles").getAsInt());
+            var limits = json(response.body()).getAsJsonObject().getAsJsonObject("limits");
+            assertEquals(10, limits.get("maxCommandsPerRequest").getAsInt());
+            assertEquals(8_192, limits.get("maxCommandFeedbackCharacters").getAsInt());
+        }
+    }
+
+    @Test
+    void parsesCommandBatchesAndSerializesLowerCasePerCommandOutcomes() throws Exception {
+        AtomicReference<RunMinecraftCommands.Request> captured = new AtomicReference<>();
+        BridgeTestFixture.TestOperations operations =
+                new BridgeTestFixture.TestOperations() {
+                    @Override
+                    public RunMinecraftCommands.Result runCommands(
+                            RunMinecraftCommands.Request request) {
+                        captured.set(request);
+                        return new RunMinecraftCommands.Result(
+                                new RunMinecraftCommands.Sender("DirtMCP", true, false),
+                                true,
+                                List.of(
+                                        new RunMinecraftCommands.CommandResult(
+                                                "say hello",
+                                                RunMinecraftCommands.Outcome.DISPATCHED,
+                                                List.of("hello"),
+                                                null,
+                                                null),
+                                        new RunMinecraftCommands.CommandResult(
+                                                "missing",
+                                                RunMinecraftCommands.Outcome.NOT_FOUND,
+                                                List.of(),
+                                                "Paper found no target for this command",
+                                                null)));
+                    }
+                };
+        try (BridgeServer bridge = server(config(availablePort(), 4), operations);
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+
+            HttpResponse<String> response =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/run-minecraft-commands",
+                                    "{\"commands\":[\"say hello\",\"missing\",\"must not run\"]}"));
+
+            assertEquals(200, response.statusCode());
+            assertEquals(
+                    new RunMinecraftCommands.Request(
+                            List.of("say hello", "missing", "must not run")),
+                    captured.get());
+            assertEquals(
+                    json(
+                            """
+                            {
+                              "sender":{"name":"DirtMCP","isOperator":true,"isPlayer":false},
+                              "feedbackTruncated":true,
+                              "results":[
+                                {"command":"say hello","outcome":"dispatched","feedback":["hello"],
+                                 "message":null,"rawMessage":null},
+                                {"command":"missing","outcome":"not_found","feedback":[],
+                                 "message":"Paper found no target for this command","rawMessage":null}
+                              ]
+                            }
+                            """),
+                    json(response.body()));
         }
     }
 
@@ -629,7 +695,9 @@ final class BridgeOperationEndpointsTest {
                                 limits.maxChangedBlocks(),
                                 limits.maxInspectionVolume(),
                                 limits.defaultInspectionResultLimit(),
-                                limits.maxInspectionResultLimit()),
+                                limits.maxInspectionResultLimit(),
+                                limits.maxCommandsPerRequest(),
+                                limits.maxCommandFeedbackCharacters()),
                         standard.editHistory(),
                         standard.defaults());
         try (BridgeServer bridge = server(small, operations);
@@ -763,6 +831,15 @@ final class BridgeOperationEndpointsTest {
                                     .header("X-Dirt-Call-Id", "not-a-uuid")
                                     .POST(HttpRequest.BodyPublishers.ofString(fill))
                                     .build());
+            HttpResponse<String> missingCommandCallId =
+                    send(
+                            client,
+                            authorized(bridge, "/v1/run-minecraft-commands")
+                                    .header("Content-Type", "application/json")
+                                    .POST(
+                                            HttpRequest.BodyPublishers.ofString(
+                                                    "{\"commands\":[\"help\"]}"))
+                                    .build());
             HttpResponse<String> nonCanonicalCallId =
                     send(
                             client,
@@ -805,6 +882,7 @@ final class BridgeOperationEndpointsTest {
             HttpResponse<String> valid = send(client, post(bridge, "/v1/fill-region", fill));
 
             assertError(missingCallId, "X-Dirt-Call-Id must be a UUID version 4");
+            assertError(missingCommandCallId, "X-Dirt-Call-Id must be a UUID version 4");
             assertError(invalidCallId, "X-Dirt-Call-Id must be a UUID version 4");
             assertError(nonCanonicalCallId, "X-Dirt-Call-Id must be a UUID version 4");
             assertError(wrongVersionCallId, "X-Dirt-Call-Id must be a UUID version 4");

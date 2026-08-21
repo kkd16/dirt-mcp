@@ -152,7 +152,17 @@ final class BridgeDispatcher implements AutoCloseable {
         boolean transportFailure = responseTransportFailure || failure instanceof IOException;
         boolean internalFailure =
                 status != null && status == 500 && "internal_error".equals(exchange.errorCode());
-        boolean recoveryAmbiguity = recoveryRisk || transportFailure && exchange.editId() != null;
+        boolean commandOperation = "run_minecraft_commands".equals(operation);
+        boolean commandResultCaptured = commandResultCaptured(exchange);
+        boolean commandResponseAmbiguity =
+                commandOperation
+                        && (internalFailure
+                                || unexpectedFailure
+                                || commandResultCaptured && transportFailure);
+        boolean recoveryAmbiguity =
+                recoveryRisk
+                        || transportFailure && exchange.editId() != null
+                        || commandResponseAmbiguity;
         String callId = rawExchange.getRequestHeaders().getFirst(CALL_ID_HEADER);
         String canonicalCallId = canonicalCallId(callId);
         LogContext context =
@@ -187,18 +197,25 @@ final class BridgeDispatcher implements AutoCloseable {
                         canonicalCallId,
                         unexpectedFailure || internalFailure,
                         recoveryAmbiguity,
+                        commandResponseAmbiguity,
                         transportFailure);
+        Throwable loggedFailure = commandOperation && unexpectedFailure ? null : failure;
         if (unexpectedFailure) {
-            this.log.error("bridge", "bridge.request_completed", message, context, failure);
+            this.log.error("bridge", "bridge.request_completed", message, context, loggedFailure);
         } else if (recoveryAmbiguity) {
-            this.log.warning("bridge", "bridge.request_completed", message, context, failure);
+            this.log.warning("bridge", "bridge.request_completed", message, context, loggedFailure);
         } else if (internalFailure) {
             this.log.error("bridge", "bridge.request_completed", message, context, failure);
         } else if (status != null
                 && status == 200
                 && ("committed".equals(exchange.outcome())
-                        || "undone".equals(exchange.outcome()))) {
+                        || "undone".equals(exchange.outcome())
+                        || "dispatched".equals(exchange.outcome()))) {
             this.log.info("bridge", "bridge.request_completed", message, context);
+        } else if (status != null
+                && status == 200
+                && "partial_failure".equals(exchange.outcome())) {
+            this.log.warning("bridge", "bridge.request_completed", message, context);
         } else {
             Throwable detailFailure =
                     transportFailure || failure != null && failure.getCause() != null
@@ -220,13 +237,33 @@ final class BridgeDispatcher implements AutoCloseable {
         }
     }
 
+    private static boolean commandResultCaptured(BridgeExchange exchange) {
+        return exchange.resultCount() != null
+                && exchange.resultCount() > 0
+                && ("dispatched".equals(exchange.outcome())
+                        || "partial_failure".equals(exchange.outcome()));
+    }
+
     private static String summary(
             String operation,
             BridgeExchange exchange,
             String canonicalCallId,
             boolean internalFailure,
             boolean recoveryAmbiguity,
+            boolean commandResponseAmbiguity,
             boolean transportFailure) {
+        if (commandResponseAmbiguity) {
+            if (exchange.resultCount() == null) {
+                return "Dirt MCP encountered an internal error while running a Minecraft command batch"
+                        + (canonicalCallId == null ? "" : " for call " + canonicalCallId)
+                        + "; commands may have taken effect; inspect server state before retrying";
+            }
+            return "Dirt MCP ran a Minecraft command batch ("
+                    + commandCount(exchange.resultCount())
+                    + ')'
+                    + (canonicalCallId == null ? "" : " for call " + canonicalCallId)
+                    + ", but its response could not be finalized; inspect server state before retrying";
+        }
         if (recoveryAmbiguity) {
             boolean knownCompletion =
                     "committed".equals(exchange.outcome()) || "undone".equals(exchange.outcome());
@@ -267,6 +304,16 @@ final class BridgeDispatcher implements AutoCloseable {
                     + exchange.changedBlockCount()
                     + " blocks)";
         }
+        if (!internalFailure && "dispatched".equals(exchange.outcome())) {
+            return "Dirt MCP ran a Minecraft command batch ("
+                    + commandCount(exchange.resultCount())
+                    + "; all dispatched)";
+        }
+        if (!internalFailure && "partial_failure".equals(exchange.outcome())) {
+            return "Dirt MCP ran a Minecraft command batch ("
+                    + exchange.resultCount()
+                    + " attempted; stopped at first failure)";
+        }
         if (internalFailure || exchange.status() != null && exchange.status() >= 500) {
             return "Dirt MCP "
                     + operation
@@ -274,6 +321,10 @@ final class BridgeDispatcher implements AutoCloseable {
                     + (canonicalCallId == null ? "" : " (call " + canonicalCallId + ')');
         }
         return "Dirt MCP bridge request completed";
+    }
+
+    private static String commandCount(long count) {
+        return count + (count == 1 ? " command" : " commands");
     }
 
     private static Throwable preserveFirstFailure(Throwable first, Throwable next) {

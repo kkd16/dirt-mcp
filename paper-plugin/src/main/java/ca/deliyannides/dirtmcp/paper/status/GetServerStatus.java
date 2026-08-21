@@ -77,7 +77,9 @@ public interface GetServerStatus {
             int maxChangedBlocks,
             int maxInspectionVolume,
             int defaultInspectionResultLimit,
-            int maxInspectionResultLimit) {}
+            int maxInspectionResultLimit,
+            int maxCommandsPerRequest,
+            int maxCommandFeedbackCharacters) {}
 
     record EffectiveLogging(
             String consoleLevel, int detailFileMaxBytes, int detailFileRetainedFiles) {}
