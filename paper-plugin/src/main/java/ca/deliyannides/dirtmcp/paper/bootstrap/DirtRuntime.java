@@ -12,7 +12,7 @@ import ca.deliyannides.dirtmcp.paper.bridge.endpoint.RunMinecraftCommandsEndpoin
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ScanOrthographicViewEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ServerStatusEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.SetBlocksEndpoint;
-import ca.deliyannides.dirtmcp.paper.bridge.endpoint.UndoEditEndpoint;
+import ca.deliyannides.dirtmcp.paper.bridge.endpoint.UndoEditsEndpoint;
 import ca.deliyannides.dirtmcp.paper.command.BukkitCommandAccess;
 import ca.deliyannides.dirtmcp.paper.command.DirtAdminCommand;
 import ca.deliyannides.dirtmcp.paper.command.PaperCommandService;
@@ -128,7 +128,7 @@ public final class DirtRuntime implements AutoCloseable {
                                     new ReplaceRegionBlocksEndpoint(worldEditor, config),
                                     new SetBlocksEndpoint(worldEditor, config),
                                     new GetEditHistoryEndpoint(worldEditor),
-                                    new UndoEditEndpoint(worldEditor),
+                                    new UndoEditsEndpoint(worldEditor),
                                     new RunMinecraftCommandsEndpoint(commands)),
                             log);
             bridge.start();

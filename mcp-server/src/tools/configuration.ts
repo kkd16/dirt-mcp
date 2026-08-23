@@ -11,7 +11,7 @@ export const MCP_TOOL_NAMES = [
   'replace_region_blocks',
   'set_blocks',
   'get_edit_history',
-  'undo_edit',
+  'undo_edits',
   'run_minecraft_commands',
 ] as const;
 
@@ -29,7 +29,7 @@ const toolConfigurationShape = {
   replace_region_blocks: enabledSchema,
   set_blocks: enabledSchema,
   get_edit_history: enabledSchema,
-  undo_edit: enabledSchema,
+  undo_edits: enabledSchema,
   run_minecraft_commands: enabledSchema,
 } satisfies Record<McpToolName, z.ZodBoolean>;
 

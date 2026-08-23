@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as z from 'zod/v4';
 import { BridgeClient } from '../dist/bridge/client.js';
-import { BRIDGE_ERROR_CODES, BRIDGE_ROUTES, BridgeErrorResponseSchema } from '../dist/bridge/contract.js';
+import {
+  BRIDGE_ERROR_CODES,
+  BRIDGE_ROUTES,
+  BridgeErrorResponseSchema,
+  BridgeErrorSchema,
+} from '../dist/bridge/contract.js';
 import { ToolFailure } from '../dist/bridge/errors.js';
 
 const ResponseSchema = z.object({ value: z.string() }).strict();
@@ -74,6 +79,76 @@ test('preserves structured bridge failures and classifies network failures', asy
     assert.deepEqual(error.data.details, { reason: 'request_failed' });
     return error.message === 'Paper bridge request failed: connection refused';
   });
+});
+
+test('preserves only explicitly validated route-specific failure progress', async () => {
+  const error = {
+    code: 'world_unavailable' as const,
+    message: 'Undo stopped',
+    details: { reason: 'world_unloaded' as const, world: 'world' },
+    editId: EDIT_ID,
+  };
+  const progressSchema = z.object({ error: BridgeErrorSchema, undoneEditIds: z.array(z.uuidv4()) }).strict();
+  const progressed = new BridgeClient({ origin: 'http://127.0.0.1', token: 'token' }, async () =>
+    Response.json({ error, undoneEditIds: [OTHER_EDIT_ID] }, { status: 503 }),
+  );
+  await assert.rejects(
+    progressed.request(
+      BRIDGE_ROUTES.undoEdits,
+      CALL_ID,
+      ResponseSchema,
+      { world: 'world' },
+      {
+        schema: progressSchema,
+        select: (response) => ({ undoneEditIds: response.undoneEditIds }),
+      },
+    ),
+    (failure: unknown) => {
+      if (!(failure instanceof ToolFailure)) return false;
+      assert.equal(failure.code, 'world_unavailable');
+      assert.deepEqual(failure.progress, { undoneEditIds: [OTHER_EDIT_ID] });
+      return true;
+    },
+  );
+
+  const preflightError = { ...error, editId: undefined };
+  const preflight = new BridgeClient({ origin: 'http://127.0.0.1', token: 'token' }, async () =>
+    Response.json({ error: preflightError }, { status: 503 }),
+  );
+  await assert.rejects(
+    preflight.request(
+      BRIDGE_ROUTES.undoEdits,
+      CALL_ID,
+      ResponseSchema,
+      { world: 'world' },
+      {
+        schema: progressSchema,
+        select: (response) => ({ undoneEditIds: response.undoneEditIds }),
+      },
+    ),
+    (failure: unknown) => failure instanceof ToolFailure && failure.progress === undefined,
+  );
+
+  const missingProgress = new BridgeClient({ origin: 'http://127.0.0.1', token: 'token' }, async () =>
+    Response.json({ error }, { status: 503 }),
+  );
+  await assert.rejects(
+    missingProgress.request(
+      BRIDGE_ROUTES.undoEdits,
+      CALL_ID,
+      ResponseSchema,
+      { world: 'world' },
+      {
+        schema: progressSchema,
+        select: (response) => ({ undoneEditIds: response.undoneEditIds }),
+      },
+    ),
+    (failure: unknown) =>
+      failure instanceof ToolFailure &&
+      failure.code === 'bridge_invalid_response' &&
+      failure.editId === EDIT_ID &&
+      failure.progress === undefined,
+  );
 });
 
 test('classifies fetch timeout failures without exposing transport objects', async () => {
@@ -557,7 +632,7 @@ test('salvages a valid edit ID from a malformed successful mutation response', a
   );
 
   await Promise.all(
-    [BRIDGE_ROUTES.setBlocks, BRIDGE_ROUTES.undoEdit].map((route) =>
+    [BRIDGE_ROUTES.setBlocks, BRIDGE_ROUTES.undoEdits].map((route) =>
       assert.rejects(
         malformed.request(route, CALL_ID, ResponseSchema, { world: 'world' }),
         (error: unknown) =>
@@ -579,7 +654,7 @@ test('salvages a valid edit ID from a malformed mutation error response', async 
   );
 
   await Promise.all(
-    [BRIDGE_ROUTES.replaceRegionBlocks, BRIDGE_ROUTES.setBlocks, BRIDGE_ROUTES.undoEdit].map((route) =>
+    [BRIDGE_ROUTES.replaceRegionBlocks, BRIDGE_ROUTES.setBlocks, BRIDGE_ROUTES.undoEdits].map((route) =>
       assert.rejects(
         malformed.request(route, CALL_ID, ResponseSchema, { world: 'world' }),
         (error: unknown) =>
@@ -598,7 +673,7 @@ test('salvages a valid edit ID from a malformed mutation error response', async 
     Response.json({ error: { editId: EDIT_ID } }, { status: 401 }),
   );
   await assert.rejects(
-    unauthorized.request(BRIDGE_ROUTES.undoEdit, CALL_ID, ResponseSchema, { world: 'world' }),
+    unauthorized.request(BRIDGE_ROUTES.undoEdits, CALL_ID, ResponseSchema, { world: 'world' }),
     (error: unknown) =>
       error instanceof ToolFailure && error.code === 'bridge_unauthorized' && error.editId === EDIT_ID,
   );
@@ -638,7 +713,7 @@ test('does not salvage an ambiguous edit ID from conflicting mutation envelopes'
   );
 
   await assert.rejects(
-    conflicting.request(BRIDGE_ROUTES.undoEdit, CALL_ID, ResponseSchema, { world: 'world' }),
+    conflicting.request(BRIDGE_ROUTES.undoEdits, CALL_ID, ResponseSchema, { world: 'world' }),
     (error: unknown) =>
       error instanceof ToolFailure && error.code === 'bridge_invalid_response' && error.editId === undefined,
   );

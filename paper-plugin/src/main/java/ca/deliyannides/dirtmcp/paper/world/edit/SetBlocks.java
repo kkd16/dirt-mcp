@@ -21,7 +21,9 @@ public interface SetBlocks {
             List<Placement> placements,
             List<Run> runs,
             int seed,
-            boolean dryRun) {
+            boolean dryRun,
+            String label,
+            Integer maxChangedBlocks) {
         public Request {
             if (palettes != null) {
                 palettes = immutablePalettes(palettes);

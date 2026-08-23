@@ -27,7 +27,7 @@ tools:
   replace_region_blocks: true
   set_blocks: true
   get_edit_history: true
-  undo_edit: true
+  undo_edits: true
   run_minecraft_commands: true
 
 logging:

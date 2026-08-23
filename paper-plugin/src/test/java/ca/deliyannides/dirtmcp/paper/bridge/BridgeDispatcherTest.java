@@ -11,12 +11,16 @@ import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.logging.LogContext;
+import ca.deliyannides.dirtmcp.paper.operation.OperationException;
+import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.edit.DestinationPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditOperation;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditOutcome;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditRecord;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditStatus;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
+import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdits;
+import ca.deliyannides.dirtmcp.paper.world.edit.UndoEditsException;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import com.sun.net.httpserver.Headers;
@@ -240,6 +244,121 @@ final class BridgeDispatcherTest {
             assertEquals(2L, context.values().get("result_count"));
             assertEquals("partial_failure", context.values().get("outcome"));
             assertEquals(true, context.values().get("aborted"));
+        }
+    }
+
+    @Test
+    void summarizesSuccessfulPluralUndoWithoutInventingAnEditId() throws IOException {
+        List<LogRecord> records = new ArrayList<>();
+        DirtLog log = recordingLog(records);
+        BridgeDispatcher dispatcher = undoDispatcher(log);
+        FailingExchange exchange = new FailingExchange(DeliveryFailure.NONE);
+
+        try (log;
+                dispatcher) {
+            dispatcher.handle(exchange);
+
+            LogRecord audit = records.getFirst();
+            assertEquals(Level.INFO, audit.getLevel());
+            assertTrue(audit.getMessage().contains("undid 2 edits"));
+            assertTrue(audit.getMessage().contains("3 changed-block entries"));
+            assertFalse(audit.getMessage().contains("null"));
+            LogContext context = (LogContext) audit.getParameters()[0];
+            assertEquals(2L, context.values().get("result_count"));
+            assertEquals(3L, context.values().get("changed_block_count"));
+            assertFalse(context.values().containsKey("edit_id"));
+        }
+    }
+
+    @Test
+    void warnsToReconcileHistoryWhenPluralUndoResponseDeliveryFails() {
+        List<LogRecord> records = new ArrayList<>();
+        DirtLog log = recordingLog(records);
+        BridgeDispatcher dispatcher = undoDispatcher(log);
+        FailingExchange exchange = new FailingExchange(DeliveryFailure.ALWAYS_IO);
+        exchange.requestHeaders.add("X-Dirt-Call-Id", BridgeTestFixture.CALL_ID);
+
+        try (log;
+                dispatcher) {
+            assertThrows(IOException.class, () -> dispatcher.handle(exchange));
+
+            LogRecord audit = records.getFirst();
+            assertEquals(Level.WARNING, audit.getLevel());
+            assertTrue(audit.getMessage().contains("restored 2 edits"));
+            assertTrue(audit.getMessage().contains("reconcile edit history"));
+            assertTrue(audit.getMessage().contains(BridgeTestFixture.CALL_ID));
+            assertFalse(audit.getMessage().contains("null"));
+            LogContext context = (LogContext) audit.getParameters()[0];
+            assertEquals("undone", context.values().get("outcome"));
+            assertEquals(2L, context.values().get("result_count"));
+            assertEquals(true, context.values().get("aborted"));
+            assertFalse(context.values().containsKey("edit_id"));
+        }
+    }
+
+    @Test
+    void summarizesPartialUndoAsHistoryReconciliationRatherThanACommandBatch() throws IOException {
+        UUID failedEditId = UUID.fromString("66666666-6666-4666-8666-666666666666");
+        List<LogRecord> records = new ArrayList<>();
+        DirtLog log = recordingLog(records);
+        BridgeEndpoint endpoint =
+                new BridgeEndpoint() {
+                    @Override
+                    public String operation() {
+                        return "undo_edits";
+                    }
+
+                    @Override
+                    public String method() {
+                        return "GET";
+                    }
+
+                    @Override
+                    public String path() {
+                        return "/v1/ping";
+                    }
+
+                    @Override
+                    public void handle(BridgeExchange exchange) throws OperationException {
+                        exchange.world("world");
+                        throw new UndoEditsException(
+                                OperationFailure.WORLD_UNAVAILABLE,
+                                "Undo execution failed",
+                                new ErrorDetails.WorldUnavailable.OperationFailed(),
+                                new IllegalStateException("test failure"),
+                                failedEditId,
+                                List.of(committedSetResult().edit()));
+                    }
+
+                    @Override
+                    public String internalErrorMessage() {
+                        return "safe failure";
+                    }
+                };
+        BridgeDispatcher dispatcher =
+                new BridgeDispatcher(
+                        List.of(endpoint),
+                        new BearerAuthenticator(BridgeTestFixture.TOKEN),
+                        1,
+                        1_024,
+                        1,
+                        log);
+        FailingExchange exchange = new FailingExchange(DeliveryFailure.NONE);
+
+        try (log;
+                dispatcher) {
+            dispatcher.handle(exchange);
+
+            assertEquals(503, exchange.getResponseCode());
+            LogRecord audit = records.getFirst();
+            assertEquals(Level.WARNING, audit.getLevel());
+            assertTrue(audit.getMessage().contains("undo_edits"));
+            assertTrue(audit.getMessage().contains("reconcile edit " + failedEditId));
+            assertFalse(audit.getMessage().contains("Minecraft command"));
+            LogContext context = (LogContext) audit.getParameters()[0];
+            assertEquals("partial_failure", context.values().get("outcome"));
+            assertEquals(1L, context.values().get("result_count"));
+            assertEquals(failedEditId, context.values().get("edit_id"));
         }
     }
 
@@ -468,6 +587,62 @@ final class BridgeDispatcherTest {
                 log);
     }
 
+    private static BridgeDispatcher undoDispatcher(DirtLog log) {
+        BridgeEndpoint endpoint =
+                new BridgeEndpoint() {
+                    @Override
+                    public String operation() {
+                        return "undo_edits";
+                    }
+
+                    @Override
+                    public String method() {
+                        return "GET";
+                    }
+
+                    @Override
+                    public String path() {
+                        return "/v1/ping";
+                    }
+
+                    @Override
+                    public void handle(BridgeExchange exchange) throws IOException {
+                        EditRecord first = committedSetResult().edit();
+                        EditRecord second =
+                                new EditRecord(
+                                        UUID.fromString("44444444-4444-4444-8444-444444444444"),
+                                        UUID.fromString("55555555-5555-4555-8555-555555555555"),
+                                        EditOperation.SET_BLOCKS,
+                                        "Second test edit",
+                                        first.world(),
+                                        first.worldId(),
+                                        first.bounds(),
+                                        2,
+                                        first.completedAt(),
+                                        EditStatus.COMMITTED);
+                        exchange.world("world");
+                        exchange.ok(
+                                new UndoEdits.Result(
+                                        "world",
+                                        List.of(first, second),
+                                        UUID.fromString(BridgeTestFixture.CALL_ID),
+                                        Instant.parse("2026-08-20T00:01:00Z")));
+                    }
+
+                    @Override
+                    public String internalErrorMessage() {
+                        return "safe failure";
+                    }
+                };
+        return new BridgeDispatcher(
+                List.of(endpoint),
+                new BearerAuthenticator(BridgeTestFixture.TOKEN),
+                1,
+                1_024,
+                1,
+                log);
+    }
+
     private static void assertNoCommandPayload(String message) {
         assertFalse(message.contains("private-command"));
         assertFalse(message.contains("private-feedback"));
@@ -506,6 +681,7 @@ final class BridgeDispatcherTest {
                         editId,
                         UUID.fromString("22222222-2222-4222-8222-222222222222"),
                         EditOperation.SET_BLOCKS,
+                        "Place test block",
                         "world",
                         UUID.fromString("33333333-3333-4333-8333-333333333333"),
                         bounds,

@@ -6,10 +6,11 @@ import ca.deliyannides.dirtmcp.paper.command.RunMinecraftCommands;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.validation.UuidV4;
+import ca.deliyannides.dirtmcp.paper.world.edit.EditRecord;
 import ca.deliyannides.dirtmcp.paper.world.edit.GetEditHistory;
 import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
-import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
+import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdits;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView;
@@ -27,6 +28,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
@@ -156,7 +158,7 @@ public final class BridgeExchange {
     }
 
     void sendError(int status, String message, ErrorDetails details) throws IOException {
-        sendErrorEnvelope(status, ErrorDetailsJson.code(details), message, details, null);
+        sendErrorEnvelope(status, ErrorDetailsJson.code(details), message, details, null, null);
     }
 
     void sendError(int status, String message, ErrorDetails details, UUID editId)
@@ -166,20 +168,59 @@ public final class BridgeExchange {
                 ErrorDetailsJson.code(details),
                 message,
                 details,
-                Objects.requireNonNull(editId, "editId"));
+                Objects.requireNonNull(editId, "editId"),
+                null);
+    }
+
+    void sendUndoError(
+            int status,
+            String message,
+            ErrorDetails details,
+            UUID editId,
+            List<EditRecord> undoneEdits)
+            throws IOException {
+        sendErrorEnvelope(
+                status,
+                ErrorDetailsJson.code(details),
+                message,
+                details,
+                Objects.requireNonNull(editId, "editId"),
+                Objects.requireNonNull(undoneEdits, "undoneEdits"));
     }
 
     void sendInternalError(int status, String message) throws IOException {
-        sendErrorEnvelope(status, "internal_error", message, null, null);
+        sendErrorEnvelope(status, "internal_error", message, null, null, null);
     }
 
     void sendInternalError(int status, String message, UUID editId) throws IOException {
         sendErrorEnvelope(
-                status, "internal_error", message, null, Objects.requireNonNull(editId, "editId"));
+                status,
+                "internal_error",
+                message,
+                null,
+                Objects.requireNonNull(editId, "editId"),
+                null);
+    }
+
+    void sendInternalUndoError(
+            int status, String message, UUID editId, List<EditRecord> undoneEdits)
+            throws IOException {
+        sendErrorEnvelope(
+                status,
+                "internal_error",
+                message,
+                null,
+                Objects.requireNonNull(editId, "editId"),
+                Objects.requireNonNull(undoneEdits, "undoneEdits"));
     }
 
     private void sendErrorEnvelope(
-            int status, String code, String message, ErrorDetails details, UUID editId)
+            int status,
+            String code,
+            String message,
+            ErrorDetails details,
+            UUID editId,
+            List<EditRecord> undoneEdits)
             throws IOException {
         if (message == null || message.isEmpty()) {
             throw new IllegalArgumentException("Error message must not be empty");
@@ -198,6 +239,12 @@ public final class BridgeExchange {
         }
         JsonObject envelope = new JsonObject();
         envelope.add("error", detail);
+        if (undoneEdits != null) {
+            envelope.add("undoneEdits", BridgeJson.GSON.toJsonTree(undoneEdits));
+            this.resultCount = (long) undoneEdits.size();
+            this.changedBlockCount = changedBlockCount(undoneEdits);
+            this.outcome = "partial_failure";
+        }
         send(status, envelope);
     }
 
@@ -284,12 +331,10 @@ public final class BridgeExchange {
                             result.changedBlockCount(),
                             result.edit() == null ? null : result.edit().editId(),
                             null);
-            case UndoEdit.Result result -> {
-                UUID checkedEditId = UuidV4.require(result.edit().editId(), "editId");
-                this.bounds = bounds(result.edit().bounds());
+            case UndoEdits.Result result -> {
                 this.outcome = "undone";
-                this.changedBlockCount = result.edit().changedBlockCount();
-                this.editId = checkedEditId;
+                this.changedBlockCount = changedBlockCount(result.edits());
+                this.resultCount = (long) result.edits().size();
             }
             case GetEditHistory.Result result -> this.resultCount = (long) result.edits().size();
             case CountRegionBlockStates.Result result -> {
@@ -349,5 +394,13 @@ public final class BridgeExchange {
                 + value.max().y()
                 + ","
                 + value.max().z();
+    }
+
+    private static long changedBlockCount(List<EditRecord> edits) {
+        long total = 0;
+        for (EditRecord edit : edits) {
+            total = Math.addExact(total, edit.changedBlockCount());
+        }
+        return total;
     }
 }

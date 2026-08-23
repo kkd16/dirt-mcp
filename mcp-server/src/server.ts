@@ -26,13 +26,13 @@ function serverInstructions(configuration: McpToolConfiguration): string {
     configuration.count_region_block_states || configuration.get_blocks || configuration.replace_region_blocks;
   const hasDetailedInspection =
     configuration.get_blocks || configuration.scan_orthographic_view || configuration.get_perspective_view;
-  const hasWorldTool = hasInspection || hasMutation || configuration.get_edit_history || configuration.undo_edit;
+  const hasWorldTool = hasInspection || hasMutation || configuration.get_edit_history || configuration.undo_edits;
   const instructions: string[] = [];
 
   if (hasWorldTool) instructions.push('World tools operate on live Paper worlds.');
   if (hasInspection) instructions.push('Region and block-view inspections require already-loaded chunks.');
   if (hasMutation) instructions.push('New edits require already-loaded chunks.');
-  if (configuration.undo_edit) instructions.push('Undo can reload existing chunks without generating terrain.');
+  if (configuration.undo_edits) instructions.push('Undo can reload existing chunks without generating terrain.');
 
   if (hasInspection || hasMutation) {
     instructions.push('Minecraft axes use X east/west, Y up/down, and Z south/north.');
@@ -83,23 +83,27 @@ function serverInstructions(configuration: McpToolConfiguration): string {
     errorGuidance +=
       ' Reconcile records returned by get_edit_history using editId or callId; an absent record means no undoable edit remains.';
   }
+  if (configuration.undo_edits) {
+    errorGuidance +=
+      ' A runtime undo_edits failure also puts undoneEdits at the structuredContent root, possibly empty; those records were restored and consumed before the edit identified by structuredContent.error.editId failed.';
+  }
   instructions.push(errorGuidance);
 
   if (hasMutation) {
     instructions.push(
-      'Mutation tools can apply immediately; pass dryRun=true when a preview is needed, and retain the edit ID returned by every committed result.',
+      'Mutation tools can apply immediately. Give each edit a concise label describing one reversible intent, combine related geometry into one set_blocks call, keep unrelated refinements separate, pass dryRun=true when a preview is needed, and retain the edit ID returned by every committed result.',
     );
   }
 
-  if (configuration.get_edit_history && configuration.undo_edit) {
+  if (configuration.get_edit_history && configuration.undo_edits) {
     instructions.push(
-      'Use get_edit_history to inspect retained undoable edits newest first, then pass the newest edit ID to undo_edit so an intervening edit cannot be undone accidentally.',
+      'Use get_edit_history to inspect retained undoable edits newest first, then pass the exact newest-first prefix to undo_edits. Re-read history after partial or ambiguous undo outcomes before deciding what remains to undo.',
     );
   } else if (configuration.get_edit_history) {
     instructions.push('Use get_edit_history to inspect retained undoable edits newest first.');
-  } else if (configuration.undo_edit) {
+  } else if (configuration.undo_edits) {
     instructions.push(
-      'Pass the newest retained edit ID from a committed result to undo_edit so an intervening edit cannot be undone accidentally.',
+      'Pass a newest-first prefix of retained edit IDs from committed results to undo_edits so intervening edits cannot be skipped accidentally.',
     );
   }
 

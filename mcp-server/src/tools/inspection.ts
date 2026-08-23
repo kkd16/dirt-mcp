@@ -127,7 +127,7 @@ export const GetBlocksOutputSchema = z
       result.placements.length + result.runs.length === 0 ? result.palettes.length === 0 : result.palettes.length > 0,
     'Palettes must be empty exactly when the returned geometry is empty.',
   )
-  .describe('Replay-ready exact block structure accepted directly by set_blocks.');
+  .describe('Replay-ready exact block geometry accepted by set_blocks after adding its required edit label.');
 
 const OrthographicViewDirectionSchema = z
   .enum(['north', 'east', 'south', 'west', 'up', 'down'])
@@ -530,7 +530,7 @@ export function registerInspectionTools(
     {
       title: 'Get blocks',
       description:
-        'Return filtered exact block states as replay-ready origin-relative palettes, placements, and inclusive cuboid runs. Pass the result directly to set_blocks and change only origin to copy it. Results that exceed active scan, palette, or result ceilings fail rather than truncate.' +
+        'Return filtered exact block states as replay-ready origin-relative palettes, placements, and inclusive cuboid runs. To copy it with set_blocks, reuse the structure, change origin, and add a concise edit label. Results that exceed active scan, palette, or result ceilings fail rather than truncate.' +
         (toolConfiguration.get_server_status
           ? ' The active ceilings are reported by get_server_status with include.configuration=true.'
           : ''),

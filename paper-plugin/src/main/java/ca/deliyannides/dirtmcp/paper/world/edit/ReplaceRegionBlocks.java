@@ -19,7 +19,9 @@ public interface ReplaceRegionBlocks {
             List<String> sourceBlockStatePatterns,
             List<DestinationPaletteEntry> destinationPalette,
             int seed,
-            boolean dryRun) {
+            boolean dryRun,
+            String label,
+            Integer maxChangedBlocks) {
         public Request {
             sourceBlockStatePatterns = immutableCopy(sourceBlockStatePatterns);
             destinationPalette = immutableCopy(destinationPalette);

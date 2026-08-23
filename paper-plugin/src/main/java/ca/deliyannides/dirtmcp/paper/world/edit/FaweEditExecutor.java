@@ -41,11 +41,15 @@ final class FaweEditExecutor {
             PaperEditPreparation.PreparedReplace edit,
             Cuboid region,
             boolean dryRun,
+            int maxChangedBlocks,
             EditPlatform.MutationAdmission admission)
             throws OperationException {
         Objects.requireNonNull(admission, "admission");
+        int checkedMaxChangedBlocks = checkedLimit(maxChangedBlocks);
         CuboidRegion selection = selection(edit.paperWorld().worldEditWorld(), region);
-        EditSession session = newEditSession(edit.paperWorld().worldEditWorld(), !dryRun);
+        EditSession session =
+                newEditSession(
+                        edit.paperWorld().worldEditWorld(), !dryRun, checkedMaxChangedBlocks);
         long matches = 0;
         long expectedChanges = 0;
         long changes;
@@ -66,8 +70,7 @@ final class FaweEditExecutor {
                         expectedChanges++;
                     }
                 }
-                enforceChangeLimit(expectedChanges);
-                changes = expectedChanges;
+                enforceChangeLimit(expectedChanges, checkedMaxChangedBlocks);
                 if (!dryRun && expectedChanges > 0) {
                     requireNotInterrupted();
                     admission.beforeMutation();
@@ -76,21 +79,16 @@ final class FaweEditExecutor {
                     requireNotInterrupted();
                 }
             }
-            if (!dryRun && expectedChanges > 0) {
-                changes = session.getChangeSet().longSize();
-                if (changes > 0) {
-                    undo = retainedUndo(session, edit.chunks());
-                    changes = undo.changedBlockCount();
-                }
+            changes = dryRun ? expectedChanges : session.getChangeSet().longSize();
+            if (!dryRun && changes > 0) {
+                undo = retainedUndo(session, edit.chunks());
+                changes = undo.changedBlockCount();
             }
         } catch (MaxChangedBlocksException exception) {
-            OperationException failure = changeLimit(exception);
+            OperationException failure = changeLimit(checkedMaxChangedBlocks, exception);
             rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, failure);
             throw failure;
-        } catch (OperationException exception) {
-            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
-            throw exception;
-        } catch (RuntimeException exception) {
+        } catch (OperationException | RuntimeException exception) {
             rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
             throw exception;
         }
@@ -100,15 +98,17 @@ final class FaweEditExecutor {
     EditPlatform.EditResult set(
             PaperEditPreparation.PreparedSet edit,
             boolean dryRun,
+            int maxChangedBlocks,
             EditPlatform.MutationAdmission admission)
             throws OperationException {
         Objects.requireNonNull(admission, "admission");
+        int checkedMaxChangedBlocks = checkedLimit(maxChangedBlocks);
         var paperWorld = edit.paperWorld();
         var world = paperWorld.worldEditWorld();
         SetBlockGeometry geometry = edit.geometry();
         var palettes = edit.preparedPalettes();
         List<ChunkPosition> chunks = geometry.chunks();
-        EditSession session = newEditSession(world, !dryRun);
+        EditSession session = newEditSession(world, !dryRun, checkedMaxChangedBlocks);
         List<SetBlockGeometry.ResolvedPlacement> changedPlacements = new ArrayList<>();
         List<SetBlockGeometry.ResolvedRun> changedRuns = new ArrayList<>();
         long expectedChanges = 0;
@@ -141,7 +141,7 @@ final class FaweEditExecutor {
                         changedRuns.add(run);
                     }
                 }
-                enforceChangeLimit(expectedChanges);
+                enforceChangeLimit(expectedChanges, checkedMaxChangedBlocks);
                 if (!dryRun && expectedChanges > 0) {
                     requireNotInterrupted();
                     admission.beforeMutation();
@@ -167,13 +167,10 @@ final class FaweEditExecutor {
                 changes = undo.changedBlockCount();
             }
         } catch (MaxChangedBlocksException exception) {
-            OperationException failure = changeLimit(exception);
+            OperationException failure = changeLimit(checkedMaxChangedBlocks, exception);
             rollbackAfterFailure(paperWorld, session, chunks, dryRun, failure);
             throw failure;
-        } catch (OperationException exception) {
-            rollbackAfterFailure(paperWorld, session, chunks, dryRun, exception);
-            throw exception;
-        } catch (RuntimeException exception) {
+        } catch (OperationException | RuntimeException exception) {
             rollbackAfterFailure(paperWorld, session, chunks, dryRun, exception);
             throw exception;
         }
@@ -204,7 +201,8 @@ final class FaweEditExecutor {
 
     private void applyUndo(PaperEditPreparation.PaperWorld world, StoredUndo undo) {
         undo.finalizeForUse();
-        try (EditSession session = newEditSession(world.worldEditWorld(), false)) {
+        try (EditSession session =
+                newEditSession(world.worldEditWorld(), false, this.maxChangedBlocks)) {
             session.setBlocks(undo.changeSet(), ChangeSetExecutor.Type.UNDO);
         }
     }
@@ -236,7 +234,8 @@ final class FaweEditExecutor {
         }
         boolean interrupted = Thread.interrupted();
         try {
-            try (EditSession rollback = newEditSession(world.worldEditWorld(), false)) {
+            try (EditSession rollback =
+                    newEditSession(world.worldEditWorld(), false, this.maxChangedBlocks)) {
                 rollback.setBlocks(recovery.changeSet(), ChangeSetExecutor.Type.UNDO);
             } catch (RuntimeException rollbackFailure) {
                 failure.addSuppressed(rollbackFailure);
@@ -255,12 +254,12 @@ final class FaweEditExecutor {
     }
 
     private EditSession newEditSession(
-            com.sk89q.worldedit.world.World world, boolean recordHistory) {
+            com.sk89q.worldedit.world.World world, boolean recordHistory, int maxChangedBlocks) {
         var builder =
                 WorldEdit.getInstance()
                         .newEditSessionBuilder()
                         .world(world)
-                        .maxBlocks(this.maxChangedBlocks)
+                        .maxBlocks(maxChangedBlocks)
                         .allowedRegionsEverywhere()
                         .setSideEffectSet(SideEffectSet.api().without(SideEffect.NEIGHBORS));
         if (recordHistory) {
@@ -269,10 +268,17 @@ final class FaweEditExecutor {
         return builder.fastMode(true).changeSetNull().build();
     }
 
-    private void enforceChangeLimit(long changes) throws OperationException {
-        if (changes > this.maxChangedBlocks) {
-            throw changeLimit(null);
+    private void enforceChangeLimit(long changes, int maxChangedBlocks) throws OperationException {
+        if (changes > maxChangedBlocks) {
+            throw changeLimit(maxChangedBlocks, null);
         }
+    }
+
+    private int checkedLimit(int requested) {
+        if (requested < 1 || requested > this.maxChangedBlocks) {
+            throw new IllegalArgumentException("Effective change limit is invalid");
+        }
+        return requested;
     }
 
     static void requireNotInterrupted() throws OperationException {
@@ -284,17 +290,17 @@ final class FaweEditExecutor {
         }
     }
 
-    private OperationException changeLimit(Throwable cause) {
-        String message = "Edit exceeds the maximum of " + this.maxChangedBlocks + " changed blocks";
+    private static OperationException changeLimit(int maximum, Throwable cause) {
+        String message = "Edit exceeds the maximum of " + maximum + " changed blocks";
         return cause == null
                 ? new OperationException(
                         OperationFailure.CHANGE_LIMIT_EXCEEDED,
                         message,
-                        new ErrorDetails.ChangeLimitExceeded(this.maxChangedBlocks))
+                        new ErrorDetails.ChangeLimitExceeded(maximum))
                 : new OperationException(
                         OperationFailure.CHANGE_LIMIT_EXCEEDED,
                         message,
-                        new ErrorDetails.ChangeLimitExceeded(this.maxChangedBlocks),
+                        new ErrorDetails.ChangeLimitExceeded(maximum),
                         cause);
     }
 

@@ -328,6 +328,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     edit: {
       editId: '11111111-1111-4111-8111-111111111111',
       callId: '33333333-3333-4333-8333-333333333333',
+      label: 'Build west accent',
       operation: 'set_blocks',
       world: 'world',
       worldId: '22222222-2222-4222-8222-222222222222',
@@ -342,7 +343,8 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   };
   const editHistory = { world: 'world', edits: [setBlocks.edit] };
   const undone = {
-    edit: setBlocks.edit,
+    world: 'world',
+    edits: [setBlocks.edit],
     undoCallId: '44444444-4444-4444-8444-444444444444',
     undoneAt: '2026-08-19T12:35:30Z',
   };
@@ -391,7 +393,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       response.end(JSON.stringify(setBlocks));
     } else if (request.url === '/v1/get-edit-history') {
       response.end(JSON.stringify(editHistory));
-    } else if (request.url === '/v1/undo-edit') {
+    } else if (request.url === '/v1/undo-edits') {
       assert.equal(typeof request.headers['x-dirt-call-id'], 'string');
       undone.undoCallId = request.headers['x-dirt-call-id'] as string;
       response.end(JSON.stringify(undone));
@@ -459,7 +461,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { name: 'replace_region_blocks', annotations: mutationAnnotations(false) },
       { name: 'set_blocks', annotations: mutationAnnotations(false) },
       { name: 'get_edit_history', annotations: readAnnotations() },
-      { name: 'undo_edit', annotations: mutationAnnotations(false) },
+      { name: 'undo_edits', annotations: mutationAnnotations(false) },
       { name: 'run_minecraft_commands', annotations: mutationAnnotations(false) },
     ],
   );
@@ -533,11 +535,27 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   const setBlocksInputSchema = listedSetBlocks.inputSchema as {
     readonly required?: readonly string[];
     readonly properties: {
+      readonly label: { readonly minLength?: number; readonly maxLength?: number; readonly pattern?: string };
+      readonly maxChangedBlocks: { readonly exclusiveMinimum?: number; readonly maximum?: number };
       readonly placements: { readonly items: unknown };
       readonly runs: { readonly items: unknown };
     };
   };
-  assert.deepEqual(setBlocksInputSchema.required, ['world', 'origin', 'palettes', 'placements', 'runs']);
+  assert.deepEqual(setBlocksInputSchema.required, ['world', 'origin', 'palettes', 'placements', 'runs', 'label']);
+  assert.equal(setBlocksInputSchema.properties.label.minLength, 1);
+  assert.equal(setBlocksInputSchema.properties.label.maxLength, 120);
+  assert.equal(
+    setBlocksInputSchema.properties.label.pattern,
+    '^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$',
+  );
+  assert.equal(setBlocksInputSchema.properties.maxChangedBlocks.exclusiveMinimum, 0);
+  assert.equal(setBlocksInputSchema.properties.maxChangedBlocks.maximum, 2_147_483_647);
+  const listedUndoEdits = listedTools.find((tool) => tool.name === 'undo_edits');
+  assert.ok(listedUndoEdits);
+  const undoEditsInputSchema = listedUndoEdits.inputSchema as {
+    readonly properties: { readonly editIds: { readonly uniqueItems?: boolean } };
+  };
+  assert.equal(undoEditsInputSchema.properties.editIds.uniqueItems, true);
   const paletteIndexSchema = { type: 'integer', minimum: 0, maximum: 2_147_483_647 };
   const offsetSchema = { type: 'integer', minimum: -2_147_483_648, maximum: 2_147_483_647 };
   assert.deepEqual(setBlocksInputSchema.properties.placements.items, {
@@ -657,6 +675,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       name: 'replace_region_blocks',
       arguments: {
         ...region,
+        label: 'Test change ceiling',
         sourceBlockStatePatterns: ['minecraft:bedrock'],
         destinationPalette: [{ blockState: 'minecraft:dirt' }],
       },
@@ -722,6 +741,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
 
   const setBlocksInput = {
     world: 'world',
+    label: 'Build west accent',
     origin: { x: 1, y: 2, z: 3 },
     palettes: [
       [
@@ -732,6 +752,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     placements: [[0, 0, 0, 0]],
     runs: [[0, 4, 0, 0, 4, 0, 0]],
     seed: 123,
+    maxChangedBlocks: 2,
   };
   send(child, {
     jsonrpc: '2.0',
@@ -761,7 +782,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     jsonrpc: '2.0',
     id: 9,
     method: 'tools/call',
-    params: requestParams({ name: 'undo_edit', arguments: { world: 'world', editId: 'not-a-uuid' } }),
+    params: requestParams({ name: 'undo_edits', arguments: { world: 'world', editIds: ['not-a-uuid'] } }),
   });
   const invalidUndo = await waitFor(messages, 9);
   assert.ok(invalidUndo.result);
@@ -769,7 +790,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.equal(invalidUndo.result.structuredContent, undefined);
   assert.match(
     invalidUndo.result.content?.[0]?.text ?? '',
-    /Input validation error: Invalid arguments for tool undo_edit/,
+    /Input validation error: Invalid arguments for tool undo_edits/,
   );
   assert.equal(requests.length, requestCountBeforeInvalidUndo);
 
@@ -796,6 +817,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       name: 'replace_region_blocks',
       arguments: {
         ...region,
+        label: 'Preview floor replacement',
         sourceBlockStatePatterns: ['minecraft:stone'],
         destinationPalette: [{ blockState: 'minecraft:dirt', weight: 100 }],
         seed: 123,
@@ -837,8 +859,8 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     id: 13,
     method: 'tools/call',
     params: requestParams({
-      name: 'undo_edit',
-      arguments: { world: 'world', editId: setBlocks.edit.editId },
+      name: 'undo_edits',
+      arguments: { world: 'world', editIds: [setBlocks.edit.editId] },
     }),
   });
   const undo = await waitFor(messages, 13);
@@ -848,7 +870,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       content: [
         {
           type: 'text',
-          text: 'Undid edit 11111111-1111-4111-8111-111111111111 in world, restoring 1 blocks.',
+          text: 'Undid 1 edit in world, restoring 1 change entries.',
         },
       ],
       structuredContent: undone,
@@ -912,7 +934,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       { method: 'POST', path: '/v1/count-region-block-states' },
       { method: 'POST', path: '/v1/replace-region-blocks' },
       { method: 'POST', path: '/v1/get-edit-history' },
-      { method: 'POST', path: '/v1/undo-edit' },
+      { method: 'POST', path: '/v1/undo-edits' },
       { method: 'POST', path: '/v1/get-player-context' },
       { method: 'POST', path: '/v1/get-perspective-view' },
     ],
@@ -946,6 +968,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.equal(requestAt(requests, 4).headers['content-type'], 'application/json');
   assert.deepEqual(requestAt(requests, 5).body, {
     ...region,
+    label: 'Test change ceiling',
     sourceBlockStatePatterns: ['minecraft:bedrock'],
     destinationPalette: [{ blockState: 'minecraft:dirt' }],
   });
@@ -955,6 +978,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.deepEqual(requestAt(requests, 8).body, region);
   assert.deepEqual(requestAt(requests, 9).body, {
     ...region,
+    label: 'Preview floor replacement',
     sourceBlockStatePatterns: ['minecraft:stone'],
     destinationPalette: [{ blockState: 'minecraft:dirt', weight: 100 }],
     seed: 123,
@@ -963,7 +987,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.deepEqual(requestAt(requests, 10).body, { world: 'world' });
   assert.deepEqual(requestAt(requests, 11).body, {
     world: 'world',
-    editId: '11111111-1111-4111-8111-111111111111',
+    editIds: ['11111111-1111-4111-8111-111111111111'],
   });
   assert.deepEqual(requestAt(requests, 12).body, {
     player: 'Builder',
@@ -999,7 +1023,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     ['count_region_block_states', 10, true, true],
     ['replace_region_blocks', 11, true, true],
     ['get_edit_history', 12, true, true],
-    ['undo_edit', 13, true, true],
+    ['undo_edits', 13, true, true],
     ['get_player_context', 14, false, true],
     ['get_perspective_view', 15, false, true],
   ];
@@ -1027,10 +1051,12 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.equal(setBlocksAudit?.changed_block_count, 1);
   const historyAudit = auditRecords.find((record) => record.operation === 'get_edit_history');
   assert.equal(historyAudit?.result_count, 1);
-  const undoAudit = auditRecords.find((record) => record.operation === 'undo_edit');
-  assert.equal(undoAudit?.edit_id, setBlocks.edit.editId);
+  const undoAudit = auditRecords.find((record) => record.operation === 'undo_edits');
+  assert.equal(undoAudit?.edit_id, undefined);
   assert.equal(undoAudit?.outcome, 'undone');
   assert.equal(undoAudit?.changed_block_count, 1);
+  assert.equal(undoAudit?.result_count, 1);
+  assert.equal(JSON.stringify(logs.values).includes('Build west accent'), false);
   assert.equal(JSON.stringify(logs.values).includes(bridgeToken), false);
 
   const exited = once(child, 'exit');
@@ -1362,7 +1388,7 @@ test('serves the configured tool snapshot over MCP 2025-06-18 and rejects disabl
   configuredTools.ping_server = true;
   configuredTools.get_blocks = true;
   configuredTools.set_blocks = true;
-  configuredTools.undo_edit = true;
+  configuredTools.undo_edits = true;
   const requests: BridgeRequestRecord[] = [];
   const bridge = createServer(async (request, response) => {
     let rawBody = '';
@@ -1422,7 +1448,8 @@ test('serves the configured tool snapshot over MCP 2025-06-18 and rejects disabl
   assert.match(instructions as string, /callId at the structuredContent root/);
   assert.match(instructions as string, /structuredContent\.error/);
   assert.match(instructions as string, /Correctable failures also include strict code-specific details/);
-  assert.match(instructions as string, /undo_edit/);
+  assert.match(instructions as string, /undo_edits/);
+  assert.match(instructions as string, /undoneEdits/);
   assert.doesNotMatch(instructions as string, /Enabled tools|Available inspection tools/);
   assert.doesNotMatch(instructions as string, /get_server_status|get_edit_history/);
 
@@ -1435,7 +1462,7 @@ test('serves the configured tool snapshot over MCP 2025-06-18 and rejects disabl
   assert.equal(Object.hasOwn(catalog.result, '_meta'), false);
   assert.deepEqual(
     catalog.result.tools?.map((tool) => tool.name),
-    ['ping_server', 'get_blocks', 'set_blocks', 'undo_edit'],
+    ['ping_server', 'get_blocks', 'set_blocks', 'undo_edits'],
   );
   const listedMetadata = JSON.stringify(catalog.result.tools);
   assert.doesNotMatch(listedMetadata, /get_server_status|get_edit_history/);
@@ -1651,6 +1678,195 @@ test('retries a failed bootstrap and fixes the first successful snapshot for the
     [],
   );
   assert.equal(bootstrapAttempts, 2);
+
+  const exited = once(child, 'exit');
+  child.stdin.end();
+  const [exitCode] = await exited;
+  assert.equal(exitCode, 0);
+});
+
+test('preserves batch undo execution progress but keeps preflight failures ordinary', async (context) => {
+  const configuredTools = toolConfiguration(false);
+  configuredTools.undo_edits = true;
+  const completedEditId = '11111111-1111-4111-8111-111111111111';
+  const failedEditId = '22222222-2222-4222-8222-222222222222';
+  const newestEditId = '33333333-3333-4333-8333-333333333333';
+  const completedEdit = {
+    editId: completedEditId,
+    callId: '44444444-4444-4444-8444-444444444444',
+    label: 'SECRET_BATCH_UNDO_LABEL',
+    operation: 'set_blocks',
+    world: 'world',
+    worldId: '55555555-5555-4555-8555-555555555555',
+    bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } },
+    changedBlockCount: 7,
+    completedAt: '2026-08-19T12:34:56Z',
+    status: 'committed',
+  };
+  let behavior: 'partial' | 'first' | 'preflight' = 'partial';
+  const bridge = createServer(async (request, response) => {
+    let rawBody = '';
+    for await (const chunk of request) rawBody += chunk;
+    response.setHeader('Content-Type', 'application/json');
+    if (request.url === '/v1/server-status') {
+      response.end(JSON.stringify(minimalServerStatus(configuredTools)));
+      return;
+    }
+    assert.equal(request.url, '/v1/undo-edits');
+    if (behavior === 'preflight') {
+      response.statusCode = 409;
+      response.end(
+        JSON.stringify({
+          error: {
+            code: 'edit_not_latest',
+            message: 'Edit is not latest',
+            details: { world: 'world', requestedEditId: failedEditId, newestEditId },
+          },
+        }),
+      );
+      return;
+    }
+    response.statusCode = 503;
+    response.end(
+      JSON.stringify({
+        error: {
+          code: 'world_unavailable',
+          message: 'Undo stopped',
+          details: { reason: 'operation_failed' },
+          editId: failedEditId,
+        },
+        undoneEdits: behavior === 'partial' ? [completedEdit] : [],
+      }),
+    );
+  });
+  bridge.listen(0, '127.0.0.1');
+  await once(bridge, 'listening');
+  context.after(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        bridge.close((error) => (error === undefined ? resolve() : reject(error)));
+      }),
+  );
+
+  const child = spawn(process.execPath, [join(packageDirectory, 'dist/index.js')], {
+    env: {
+      ...process.env,
+      DIRT_MCP_BRIDGE_TOKEN: bridgeToken,
+      DIRT_MCP_BRIDGE_URL: `http://127.0.0.1:${serverAddressPort(bridge.address())}`,
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  context.after(() => {
+    if (child.exitCode === null) child.kill();
+  });
+  const messages = collectLines(child.stdout, (line) => JSON.parse(line) as JsonRpcResponse);
+  const logs = collectLines(child.stderr, parseLogRecord);
+
+  async function callUndo(id: number, editIds: readonly string[]): Promise<JsonRpcResponse> {
+    send(child, {
+      jsonrpc: '2.0',
+      id,
+      method: 'tools/call',
+      params: requestParams({ name: 'undo_edits', arguments: { world: 'world', editIds } }),
+    });
+    return waitFor(messages, id);
+  }
+
+  const partial = await callUndo(70, [completedEditId, failedEditId]);
+  assert.ok(partial.result);
+  const partialCallId = partial.result.structuredContent?.callId;
+  assert.ok(typeof partialCallId === 'string');
+  assert.deepEqual(
+    partial.result,
+    completeResult({
+      isError: true,
+      content: [{ type: 'text', text: 'Could not undo the edits: Undo stopped' }],
+      structuredContent: {
+        callId: partialCallId,
+        error: {
+          code: 'world_unavailable',
+          message: 'Undo stopped',
+          details: { reason: 'operation_failed' },
+          editId: failedEditId,
+        },
+        undoneEdits: [completedEdit],
+      },
+    }),
+  );
+
+  behavior = 'first';
+  const first = await callUndo(71, [failedEditId]);
+  assert.ok(first.result);
+  const firstCallId = first.result.structuredContent?.callId;
+  assert.ok(typeof firstCallId === 'string');
+  assert.deepEqual(first.result.structuredContent, {
+    callId: firstCallId,
+    error: {
+      code: 'world_unavailable',
+      message: 'Undo stopped',
+      details: { reason: 'operation_failed' },
+      editId: failedEditId,
+    },
+    undoneEdits: [],
+  });
+
+  behavior = 'preflight';
+  const preflight = await callUndo(72, [failedEditId]);
+  assert.ok(preflight.result);
+  const preflightCallId = preflight.result.structuredContent?.callId;
+  assert.ok(typeof preflightCallId === 'string');
+  assert.deepEqual(preflight.result.structuredContent, {
+    callId: preflightCallId,
+    error: {
+      code: 'edit_not_latest',
+      message: 'Edit is not latest',
+      details: { world: 'world', requestedEditId: failedEditId, newestEditId },
+    },
+  });
+
+  await waitForValue(
+    logs,
+    (record) => record.event === 'tool.completed' && record.request_id === 72,
+    'final undo progress audit',
+  );
+  const audits = logs.values.filter((record) => record.event === 'tool.completed' && record.operation === 'undo_edits');
+  assert.deepEqual(
+    audits.map((record) => ({
+      requestId: record.request_id,
+      editId: record.edit_id,
+      outcome: record.outcome,
+      changedBlockCount: record.changed_block_count,
+      resultCount: record.result_count,
+      errorCode: record.error_code,
+    })),
+    [
+      {
+        requestId: 70,
+        editId: failedEditId,
+        outcome: 'partial_failure',
+        changedBlockCount: 7,
+        resultCount: 1,
+        errorCode: 'world_unavailable',
+      },
+      {
+        requestId: 71,
+        editId: failedEditId,
+        outcome: 'partial_failure',
+        changedBlockCount: 0,
+        resultCount: 0,
+        errorCode: 'world_unavailable',
+      },
+      {
+        requestId: 72,
+        editId: undefined,
+        outcome: undefined,
+        changedBlockCount: undefined,
+        resultCount: undefined,
+        errorCode: 'edit_not_latest',
+      },
+    ],
+  );
+  assert.equal(JSON.stringify(logs.values).includes('SECRET_BATCH_UNDO_LABEL'), false);
 
   const exited = once(child, 'exit');
   child.stdin.end();

@@ -20,9 +20,18 @@ import java.util.concurrent.ThreadLocalRandom;
 
 final class SetBlocksRequestDecoder {
     private static final Set<String> REQUIRED_FIELDS =
-            Set.of("world", "origin", "palettes", "placements", "runs");
+            Set.of("world", "origin", "palettes", "placements", "runs", "label");
     private static final Set<String> ALLOWED_FIELDS =
-            Set.of("world", "origin", "palettes", "placements", "runs", "seed", "dryRun");
+            Set.of(
+                    "world",
+                    "origin",
+                    "palettes",
+                    "placements",
+                    "runs",
+                    "seed",
+                    "dryRun",
+                    "label",
+                    "maxChangedBlocks");
 
     private SetBlocksRequestDecoder() {}
 
@@ -41,7 +50,11 @@ final class SetBlocksRequestDecoder {
                         : ThreadLocalRandom.current().nextInt(),
                 object.has("dryRun")
                         ? RequestJson.bool(object.get("dryRun"), "dryRun")
-                        : config.defaults().editDryRun());
+                        : config.defaults().editDryRun(),
+                RequestJson.string(object.get("label"), "label"),
+                object.has("maxChangedBlocks")
+                        ? RequestJson.integer(object.get("maxChangedBlocks"), "maxChangedBlocks")
+                        : null);
     }
 
     private static List<List<DestinationPaletteEntry>> palettes(JsonElement element)

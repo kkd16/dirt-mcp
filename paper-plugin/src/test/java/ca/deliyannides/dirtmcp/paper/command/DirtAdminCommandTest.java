@@ -151,7 +151,7 @@ final class DirtAdminCommandTest {
         assertTrue(plain.contains("replace_region_blocks  false"));
         assertTrue(plain.contains("set_blocks  true"));
         assertTrue(plain.contains("get_edit_history  true"));
-        assertTrue(plain.contains("undo_edit  false"));
+        assertTrue(plain.contains("undo_edits  false"));
         assertTrue(plain.contains("run_minecraft_commands  false"));
         assertTrue(plain.contains("LOGGING"));
         assertTrue(plain.contains("console-level  warning"));

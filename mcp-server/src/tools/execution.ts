@@ -43,15 +43,18 @@ export async function executeToolCall(
     if (!(error instanceof ToolFailure)) {
       callLogger.error('tool.unexpected_failure', 'Tool call failed unexpectedly.', safeErrorFields(error));
     }
-    const structuredContent = ToolFailureResultSchema.parse({
+    const baseStructuredContent = ToolFailureResultSchema.parse({
       callId,
       error: failure.data,
     });
-    return {
+    const structuredContent = { ...failure.progress, ...baseStructuredContent };
+    const result: CallToolResult = {
       content: [{ type: 'text', text: `${details.failureContext}: ${failure.message}` }],
       structuredContent,
       isError: true,
     };
+    resultFields = resultLogFields(result);
+    return result;
   } finally {
     const failureFields: LogFields =
       failure === undefined
@@ -95,13 +98,10 @@ function resultLogFields(result: CallToolResult): LogFields {
   const editId = stringValue(propertyValue(edit, 'editId'));
   let outcome = stringValue(propertyValue(content, 'outcome'));
   let changedBlockCount = integerValue(propertyValue(content, 'changedBlockCount'));
-  if (edit !== undefined && stringValue(propertyValue(content, 'undoCallId')) !== undefined) {
-    outcome = 'undone';
-    changedBlockCount = integerValue(propertyValue(edit, 'changedBlockCount'));
-  }
 
   let resultCount: number | undefined;
   const edits = propertyValue(content, 'edits');
+  const undoneEdits = propertyValue(content, 'undoneEdits');
   const commandResults = propertyValue(content, 'results');
   if (Array.isArray(commandResults)) {
     resultCount = commandResults.length;
@@ -113,6 +113,14 @@ function resultLogFields(result: CallToolResult): LogFields {
     }
   } else if (Array.isArray(edits)) {
     resultCount = edits.length;
+    if (stringValue(propertyValue(content, 'undoCallId')) !== undefined) {
+      outcome = 'undone';
+      changedBlockCount = sumChangedBlockCounts(edits);
+    }
+  } else if (Array.isArray(undoneEdits)) {
+    resultCount = undoneEdits.length;
+    outcome = 'partial_failure';
+    changedBlockCount = sumChangedBlockCounts(undoneEdits);
   } else {
     const blockStateCounts = objectValue(propertyValue(content, 'blockStateCounts'));
     resultCount =
@@ -128,6 +136,17 @@ function resultLogFields(result: CallToolResult): LogFields {
     ...(changedBlockCount === undefined ? {} : { changed_block_count: changedBlockCount }),
     ...(resultCount === undefined ? {} : { result_count: resultCount }),
   };
+}
+
+function sumChangedBlockCounts(values: readonly unknown[]): number | undefined {
+  let sum = 0;
+  for (const value of values) {
+    const record = objectValue(value);
+    const count = integerValue(propertyValue(record, 'changedBlockCount'));
+    if (count === undefined || count < 0 || !Number.isSafeInteger(sum + count)) return undefined;
+    sum += count;
+  }
+  return sum;
 }
 
 function objectValue(value: unknown): object | undefined {

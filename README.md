@@ -21,9 +21,9 @@ inspect -> preview -> edit -> verify -> undo if needed
 | -------- | ------------------------------------------------------------------------------- |
 | Inspect  | Count blocks or retrieve exact block states in bounded, already-loaded regions. |
 | View     | Scan orthographic views or trace from a player or arbitrary camera perspective. |
-| Edit     | Replace or place weighted-palette blocks as a single FAWE edit.                 |
+| Edit     | Apply labeled, bounded replacements or placements as one FAWE edit.             |
 | Preview  | Preview edits with reproducible seeds before committing them.                   |
-| Undo     | Inspect bounded in-memory edit history and undo the newest edit by ID.          |
+| Undo     | Inspect labeled in-memory history and undo an exact newest-first edit prefix.   |
 | Commands | Run bounded command batches through an operator-level, non-player sender.       |
 | Access   | Paper administrators choose which MCP tools to expose.                          |
 
@@ -125,6 +125,11 @@ trusted checkout.
 - Edits are synchronous and bounded, with one Dirt mutation at a time per world.
 - Undo history is in-memory only and is cleared on world unload or server
   restart.
+
+Keep each label and edit focused on one reversible intent. Batch undo validates
+the complete newest-first ID list before starting, then restores sequentially;
+if a runtime failure follows successful undos, inspect history before retrying.
+Undo is a flat stack and does not create redo entries.
 
 Command batches are non-atomic and may cause effects outside Dirt's edit limits
 and history. Do not retry them blindly after an ambiguous timeout. Keep normal

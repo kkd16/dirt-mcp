@@ -11,7 +11,7 @@ import ca.deliyannides.dirtmcp.paper.bridge.endpoint.RunMinecraftCommandsEndpoin
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ScanOrthographicViewEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.ServerStatusEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.SetBlocksEndpoint;
-import ca.deliyannides.dirtmcp.paper.bridge.endpoint.UndoEditEndpoint;
+import ca.deliyannides.dirtmcp.paper.bridge.endpoint.UndoEditsEndpoint;
 import ca.deliyannides.dirtmcp.paper.command.RunMinecraftCommands;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.config.McpTool;
@@ -26,7 +26,7 @@ import ca.deliyannides.dirtmcp.paper.world.edit.EditStatus;
 import ca.deliyannides.dirtmcp.paper.world.edit.GetEditHistory;
 import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
-import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
+import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdits;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView;
@@ -95,7 +95,7 @@ final class BridgeTestFixture {
                         new ReplaceRegionBlocksEndpoint(operations, config),
                         new SetBlocksEndpoint(operations, config),
                         new GetEditHistoryEndpoint(operations),
-                        new UndoEditEndpoint(operations),
+                        new UndoEditsEndpoint(operations),
                         new RunMinecraftCommandsEndpoint(operations)),
                 log);
     }
@@ -137,7 +137,7 @@ final class BridgeTestFixture {
                     ReplaceRegionBlocks,
                     SetBlocks,
                     GetEditHistory,
-                    UndoEdit,
+                    UndoEdits,
                     RunMinecraftCommands {
         @Override
         public PingServer.Result ping() throws OperationException {
@@ -358,7 +358,8 @@ final class BridgeTestFixture {
                             request.world(),
                             bounds,
                             callId,
-                            EditOperation.REPLACE_REGION_BLOCKS));
+                            EditOperation.REPLACE_REGION_BLOCKS,
+                            request.label()));
         }
 
         @Override
@@ -380,7 +381,8 @@ final class BridgeTestFixture {
                             request.world(),
                             bounds,
                             callId,
-                            EditOperation.SET_BLOCKS));
+                            EditOperation.SET_BLOCKS,
+                            request.label()));
         }
 
         @Override
@@ -395,19 +397,28 @@ final class BridgeTestFixture {
                                             new BlockPosition(0, 0, 0), new BlockPosition(0, 0, 0)),
                                     UUID.fromString(CALL_ID),
                                     EditOperation.SET_BLOCKS,
-                                    EDIT_ID)));
+                                    EDIT_ID,
+                                    "Place history block")));
         }
 
         @Override
-        public UndoEdit.Result undoEdit(UndoEdit.Request request, UUID callId)
+        public UndoEdits.Result undoEdits(UndoEdits.Request request, UUID callId)
                 throws OperationException {
-            return new UndoEdit.Result(
-                    editRecord(
-                            request.world(),
-                            new BlockBounds(new BlockPosition(0, 0, 0), new BlockPosition(0, 0, 0)),
-                            UUID.fromString(CALL_ID),
-                            EditOperation.SET_BLOCKS,
-                            request.editId()),
+            BlockBounds bounds =
+                    new BlockBounds(new BlockPosition(0, 0, 0), new BlockPosition(0, 0, 0));
+            return new UndoEdits.Result(
+                    request.world(),
+                    request.editIds().stream()
+                            .map(
+                                    editId ->
+                                            editRecord(
+                                                    request.world(),
+                                                    bounds,
+                                                    UUID.fromString(CALL_ID),
+                                                    EditOperation.SET_BLOCKS,
+                                                    editId,
+                                                    "Undo fixture edit"))
+                            .toList(),
                     callId,
                     Instant.parse("2026-08-19T12:01:00Z"));
         }
@@ -421,8 +432,9 @@ final class BridgeTestFixture {
                 String world,
                 BlockBounds bounds,
                 UUID callId,
-                EditOperation operation) {
-            return dryRun ? null : editRecord(world, bounds, callId, operation, EDIT_ID);
+                EditOperation operation,
+                String label) {
+            return dryRun ? null : editRecord(world, bounds, callId, operation, EDIT_ID, label);
         }
 
         private static EditRecord editRecord(
@@ -430,11 +442,13 @@ final class BridgeTestFixture {
                 BlockBounds bounds,
                 UUID callId,
                 EditOperation operation,
-                UUID editId) {
+                UUID editId,
+                String label) {
             return new EditRecord(
                     editId,
                     callId,
                     operation,
+                    label,
                     world,
                     WORLD_ID,
                     bounds,

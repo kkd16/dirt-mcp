@@ -150,6 +150,10 @@ final class EditCoordinator implements AutoCloseable {
         }
     }
 
+    int maxEntriesPerWorld() {
+        return this.maxEntriesPerWorld;
+    }
+
     private void releaseReservation(UUID worldId, WorldState state) {
         List<RetainedEdit> discarded;
         synchronized (this.worlds) {
@@ -291,14 +295,17 @@ final class EditCoordinator implements AutoCloseable {
         this.reservedHistoryChangedBlocks -= changedBlocks;
     }
 
-    private void removeWithoutClosing(RetainedEdit edit) {
+    private boolean removeWithoutClosing(RetainedEdit edit) {
+        boolean removed = false;
         WorldState owner = this.worlds.get(edit.record().worldId());
         if (owner != null) {
-            owner.history.removeLastOccurrence(edit);
+            removed = owner.history.removeLastOccurrence(edit);
         }
         if (this.retained.remove(edit.record().editId(), edit)) {
             this.retainedChangedBlocks -= edit.record().changedBlockCount();
+            removed = true;
         }
+        return removed;
     }
 
     private void detach(RetainedEdit edit) {
@@ -331,9 +338,7 @@ final class EditCoordinator implements AutoCloseable {
             WorldState owner = this.worlds.get(candidate.record().worldId());
             if (!excluded.contains(candidate)
                     && candidate.record().status() == EditStatus.COMMITTED
-                    && (owner == null
-                            || !owner.undoActive
-                            || owner.history.peekLast() != candidate)) {
+                    && (owner == null || !owner.undoActive)) {
                 return candidate;
             }
         }
@@ -441,22 +446,6 @@ final class EditCoordinator implements AutoCloseable {
             }
         }
 
-        RetainedEdit latest() {
-            synchronized (worlds) {
-                return this.state.invalidated ? null : this.state.history.peekLast();
-            }
-        }
-
-        boolean contains(UUID editId) {
-            synchronized (worlds) {
-                if (this.state.invalidated) {
-                    return false;
-                }
-                return this.state.history.stream()
-                        .anyMatch(edit -> edit.record().editId().equals(editId));
-            }
-        }
-
         List<EditRecord> history() {
             synchronized (worlds) {
                 if (this.state.invalidated) {
@@ -468,6 +457,41 @@ final class EditCoordinator implements AutoCloseable {
                     snapshot.add(iterator.next().record());
                 }
                 return List.copyOf(snapshot);
+            }
+        }
+
+        List<RetainedEdit> requireUndoPrefix(List<UUID> editIds) throws OperationException {
+            synchronized (worlds) {
+                if (this.access != Access.UNDO || this.released) {
+                    throw new IllegalStateException("An undo prefix requires a current undo lease");
+                }
+                if (this.state.invalidated) {
+                    throw unavailable(this.worldName);
+                }
+                List<RetainedEdit> prefix = new ArrayList<>(editIds.size());
+                var iterator = this.state.history.descendingIterator();
+                for (UUID requested : editIds) {
+                    RetainedEdit expected = iterator.hasNext() ? iterator.next() : null;
+                    if (expected != null && expected.record().editId().equals(requested)) {
+                        prefix.add(expected);
+                        continue;
+                    }
+                    boolean retainedInWorld =
+                            this.state.history.stream()
+                                    .anyMatch(edit -> edit.record().editId().equals(requested));
+                    if (retainedInWorld && expected != null) {
+                        throw new OperationException(
+                                OperationFailure.EDIT_NOT_LATEST,
+                                "Edit is retained but does not match the next edit eligible for undo",
+                                new ErrorDetails.EditNotLatest(
+                                        this.worldName, requested, expected.record().editId()));
+                    }
+                    throw new OperationException(
+                            OperationFailure.EDIT_NOT_FOUND,
+                            "Edit is not retained for this world: " + requested,
+                            new ErrorDetails.EditNotFound(this.worldName, requested));
+                }
+                return List.copyOf(prefix);
             }
         }
 
@@ -483,16 +507,16 @@ final class EditCoordinator implements AutoCloseable {
             }
         }
 
-        void removeLatest(RetainedEdit expected) {
-            boolean close = false;
+        void consumeRestored(RetainedEdit restored) {
+            boolean detached;
             synchronized (worlds) {
-                if (!this.state.invalidated && this.state.history.peekLast() == expected) {
-                    detach(expected);
-                    close = true;
+                detached = removeWithoutClosing(restored);
+                if (detached) {
+                    pendingDisposals++;
                 }
             }
-            if (close) {
-                closeDetached(List.of(expected));
+            if (detached) {
+                closeDetached(List.of(restored));
             }
         }
 

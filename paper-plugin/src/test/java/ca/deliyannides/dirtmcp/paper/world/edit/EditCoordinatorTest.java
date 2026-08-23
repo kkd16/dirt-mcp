@@ -2,7 +2,6 @@ package ca.deliyannides.dirtmcp.paper.world.edit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -104,7 +103,7 @@ final class EditCoordinatorTest {
     }
 
     @Test
-    void globalAdmissionProtectsOnlyTheEditBeingUndone() throws OperationException {
+    void globalAdmissionProtectsTheUndoWorldsEntireHistory() throws OperationException {
         EditCoordinator coordinator = new EditCoordinator(2, 2, 2);
         TestUndo olderUndo = new TestUndo(1);
         TestUndo newestUndo = new TestUndo(1);
@@ -115,14 +114,17 @@ final class EditCoordinatorTest {
 
         try (EditCoordinator.Lease undo = coordinator.enterUndo(WORLD_ID, "world");
                 EditCoordinator.Lease other = coordinator.enterMutation(OTHER_WORLD_ID, "other")) {
-            other.reserveHistory(1);
+            OperationException failure =
+                    assertThrows(OperationException.class, () -> other.reserveHistory(1));
 
-            assertTrue(olderUndo.closed);
+            assertEquals(OperationFailure.HISTORY_CAPACITY_EXCEEDED, failure.failure());
+            assertFalse(olderUndo.closed);
             assertFalse(newestUndo.closed);
-            assertEquals(java.util.List.of(newest.record()), undo.history());
+            assertEquals(java.util.List.of(newest.record(), older.record()), undo.history());
         }
 
         coordinator.close();
+        assertTrue(olderUndo.closed);
         assertTrue(newestUndo.closed);
     }
 
@@ -276,7 +278,7 @@ final class EditCoordinatorTest {
                             () -> {
                                 try (EditCoordinator.Lease lease =
                                         coordinator.enterUndo(WORLD_ID, "world")) {
-                                    lease.removeLatest(retained);
+                                    lease.consumeRestored(retained);
                                 }
                                 return null;
                             });
@@ -345,7 +347,9 @@ final class EditCoordinatorTest {
             assertEquals(java.util.List.of(recovery.record()), history.history());
         }
         try (EditCoordinator.Lease lease = coordinator.enterUndo(WORLD_ID, "world")) {
-            lease.removeLatest(lease.latest());
+            lease.consumeRestored(
+                    lease.requireUndoPrefix(java.util.List.of(recovery.record().editId()))
+                            .getFirst());
         }
         assertTrue(undo.closed);
     }
@@ -358,7 +362,7 @@ final class EditCoordinatorTest {
 
         try (EditCoordinator.Lease lease = coordinator.enterUndo(WORLD_ID, "world")) {
             lease.markRecoveryRequired(committed);
-            assertEquals(EditStatus.RECOVERY_REQUIRED, lease.latest().record().status());
+            assertEquals(EditStatus.RECOVERY_REQUIRED, lease.history().getFirst().status());
         }
     }
 
@@ -372,7 +376,7 @@ final class EditCoordinatorTest {
         TestUndo incomingUndo = new TestUndo(1);
         RetainedEdit incoming = edit(OTHER_WORLD_ID, "other", incomingUndo, EditStatus.COMMITTED);
         try (EditCoordinator.Lease undo = coordinator.enterUndo(WORLD_ID, "world")) {
-            assertEquals(protectedEdit, undo.latest());
+            assertEquals(java.util.List.of(protectedEdit.record()), undo.history());
             try (EditCoordinator.Lease mutation =
                     coordinator.enterMutation(OTHER_WORLD_ID, "other")) {
                 assertEquals(
@@ -470,11 +474,9 @@ final class EditCoordinatorTest {
 
         coordinator.invalidate(WORLD_ID);
 
-        assertNull(stale.latest());
-        assertFalse(stale.contains(recovery.record().editId()));
         assertTrue(stale.history().isEmpty());
         stale.markRecoveryRequired(recovery);
-        stale.removeLatest(recovery);
+        stale.consumeRestored(recovery);
         assertFalse(stale.rememberRecovery(recovery));
         assertFalse(undo.closed);
         stale.close();
@@ -553,6 +555,7 @@ final class EditCoordinatorTest {
                         UUID.randomUUID(),
                         CALL_ID,
                         EditOperation.SET_BLOCKS,
+                        "Test edit",
                         world,
                         worldId,
                         new BlockBounds(position, position),

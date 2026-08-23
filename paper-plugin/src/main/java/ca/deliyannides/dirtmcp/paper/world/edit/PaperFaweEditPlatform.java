@@ -37,15 +37,21 @@ final class PaperFaweEditPlatform implements EditPlatform {
 
     @Override
     public EditResult replace(
-            PreparedReplace prepared, Cuboid region, boolean dryRun, MutationAdmission admission)
+            PreparedReplace prepared,
+            Cuboid region,
+            boolean dryRun,
+            int maxChangedBlocks,
+            MutationAdmission admission)
             throws OperationException {
-        return this.executor.replace(requireReplace(prepared), region, dryRun, admission);
+        return this.executor.replace(
+                requireReplace(prepared), region, dryRun, maxChangedBlocks, admission);
     }
 
     @Override
-    public EditResult set(PreparedSet prepared, boolean dryRun, MutationAdmission admission)
+    public EditResult set(
+            PreparedSet prepared, boolean dryRun, int maxChangedBlocks, MutationAdmission admission)
             throws OperationException {
-        return this.executor.set(requireSet(prepared), dryRun, admission);
+        return this.executor.set(requireSet(prepared), dryRun, maxChangedBlocks, admission);
     }
 
     @Override

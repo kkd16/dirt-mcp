@@ -355,7 +355,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '413':
-          description: Region volume, touched chunks, or exact changed-block count exceeds its configured limit
+          description: Region volume or touched chunks exceed configured limits, or the exact changed-block count exceeds the effective configured/request ceiling
           content:
             application/json:
               schema:
@@ -414,7 +414,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '413':
-          description: Expanded block count, touched chunks, or changed-block count exceeds its configured limit
+          description: Expanded block count or touched chunks exceed configured limits, or the changed-block count exceeds the effective configured/request ceiling
           content:
             application/json:
               schema:
@@ -482,10 +482,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /v1/undo-edit:
+  /v1/undo-edits:
     post:
-      operationId: undoEdit
-      summary: Undo an identified retained Dirt edit in a loaded world
+      operationId: undoEdits
+      summary: Undo an exact newest-first prefix of retained Dirt edits in a loaded world
       parameters:
         - $ref: '#/components/parameters/DirtCallId'
       requestBody:
@@ -493,16 +493,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UndoEditRequest'
+              $ref: '#/components/schemas/UndoEditsRequest'
       responses:
         '200':
-          description: Completed identified undo
+          description: Every requested edit was restored and consumed in newest-first order
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UndoEditResponse'
+                $ref: '#/components/schemas/UndoEditsResponse'
         '400':
-          description: Invalid call ID, JSON, fields, or edit ID
+          description: Invalid call ID, JSON, fields, or edit ID list
           content:
             application/json:
               schema:
@@ -510,7 +510,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
-          description: World is not loaded or the edit is not retained
+          description: World is not loaded or a requested edit is not retained
           content:
             application/json:
               schema:
@@ -518,23 +518,27 @@ paths:
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '409':
-          description: The edit is not the newest retained edit or another Dirt MCP world operation is active in this world
+          description: The requested IDs are not the exact newest-first history prefix or another Dirt MCP world operation is active in this world
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '500':
-          description: Unexpected undo failure
+          description: Unexpected failure before execution, or runtime failure after zero or more edits were undone
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/UndoEditsRuntimeError'
         '503':
-          description: Undo was interrupted, its world became unavailable, or an existing touched chunk could not be loaded
+          description: Undo was unavailable before execution, or runtime execution was interrupted, lost its world, or could not load an existing touched chunk
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/UndoEditsRuntimeError'
   /v1/run-minecraft-commands:
     post:
       operationId: runMinecraftCommands
@@ -728,7 +732,9 @@ components:
                 - maximum
               properties:
                 maximum:
-                  $ref: '#/components/schemas/PositiveInt32'
+                  allOf:
+                    - $ref: '#/components/schemas/PositiveInt32'
+                  description: Effective changed-block ceiling, using the lower of the configured and optional request limits.
       unevaluatedProperties: false
     EditNotFoundError:
       allOf:
@@ -2681,6 +2687,12 @@ components:
           minimum: 1
           maximum: 100
           description: Whole-number percentage supplied for every entry or omitted from every entry.
+    EditLabel:
+      type: string
+      minLength: 1
+      maxLength: 120
+      pattern: '^(?!\s)(?!.*\s$)[^\u0000-\u001F\u007F-\u009F\u2028\u2029]+$'
+      description: Concise model-supplied purpose for an edit. Contains 1-120 Unicode code points, is already trimmed and single-line, and contains no ISO control characters.
     EditRecord:
       type: object
       additionalProperties: false
@@ -2688,6 +2700,7 @@ components:
       required:
         - editId
         - callId
+        - label
         - operation
         - world
         - worldId
@@ -2700,6 +2713,8 @@ components:
           $ref: '#/components/schemas/UuidV4'
         callId:
           $ref: '#/components/schemas/UuidV4'
+        label:
+          $ref: '#/components/schemas/EditLabel'
         operation:
           type: string
           enum:
@@ -2733,6 +2748,7 @@ components:
       additionalProperties: false
       required:
         - world
+        - label
         - min
         - max
         - sourceBlockStatePatterns
@@ -2742,6 +2758,8 @@ components:
           type: string
           minLength: 1
           pattern: '.*\S.*'
+        label:
+          $ref: '#/components/schemas/EditLabel'
         min:
           $ref: '#/components/schemas/BlockPosition'
         max:
@@ -2770,6 +2788,10 @@ components:
         dryRun:
           type: boolean
           description: True requires a preview outcome, false excludes preview, and omission uses the configured replace default.
+        maxChangedBlocks:
+          allOf:
+            - $ref: '#/components/schemas/PositiveInt32'
+          description: Optional caller ceiling on the changed-block count. Dirt enforces the lower of this value and the configured maximum during exact preflight and FAWE execution; live drift uses normal rollback or recovery handling.
     ReplaceRegionBlocksResponse:
       type: object
       additionalProperties: false
@@ -2861,6 +2883,7 @@ components:
       additionalProperties: false
       required:
         - world
+        - label
         - origin
         - palettes
         - placements
@@ -2870,6 +2893,8 @@ components:
           type: string
           minLength: 1
           pattern: '.*\S.*'
+        label:
+          $ref: '#/components/schemas/EditLabel'
         origin:
           $ref: '#/components/schemas/BlockPosition'
         palettes:
@@ -2900,6 +2925,10 @@ components:
         dryRun:
           type: boolean
           description: True requires a preview outcome, false excludes preview, and omission uses the configured set-blocks default.
+        maxChangedBlocks:
+          allOf:
+            - $ref: '#/components/schemas/PositiveInt32'
+          description: Optional caller ceiling on the changed-block count. Dirt enforces the lower of this value and the configured maximum during exact preflight and FAWE execution; live drift uses normal rollback or recovery handling.
     SetBlocksResponse:
       type: object
       additionalProperties: false
@@ -3014,35 +3043,71 @@ components:
           description: Retained undoable edit records for one loaded world UUID, ordered newest first with distinct edit IDs.
           items:
             $ref: '#/components/schemas/EditRecord'
-    UndoEditRequest:
+    UndoEditsRequest:
       type: object
       additionalProperties: false
+      description: Identity-checked request for an exact newest-first prefix of retained edits. The complete list is validated before restoration begins.
       required:
         - world
-        - editId
+        - editIds
       properties:
         world:
           type: string
           minLength: 1
           pattern: '.*\S.*'
-        editId:
-          $ref: '#/components/schemas/UuidV4'
-    UndoEditResponse:
+        editIds:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: Case-insensitively distinct retained edit IDs in exact newest-first history order, with no skipped entries and no more entries than the configured per-world history capacity.
+          items:
+            $ref: '#/components/schemas/UuidV4'
+    UndoEditsResponse:
       type: object
       additionalProperties: false
       required:
-        - edit
+        - world
+        - edits
         - undoCallId
         - undoneAt
       properties:
-        edit:
-          description: Edit record as retained immediately before the successful undo consumed it.
-          $ref: '#/components/schemas/EditRecord'
+        world:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+        edits:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: Successfully restored and consumed edit records in the requested newest-first order, each as retained immediately before its undo.
+          items:
+            $ref: '#/components/schemas/EditRecord'
         undoCallId:
           $ref: '#/components/schemas/UuidV4'
         undoneAt:
           type: string
           format: date-time
+          description: Timestamp recorded after the complete requested prefix was undone.
+    UndoEditsRuntimeError:
+      type: object
+      additionalProperties: false
+      description: Runtime undo failure after exact-prefix validation. Successful earlier undos remain consumed; error.editId identifies the current retained edit that failed.
+      required:
+        - error
+        - undoneEdits
+      properties:
+        error:
+          allOf:
+            - $ref: '#/components/schemas/BridgeError'
+            - type: object
+              required:
+                - editId
+        undoneEdits:
+          type: array
+          uniqueItems: true
+          description: Successfully restored and consumed prefix before the failure, newest first. Present and empty when the first requested edit failed during execution.
+          items:
+            $ref: '#/components/schemas/EditRecord'
     RunMinecraftCommandsRequest:
       type: object
       additionalProperties: false
@@ -3339,7 +3404,7 @@ components:
         - replace_region_blocks
         - set_blocks
         - get_edit_history
-        - undo_edit
+        - undo_edits
         - run_minecraft_commands
       properties:
         ping_server:
@@ -3362,7 +3427,7 @@ components:
           type: boolean
         get_edit_history:
           type: boolean
-        undo_edit:
+        undo_edits:
           type: boolean
         run_minecraft_commands:
           type: boolean

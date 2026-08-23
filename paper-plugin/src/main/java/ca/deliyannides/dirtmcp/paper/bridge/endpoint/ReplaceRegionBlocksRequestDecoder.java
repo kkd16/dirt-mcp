@@ -12,7 +12,13 @@ import java.util.concurrent.ThreadLocalRandom;
 
 final class ReplaceRegionBlocksRequestDecoder {
     private static final Set<String> REQUIRED_FIELDS =
-            Set.of("world", "min", "max", "sourceBlockStatePatterns", "destinationPalette");
+            Set.of(
+                    "world",
+                    "min",
+                    "max",
+                    "sourceBlockStatePatterns",
+                    "destinationPalette",
+                    "label");
     private static final Set<String> ALLOWED_FIELDS =
             Set.of(
                     "world",
@@ -21,7 +27,9 @@ final class ReplaceRegionBlocksRequestDecoder {
                     "sourceBlockStatePatterns",
                     "destinationPalette",
                     "seed",
-                    "dryRun");
+                    "dryRun",
+                    "label",
+                    "maxChangedBlocks");
 
     private ReplaceRegionBlocksRequestDecoder() {}
 
@@ -42,6 +50,10 @@ final class ReplaceRegionBlocksRequestDecoder {
                         : ThreadLocalRandom.current().nextInt(),
                 object.has("dryRun")
                         ? RequestJson.bool(object.get("dryRun"), "dryRun")
-                        : config.defaults().editDryRun());
+                        : config.defaults().editDryRun(),
+                RequestJson.string(object.get("label"), "label"),
+                object.has("maxChangedBlocks")
+                        ? RequestJson.integer(object.get("maxChangedBlocks"), "maxChangedBlocks")
+                        : null);
     }
 }

@@ -2,7 +2,9 @@ package ca.deliyannides.dirtmcp.paper.bridge;
 
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
+import ca.deliyannides.dirtmcp.paper.world.edit.UndoEditsException;
 import java.io.IOException;
+import java.util.UUID;
 
 final class FailureMapper {
     private FailureMapper() {}
@@ -22,6 +24,21 @@ final class FailureMapper {
                             WORLD_UNAVAILABLE ->
                             503;
                 };
+        if (exception instanceof UndoEditsException batch) {
+            UUID failedEditId = exception.editId().orElseThrow();
+            if (failure == OperationFailure.INTERNAL_ERROR) {
+                exchange.sendInternalUndoError(
+                        status, exception.getMessage(), failedEditId, batch.undoneEdits());
+            } else {
+                exchange.sendUndoError(
+                        status,
+                        exception.getMessage(),
+                        exception.details().orElseThrow(),
+                        failedEditId,
+                        batch.undoneEdits());
+            }
+            return;
+        }
         if (failure == OperationFailure.INTERNAL_ERROR) {
             if (exception.editId().isPresent()) {
                 exchange.sendInternalError(

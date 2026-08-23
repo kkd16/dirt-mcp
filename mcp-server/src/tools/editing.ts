@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import type { BridgeClient } from '../bridge/client.ts';
-import { BRIDGE_ROUTES } from '../bridge/contract.ts';
+import { BRIDGE_ROUTES, BridgeErrorSchema } from '../bridge/contract.ts';
 import type { DirtLogger } from '../logging.ts';
 import { ToolFailure, toolOutputSchema } from '../bridge/errors.ts';
 import {
@@ -93,10 +93,43 @@ export const DestinationPaletteSchema = z
   .describe('One or more exact destination states. Omitted weights give every entry equal probability.');
 
 const SeedSchema = SignedInt32Schema.describe('Signed 32-bit seed for reproducible per-coordinate palette choices.');
+const PositiveInt32Schema = SignedInt32Schema.positive();
+// oxlint-disable-next-line eslint/no-control-regex -- These are precisely the control characters labels forbid.
+const FORBIDDEN_EDIT_LABEL_CHARACTER = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/u;
+
+export const EditLabelSchema = z
+  .string()
+  .min(1)
+  .superRefine((label, context) => {
+    // oxlint-disable-next-line typescript/no-misused-spread -- String iteration intentionally counts Unicode code points.
+    if ([...label].length > 120) {
+      context.addIssue({ code: 'custom', message: 'Label must contain between 1 and 120 Unicode code points.' });
+    }
+    if (label !== label.trim()) {
+      context.addIssue({ code: 'custom', message: 'Label must not have leading or trailing whitespace.' });
+    }
+    if (FORBIDDEN_EDIT_LABEL_CHARACTER.test(label)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Label must be one line and must not contain control characters or Unicode line separators.',
+      });
+    }
+  })
+  .describe(
+    'Required concise description of one reversible edit intent: 1-120 Unicode code points, already trimmed, single-line, and free of control characters.',
+  )
+  .meta({
+    maxLength: 120,
+    pattern: '^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$',
+  });
 
 const EditOptionsInputShape = {
+  label: EditLabelSchema,
   seed: SeedSchema.optional().describe(
     'Optional reproducibility seed. Omission generates a fresh seed returned in the result.',
+  ),
+  maxChangedBlocks: PositiveInt32Schema.optional().describe(
+    'Optional per-call changed-block ceiling. The effective ceiling is the lower of this value and the server limit.',
   ),
   dryRun: z
     .boolean()
@@ -110,6 +143,7 @@ export const EditRecordSchema = z
   .object({
     editId: z.uuidv4().describe('Stable identifier for this edit transaction.'),
     callId: z.uuidv4().describe('Bridge call identifier that created this edit.'),
+    label: EditLabelSchema,
     operation: EditOperationSchema.describe('Dirt operation that performed this edit.'),
     world: NonBlankStringSchema.describe('Loaded world name associated with this edit.'),
     worldId: z.uuid().describe('Paper world UUID associated with this edit.'),
@@ -165,12 +199,12 @@ function hasConsistentEditResult(
 const EditResultMessage =
   'Committed outcomes require matching committed edit metadata and a positive changedBlockCount; preview and no_change outcomes require a null edit.';
 
-export function requireMatchingCallId(expected: string, actual: string, editId: string): void {
+export function requireMatchingCallId(expected: string, actual: string, editId?: string): void {
   if (actual.toLowerCase() !== expected.toLowerCase()) {
     throw new ToolFailure({
       code: 'bridge_invalid_response',
       message: 'Paper bridge response call ID did not match the request.',
-      editId,
+      ...(editId === undefined ? {} : { editId }),
     });
   }
 }
@@ -178,6 +212,7 @@ export function requireMatchingCallId(expected: string, actual: string, editId: 
 export function requireMatchingEditIdentity(
   expectedWorld: string,
   expectedBounds: z.infer<typeof BoundsSchema>,
+  expectedLabel: string,
   expectedCallId: string,
   actual: EditResultMetadata,
 ): void {
@@ -189,7 +224,16 @@ export function requireMatchingEditIdentity(
       ...(editId === undefined ? {} : { editId }),
     });
   }
-  if (actual.edit !== null) requireMatchingCallId(expectedCallId, actual.edit.callId, actual.edit.editId);
+  if (actual.edit !== null) {
+    requireMatchingCallId(expectedCallId, actual.edit.callId, actual.edit.editId);
+    if (actual.edit.label !== expectedLabel) {
+      throw new ToolFailure({
+        code: 'bridge_invalid_response',
+        message: 'Paper bridge edit label did not match the request.',
+        editId: actual.edit.editId,
+      });
+    }
+  }
 }
 
 export function requireMatchingUndoIdentity(
@@ -206,7 +250,7 @@ export function requireMatchingUndoIdentity(
   }
 }
 
-const ReplaceRegionBlocksInputSchema = z
+export const ReplaceRegionBlocksInputSchema = z
   .object({
     world: NonBlankStringSchema.describe('Exact name of an already loaded Paper world.'),
     min: BlockPositionSchema.describe('One inclusive corner; ordering relative to max does not matter.'),
@@ -456,6 +500,7 @@ function invalidEditResult(actual: EditResultMetadata, message: string): never {
 export function requireMatchingEditOptions(
   expectedSeed: number | undefined,
   expectedDryRun: boolean | undefined,
+  expectedMaxChangedBlocks: number | undefined,
   actual: EditResultMetadata & { readonly seed: number },
 ): void {
   requireMatchingSeed(expectedSeed, actual);
@@ -464,6 +509,9 @@ export function requireMatchingEditOptions(
     (expectedDryRun === false && actual.outcome === 'preview')
   ) {
     invalidEditResult(actual, 'Paper bridge edit outcome did not match the explicit dryRun request.');
+  }
+  if (expectedMaxChangedBlocks !== undefined && actual.changedBlockCount > expectedMaxChangedBlocks) {
+    invalidEditResult(actual, 'Paper bridge edit result exceeded the requested maxChangedBlocks ceiling.');
   }
 }
 
@@ -496,22 +544,88 @@ export function requireMatchingSetBlockCount(
   }
 }
 
-const UndoEditInputSchema = z
+export const UndoEditsInputSchema = z
   .object({
-    world: NonBlankStringSchema.describe('Exact name of the loaded world containing the retained edit.'),
-    editId: z.uuidv4().describe('Identifier of the newest retained edit to undo.'),
+    world: NonBlankStringSchema.describe('Exact name of the loaded world containing the retained edits.'),
+    editIds: z
+      .array(z.uuidv4())
+      .min(1)
+      .superRefine((editIds, context) => {
+        const seen = new Set<string>();
+        editIds.forEach((editId, index) => {
+          const normalized = editId.toLowerCase();
+          if (seen.has(normalized)) {
+            context.addIssue({
+              code: 'custom',
+              path: [index],
+              message: 'Edit IDs must be case-insensitively unique.',
+            });
+          }
+          seen.add(normalized);
+        });
+      })
+      .meta({ uniqueItems: true })
+      .describe('Exact newest-first prefix of retained edit IDs to undo.'),
   })
   .strict()
-  .describe('Identity-checked undo of one retained Dirt edit.');
+  .describe('Identity-checked batch undo of a newest-first retained-history prefix.');
 
-export const UndoEditOutputSchema = z
+export const UndoEditsOutputSchema = z
   .object({
-    edit: EditRecordSchema.describe('Edit record as retained immediately before the successful undo consumed it.'),
+    world: NonBlankStringSchema.describe('Loaded world whose edits were undone.'),
+    edits: z
+      .array(EditRecordSchema)
+      .min(1)
+      .meta({ uniqueItems: true })
+      .describe('Consumed edit records in the same newest-first order requested.'),
     undoCallId: z.uuidv4().describe('Bridge call identifier that performed the undo.'),
-    undoneAt: z.iso.datetime({ offset: true }).describe('Timestamp at which the undo completed.'),
+    undoneAt: z.iso.datetime({ offset: true }).describe('Timestamp at which the complete batch undo finished.'),
   })
   .strict()
-  .describe('Result of undoing and consuming an identified retained Dirt edit.');
+  .describe('Result of undoing and consuming an identified newest-first edit prefix.');
+
+const UndoneEditPrefixSchema = z
+  .array(EditRecordSchema)
+  .meta({ uniqueItems: true })
+  .describe('Successfully restored and consumed newest-first prefix before execution stopped.');
+
+const UndoEditsFailureResponseSchema = z
+  .object({
+    error: z.intersection(BridgeErrorSchema, z.object({ editId: z.uuidv4() }).passthrough()),
+    undoneEdits: UndoneEditPrefixSchema,
+  })
+  .strict();
+
+function requireMatchingUndonePrefix(
+  expectedWorld: string,
+  expectedEditIds: readonly string[],
+  edits: readonly z.infer<typeof EditRecordSchema>[],
+): void {
+  if (edits.length > expectedEditIds.length) {
+    throw new ToolFailure({
+      code: 'bridge_invalid_response',
+      message: 'Paper bridge undo result contained more edits than requested.',
+    });
+  }
+  edits.forEach((edit, index) => requireMatchingUndoIdentity(expectedWorld, expectedEditIds[index]!, edit));
+}
+
+function requireMatchingUndoFailure(
+  expectedWorld: string,
+  expectedEditIds: readonly string[],
+  undoneEdits: readonly z.infer<typeof EditRecordSchema>[],
+  failedEditId: string,
+): void {
+  requireMatchingUndonePrefix(expectedWorld, expectedEditIds, undoneEdits);
+  const expectedFailedEditId = expectedEditIds[undoneEdits.length];
+  if (expectedFailedEditId === undefined || expectedFailedEditId.toLowerCase() !== failedEditId.toLowerCase()) {
+    throw new ToolFailure({
+      code: 'bridge_invalid_response',
+      message: 'Paper bridge undo failure did not identify the next requested edit.',
+      editId: failedEditId,
+    });
+  }
+}
 
 export function registerEditingTools(
   server: McpServer,
@@ -524,7 +638,7 @@ export function registerEditingTools(
     {
       title: 'Replace region blocks',
       description:
-        'Replace blocks matching any source pattern throughout an inclusive region. Omitted source properties match any value. Destination entries are exact states; omit every weight for equal probability or provide whole percentages totaling 100. Reuse the returned seed to reproduce a preview. Set dryRun=true to preview without mutation. Every committed non-empty edit returns retained edit metadata including its edit ID.',
+        'Replace blocks matching any source pattern throughout an inclusive region. Label the single reversible intent concisely. Omitted source properties match any value. Destination entries are exact states; omit every weight for equal probability or provide whole percentages totaling 100. Reuse the returned seed to reproduce a preview. Set maxChangedBlocks for a stricter per-call ceiling and dryRun=true to preview without mutation. Every committed non-empty edit returns retained edit metadata including its edit ID and label.',
       inputSchema: ReplaceRegionBlocksInputSchema,
       outputSchema: toolOutputSchema(ReplaceRegionBlocksOutputSchema),
       annotations: NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
@@ -546,8 +660,8 @@ export function registerEditingTools(
             input,
           );
           const bounds = normalizedBounds(input.min, input.max);
-          requireMatchingEditIdentity(input.world, bounds, callId, result);
-          requireMatchingEditOptions(input.seed, input.dryRun, result);
+          requireMatchingEditIdentity(input.world, bounds, input.label, callId, result);
+          requireMatchingEditOptions(input.seed, input.dryRun, input.maxChangedBlocks, result);
           requireReplaceCountsWithinBounds(bounds, result);
           const verb = result.outcome === 'preview' ? 'Would change' : 'Changed';
           const editSummary = result.edit === null ? '' : ` Edit ID: ${result.edit.editId}.`;
@@ -565,11 +679,11 @@ export function registerEditingTools(
     {
       title: 'Set blocks',
       description:
-        'Place blocks from weighted palettes using origin-relative singleton placements and forward inclusive cuboids. Each placement is [paletteIndex, x, y, z]; each run is [paletteIndex, x, y, z, toX, toY, toZ]. Palette indexes are zero-based and represented blocks cannot overlap. Omit every weight in a palette for equal probability, or provide whole percentages totaling 100. Change only origin on a get_blocks result to copy its exact structure elsewhere. Empty palettes, placements, and runs are a valid no-op. Reuse the returned seed to replay a preview. All states and resolved geometry are validated before mutation. Keep the expanded block count, palettes, and encoded request within the active configured limits.' +
+        'Place blocks from weighted palettes using origin-relative singleton placements and forward inclusive cuboids. Label the single reversible intent concisely. Each placement is [paletteIndex, x, y, z]; each run is [paletteIndex, x, y, z, toX, toY, toZ]. Palette indexes are zero-based and represented blocks cannot overlap. Omit every weight in a palette for equal probability, or provide whole percentages totaling 100. Reuse a get_blocks structure with a new origin and label to copy it elsewhere. Empty palettes, placements, and runs are a valid no-op. Reuse the returned seed to replay a preview. All states and resolved geometry are validated before mutation. Keep the expanded block count, palettes, and encoded request within the active configured limits.' +
         (toolConfiguration.get_server_status
           ? ' Those limits are reported by get_server_status with include.configuration=true.'
           : '') +
-        ' Placement does not trigger Minecraft neighbor physics. Set dryRun=true to preview exact counts. Every committed non-empty edit returns retained edit metadata including its edit ID.',
+        ' Placement does not trigger Minecraft neighbor physics. Set maxChangedBlocks for a stricter per-call ceiling and dryRun=true to preview exact counts. Every committed non-empty edit returns retained edit metadata including its edit ID and label.',
       inputSchema: SetBlocksInputSchema,
       outputSchema: toolOutputSchema(SetBlocksOutputSchema),
       annotations: NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
@@ -586,8 +700,8 @@ export function registerEditingTools(
             requireMatchingWorld(input.world, result.world);
             requireMatchingSeed(input.seed, result);
           } else {
-            requireMatchingEditIdentity(input.world, bounds, callId, result);
-            requireMatchingEditOptions(input.seed, input.dryRun, result);
+            requireMatchingEditIdentity(input.world, bounds, input.label, callId, result);
+            requireMatchingEditOptions(input.seed, input.dryRun, input.maxChangedBlocks, result);
           }
           requireMatchingSetBlockCount(expectedBlockCount, result);
           const verb = result.outcome === 'preview' ? 'Would change' : 'Changed';
@@ -630,36 +744,55 @@ export function registerEditingTools(
   );
   if (!toolConfiguration.get_edit_history) getEditHistory.disable();
 
-  const undoEdit = server.registerTool(
-    'undo_edit',
+  const undoEdits = server.registerTool(
+    'undo_edits',
     {
-      title: 'Undo an edit',
+      title: 'Undo edits',
       description:
-        'Undo the retained Dirt edit identified by editId in one loaded world. The edit must still be retained and must be the newest retained entry, preventing an intervening edit from being undone accidentally.' +
-        (toolConfiguration.get_edit_history ? ' Use get_edit_history to identify that entry.' : ''),
-      inputSchema: UndoEditInputSchema,
-      outputSchema: toolOutputSchema(UndoEditOutputSchema),
+        'Undo and consume a non-empty newest-first prefix of retained Dirt edits in one loaded world. editIds must exactly match history order, so entries cannot be skipped.' +
+        (toolConfiguration.get_edit_history
+          ? ' Use get_edit_history immediately beforehand to select the prefix, and re-read it after partial or ambiguous failures.'
+          : ''),
+      inputSchema: UndoEditsInputSchema,
+      outputSchema: toolOutputSchema(UndoEditsOutputSchema, {
+        undoneEdits: UndoneEditPrefixSchema,
+      }),
       annotations: NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
     },
     async (input, context) =>
       executeToolCall(
         logger,
         {
-          operation: 'undo_edit',
+          operation: 'undo_edits',
           world: input.world,
           context,
-          failureContext: 'Could not undo the edit',
+          failureContext: 'Could not undo the edits',
         },
         async (callId) => {
-          const result = await bridge.request(BRIDGE_ROUTES.undoEdit, callId, UndoEditOutputSchema, input);
-          requireMatchingCallId(callId, result.undoCallId, result.edit.editId);
-          requireMatchingUndoIdentity(input.world, input.editId, result.edit);
+          const result = await bridge.request(BRIDGE_ROUTES.undoEdits, callId, UndoEditsOutputSchema, input, {
+            schema: UndoEditsFailureResponseSchema,
+            select: (failure) => {
+              requireMatchingUndoFailure(input.world, input.editIds, failure.undoneEdits, failure.error.editId);
+              return { undoneEdits: failure.undoneEdits };
+            },
+          });
+          requireMatchingCallId(callId, result.undoCallId);
+          requireMatchingWorld(input.world, result.world);
+          if (result.edits.length !== input.editIds.length) {
+            throw new ToolFailure({
+              code: 'bridge_invalid_response',
+              message: 'Paper bridge undo result did not contain every requested edit.',
+            });
+          }
+          requireMatchingUndonePrefix(input.world, input.editIds, result.edits);
+          const changedBlockCount = result.edits.reduce((sum, edit) => sum + edit.changedBlockCount, 0);
+          const noun = result.edits.length === 1 ? 'edit' : 'edits';
           return successResult(
             result,
-            `Undid edit ${result.edit.editId} in ${result.edit.world}, restoring ${result.edit.changedBlockCount} blocks.`,
+            `Undid ${result.edits.length} ${noun} in ${result.world}, restoring ${changedBlockCount} change entries.`,
           );
         },
       ),
   );
-  if (!toolConfiguration.undo_edit) undoEdit.disable();
+  if (!toolConfiguration.undo_edits) undoEdits.disable();
 }

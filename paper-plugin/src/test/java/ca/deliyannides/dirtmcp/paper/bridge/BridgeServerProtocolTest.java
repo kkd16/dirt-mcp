@@ -495,7 +495,8 @@ final class BridgeServerProtocolTest {
                                                      "origin":{"x":1,"y":2,"z":3},
                                                      "palettes":[[{"blockState":
                                                      "minecraft:secret_gold_block"}]],
-                                                     "placements":[[0,0,0,0]],"runs":[]}
+                                                     "placements":[[0,0,0,0]],"runs":[],
+                                                     "label":"private-label-payload"}
                                                     """))
                                     .build(),
                             HttpResponse.BodyHandlers.ofString());

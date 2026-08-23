@@ -49,7 +49,7 @@ const inspectionPaths = new Set([
 ]);
 
 function bridgeTimeoutMilliseconds(path) {
-  if (longRunningMutationPaths.has(path) || path === '/v1/undo-edit') return 120_000;
+  if (longRunningMutationPaths.has(path) || path === '/v1/undo-edits') return 120_000;
   return inspectionPaths.has(path) ? 30_000 : 3_000;
 }
 
@@ -90,10 +90,15 @@ async function bridgeResponse(path, body) {
   const text = await response.text();
   const document = JSON.parse(text);
   if (editMutationPaths.has(path)) {
-    trackEditId(response.ok && document.outcome === 'committed' ? document.edit?.editId : document.error?.editId);
+    const committed = response.ok && document.outcome === 'committed';
+    trackEditId(committed ? document.edit?.editId : document.error?.editId);
+    if (committed) assert.equal(document.edit?.label, body.label);
   }
-  if (response.ok && path === '/v1/undo-edit' && sameUuid(editIdsToUndo.at(-1), body.editId)) {
-    editIdsToUndo.pop();
+  if (response.ok && path === '/v1/undo-edits' && Array.isArray(document.edits)) {
+    for (const edit of document.edits) {
+      if (!sameUuid(editIdsToUndo.at(-1), edit?.editId)) break;
+      editIdsToUndo.pop();
+    }
   }
   return { status: response.status, ok: response.ok, body: document, callId };
 }
@@ -338,7 +343,7 @@ function assertExactBlocks(inspection, blockState) {
 const region = { world, min, max };
 const stairRegion = { world, min: stairMin, max: stairMax };
 
-function retainEdit(result, operation) {
+function assertCommittedEdit(result, operation) {
   assert.equal(result.outcome, 'committed');
   assert.ok(result.edit);
   assert.match(result.edit.editId, uuidV4Pattern);
@@ -352,14 +357,25 @@ function retainEdit(result, operation) {
   assert.ok(!Number.isNaN(Date.parse(result.edit.completedAt)));
 }
 
-async function undoRetained(result) {
-  const editId = editIdsToUndo.at(-1);
-  assert.ok(sameUuid(editId, result.edit.editId));
-  const undone = await bridgeRequest('/v1/undo-edit', { world, editId });
-  assert.deepEqual(undone.edit, result.edit);
+async function undoRetainedBatch(results) {
+  const edits = results.map((result) => result.edit);
+  const editIds = edits.map((edit) => edit.editId);
+  assert.deepEqual(
+    editIdsToUndo
+      .slice(-editIds.length)
+      .toReversed()
+      .map((editId) => editId.toLowerCase()),
+    editIds.map((editId) => editId.toLowerCase()),
+  );
+  const undone = await bridgeRequest('/v1/undo-edits', { world, editIds });
+  assert.equal(undone.world, world);
+  assert.deepEqual(undone.edits, edits);
   assert.match(undone.undoCallId, uuidV4Pattern);
   assert.ok(!Number.isNaN(Date.parse(undone.undoneAt)));
-  return undone;
+}
+
+async function undoRetained(result) {
+  await undoRetainedBatch([result]);
 }
 
 async function assertEditHistory(expectedEdits) {
@@ -428,7 +444,7 @@ async function cleanupRetainedEdits() {
     let undo;
     try {
       // oxlint-disable-next-line eslint/no-await-in-loop
-      undo = await bridgeResponse('/v1/undo-edit', { world, editId: latest.editId });
+      undo = await bridgeResponse('/v1/undo-edits', { world, editIds: [latest.editId] });
     } catch {
       // A transport failure is ambiguous: the undo may still be running. The next history
       // request is an ordering fence and must settle before any direct fixture restoration.
@@ -512,7 +528,7 @@ try {
     replace_region_blocks: true,
     set_blocks: true,
     get_edit_history: true,
-    undo_edit: true,
+    undo_edits: true,
     run_minecraft_commands: true,
   });
   await assertEditHistory([]);
@@ -735,6 +751,7 @@ try {
 
   const emptySet = await bridgeRequest('/v1/set-blocks', {
     world,
+    label: 'Preview an empty smoke edit',
     origin: setMin,
     palettes: [],
     placements: [],
@@ -757,6 +774,7 @@ try {
 
   const setPreview = await bridgeRequest('/v1/set-blocks', {
     world,
+    label: 'Preview smoke palette blocks',
     origin: setMin,
     palettes: setPalettes,
     placements: [],
@@ -774,8 +792,24 @@ try {
   assert.equal(setPreview.unchangedBlockCount, 2 - setPreview.changedBlockCount);
   await assertEditHistory([]);
 
+  const cappedSet = await bridgeResponse('/v1/set-blocks', {
+    world,
+    label: 'Reject an oversized smoke edit',
+    origin: setMin,
+    palettes: setPalettes,
+    placements: [],
+    runs: [[0, 0, 0, 0, 1, 0, 0]],
+    seed: setSeed,
+    maxChangedBlocks: 1,
+  });
+  assert.equal(cappedSet.status, 413);
+  assert.equal(cappedSet.body.error.code, 'change_limit_exceeded');
+  assert.deepEqual(cappedSet.body.error.details, { maximum: 1 });
+  await assertEditHistory([]);
+
   const duplicateSet = await bridgeResponse('/v1/set-blocks', {
     world,
+    label: 'Reject overlapping smoke placements',
     origin: setMin,
     palettes: [[{ blockState: firstSetState }], [{ blockState: secondSetState }]],
     placements: [
@@ -790,6 +824,7 @@ try {
 
   const invalidSet = await bridgeResponse('/v1/set-blocks', {
     world,
+    label: 'Reject an invalid smoke block state',
     origin: setMin,
     palettes: [[{ blockState: firstSetState }], [{ blockState: 'minecraft:not_a_block' }]],
     placements: [
@@ -817,6 +852,7 @@ try {
 
   const setResponse = await bridgeResponse('/v1/set-blocks', {
     world,
+    label: 'Set smoke palette blocks',
     origin: setMin,
     palettes: setPalettes,
     placements: [],
@@ -825,7 +861,7 @@ try {
   });
   assert.equal(setResponse.status, 200);
   const setResult = setResponse.body;
-  retainEdit(setResult, 'set_blocks');
+  assertCommittedEdit(setResult, 'set_blocks');
   assert.equal(setResult.edit.callId, setResponse.callId);
   assert.equal(setResult.world, world);
   assert.deepEqual(setResult.bounds, { min: setMin, max: setMax });
@@ -850,10 +886,14 @@ try {
   assert.ok(setStates.includes(afterSetStates.get('5,0,0')));
   assert.ok(setStates.includes(afterSetStates.get('6,0,0')));
 
-  const copyResponse = await bridgeResponse('/v1/set-blocks', { ...afterSet, origin: copyMin });
+  const copyResponse = await bridgeResponse('/v1/set-blocks', {
+    ...afterSet,
+    label: 'Copy the smoke palette structure',
+    origin: copyMin,
+  });
   assert.equal(copyResponse.status, 200);
   const copyResult = copyResponse.body;
-  retainEdit(copyResult, 'set_blocks');
+  assertCommittedEdit(copyResult, 'set_blocks');
   assert.equal(copyResult.edit.callId, copyResponse.callId);
   assert.deepEqual(copyResult.bounds, { min: copyMin, max: copyMax });
   assert.equal(copyResult.blockCount, 2);
@@ -866,8 +906,8 @@ try {
     includeAir: true,
   });
   assert.deepEqual(relativeBlockKeys(copiedStructure), relativeBlockKeys(afterSet));
-  await undoRetained(copyResult);
-  await assertEditHistory([setResult.edit]);
+  await undoRetainedBatch([copyResult, setResult]);
+  await assertEditHistory([]);
   const afterCopyUndo = await bridgeRequest('/v1/get-blocks', {
     world,
     min: copyMin,
@@ -880,9 +920,10 @@ try {
   );
   originalCopyFixture = undefined;
 
-  await undoRetained(setResult);
-  await assertEditHistory([]);
-  const consumedSetUndo = await bridgeResponse('/v1/undo-edit', { world, editId: setResult.edit.editId });
+  const consumedSetUndo = await bridgeResponse('/v1/undo-edits', {
+    world,
+    editIds: [setResult.edit.editId],
+  });
   assert.equal(consumedSetUndo.status, 404);
   assert.equal(consumedSetUndo.body.error.code, 'edit_not_found');
   assert.deepEqual(consumedSetUndo.body.error.details, {
@@ -908,6 +949,7 @@ try {
       : 'minecraft:barrier';
   const regionSetInput = {
     world,
+    label: 'Set the smoke inspection region',
     origin: min,
     palettes: [[{ blockState: regionBlockState }]],
     placements: [],
@@ -928,7 +970,7 @@ try {
     ...regionSetInput,
     seed: regionPreview.seed,
   });
-  retainEdit(regionSet, 'set_blocks');
+  assertCommittedEdit(regionSet, 'set_blocks');
   const regionState = regionSet.palettes[0][0].blockState;
   assert.equal(regionSet.seed, regionPreview.seed);
   assert.deepEqual(regionSet.palettes, regionPreview.palettes);
@@ -1066,6 +1108,7 @@ try {
   const replacementDestination = 'minecraft:gold_block';
   const replacePreview = await bridgeRequest('/v1/replace-region-blocks', {
     ...region,
+    label: 'Preview replacing the smoke region',
     sourceBlockStatePatterns: [regionState],
     destinationPalette: [{ blockState: replacementDestination }],
     dryRun: true,
@@ -1077,17 +1120,21 @@ try {
 
   const replaced = await bridgeRequest('/v1/replace-region-blocks', {
     ...region,
+    label: 'Replace the smoke region',
     sourceBlockStatePatterns: [regionState],
     destinationPalette: [{ blockState: replacementDestination }],
     seed: replacePreview.seed,
   });
-  retainEdit(replaced, 'replace_region_blocks');
+  assertCommittedEdit(replaced, 'replace_region_blocks');
   assert.equal(replaced.matchedBlockCount, replacePreview.matchedBlockCount);
   assert.equal(replaced.changedBlockCount, replacePreview.changedBlockCount);
   await assertEditHistory([replaced.edit, regionSet.edit]);
   assertExactBlocks(await bridgeRequest('/v1/get-blocks', region), replaced.destinationPalette[0].blockState);
 
-  const nonLatestUndo = await bridgeResponse('/v1/undo-edit', { world, editId: regionSet.edit.editId });
+  const nonLatestUndo = await bridgeResponse('/v1/undo-edits', {
+    world,
+    editIds: [regionSet.edit.editId],
+  });
   assert.equal(nonLatestUndo.status, 409);
   assert.equal(nonLatestUndo.body.error.code, 'edit_not_latest');
   assert.deepEqual(nonLatestUndo.body.error.details, {
@@ -1135,6 +1182,7 @@ try {
 
   const exactStatePreview = await bridgeRequest('/v1/replace-region-blocks', {
     ...stairRegion,
+    label: 'Preview exact-state stair replacement',
     sourceBlockStatePatterns: ['minecraft:dark_oak_stairs', 'minecraft:air'],
     destinationPalette: [
       { blockState: 'minecraft:gold_block', weight: 50 },
@@ -1147,6 +1195,7 @@ try {
 
   const exactStateReplacement = await bridgeRequest('/v1/replace-region-blocks', {
     ...stairRegion,
+    label: 'Replace exact stair states',
     sourceBlockStatePatterns: ['minecraft:dark_oak_stairs', 'minecraft:air'],
     destinationPalette: [
       { blockState: 'minecraft:gold_block', weight: 50 },
@@ -1154,7 +1203,7 @@ try {
     ],
     seed: exactStatePreview.seed,
   });
-  retainEdit(exactStateReplacement, 'replace_region_blocks');
+  assertCommittedEdit(exactStateReplacement, 'replace_region_blocks');
   assert.equal(exactStateReplacement.matchedBlockCount, 3);
   assert.equal(exactStateReplacement.changedBlockCount, 3);
   const exactStateBlocks = await bridgeRequest('/v1/get-blocks', {
@@ -1173,6 +1222,7 @@ try {
 
   const replayedReplacement = await bridgeRequest('/v1/replace-region-blocks', {
     ...stairRegion,
+    label: 'Replay exact stair replacement',
     sourceBlockStatePatterns: ['minecraft:dark_oak_stairs', 'minecraft:air'],
     destinationPalette: [
       { blockState: 'minecraft:gold_block', weight: 50 },
@@ -1180,7 +1230,7 @@ try {
     ],
     seed: exactStatePreview.seed,
   });
-  retainEdit(replayedReplacement, 'replace_region_blocks');
+  assertCommittedEdit(replayedReplacement, 'replace_region_blocks');
   assert.equal(replayedReplacement.changedBlockCount, exactStateReplacement.changedBlockCount);
   const replayedBlocks = await bridgeRequest('/v1/get-blocks', {
     ...stairRegion,
@@ -1191,6 +1241,7 @@ try {
 
   const propertySetInput = {
     world,
+    label: 'Change one stair orientation',
     origin: stairMin,
     palettes: [[{ blockState: southStairs }]],
     placements: [],
@@ -1203,7 +1254,7 @@ try {
     ...propertySetInput,
     seed: propertySetPreview.seed,
   });
-  retainEdit(propertySet, 'set_blocks');
+  assertCommittedEdit(propertySet, 'set_blocks');
   assert.equal(propertySet.changedBlockCount, 1);
   await assertDetailedMutationLog(propertySet);
   const propertySetBlocks = await bridgeRequest('/v1/get-blocks', {

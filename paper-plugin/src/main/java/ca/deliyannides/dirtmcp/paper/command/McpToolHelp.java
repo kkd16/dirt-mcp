@@ -92,7 +92,8 @@ final class McpToolHelp {
                             ToolKind.WORLD_MUTATION,
                             "Replaces blocks matching source patterns throughout inclusive bounds.",
                             "world, min, max, sourceBlockStatePatterns, destinationPalette entries "
-                                    + "{blockState,weight?}; optional seed and dryRun. Omit all "
+                                    + "{blockState,weight?}, and concise label; optional seed, dryRun, "
+                                    + "and maxChangedBlocks. Omit all "
                                     + "weights for equal choice or make them total 100. An omitted "
                                     + "seed is generated and returned; dryRun uses the Paper default.",
                             "world, bounds, sourceBlockStatePatterns, destinationPalette, seed, "
@@ -108,7 +109,7 @@ final class McpToolHelp {
                             "world, origin, palettes (arrays of {blockState,weight?}), placements = "
                                     + "[paletteIndex,xOffset,yOffset,zOffset], and runs = "
                                     + "[paletteIndex,xOffset,yOffset,zOffset,toXOffset,toYOffset,toZOffset]; "
-                                    + "optional seed and dryRun. Run corners are inclusive. Palette "
+                                    + "label; optional seed, dryRun, and maxChangedBlocks. Run corners are inclusive. Palette "
                                     + "weights are all omitted or total 100.",
                             "world, nullable bounds, palettes, seed, outcome, edit, blockCount, "
                                     + "changedBlockCount, and unchangedBlockCount.",
@@ -127,15 +128,15 @@ final class McpToolHelp {
                             "world and edits, an ordered array of retained edit records.",
                             "Dry runs, no-ops, consumed edits, and evicted edits are not returned. "
                                     + "In-memory history clears on world unload or Paper restart.");
-            case UNDO_EDIT ->
+            case UNDO_EDITS ->
                     new ToolSpec(
-                            "Undo an edit",
+                            "Undo edits",
                             ToolKind.WORLD_MUTATION,
-                            "Restores and consumes one identified retained Dirt edit.",
-                            "world, editId (UUIDv4 of the newest retained edit).",
-                            "edit (the consumed pre-undo EditRecord), undoCallId, and undoneAt.",
-                            "Newest-only identity checking prevents an intervening edit from being "
-                                    + "undone accidentally.");
+                            "Restores and consumes an identified newest-first prefix of retained Dirt edits.",
+                            "world, editIds (one or more newest-first UUIDv4 edit IDs).",
+                            "world, edits (consumed pre-undo EditRecords), undoCallId, and undoneAt.",
+                            "The complete prefix is validated before restoration. Execution stops "
+                                    + "at the first failure and reports the consumed prefix.");
             case RUN_MINECRAFT_COMMANDS ->
                     new ToolSpec(
                             "Run Minecraft commands",

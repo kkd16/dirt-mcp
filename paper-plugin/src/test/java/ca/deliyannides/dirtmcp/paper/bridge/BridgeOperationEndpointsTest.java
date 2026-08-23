@@ -13,7 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ca.deliyannides.dirtmcp.paper.command.RunMinecraftCommands;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.config.McpTool;
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
+import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.edit.DestinationPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditOperation;
 import ca.deliyannides.dirtmcp.paper.world.edit.EditRecord;
@@ -21,7 +23,8 @@ import ca.deliyannides.dirtmcp.paper.world.edit.EditStatus;
 import ca.deliyannides.dirtmcp.paper.world.edit.GetEditHistory;
 import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
-import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdit;
+import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdits;
+import ca.deliyannides.dirtmcp.paper.world.edit.UndoEditsException;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks.ExactPaletteEntry;
@@ -37,6 +40,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -434,7 +438,7 @@ final class BridgeOperationEndpointsTest {
         AtomicReference<ReplaceRegionBlocks.Request> replaceRequest = new AtomicReference<>();
         AtomicReference<SetBlocks.Request> setRequest = new AtomicReference<>();
         AtomicReference<GetEditHistory.Request> historyRequest = new AtomicReference<>();
-        AtomicReference<UndoEdit.Request> undoRequest = new AtomicReference<>();
+        AtomicReference<UndoEdits.Request> undoRequest = new AtomicReference<>();
         BridgeTestFixture.TestOperations operations =
                 new BridgeTestFixture.TestOperations() {
                     @Override
@@ -460,10 +464,10 @@ final class BridgeOperationEndpointsTest {
                     }
 
                     @Override
-                    public UndoEdit.Result undoEdit(UndoEdit.Request request, UUID callId)
+                    public UndoEdits.Result undoEdits(UndoEdits.Request request, UUID callId)
                             throws OperationException {
                         undoRequest.set(request);
-                        return super.undoEdit(request, callId);
+                        return super.undoEdits(request, callId);
                     }
                 };
         try (BridgeServer bridge = server(config(availablePort(), 4), operations);
@@ -482,7 +486,8 @@ final class BridgeOperationEndpointsTest {
                                      "sourceBlockStatePatterns":["minecraft:stone"],
                                      "destinationPalette":[{"blockState":"minecraft:dirt","weight":40},
                                      {"blockState":"minecraft:grass_block","weight":60}],
-                                     "seed":17,"dryRun":true}
+                                     "seed":17,"dryRun":true,"label":"Preview stone replacement",
+                                     "maxChangedBlocks":19}
                                     """));
             HttpResponse<String> set =
                     send(
@@ -495,11 +500,21 @@ final class BridgeOperationEndpointsTest {
                                      "palettes":[[{"blockState":"minecraft:gold_block","weight":25},
                                      {"blockState":"minecraft:iron_block","weight":75}]],
                                      "placements":[[0,0,0,0]],
-                                     "runs":[[0,1,0,0,1,0,0]],"seed":23,"dryRun":true}
+                                     "runs":[[0,1,0,0,1,0,0]],"seed":23,"dryRun":true,
+                                     "label":"Preview metal blocks","maxChangedBlocks":11}
                                     """));
             HttpResponse<String> history =
                     send(client, post(bridge, "/v1/get-edit-history", "{\"world\":\"world\"}"));
             HttpResponse<String> undo =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/undo-edits",
+                                    "{\"world\":\"world\",\"editIds\":[\""
+                                            + BridgeTestFixture.EDIT_ID
+                                            + "\"]}"));
+            HttpResponse<String> legacyUndo =
                     send(
                             client,
                             post(
@@ -511,10 +526,14 @@ final class BridgeOperationEndpointsTest {
             assertEquals(200, replace.statusCode());
             assertEquals(17, replaceRequest.get().seed());
             assertTrue(replaceRequest.get().dryRun());
+            assertEquals("Preview stone replacement", replaceRequest.get().label());
+            assertEquals(19, replaceRequest.get().maxChangedBlocks());
             assertEquals(40, replaceRequest.get().destinationPalette().getFirst().weight());
             assertEquals(200, set.statusCode());
             assertEquals(new BlockPosition(7, 8, 9), setRequest.get().origin());
             assertEquals(23, setRequest.get().seed());
+            assertEquals("Preview metal blocks", setRequest.get().label());
+            assertEquals(11, setRequest.get().maxChangedBlocks());
             assertEquals(
                     List.of(
                             new DestinationPaletteEntry("minecraft:gold_block", 25),
@@ -526,8 +545,10 @@ final class BridgeOperationEndpointsTest {
             assertEquals(new GetEditHistory.Request("world"), historyRequest.get());
             assertEquals(200, history.statusCode());
             assertEquals(
-                    new UndoEdit.Request("world", BridgeTestFixture.EDIT_ID), undoRequest.get());
+                    new UndoEdits.Request("world", List.of(BridgeTestFixture.EDIT_ID)),
+                    undoRequest.get());
             assertEquals(200, undo.statusCode());
+            assertEquals(404, legacyUndo.statusCode());
         }
     }
 
@@ -539,6 +560,7 @@ final class BridgeOperationEndpointsTest {
                         recoveryEditId,
                         UUID.fromString("523e4567-e89b-42d3-a456-426614174000"),
                         EditOperation.SET_BLOCKS,
+                        "Repair the west wall",
                         "world",
                         BridgeTestFixture.WORLD_ID,
                         new BlockBounds(new BlockPosition(-2, 64, 8), new BlockPosition(3, 70, 12)),
@@ -550,6 +572,7 @@ final class BridgeOperationEndpointsTest {
                         BridgeTestFixture.EDIT_ID,
                         UUID.fromString("623e4567-e89b-42d3-a456-426614174000"),
                         EditOperation.REPLACE_REGION_BLOCKS,
+                        "Replace the courtyard floor",
                         "world",
                         BridgeTestFixture.WORLD_ID,
                         new BlockBounds(new BlockPosition(0, 60, 0), new BlockPosition(1, 61, 1)),
@@ -565,9 +588,12 @@ final class BridgeOperationEndpointsTest {
                     }
 
                     @Override
-                    public UndoEdit.Result undoEdit(UndoEdit.Request request, UUID callId) {
-                        return new UndoEdit.Result(
-                                recovery, callId, Instant.parse("2026-08-19T12:05:00.000000Z"));
+                    public UndoEdits.Result undoEdits(UndoEdits.Request request, UUID callId) {
+                        return new UndoEdits.Result(
+                                request.world(),
+                                List.of(recovery),
+                                callId,
+                                Instant.parse("2026-08-19T12:05:00.000000Z"));
                     }
                 };
         try (BridgeServer bridge = server(config(availablePort(), 4), operations);
@@ -581,8 +607,10 @@ final class BridgeOperationEndpointsTest {
                             client,
                             post(
                                     bridge,
-                                    "/v1/undo-edit",
-                                    "{\"world\":\"world\",\"editId\":\"" + recoveryEditId + "\"}"));
+                                    "/v1/undo-edits",
+                                    "{\"world\":\"world\",\"editIds\":[\""
+                                            + recoveryEditId
+                                            + "\"]}"));
 
             assertEquals(200, history.statusCode());
             assertEquals(
@@ -595,6 +623,7 @@ final class BridgeOperationEndpointsTest {
                                   "editId":"423e4567-e89b-42d3-a456-426614174000",
                                   "callId":"523e4567-e89b-42d3-a456-426614174000",
                                   "operation":"set_blocks",
+                                  "label":"Repair the west wall",
                                   "world":"world",
                                   "worldId":"323e4567-e89b-42d3-a456-426614174000",
                                   "bounds":{"min":{"x":-2,"y":64,"z":8},
@@ -607,6 +636,7 @@ final class BridgeOperationEndpointsTest {
                                   "editId":"223e4567-e89b-42d3-a456-426614174000",
                                   "callId":"623e4567-e89b-42d3-a456-426614174000",
                                   "operation":"replace_region_blocks",
+                                  "label":"Replace the courtyard floor",
                                   "world":"world",
                                   "worldId":"323e4567-e89b-42d3-a456-426614174000",
                                   "bounds":{"min":{"x":0,"y":60,"z":0},
@@ -624,10 +654,12 @@ final class BridgeOperationEndpointsTest {
                     json(
                             """
                             {
-                              "edit":{
+                              "world":"world",
+                              "edits":[{
                                 "editId":"423e4567-e89b-42d3-a456-426614174000",
                                 "callId":"523e4567-e89b-42d3-a456-426614174000",
                                 "operation":"set_blocks",
+                                "label":"Repair the west wall",
                                 "world":"world",
                                 "worldId":"323e4567-e89b-42d3-a456-426614174000",
                                 "bounds":{"min":{"x":-2,"y":64,"z":8},
@@ -635,12 +667,91 @@ final class BridgeOperationEndpointsTest {
                                 "changedBlockCount":7,
                                 "completedAt":"2026-08-19T12:02:03.120Z",
                                 "status":"recovery_required"
-                              },
+                              }],
                               "undoCallId":"123e4567-e89b-42d3-a456-426614174000",
                               "undoneAt":"2026-08-19T12:05:00Z"
                             }
                             """),
                     json(undo.body()));
+        }
+    }
+
+    @Test
+    void serializesUndoExecutionProgressBesideTheError() throws Exception {
+        UUID undoneId = UUID.fromString("423e4567-e89b-42d3-a456-426614174000");
+        UUID failedId = UUID.fromString("523e4567-e89b-42d3-a456-426614174000");
+        EditRecord undone =
+                new EditRecord(
+                        undoneId,
+                        UUID.fromString("623e4567-e89b-42d3-a456-426614174000"),
+                        EditOperation.SET_BLOCKS,
+                        "Undo completed prefix",
+                        "world",
+                        BridgeTestFixture.WORLD_ID,
+                        new BlockBounds(new BlockPosition(0, 64, 0), new BlockPosition(0, 64, 0)),
+                        1,
+                        Instant.parse("2026-08-19T12:00:00Z"),
+                        EditStatus.COMMITTED);
+        BridgeTestFixture.TestOperations operations =
+                new BridgeTestFixture.TestOperations() {
+                    @Override
+                    public UndoEdits.Result undoEdits(UndoEdits.Request request, UUID callId)
+                            throws OperationException {
+                        List<EditRecord> progress =
+                                request.editIds().size() == 1 ? List.of() : List.of(undone);
+                        UUID failed = request.editIds().get(progress.size());
+                        throw new UndoEditsException(
+                                OperationFailure.WORLD_UNAVAILABLE,
+                                "Undo execution failed",
+                                new ErrorDetails.WorldUnavailable.OperationFailed(),
+                                new IllegalStateException("test failure"),
+                                failed,
+                                progress);
+                    }
+                };
+        try (BridgeServer bridge = server(config(availablePort(), 4), operations);
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+
+            HttpResponse<String> partial =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/undo-edits",
+                                    "{\"world\":\"world\",\"editIds\":[\""
+                                            + undoneId
+                                            + "\",\""
+                                            + failedId
+                                            + "\"]}"));
+            HttpResponse<String> firstFailure =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/undo-edits",
+                                    "{\"world\":\"world\",\"editIds\":[\"" + failedId + "\"]}"));
+
+            assertEquals(503, partial.statusCode());
+            var partialBody = json(partial.body()).getAsJsonObject();
+            assertEquals(Set.of("error", "undoneEdits"), partialBody.keySet());
+            assertEquals(
+                    failedId.toString(),
+                    partialBody.getAsJsonObject("error").get("editId").getAsString());
+            assertEquals(1, partialBody.getAsJsonArray("undoneEdits").size());
+            assertEquals(
+                    "Undo completed prefix",
+                    partialBody
+                            .getAsJsonArray("undoneEdits")
+                            .get(0)
+                            .getAsJsonObject()
+                            .get("label")
+                            .getAsString());
+
+            assertEquals(503, firstFailure.statusCode());
+            var firstFailureBody = json(firstFailure.body()).getAsJsonObject();
+            assertEquals(Set.of("error", "undoneEdits"), firstFailureBody.keySet());
+            assertEquals(0, firstFailureBody.getAsJsonArray("undoneEdits").size());
         }
     }
 
@@ -693,7 +804,8 @@ final class BridgeOperationEndpointsTest {
                                     """
                                     {"world":"world","origin":{"x":0,"y":0,"z":0},
                                      "palettes":[[{"blockState":"minecraft:stone"}]],
-                                     "placements":[[0,0,0,0]],"runs":[]}
+                                     "placements":[[0,0,0,0]],"runs":[],
+                                     "label":"Place default block"}
                                     """));
 
             assertTrue(blocksRequest.get().includeAir());
@@ -820,7 +932,8 @@ final class BridgeOperationEndpointsTest {
                                     """
                                     {"world":"world","origin":{"x":0,"y":0,"z":0},
                                      "palettes":[[{"blockState":"minecraft:stone"}]],
-                                     "placements":[[0,1e2147483648,0,0]],"runs":[]}
+                                     "placements":[[0,1e2147483648,0,0]],"runs":[],
+                                     "label":"Reject invalid coordinate"}
                                     """)),
                     "placements[0][1] must be a signed 32-bit integer");
             assertError(
@@ -832,7 +945,8 @@ final class BridgeOperationEndpointsTest {
                                     """
                                     {"world":"world","origin":{"x":0,"y":0,"z":0},
                                      "palettes":[[{"blockState":"minecraft:stone"}]],
-                                     "placements":[[0,0,0,0]],"runs":[],"unexpected":true}
+                                     "placements":[[0,0,0,0]],"runs":[],
+                                     "label":"Reject unknown field","unexpected":true}
                                     """)),
                     "Request contains missing or unknown fields");
         }
@@ -848,7 +962,7 @@ final class BridgeOperationEndpointsTest {
                     """
                     {"world":"world","origin":{"x":0,"y":0,"z":0},
                      "palettes":[[{"blockState":"minecraft:stone"}]],
-                     "placements":[[0,0,0,0]],"runs":[]}
+                     "placements":[[0,0,0,0]],"runs":[],"label":"Place one block"}
                     """;
             HttpResponse<String> missingCallId =
                     send(
@@ -897,22 +1011,22 @@ final class BridgeOperationEndpointsTest {
                             client,
                             post(
                                     bridge,
-                                    "/v1/undo-edit",
-                                    "{\"world\":\"world\",\"editId\":\"not-a-uuid\"}"));
+                                    "/v1/undo-edits",
+                                    "{\"world\":\"world\",\"editIds\":[\"not-a-uuid\"]}"));
             HttpResponse<String> nonCanonicalEditId =
                     send(
                             client,
                             post(
                                     bridge,
-                                    "/v1/undo-edit",
-                                    "{\"world\":\"world\",\"editId\":\"1-1-4000-8000-1\"}"));
+                                    "/v1/undo-edits",
+                                    "{\"world\":\"world\",\"editIds\":[\"1-1-4000-8000-1\"]}"));
             HttpResponse<String> wrongVersionEditId =
                     send(
                             client,
                             post(
                                     bridge,
-                                    "/v1/undo-edit",
-                                    "{\"world\":\"world\",\"editId\":\"123e4567-e89b-12d3-a456-426614174000\"}"));
+                                    "/v1/undo-edits",
+                                    "{\"world\":\"world\",\"editIds\":[\"123e4567-e89b-12d3-a456-426614174000\"]}"));
             HttpResponse<String> valid = send(client, post(bridge, "/v1/set-blocks", setBlocks));
 
             assertError(missingCallId, "X-Dirt-Call-Id must be a UUID version 4");
@@ -920,9 +1034,9 @@ final class BridgeOperationEndpointsTest {
             assertError(invalidCallId, "X-Dirt-Call-Id must be a UUID version 4");
             assertError(nonCanonicalCallId, "X-Dirt-Call-Id must be a UUID version 4");
             assertError(wrongVersionCallId, "X-Dirt-Call-Id must be a UUID version 4");
-            assertError(invalidEditId, "editId must be a UUID version 4");
-            assertError(nonCanonicalEditId, "editId must be a UUID version 4");
-            assertError(wrongVersionEditId, "editId must be a UUID version 4");
+            assertError(invalidEditId, "editIds[0] must be a UUID version 4");
+            assertError(nonCanonicalEditId, "editIds[0] must be a UUID version 4");
+            assertError(wrongVersionEditId, "editIds[0] must be a UUID version 4");
             assertEquals(200, valid.statusCode());
             assertEquals(
                     BridgeTestFixture.CALL_ID,

@@ -65,6 +65,17 @@ const AdvertisedInternalFailureSchema = z
   })
   .strict();
 
+const AdvertisedProgressFailureDataSchema = z.discriminatedUnion('code', [
+  AdvertisedCorrectableBridgeFailureSchema.extend({ editId: z.uuidv4() }),
+  z
+    .object({
+      code: z.literal('internal_error'),
+      message: MessageSchema,
+      editId: z.uuidv4(),
+    })
+    .strict(),
+]);
+
 const AdvertisedToolFailureDataSchema = z.discriminatedUnion('code', [
   AdvertisedCorrectableBridgeFailureSchema,
   BridgeUnavailableFailureSchema,
@@ -90,8 +101,13 @@ export const ToolFailureResultSchema = z
   .strict()
   .describe('Structured MCP tool execution failure.');
 
-export function toolOutputSchema<Success extends z.ZodType>(success: Success) {
-  return z.union([success, AdvertisedToolFailureResultSchema]);
+export function toolOutputSchema(success: z.ZodType, progressShape?: z.ZodRawShape): z.ZodType {
+  if (progressShape === undefined) return z.union([success, AdvertisedToolFailureResultSchema]);
+  const progressFailure = AdvertisedToolFailureResultSchema.extend({
+    ...progressShape,
+    error: AdvertisedProgressFailureDataSchema,
+  });
+  return z.union([success, AdvertisedToolFailureResultSchema, progressFailure]);
 }
 
 type ToolFailureLogLevel = 'info' | 'warning' | 'error';
@@ -116,11 +132,16 @@ const WARNING_FAILURE_CODES: ReadonlySet<ToolFailureCode> = new Set([
 
 export class ToolFailure extends Error {
   readonly data: ToolFailureData;
+  readonly progress: Readonly<Record<string, unknown>> | undefined;
 
-  constructor(data: ToolFailureData) {
+  constructor(data: ToolFailureData, progress?: Readonly<Record<string, unknown>>) {
     const checked = ToolFailureDataSchema.parse(data);
+    if (progress !== undefined && checked.editId === undefined) {
+      throw new TypeError('Tool failure progress requires an editId.');
+    }
     super(checked.message);
     this.data = checked;
+    this.progress = progress;
     this.name = 'ToolFailure';
   }
 

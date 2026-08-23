@@ -16,10 +16,15 @@ interface EditPlatform extends AutoCloseable {
             throws OperationException;
 
     EditResult replace(
-            PreparedReplace prepared, Cuboid region, boolean dryRun, MutationAdmission admission)
+            PreparedReplace prepared,
+            Cuboid region,
+            boolean dryRun,
+            int maxChangedBlocks,
+            MutationAdmission admission)
             throws OperationException;
 
-    EditResult set(PreparedSet prepared, boolean dryRun, MutationAdmission admission)
+    EditResult set(
+            PreparedSet prepared, boolean dryRun, int maxChangedBlocks, MutationAdmission admission)
             throws OperationException;
 
     void undo(WorldHandle world, UndoToken undo) throws OperationException;

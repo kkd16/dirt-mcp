@@ -92,7 +92,9 @@ follow this lifecycle:
 
 1. Resolve the loaded world and validate bounds, positions, states, chunks, and
    configured limits.
-2. Reserve bounded undo-history capacity before the first mutation.
+2. Compute the expected change count and enforce the configured and optional
+   request ceiling; before a positive live edit, reserve the lower of the
+   effective ceiling and the operation's maximum possible change count.
 3. Run the edit off-thread in one recording FAWE session.
 4. Close the session and retain its change set before returning committed
    success.
@@ -102,13 +104,20 @@ Competing work fails as busy rather than racing. Ordinary edits require loaded
 chunks; short-lived plugin tickets keep them loaded only while preparation and
 execution need them.
 
-Dirt retains edit metadata, touched chunk coordinates, and the FAWE change set,
-not an open session or full world snapshot. History is bounded per world and
-globally, ordered newest first, and keyed by Paper world UUID. An undo must name
-the newest retained edit. It loads only remembered existing chunks without
-generation and consumes the record only after restoration succeeds. History is
-cleared on world unload, plugin shutdown, or process restart and does not replace
-backups.
+Dirt retains the model-supplied label, edit metadata, touched chunk coordinates,
+and the FAWE change set, not an open session or full world snapshot. History is
+bounded per world and globally, ordered newest first, and keyed by Paper world
+UUID. A batch undo must name an exact newest-first history prefix, which Dirt
+validates completely before restoration starts. It then restores sequentially,
+loading only remembered existing chunks without generation and consuming each
+record after that restoration succeeds.
+
+If a runtime batch failure follows successful undos, those newer records remain
+consumed, the failed current record remains retained, and older requested edits
+are not attempted. Records in an undo-active world are protected from global
+eviction until the batch stops. History is a flat stack with no redo entries. It
+is cleared on world unload, plugin shutdown, or process restart and does not
+replace backups.
 
 If an edit and its automatic rollback both fail, or an undo fails, the retained
 record enters `recovery_required`. It remains retryable and blocks new Dirt

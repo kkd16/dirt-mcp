@@ -1,7 +1,12 @@
 import type { BridgeConfig } from '../config.ts';
 import * as z from 'zod/v4';
-import { BridgeErrorResponseSchema, type BridgeRoute } from './contract.ts';
+import { BridgeErrorResponseSchema, type BridgeError, type BridgeRoute } from './contract.ts';
 import { ToolFailure } from './errors.ts';
+
+interface BridgeFailureProgress<Response extends { readonly error: BridgeError }> {
+  readonly schema: z.ZodType<Response>;
+  readonly select: (response: Response) => Readonly<Record<string, unknown>>;
+}
 
 const EditIdContainerSchema = z.object({ editId: z.uuidv4() }).passthrough();
 const EditIdEnvelopeSchema = z.object({ edit: z.unknown().optional(), error: z.unknown().optional() }).passthrough();
@@ -30,11 +35,12 @@ export class BridgeClient {
     this.#token = config.token;
   }
 
-  async request<T>(
+  async request<T, FailureResponse extends { readonly error: BridgeError } = never>(
     route: BridgeRoute,
     callId: string,
     responseSchema: z.ZodType<T>,
     requestBody?: unknown,
+    failureProgress?: BridgeFailureProgress<FailureResponse>,
   ): Promise<T> {
     const headers = new Headers({
       Accept: 'application/json',
@@ -71,8 +77,21 @@ export class BridgeClient {
           ...(editId === undefined ? {} : { editId }),
         });
       }
+      if (failureProgress !== undefined) {
+        const progressDetail = failureProgress.schema.safeParse(body);
+        if (progressDetail.success) {
+          throw new ToolFailure(progressDetail.data.error, failureProgress.select(progressDetail.data));
+        }
+      }
       const detail = BridgeErrorResponseSchema.safeParse(body);
       if (detail.success) {
+        if (failureProgress !== undefined && detail.data.error.editId !== undefined) {
+          throw new ToolFailure({
+            code: 'bridge_invalid_response',
+            message: 'Paper bridge runtime failure omitted required progress.',
+            editId: detail.data.error.editId,
+          });
+        }
         throw new ToolFailure(detail.data.error);
       }
       throw new ToolFailure({

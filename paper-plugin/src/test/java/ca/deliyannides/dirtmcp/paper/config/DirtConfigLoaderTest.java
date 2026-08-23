@@ -47,11 +47,11 @@ final class DirtConfigLoaderTest {
         assertTrue(noTools.tools().flags().values().stream().noneMatch(Boolean::booleanValue));
 
         YamlConfiguration withoutKey = defaultConfiguration();
-        withoutKey.set("tools.undo_edit", null);
+        withoutKey.set("tools.undo_edits", null);
 
         DirtConfig oneMissing = DirtConfigLoader.load(withoutKey, null);
 
-        assertFalse(oneMissing.tools().isEnabled(McpTool.UNDO_EDIT));
+        assertFalse(oneMissing.tools().isEnabled(McpTool.UNDO_EDITS));
         assertEquals(McpTool.values().length - 1, oneMissing.tools().enabled().size());
     }
 
@@ -129,6 +129,7 @@ final class DirtConfigLoaderTest {
                 Arguments.of("bridge.unknown", 1),
                 Arguments.of("tools", true),
                 Arguments.of("tools.set_blocks", "true"),
+                Arguments.of("tools.undo_edit", true),
                 Arguments.of("tools.not_a_tool", true),
                 Arguments.of("logging.console-level", null),
                 Arguments.of("logging.console-level", "warn"),

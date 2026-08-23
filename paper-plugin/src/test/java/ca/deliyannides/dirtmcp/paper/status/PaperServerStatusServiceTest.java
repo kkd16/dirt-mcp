@@ -88,7 +88,7 @@ final class PaperServerStatusServiceTest {
     @Test
     void rejectsIncompleteUnknownAndNullToolFlags() {
         Map<String, Boolean> incomplete = new HashMap<>(allTools());
-        incomplete.remove(McpTool.UNDO_EDIT.id());
+        incomplete.remove(McpTool.UNDO_EDITS.id());
         assertThrows(IllegalArgumentException.class, () -> status(incomplete));
 
         Map<String, Boolean> unknown = new HashMap<>(allTools());
@@ -96,7 +96,7 @@ final class PaperServerStatusServiceTest {
         assertThrows(IllegalArgumentException.class, () -> status(unknown));
 
         Map<String, Boolean> nullValue = new HashMap<>(allTools());
-        nullValue.put(McpTool.UNDO_EDIT.id(), null);
+        nullValue.put(McpTool.UNDO_EDITS.id(), null);
         assertThrows(IllegalArgumentException.class, () -> status(nullValue));
     }
 

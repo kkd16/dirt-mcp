@@ -4,8 +4,10 @@ import { ToolFailure } from '../dist/bridge/errors.js';
 import { BlockPositionSchema, BoundsSchema, INT32_MAX, NonBlankStringSchema } from '../dist/tools/common.js';
 import {
   DestinationPaletteSchema,
+  EditLabelSchema,
   EditRecordSchema,
   GetEditHistoryOutputSchema,
+  ReplaceRegionBlocksInputSchema,
   ReplaceRegionBlocksOutputSchema,
   requireMatchingCallId,
   requireMatchingEditIdentity,
@@ -16,6 +18,8 @@ import {
   SetBlocksInputSchema,
   SetBlocksOutputSchema,
   SourceBlockStatePatternsSchema,
+  UndoEditsInputSchema,
+  UndoEditsOutputSchema,
 } from '../dist/tools/editing.js';
 import {
   GetBlocksInputSchema,
@@ -105,7 +109,7 @@ test('applies inspection defaults and rejects combined pattern amplification', (
   );
 });
 
-test('accepts every exact get-blocks structure directly as set-blocks input', () => {
+test('accepts every exact get-blocks structure with a label as set-blocks input', () => {
   const exact = GetBlocksOutputSchema.parse({
     world: 'world',
     origin: { x: 100, y: 64, z: 100 },
@@ -113,8 +117,14 @@ test('accepts every exact get-blocks structure directly as set-blocks input', ()
     placements: [[1, 0, 1, 0]],
     runs: [[0, 0, 0, 0, 15, 0, 0]],
   });
-  assert.deepEqual(SetBlocksInputSchema.parse(exact), exact);
-  assert.equal(SetBlocksInputSchema.safeParse({ ...exact, origin: { x: -20, y: 80, z: 45 } }).success, true);
+  assert.deepEqual(SetBlocksInputSchema.parse({ ...exact, label: 'Copy west wall' }), {
+    ...exact,
+    label: 'Copy west wall',
+  });
+  assert.equal(
+    SetBlocksInputSchema.safeParse({ ...exact, label: 'Copy west wall', origin: { x: -20, y: 80, z: 45 } }).success,
+    true,
+  );
   assert.equal(
     GetBlocksOutputSchema.safeParse({
       ...exact,
@@ -130,7 +140,64 @@ test('accepts every exact get-blocks structure directly as set-blocks input', ()
     placements: [],
     runs: [],
   });
-  assert.deepEqual(SetBlocksInputSchema.parse(empty), empty);
+  assert.deepEqual(SetBlocksInputSchema.parse({ ...empty, label: 'Empty structure check' }), {
+    ...empty,
+    label: 'Empty structure check',
+  });
+});
+
+test('requires concise exact edit labels and bounded per-call change ceilings', () => {
+  for (const label of ['Add roof trim', 'e\u0301', '🧱'.repeat(120), 'x'.repeat(120)]) {
+    assert.equal(EditLabelSchema.safeParse(label).success, true, label);
+    assert.equal(EditLabelSchema.parse(label), label);
+  }
+  for (const label of [
+    '',
+    ' leading',
+    'trailing ',
+    '\ufeffbyte-order-mark boundary',
+    'two\nlines',
+    'nul\u0000byte',
+    'delete\u007fcontrol',
+    'next\u0085line',
+    'line\u2028separator',
+    'paragraph\u2029separator',
+    '🧱'.repeat(121),
+  ]) {
+    assert.equal(EditLabelSchema.safeParse(label).success, false, JSON.stringify(label));
+  }
+
+  const replaceInput = {
+    ...region,
+    label: 'Replace floor material',
+    sourceBlockStatePatterns: ['minecraft:stone'],
+    destinationPalette: [{ blockState: 'minecraft:dirt' }],
+  };
+  assert.equal(ReplaceRegionBlocksInputSchema.safeParse(replaceInput).success, true);
+  assert.equal(ReplaceRegionBlocksInputSchema.safeParse({ ...replaceInput, label: undefined }).success, false);
+  assert.equal(
+    SetBlocksInputSchema.safeParse({
+      world: 'world',
+      label: 'No-op edit',
+      origin: { x: 0, y: 0, z: 0 },
+      palettes: [],
+      placements: [],
+      runs: [],
+    }).success,
+    true,
+  );
+  for (const maximum of [1, INT32_MAX]) {
+    assert.equal(
+      ReplaceRegionBlocksInputSchema.safeParse({ ...replaceInput, maxChangedBlocks: maximum }).success,
+      true,
+    );
+  }
+  for (const maximum of [0, -1, 1.5, INT32_MAX + 1]) {
+    assert.equal(
+      ReplaceRegionBlocksInputSchema.safeParse({ ...replaceInput, maxChangedBlocks: maximum }).success,
+      false,
+    );
+  }
 });
 
 test('validates distinct source patterns and complete destination weights', () => {
@@ -236,7 +303,7 @@ test('validates bounded server limits and their relationships', () => {
     false,
   );
   assert.equal(McpToolConfigurationSchema.safeParse(status.tools).success, true);
-  assert.equal(McpToolConfigurationSchema.safeParse({ ...status.tools, undo_edit: undefined }).success, false);
+  assert.equal(McpToolConfigurationSchema.safeParse({ ...status.tools, undo_edits: undefined }).success, false);
   assert.equal(McpToolConfigurationSchema.safeParse({ ...status.tools, unknown_tool: false }).success, false);
 });
 
@@ -291,6 +358,7 @@ test('strictly validates active Paper logging configuration', () => {
 test('validates weighted set-block palettes, placements, and cuboid runs', () => {
   const input = {
     world: 'world',
+    label: 'Build weighted wall',
     origin: { x: 10, y: 20, z: 30 },
     palettes: [
       [
@@ -334,8 +402,14 @@ test('validates weighted set-block palettes, placements, and cuboid runs', () =>
   assert.equal(SetBlocksInputSchema.safeParse({ ...input, runs: [[1, 2, 1, 0, 2, 0, 0]] }).success, false);
   assert.equal(SetBlocksInputSchema.safeParse({ ...input, runs: [[1, 0, 0, 0, 2, 0, 0]] }).success, false);
   assert.equal(
-    SetBlocksInputSchema.safeParse({ world: 'world', origin: input.origin, palettes: [], placements: [], runs: [] })
-      .success,
+    SetBlocksInputSchema.safeParse({
+      world: 'world',
+      label: 'Empty structure check',
+      origin: input.origin,
+      palettes: [],
+      placements: [],
+      runs: [],
+    }).success,
     true,
   );
   assert.equal(
@@ -411,6 +485,7 @@ test('validates retained edit metadata and edit-result outcome invariants', () =
   const edit = {
     editId: '11111111-1111-4111-8111-111111111111',
     callId: '22222222-2222-4222-8222-222222222222',
+    label: 'Replace stone floor',
     operation: 'replace_region_blocks',
     world: 'world',
     worldId: '33333333-3333-4333-8333-333333333333',
@@ -424,6 +499,7 @@ test('validates retained edit metadata and edit-result outcome invariants', () =
   assert.equal(EditRecordSchema.safeParse({ ...edit, world: '   ' }).success, false);
   assert.equal(EditRecordSchema.safeParse({ ...edit, changedBlockCount: 0 }).success, false);
   assert.equal(EditRecordSchema.safeParse({ ...edit, completedAt: 'yesterday' }).success, false);
+  assert.equal(EditRecordSchema.safeParse({ ...edit, label: 'two\nlines' }).success, false);
 
   const result = {
     world: 'world',
@@ -546,6 +622,42 @@ test('validates retained edit metadata and edit-result outcome invariants', () =
   );
 });
 
+test('validates ordered batch undo inputs and outputs', () => {
+  const firstId = '11111111-1111-4111-8111-111111111111';
+  const secondId = '22222222-2222-4222-8222-222222222222';
+  const input = { world: 'world', editIds: [firstId, secondId] };
+  assert.equal(UndoEditsInputSchema.safeParse(input).success, true);
+  assert.equal(UndoEditsInputSchema.safeParse({ world: 'world', editIds: [] }).success, false);
+  assert.equal(UndoEditsInputSchema.safeParse({ world: 'world', editIds: [firstId, firstId] }).success, false);
+  assert.equal(
+    UndoEditsInputSchema.safeParse({ world: 'world', editIds: [firstId, firstId.toUpperCase()] }).success,
+    false,
+  );
+  assert.equal(UndoEditsInputSchema.safeParse({ world: 'world', editId: firstId }).success, false);
+
+  const edit = {
+    editId: firstId,
+    callId: '33333333-3333-4333-8333-333333333333',
+    label: 'Add west wall',
+    operation: 'set_blocks',
+    world: 'world',
+    worldId: '44444444-4444-4444-8444-444444444444',
+    bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } },
+    changedBlockCount: 1,
+    completedAt: '2026-08-19T12:34:56Z',
+    status: 'committed',
+  };
+  const output = {
+    world: 'world',
+    edits: [edit, { ...edit, editId: secondId }],
+    undoCallId: '55555555-5555-4555-8555-555555555555',
+    undoneAt: '2026-08-19T12:35:56Z',
+  };
+  assert.equal(UndoEditsOutputSchema.safeParse(output).success, true);
+  assert.equal(UndoEditsOutputSchema.safeParse({ ...output, edits: [] }).success, false);
+  assert.equal(UndoEditsOutputSchema.safeParse({ ...output, edit: edit }).success, false);
+});
+
 test('rejects successful edit and undo responses that do not match their requests', () => {
   const expectedCallId = '11111111-1111-4111-8111-111111111111';
   const actualCallId = '22222222-2222-4222-8222-222222222222';
@@ -561,10 +673,16 @@ test('rejects successful edit and undo responses that do not match their request
       error.editId === editId &&
       error.message === 'Paper bridge response call ID did not match the request.',
   );
+  assert.throws(
+    () => requireMatchingCallId(expectedCallId, actualCallId),
+    (error: unknown) =>
+      error instanceof ToolFailure && error.code === 'bridge_invalid_response' && error.editId === undefined,
+  );
 
   const edit = EditRecordSchema.parse({
     editId,
     callId: expectedCallId,
+    label: 'Set one block',
     operation: 'set_blocks',
     world: 'world',
     worldId: '44444444-4444-4444-8444-444444444444',
@@ -580,13 +698,13 @@ test('rejects successful edit and undo responses that do not match their request
     outcome: 'committed' as const,
     edit,
   };
-  assert.doesNotThrow(() => requireMatchingEditIdentity('world', edit.bounds, expectedCallId, editResult));
+  assert.doesNotThrow(() => requireMatchingEditIdentity('world', edit.bounds, edit.label, expectedCallId, editResult));
   for (const [world, bounds] of [
     ['other_world', edit.bounds],
     ['world', { ...edit.bounds, max: { x: 1, y: 0, z: 0 } }],
   ] as const) {
     assert.throws(
-      () => requireMatchingEditIdentity(world, bounds, expectedCallId, editResult),
+      () => requireMatchingEditIdentity(world, bounds, edit.label, expectedCallId, editResult),
       (error: unknown) =>
         error instanceof ToolFailure && error.code === 'bridge_invalid_response' && error.editId === editId,
     );
@@ -609,6 +727,10 @@ test('rejects successful edit and undo responses that do not match their request
         error instanceof ToolFailure && error.code === 'bridge_invalid_response' && error.editId === editId,
     );
   }
+  assert.throws(
+    () => requireMatchingEditIdentity('world', edit.bounds, 'Different label', expectedCallId, editResult),
+    isInvalidBridgeResponse,
+  );
 });
 
 test('correlates edit options and counts with the originating request', () => {
@@ -621,15 +743,20 @@ test('correlates edit options and counts with the originating request', () => {
     edit: null,
     seed: 42,
   };
-  assert.doesNotThrow(() => requireMatchingEditOptions(42, true, result));
-  assert.doesNotThrow(() => requireMatchingEditOptions(undefined, undefined, result));
-  assert.throws(() => requireMatchingEditOptions(41, true, result), isInvalidBridgeResponse);
-  assert.throws(() => requireMatchingEditOptions(42, false, result), isInvalidBridgeResponse);
+  assert.doesNotThrow(() => requireMatchingEditOptions(42, true, 1, result));
+  assert.doesNotThrow(() => requireMatchingEditOptions(undefined, undefined, undefined, result));
+  assert.throws(() => requireMatchingEditOptions(41, true, 1, result), isInvalidBridgeResponse);
+  assert.throws(() => requireMatchingEditOptions(42, false, 1, result), isInvalidBridgeResponse);
   assert.throws(
-    () => requireMatchingEditOptions(42, true, { ...result, outcome: 'no_change' }),
+    () => requireMatchingEditOptions(42, true, 1, { ...result, outcome: 'no_change' }),
     isInvalidBridgeResponse,
   );
-  assert.doesNotThrow(() => requireMatchingEditOptions(42, false, { ...result, outcome: 'no_change' }));
+  assert.doesNotThrow(() => requireMatchingEditOptions(42, false, 1, { ...result, outcome: 'no_change' }));
+  assert.doesNotThrow(() => requireMatchingEditOptions(42, true, 1, { ...result, changedBlockCount: 1 }));
+  assert.throws(
+    () => requireMatchingEditOptions(42, true, 1, { ...result, changedBlockCount: 2 }),
+    isInvalidBridgeResponse,
+  );
 
   assert.doesNotThrow(() => requireReplaceCountsWithinBounds(bounds, { ...result, matchedBlockCount: 8 }));
   assert.throws(

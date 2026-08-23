@@ -90,6 +90,22 @@ test('advertises every failure code with a compact envelope', () => {
   }
 });
 
+test('advertises execution progress only with a failed edit ID', () => {
+  const schema = toolOutputSchema(z.object({ value: z.string() }).strict(), {
+    undoneEdits: z.array(z.object({ editId: z.uuidv4() }).strict()),
+  });
+  const callId = '22222222-2222-4222-8222-222222222222';
+  const error = {
+    code: 'world_unavailable',
+    message: 'Undo stopped',
+    details: { reason: 'operation_failed' },
+  } as const;
+  assert.equal(schema.safeParse({ callId, error, undoneEdits: [] }).success, false);
+  assert.equal(schema.safeParse({ callId, error: { ...error, editId: EDIT_ID }, undoneEdits: [] }).success, true);
+  assert.equal(schema.safeParse({ callId, error: { ...error, editId: EDIT_ID } }).success, true);
+  assert.throws(() => new ToolFailure(error, { undoneEdits: [] }), /Tool failure progress requires an editId/);
+});
+
 test('fully validates the canonical failure result at runtime', () => {
   const callId = '22222222-2222-4222-8222-222222222222';
   const failure = {
@@ -330,23 +346,76 @@ test('adds only allowlisted edit and bounded result metadata to successful audit
   assert.equal(JSON.stringify(captured.records).includes('not logged'), false);
 });
 
-test('identifies successful undo metadata without exposing the full result', async () => {
+test('audits successful batch undo counts without selecting an arbitrary edit ID', async () => {
   const captured = await captureLogs((logger) =>
     executeToolCall(
       logger,
-      { operation: 'undo_edit', context: context(21), failureContext: 'Could not undo' },
+      { operation: 'undo_edits', context: context(21), failureContext: 'Could not undo' },
       async () =>
         successResult(
           {
-            edit: { editId: EDIT_ID, changedBlockCount: 7 },
+            edits: [
+              { editId: EDIT_ID, changedBlockCount: 7, label: 'Private first label' },
+              {
+                editId: '33333333-3333-4333-8333-333333333333',
+                changedBlockCount: 5,
+                label: 'Private second label',
+              },
+            ],
             undoCallId: '22222222-2222-4222-8222-222222222222',
           },
-          'Undid edit',
+          'Undid edits',
         ),
     ),
   );
 
-  assert.equal(captured.records[0]?.edit_id, EDIT_ID);
+  assert.equal(captured.records[0]?.edit_id, undefined);
   assert.equal(captured.records[0]?.outcome, 'undone');
+  assert.equal(captured.records[0]?.changed_block_count, 12);
+  assert.equal(captured.records[0]?.result_count, 2);
+  assert.equal(JSON.stringify(captured.records).includes('Private'), false);
+});
+
+test('propagates and audits validated batch undo execution progress', async () => {
+  const captured = await captureLogs((logger) =>
+    executeToolCall(
+      logger,
+      { operation: 'undo_edits', context: context(22), failureContext: 'Could not undo' },
+      async () => {
+        throw new ToolFailure(
+          {
+            code: 'world_unavailable',
+            message: 'World unloaded during undo',
+            details: { reason: 'world_unloaded', world: 'world' },
+            editId: EDIT_ID,
+          },
+          {
+            undoneEdits: [
+              {
+                editId: '33333333-3333-4333-8333-333333333333',
+                changedBlockCount: 7,
+                label: 'Never log this label',
+              },
+            ],
+          },
+        );
+      },
+    ),
+  );
+
+  const structuredContent = captured.result.structuredContent as Record<string, unknown>;
+  assert.deepEqual(structuredContent.undoneEdits, [
+    {
+      editId: '33333333-3333-4333-8333-333333333333',
+      changedBlockCount: 7,
+      label: 'Never log this label',
+    },
+  ]);
+  assert.equal(structuredContent.callId === undefined, false);
+  assert.equal(captured.result.isError, true);
+  assert.equal(captured.records[0]?.edit_id, EDIT_ID);
+  assert.equal(captured.records[0]?.outcome, 'partial_failure');
   assert.equal(captured.records[0]?.changed_block_count, 7);
+  assert.equal(captured.records[0]?.result_count, 1);
+  assert.equal(JSON.stringify(captured.records).includes('Never log'), false);
 });

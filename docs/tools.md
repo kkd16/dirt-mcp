@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Dirt MCP exposes 13 synchronous tools for a live Paper server. Tool availability
+Dirt MCP exposes synchronous tools for a live Paper server. Tool availability
 comes from the Paper plugin's `tools` allowlist and is snapshotted when Paper and
 the MCP process start. A disabled tool is absent from MCP discovery.
 
@@ -52,10 +52,12 @@ type PaletteEntry = {
 type DestinationPalette = PaletteEntry[]; // 1-64 distinct exact states
 
 type EditOperation = 'replace_region_blocks' | 'set_blocks';
+type EditLabel = string; // 1-120 Unicode code points; trimmed, single-line, and control-free
 
 type EditRecord = {
   editId: uuidV4;
   callId: uuidV4;
+  label: EditLabel;
   operation: EditOperation;
   world: string;
   worldId: uuid;
@@ -107,12 +109,19 @@ type ToolFailure = {
     editId?: uuidV4;
   };
 };
+
+type UndoEditsRuntimeFailure = ToolFailure & {
+  error: ToolFailure['error'] & { editId: uuidV4 };
+  undoneEdits: EditRecord[]; // successfully consumed newest-first prefix; may be empty
+};
 ```
 
 Correctable failures have code-specific `details`; internal failures deliberately
 do not. The OpenAPI contract defines every bridge detail variant. Local transport
 failures use a reason or HTTP status in `details`. An `editId` means the caller
 may need to reconcile the failure with `get_edit_history` before retrying.
+Only a runtime `undo_edits` failure adds the required top-level `undoneEdits`
+array; its `error.editId` identifies the retained edit whose undo failed.
 
 ## Status
 
@@ -210,7 +219,7 @@ type Success = {
 };
 ```
 
-`ToolName` is the set of the 13 headings in this document.
+`ToolName` is the set of tool headings in this document.
 
 ## Inspection
 
@@ -272,8 +281,8 @@ inspection is exact. Blocks are scanned in Y/Z/X order and greedily packed
 along +X, then +Z, then +Y; singletons remain placements. Both geometry arrays
 are always present and may be empty.
 
-The success object is valid `set_blocks` input as-is. Changing only `origin`
-copies the exact structure to another location.
+Add the required `label` to the success object before using it as `set_blocks`
+input. Changing `origin` as well copies the exact structure to another location.
 
 ### `scan_orthographic_view`
 
@@ -547,6 +556,18 @@ generates a seed returned in the result. Reusing it with the same ordered
 palettes and unchanged world reproduces per-coordinate choices, allowing an
 exact preview to be replayed.
 
+Every edit request requires a concise `label` describing one reversible intent.
+Labels are retained on committed and recovery records so history remains useful
+to the model; previews and no-ops create no record. Use one `set_blocks` call for
+related placements and runs, and separate unrelated refinements into separately
+labeled edits.
+
+An optional `maxChangedBlocks` sets a request-specific positive int32 ceiling.
+Dirt enforces the lower of this value and the configured maximum during exact
+preflight and in FAWE execution. A request whose preflight count exceeds the
+ceiling fails before mutation; changes after preflight remain protected by
+FAWE's limit and normal rollback or recovery handling.
+
 `dryRun=true` returns `outcome="preview"` without mutation. An executed no-op
 returns `outcome="no_change"`; a positive completed edit returns
 `outcome="committed"` and an `EditRecord`. Committed success is returned only
@@ -560,12 +581,14 @@ inclusive region.
 ```ts
 type Input = {
   world: string;
+  label: EditLabel;
   min: BlockPosition;
   max: BlockPosition;
   sourceBlockStatePatterns: string[]; // 1-64 distinct patterns
   destinationPalette: DestinationPalette;
   seed?: int32;
   dryRun?: boolean; // plugin default when omitted
+  maxChangedBlocks?: positiveInt; // at most 2,147,483,647
 };
 
 type Success = {
@@ -590,12 +613,14 @@ in both tuple forms is a signed offset added to `origin`.
 ```ts
 type Input = {
   world: string;
+  label: EditLabel;
   origin: BlockPosition;
   palettes: DestinationPalette[]; // at most 64 entries total
   placements: PalettePlacement[];
   runs: PaletteRun[];
   seed?: int32;
   dryRun?: boolean; // plugin default when omitted
+  maxChangedBlocks?: positiveInt; // at most 2,147,483,647
 };
 
 type Success = {
@@ -639,27 +664,37 @@ type Success = {
 };
 ```
 
-### `undo_edit`
+### `undo_edits`
 
-Restores and consumes the named retained edit. The ID must belong to the loaded
-world and must be the newest retained edit, preventing an intervening edit from
-being undone accidentally.
+Restores and consumes one or more retained edits. `editIds` must be a non-empty,
+case-insensitively distinct array equal to the exact newest-first prefix of
+current history, with at most the configured per-world history capacity. Dirt
+validates the complete array before restoration, so a missing, reordered,
+skipped, or intervening edit fails without changing the world.
 
 ```ts
 type Input = {
   world: string;
-  editId: uuidV4;
+  editIds: uuidV4[];
 };
 
 type Success = {
-  edit: EditRecord;
+  world: string;
+  edits: EditRecord[]; // requested newest-first order
   undoCallId: uuidV4;
   undoneAt: timestamp;
 };
 ```
 
-A failed chunk load or undo leaves the record available for retry. A successful
-undo returns the record as it existed immediately before consumption.
+Execution is sequential and is not all-or-nothing. If an edit fails at runtime,
+newer edits already restored by the call remain consumed, `undoneEdits` returns
+that successful prefix (including an empty array when the first edit fails),
+and `error.editId` identifies the failed current record. The failed record stays
+retained for recovery and older requested edits are not attempted. Re-read
+`get_edit_history` before retrying.
+
+History is a flat, volatile undo stack. Undo does not create redo entries, and
+Dirt provides no grouping, branching, or persistent history.
 
 ## Commands
 

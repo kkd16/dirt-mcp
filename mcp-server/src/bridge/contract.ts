@@ -43,9 +43,9 @@ export const BRIDGE_ROUTES = {
     path: '/v1/get-edit-history',
     timeoutMilliseconds: 3_000,
   },
-  undoEdit: {
+  undoEdits: {
     method: 'POST',
-    path: '/v1/undo-edit',
+    path: '/v1/undo-edits',
     timeoutMilliseconds: 120_000,
     salvageEditId: true,
   },

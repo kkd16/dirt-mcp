@@ -153,15 +153,23 @@ final class BridgeDispatcher implements AutoCloseable {
         boolean internalFailure =
                 status != null && status == 500 && "internal_error".equals(exchange.errorCode());
         boolean commandOperation = "run_minecraft_commands".equals(operation);
+        boolean undoOperation = "undo_edits".equals(operation);
         boolean commandResultCaptured = commandResultCaptured(exchange);
         boolean commandResponseAmbiguity =
                 commandOperation
                         && (internalFailure
                                 || unexpectedFailure
                                 || commandResultCaptured && transportFailure);
+        boolean undoResponseAmbiguity =
+                undoOperation
+                        && transportFailure
+                        && exchange.resultCount() != null
+                        && ("undone".equals(exchange.outcome())
+                                || "partial_failure".equals(exchange.outcome()));
         boolean recoveryAmbiguity =
                 recoveryRisk
                         || transportFailure && exchange.editId() != null
+                        || undoResponseAmbiguity
                         || commandResponseAmbiguity;
         String callId = rawExchange.getRequestHeaders().getFirst(CALL_ID_HEADER);
         String canonicalCallId = canonicalCallId(callId);
@@ -198,6 +206,7 @@ final class BridgeDispatcher implements AutoCloseable {
                         unexpectedFailure || internalFailure,
                         recoveryAmbiguity,
                         commandResponseAmbiguity,
+                        undoResponseAmbiguity,
                         transportFailure);
         Throwable loggedFailure = commandOperation && unexpectedFailure ? null : failure;
         if (unexpectedFailure) {
@@ -251,6 +260,7 @@ final class BridgeDispatcher implements AutoCloseable {
             boolean internalFailure,
             boolean recoveryAmbiguity,
             boolean commandResponseAmbiguity,
+            boolean undoResponseAmbiguity,
             boolean transportFailure) {
         if (commandResponseAmbiguity) {
             if (exchange.resultCount() == null) {
@@ -264,6 +274,16 @@ final class BridgeDispatcher implements AutoCloseable {
                     + (canonicalCallId == null ? "" : " for call " + canonicalCallId)
                     + ", but its response could not be finalized; inspect server state before retrying";
         }
+        if (undoResponseAmbiguity) {
+            return "Dirt MCP undo_edits restored "
+                    + editCount(exchange.resultCount())
+                    + " in world "
+                    + exchange.world()
+                    + ", but its response could not be delivered; reconcile edit history"
+                    + (exchange.editId() == null ? "" : " at failed edit " + exchange.editId())
+                    + (canonicalCallId == null ? "" : " for call " + canonicalCallId)
+                    + " before retrying";
+        }
         if (recoveryAmbiguity) {
             boolean knownCompletion =
                     "committed".equals(exchange.outcome()) || "undone".equals(exchange.outcome());
@@ -275,12 +295,14 @@ final class BridgeDispatcher implements AutoCloseable {
             } else {
                 completion = "response delivery failed and edit history must be reconciled";
             }
+            String editReference =
+                    exchange.editId() == null ? "edit history" : "edit " + exchange.editId();
             return "Dirt MCP "
                     + operation
                     + ' '
                     + completion
-                    + "; reconcile edit "
-                    + exchange.editId()
+                    + "; reconcile "
+                    + editReference
                     + (canonicalCallId == null ? "" : " from call " + canonicalCallId)
                     + " before retrying";
         }
@@ -296,20 +318,22 @@ final class BridgeDispatcher implements AutoCloseable {
                     + ')';
         }
         if (!internalFailure && "undone".equals(exchange.outcome())) {
-            return "Dirt MCP undid edit "
-                    + exchange.editId()
+            return "Dirt MCP undid "
+                    + editCount(exchange.resultCount())
                     + " in world "
                     + exchange.world()
                     + " ("
                     + exchange.changedBlockCount()
-                    + " blocks)";
+                    + " changed-block entries)";
         }
         if (!internalFailure && "dispatched".equals(exchange.outcome())) {
             return "Dirt MCP ran a Minecraft command batch ("
                     + commandCount(exchange.resultCount())
                     + "; all dispatched)";
         }
-        if (!internalFailure && "partial_failure".equals(exchange.outcome())) {
+        if (!internalFailure
+                && "run_minecraft_commands".equals(operation)
+                && "partial_failure".equals(exchange.outcome())) {
             return "Dirt MCP ran a Minecraft command batch ("
                     + exchange.resultCount()
                     + " attempted; stopped at first failure)";
@@ -325,6 +349,10 @@ final class BridgeDispatcher implements AutoCloseable {
 
     private static String commandCount(long count) {
         return count + (count == 1 ? " command" : " commands");
+    }
+
+    private static String editCount(long count) {
+        return count + (count == 1 ? " edit" : " edits");
     }
 
     private static Throwable preserveFirstFailure(Throwable first, Throwable next) {
