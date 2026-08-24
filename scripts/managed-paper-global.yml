@@ -1,0 +1,5 @@
+# The managed smoke test does not profile the server. Avoid spark's background
+# monitoring lifecycle and keep shutdown log validation deterministic.
+_version: 31
+spark:
+  enabled: false

@@ -5,6 +5,7 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 token_file="${repo_root}/paper-plugin/run/.dirt-mcp-token"
 managed_config_dir="${repo_root}/paper-plugin/run/plugins/DirtMCP"
 managed_fawe_config_dir="${repo_root}/paper-plugin/run/plugins/FastAsyncWorldEdit"
+managed_paper_config_dir="${repo_root}/paper-plugin/run/config"
 
 if [[ $# -ne 2 ]]; then
   printf 'Usage: %s MC_PORT BRIDGE_PORT\n' "$0" >&2
@@ -25,12 +26,14 @@ export DIRT_MCP_BRIDGE_PORT="$2"
 export DIRT_MCP_BRIDGE_TOKEN
 
 # The managed server is disposable and always runs against this checkout's
-# complete strict Dirt configuration schema and pinned FAWE test settings.
-mkdir -p "${managed_config_dir}" "${managed_fawe_config_dir}"
+# complete strict Dirt configuration schema and pinned dependency test settings.
+mkdir -p "${managed_config_dir}" "${managed_fawe_config_dir}" "${managed_paper_config_dir}"
 cp "${repo_root}/paper-plugin/src/main/resources/config.yml" \
   "${managed_config_dir}/config.yml"
 cp "${repo_root}/scripts/managed-fawe-config.yml" \
   "${managed_fawe_config_dir}/config.yml"
+cp "${repo_root}/scripts/managed-paper-global.yml" \
+  "${managed_paper_config_dir}/paper-global.yml"
 
 cd "${repo_root}"
 exec ./gradlew :paper-plugin:runServer
