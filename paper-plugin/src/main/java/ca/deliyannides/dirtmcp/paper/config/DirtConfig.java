@@ -133,11 +133,15 @@ public record DirtConfig(
             int maxRegionVolume,
             int maxTouchedChunks,
             int maxInspectionTouchedChunks,
+            int maxPerspectiveTouchedChunks,
             int maxBlockStatePatterns,
+            int maxPaletteEntries,
             int maxChangedBlocks,
             int maxInspectionVolume,
+            int maxPerspectiveRayDistanceBudget,
             int defaultInspectionResultLimit,
             int maxInspectionResultLimit,
+            int maxPerspectiveRays,
             int maxCommandsPerRequest,
             int maxCommandFeedbackCharacters) {
         public Limits {
@@ -149,11 +153,16 @@ public record DirtConfig(
             requirePositive("limits.max-region-volume", maxRegionVolume);
             requirePositive("limits.max-touched-chunks", maxTouchedChunks);
             requirePositive("limits.max-inspection-touched-chunks", maxInspectionTouchedChunks);
+            requirePositive("limits.max-perspective-touched-chunks", maxPerspectiveTouchedChunks);
             requirePositive("limits.max-block-state-patterns", maxBlockStatePatterns);
+            requirePositive("limits.max-palette-entries", maxPaletteEntries);
             requirePositive("limits.max-changed-blocks", maxChangedBlocks);
             requirePositive("limits.max-inspection-volume", maxInspectionVolume);
+            requirePositive(
+                    "limits.max-perspective-ray-distance-budget", maxPerspectiveRayDistanceBudget);
             requirePositive("limits.default-inspection-results", defaultInspectionResultLimit);
             requirePositive("limits.max-inspection-results", maxInspectionResultLimit);
+            requirePositive("limits.max-perspective-rays", maxPerspectiveRays);
             requirePositive("limits.max-commands-per-request", maxCommandsPerRequest);
             requirePositive("limits.max-command-feedback-characters", maxCommandFeedbackCharacters);
             requireAtMost(
@@ -166,6 +175,8 @@ public record DirtConfig(
                     maxBlockStatePatterns,
                     "the protocol maximum",
                     64);
+            requireAtMost(
+                    "limits.max-palette-entries", maxPaletteEntries, "the protocol maximum", 256);
             requireAtMost(
                     "limits.max-changed-blocks",
                     maxChangedBlocks,
@@ -186,6 +197,11 @@ public record DirtConfig(
                     maxInspectionResultLimit,
                     "limits.max-inspection-volume",
                     maxInspectionVolume);
+            requireAtMost(
+                    "limits.max-perspective-rays",
+                    maxPerspectiveRays,
+                    "limits.max-perspective-ray-distance-budget",
+                    maxPerspectiveRayDistanceBudget);
         }
     }
 

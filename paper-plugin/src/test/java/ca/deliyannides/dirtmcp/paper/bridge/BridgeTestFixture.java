@@ -68,7 +68,8 @@ final class BridgeTestFixture {
                 allTools(),
                 new DirtConfig.Logging(DirtConfig.ConsoleLogLevel.INFO, 10_485_760, 5),
                 new DirtConfig.Limits(
-                        262_144, 1_000_000, 256, 32, 64, 250_000, 32_768, 321, 654, 10, 8_192),
+                        262_144, 1_000_000, 256, 32, 64, 64, 256, 250_000, 32_768, 65_536, 321, 654,
+                        512, 10, 8_192),
                 new DirtConfig.EditHistory(20, 100, 1_000_000),
                 new DirtConfig.Defaults(false, false));
     }
@@ -163,7 +164,8 @@ final class BridgeTestFixture {
                     allTools().flags(),
                     new GetServerStatus.EffectiveLogging("info", 10_485_760, 5),
                     new GetServerStatus.EffectiveLimits(
-                            262_144, 1_000_000, 256, 32, 64, 250_000, 32_768, 321, 654, 10, 8_192),
+                            32, 1, 262_144, 1_000_000, 256, 32, 64, 64, 256, 250_000, 32_768,
+                            65_536, 321, 654, 512, 10, 8_192),
                     new GetServerStatus.EffectiveEditHistory(20, 100, 1_000_000),
                     new GetServerStatus.EffectiveDefaults(false, false));
         }

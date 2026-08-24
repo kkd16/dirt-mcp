@@ -30,6 +30,9 @@ const setMin = { x: 5, y: 0, z: 0 };
 const setMax = { x: 6, y: 0, z: 0 };
 const copyMin = { x: 7, y: 0, z: 0 };
 const copyMax = { x: 8, y: 0, z: 0 };
+const largeMin = { x: 32, y: 256, z: 32 };
+const largeMax = { x: 95, y: 319, z: 95 };
+const largeRegion = { world, min: largeMin, max: largeMax };
 const northStairs = 'minecraft:dark_oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]';
 const southStairs = 'minecraft:dark_oak_stairs[facing=south,half=bottom,shape=straight,waterlogged=false]';
 const baseUrl = `http://127.0.0.1:${bridgePort}`;
@@ -39,7 +42,7 @@ const editIdsToUndo = [];
 const observedEditIds = new Set();
 const mutationCallIds = new Set();
 const editMutationPaths = new Set(['/v1/replace-region-blocks', '/v1/set-blocks']);
-const longRunningMutationPaths = new Set([...editMutationPaths, '/v1/run-minecraft-commands']);
+const commandPaths = new Set(['/v1/run-minecraft-commands']);
 const inspectionPaths = new Set([
   '/v1/count-region-block-states',
   '/v1/get-player-context',
@@ -49,7 +52,8 @@ const inspectionPaths = new Set([
 ]);
 
 function bridgeTimeoutMilliseconds(path) {
-  if (longRunningMutationPaths.has(path) || path === '/v1/undo-edits') return 120_000;
+  if (editMutationPaths.has(path) || path === '/v1/undo-edits') return 300_000;
+  if (commandPaths.has(path)) return 120_000;
   return inspectionPaths.has(path) ? 30_000 : 3_000;
 }
 
@@ -466,6 +470,7 @@ async function cleanupRetainedEdits() {
 }
 
 let fixtureIsForceLoaded = false;
+let wideFixtureIsForceLoaded = false;
 let originalRegionFixture;
 let originalStairFixture;
 let originalSetFixture;
@@ -502,15 +507,30 @@ try {
   assert.ok(serverStatus.builds.fawe.length > 0);
   assert.ok(serverStatus.performance.tpsOneMinute >= 0);
   assert.ok(serverStatus.worlds.some((entry) => entry.name === world));
-  assert.ok(serverStatus.limits.maxRequestBytes > 0);
-  assert.ok(serverStatus.limits.maxRegionVolume > 0);
-  assert.ok(serverStatus.limits.maxTouchedChunks > 0);
-  assert.ok(serverStatus.limits.defaultInspectionResultLimit <= serverStatus.limits.maxInspectionResultLimit);
-  assert.ok(serverStatus.limits.maxCommandsPerRequest > 0);
-  assert.ok(serverStatus.limits.maxCommandFeedbackCharacters > 0);
-  assert.ok(serverStatus.editHistory.maxEntriesPerWorld > 0);
-  assert.ok(serverStatus.editHistory.maxEntriesTotal >= serverStatus.editHistory.maxEntriesPerWorld);
-  assert.ok(serverStatus.editHistory.maxRetainedChangedBlocks >= serverStatus.limits.maxChangedBlocks);
+  assert.deepEqual(serverStatus.limits, {
+    maxConcurrentRequests: 32,
+    maxConcurrentInspections: 4,
+    maxRequestBytes: 1_048_576,
+    maxRegionVolume: 1_048_576,
+    maxTouchedChunks: 512,
+    maxInspectionTouchedChunks: 128,
+    maxPerspectiveTouchedChunks: 256,
+    maxBlockStatePatterns: 64,
+    maxPaletteEntries: 256,
+    maxChangedBlocks: 262_144,
+    maxInspectionVolume: 262_144,
+    maxPerspectiveRayDistanceBudget: 131_072,
+    defaultInspectionResultLimit: 1_024,
+    maxInspectionResultLimit: 4_096,
+    maxPerspectiveRays: 2_048,
+    maxCommandsPerRequest: 10,
+    maxCommandFeedbackCharacters: 8_192,
+  });
+  assert.deepEqual(serverStatus.editHistory, {
+    maxEntriesPerWorld: 50,
+    maxEntriesTotal: 200,
+    maxRetainedChangedBlocks: 2_621_440,
+  });
   assert.deepEqual(serverStatus.logging, {
     consoleLevel: 'info',
     detailFileMaxBytes: 10_485_760,
@@ -1169,6 +1189,60 @@ try {
   );
   originalRegionFixture = undefined;
 
+  await paperCommand('forceload add -32 -32 175 175');
+  wideFixtureIsForceLoaded = true;
+  const originalLargeRegion = await waitForRegion(largeRegion);
+  assert.equal(originalLargeRegion.volume, 262_144);
+  const largeDestination = [
+    'minecraft:barrier',
+    'minecraft:structure_void',
+    'minecraft:light[level=15]',
+    'minecraft:jigsaw[orientation=down_east]',
+    'minecraft:command_block[conditional=false,facing=down]',
+  ].find((blockState) => !Object.hasOwn(originalLargeRegion.blockStateCounts, blockState));
+  assert.ok(largeDestination);
+  assert.equal(Object.hasOwn(originalLargeRegion.blockStateCounts, largeDestination), false);
+
+  const largeEdit = await bridgeRequest('/v1/set-blocks', {
+    world,
+    label: 'Exercise the 262144 block edit ceiling',
+    origin: largeMin,
+    palettes: [[{ blockState: largeDestination }]],
+    placements: [],
+    runs: [[0, 0, 0, 0, 63, 63, 63]],
+  });
+  assertCommittedEdit(largeEdit, 'set_blocks');
+  assert.equal(largeEdit.blockCount, 262_144);
+  assert.equal(largeEdit.changedBlockCount, 262_144);
+  const canonicalLargeDestination = largeEdit.palettes[0][0].blockState;
+  await assertEditHistory([largeEdit.edit]);
+
+  const concurrentInspections = await Promise.all(
+    Array.from({ length: 4 }, () => bridgeRequest('/v1/count-region-block-states', largeRegion)),
+  );
+  for (const inspection of concurrentInspections) {
+    assert.deepEqual(inspection.blockStateCounts, { [canonicalLargeDestination]: 262_144 });
+  }
+
+  const widePerspective = await bridgeRequest('/v1/get-perspective-view', {
+    source: {
+      type: 'location',
+      world,
+      cameraPosition: { x: 64.5, y: 319.5, z: 64.5 },
+      rotation: { yaw: 0, pitch: 90 },
+    },
+    width: 15,
+    height: 15,
+    verticalFieldOfViewDegrees: 170,
+    maxDistance: 96,
+  });
+  assert.ok(widePerspective.checkedChunkCount > 32);
+  assert.ok(widePerspective.checkedChunkCount <= serverStatus.limits.maxPerspectiveTouchedChunks);
+
+  await undoRetained(largeEdit);
+  await assertEditHistory([]);
+  assert.deepEqual(await bridgeRequest('/v1/count-region-block-states', largeRegion), originalLargeRegion);
+
   originalStairFixture = await bridgeRequest('/v1/get-blocks', {
     ...stairRegion,
     includeAir: true,
@@ -1326,7 +1400,14 @@ try {
       cleanupFailed = true;
     }
   }
-  if (fixtureIsForceLoaded) {
+  if (wideFixtureIsForceLoaded) {
+    try {
+      await paperCommand('forceload remove -32 -32 175 175');
+    } catch (error) {
+      process.stderr.write(`Could not release wide smoke-test chunks: ${error.message}\n`);
+      cleanupFailed = true;
+    }
+  } else if (fixtureIsForceLoaded) {
     try {
       await paperCommand('forceload remove 0 0');
     } catch (error) {

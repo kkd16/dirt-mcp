@@ -69,15 +69,21 @@ public interface GetServerStatus {
             int playerCount) {}
 
     record EffectiveLimits(
+            int maxConcurrentRequests,
+            int maxConcurrentInspections,
             int maxRequestBytes,
             int maxRegionVolume,
             int maxTouchedChunks,
             int maxInspectionTouchedChunks,
+            int maxPerspectiveTouchedChunks,
             int maxBlockStatePatterns,
+            int maxPaletteEntries,
             int maxChangedBlocks,
             int maxInspectionVolume,
+            int maxPerspectiveRayDistanceBudget,
             int defaultInspectionResultLimit,
             int maxInspectionResultLimit,
+            int maxPerspectiveRays,
             int maxCommandsPerRequest,
             int maxCommandFeedbackCharacters) {}
 

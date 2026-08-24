@@ -89,6 +89,7 @@ public final class DirtRuntime implements AutoCloseable {
                             limits.maxInspectionResultLimit(),
                             limits.maxInspectionTouchedChunks(),
                             limits.maxBlockStatePatterns(),
+                            limits.maxPaletteEntries(),
                             inspectionAdmission);
             PaperPlayerContextService playerContext =
                     new PaperPlayerContextService(
@@ -98,9 +99,9 @@ public final class DirtRuntime implements AutoCloseable {
                             mainThread,
                             new BukkitPerspectiveViewAccess(
                                     plugin.getServer(),
-                                    limits.maxInspectionResultLimit(),
-                                    limits.maxInspectionVolume(),
-                                    limits.maxInspectionTouchedChunks()),
+                                    limits.maxPerspectiveRays(),
+                                    limits.maxPerspectiveRayDistanceBudget(),
+                                    limits.maxPerspectiveTouchedChunks()),
                             inspectionAdmission);
             PaperCommandService commands =
                     new PaperCommandService(

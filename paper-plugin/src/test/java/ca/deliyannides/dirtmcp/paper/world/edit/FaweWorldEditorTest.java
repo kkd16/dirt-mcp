@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 
 final class FaweWorldEditorTest {
     private static final int MAX_BLOCK_STATE_PATTERNS = 64;
+    private static final int MAX_PALETTE_ENTRIES = 256;
     private static final UUID WORLD_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static final UUID OTHER_WORLD_ID =
             UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
@@ -210,7 +211,13 @@ final class FaweWorldEditorTest {
         FakePlatform platform = new FakePlatform();
         FaweWorldEditor editor =
                 new FaweWorldEditor(
-                        platform, 64 * 64 * 64, 16, MAX_BLOCK_STATE_PATTERNS, 100, history(3));
+                        platform,
+                        64 * 64 * 64,
+                        16,
+                        MAX_BLOCK_STATE_PATTERNS,
+                        MAX_PALETTE_ENTRIES,
+                        100,
+                        history(3));
 
         set(
                 editor,
@@ -239,7 +246,14 @@ final class FaweWorldEditorTest {
     void rejectsRegionTouchingTooManyChunksBeforeResolvingWorld() {
         FakePlatform platform = new FakePlatform();
         FaweWorldEditor editor =
-                new FaweWorldEditor(platform, 1_000, 2, MAX_BLOCK_STATE_PATTERNS, 100, history(3));
+                new FaweWorldEditor(
+                        platform,
+                        1_000,
+                        2,
+                        MAX_BLOCK_STATE_PATTERNS,
+                        MAX_PALETTE_ENTRIES,
+                        100,
+                        history(3));
 
         OperationException exception =
                 assertThrows(
@@ -267,7 +281,14 @@ final class FaweWorldEditorTest {
     void rejectsSetBlockChunkLimitBeforeWorldAndStatePreparation() {
         FakePlatform platform = new FakePlatform();
         FaweWorldEditor editor =
-                new FaweWorldEditor(platform, 100, 1, MAX_BLOCK_STATE_PATTERNS, 100, history(3));
+                new FaweWorldEditor(
+                        platform,
+                        100,
+                        1,
+                        MAX_BLOCK_STATE_PATTERNS,
+                        MAX_PALETTE_ENTRIES,
+                        100,
+                        history(3));
 
         OperationException exception =
                 assertThrows(
@@ -375,7 +396,13 @@ final class FaweWorldEditorTest {
         assertFailure(OperationFailure.INVALID_REQUEST, () -> undo(editor, " ", UUID.randomUUID()));
         FaweWorldEditor smallEditor =
                 new FaweWorldEditor(
-                        new FakePlatform(), 3, 10, MAX_BLOCK_STATE_PATTERNS, 3, history(3));
+                        new FakePlatform(),
+                        3,
+                        10,
+                        MAX_BLOCK_STATE_PATTERNS,
+                        MAX_PALETTE_ENTRIES,
+                        3,
+                        history(3));
         assertFailure(
                 OperationFailure.REGION_TOO_LARGE,
                 () ->
@@ -510,11 +537,11 @@ final class FaweWorldEditorTest {
                                         origin,
                                         List.of(
                                                 java.util.Collections.nCopies(
-                                                        33,
+                                                        129,
                                                         new DestinationPaletteEntry(
                                                                 "minecraft:stone", null)),
                                                 java.util.Collections.nCopies(
-                                                        32,
+                                                        128,
                                                         new DestinationPaletteEntry(
                                                                 "minecraft:dirt", null))),
                                         List.of(placement(0, 0, 0)),
@@ -648,7 +675,13 @@ final class FaweWorldEditorTest {
 
         FaweWorldEditor smallEditor =
                 new FaweWorldEditor(
-                        new FakePlatform(), 3, 10, MAX_BLOCK_STATE_PATTERNS, 3, history(3));
+                        new FakePlatform(),
+                        3,
+                        10,
+                        MAX_BLOCK_STATE_PATTERNS,
+                        MAX_PALETTE_ENTRIES,
+                        3,
+                        history(3));
         OperationException oversized =
                 assertThrows(
                         OperationException.class,
@@ -814,6 +847,7 @@ final class FaweWorldEditorTest {
                         100,
                         10,
                         MAX_BLOCK_STATE_PATTERNS,
+                        MAX_PALETTE_ENTRIES,
                         1,
                         new DirtConfig.EditHistory(1, 1, 1));
         assertThrows(OperationException.class, () -> set(editor, cuboidSetRequest("world", false)));
@@ -902,7 +936,14 @@ final class FaweWorldEditorTest {
         FakePlatform platform = new FakePlatform();
         platform.nextChanges = 3;
         FaweWorldEditor editor =
-                new FaweWorldEditor(platform, 100, 10, MAX_BLOCK_STATE_PATTERNS, 5, history(5));
+                new FaweWorldEditor(
+                        platform,
+                        100,
+                        10,
+                        MAX_BLOCK_STATE_PATTERNS,
+                        MAX_PALETTE_ENTRIES,
+                        5,
+                        history(5));
 
         OperationException limited =
                 assertThrows(
@@ -1013,7 +1054,13 @@ final class FaweWorldEditorTest {
         boundedPlatform.nextChanges = 1;
         FaweWorldEditor bounded =
                 new FaweWorldEditor(
-                        boundedPlatform, 100, 10, MAX_BLOCK_STATE_PATTERNS, 100, history(2));
+                        boundedPlatform,
+                        100,
+                        10,
+                        MAX_BLOCK_STATE_PATTERNS,
+                        MAX_PALETTE_ENTRIES,
+                        100,
+                        history(2));
         EditRecord first = set(bounded, cuboidSetRequest("world", false)).edit();
         EditRecord second = set(bounded, cuboidSetRequest("world", false)).edit();
         EditRecord third = set(bounded, cuboidSetRequest("world", false)).edit();
@@ -1260,7 +1307,13 @@ final class FaweWorldEditorTest {
 
     private static FaweWorldEditor editor(FakePlatform platform, int history) {
         return new FaweWorldEditor(
-                platform, 100, 10, MAX_BLOCK_STATE_PATTERNS, 100, history(Math.max(1, history)));
+                platform,
+                100,
+                10,
+                MAX_BLOCK_STATE_PATTERNS,
+                MAX_PALETTE_ENTRIES,
+                100,
+                history(Math.max(1, history)));
     }
 
     private static DirtConfig.EditHistory history(int perWorld) {

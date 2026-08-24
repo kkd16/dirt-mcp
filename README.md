@@ -36,7 +36,7 @@ Minecraft versions.
 
 | Dependency                                                          | Version                         |
 | ------------------------------------------------------------------- | ------------------------------- |
-| [Paper](https://papermc.io/downloads/paper/)                        | 26.2, API build 112 stable      |
+| [Paper](https://papermc.io/downloads/paper/)                        | 26.2, API build 116 stable      |
 | [Java](https://docs.papermc.io/paper/getting-started/#requirements) | 25                              |
 | [FAWE](https://modrinth.com/plugin/fastasyncworldedit)              | A Paper-compatible build        |
 | Node.js                                                             | 26 or newer                     |

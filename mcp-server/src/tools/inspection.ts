@@ -9,7 +9,8 @@ import {
   BoundsSchema,
   DimensionsSchema,
   INT32_MAX,
-  MAX_BLOCK_STATE_ENTRIES,
+  MAX_BLOCK_STATE_PATTERNS,
+  MAX_PALETTE_ENTRIES,
   NonBlankStringSchema,
   PalettePlacementSchema,
   PaletteRunSchema,
@@ -59,14 +60,14 @@ export const GetBlocksInputSchema = z
     max: BlockPositionSchema.describe('The other inclusive corner; ordering relative to min does not matter.'),
     includeBlockStatePatterns: z
       .array(NonBlankStringSchema)
-      .max(MAX_BLOCK_STATE_ENTRIES)
+      .max(MAX_BLOCK_STATE_PATTERNS)
       .default([])
       .describe(
         'Optional allowlist of block-state patterns. Omitted properties match any value; an empty list allows all states.',
       ),
     excludeBlockStatePatterns: z
       .array(NonBlankStringSchema)
-      .max(MAX_BLOCK_STATE_ENTRIES)
+      .max(MAX_BLOCK_STATE_PATTERNS)
       .default([])
       .describe('Block-state patterns rejected after include filtering. Omitted properties match any value.'),
     includeAir: z
@@ -85,10 +86,10 @@ export const GetBlocksInputSchema = z
   })
   .strict()
   .superRefine((input, context) => {
-    if (input.includeBlockStatePatterns.length + input.excludeBlockStatePatterns.length > MAX_BLOCK_STATE_ENTRIES) {
+    if (input.includeBlockStatePatterns.length + input.excludeBlockStatePatterns.length > MAX_BLOCK_STATE_PATTERNS) {
       context.addIssue({
         code: 'custom',
-        message: `include and exclude block-state patterns may contain at most ${MAX_BLOCK_STATE_ENTRIES} entries combined`,
+        message: `include and exclude block-state patterns may contain at most ${MAX_BLOCK_STATE_PATTERNS} entries combined`,
       });
     }
   })
@@ -100,7 +101,7 @@ const ExactPaletteEntrySchema = z
 
 const ExactPalettesSchema = z
   .array(z.tuple([ExactPaletteEntrySchema]).rest(z.never()))
-  .max(MAX_BLOCK_STATE_ENTRIES)
+  .max(MAX_PALETTE_ENTRIES)
   .superRefine((palettes, context) => {
     const states = new Set<string>();
     palettes.forEach((palette, index) => {

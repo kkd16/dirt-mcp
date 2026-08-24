@@ -1658,7 +1658,7 @@ components:
           $ref: '#/components/schemas/BlockPosition'
         palettes:
           type: array
-          maxItems: 64
+          maxItems: 256
           description: First-seen exact singleton palettes. Empty exactly when placements and runs are both empty.
           items:
             type: array
@@ -2777,7 +2777,7 @@ components:
         destinationPalette:
           type: array
           minItems: 1
-          maxItems: 64
+          maxItems: 256
           description: Exact destination states; weights are all omitted for equal probability or all total 100.
           items:
             $ref: '#/components/schemas/DestinationPaletteEntry'
@@ -2850,7 +2850,7 @@ components:
         destinationPalette:
           type: array
           minItems: 1
-          maxItems: 64
+          maxItems: 256
           items:
             $ref: '#/components/schemas/DestinationPaletteEntry'
         seed:
@@ -2899,12 +2899,12 @@ components:
           $ref: '#/components/schemas/BlockPosition'
         palettes:
           type: array
-          maxItems: 64
-          description: Weighted palettes referenced by zero-based index; empty exactly when placements and runs are both empty, with at most 64 entries across all palettes.
+          maxItems: 256
+          description: Weighted palettes referenced by zero-based index; empty exactly when placements and runs are both empty, with at most 256 entries across all palettes.
           items:
             type: array
             minItems: 1
-            maxItems: 64
+            maxItems: 256
             description: Exact states; weights are all omitted for equal probability or all supplied as whole percentages totaling 100.
             items:
               $ref: '#/components/schemas/DestinationPaletteEntry'
@@ -2979,12 +2979,12 @@ components:
             - type: 'null'
         palettes:
           type: array
-          maxItems: 64
+          maxItems: 256
           description: Canonical palettes used by the edit, or an empty array for empty geometry.
           items:
             type: array
             minItems: 1
-            maxItems: 64
+            maxItems: 256
             items:
               $ref: '#/components/schemas/DestinationPaletteEntry'
         seed:
@@ -3258,18 +3258,34 @@ components:
       type: object
       additionalProperties: false
       required:
+        - maxConcurrentRequests
+        - maxConcurrentInspections
         - maxRequestBytes
         - maxRegionVolume
         - maxTouchedChunks
         - maxInspectionTouchedChunks
+        - maxPerspectiveTouchedChunks
         - maxBlockStatePatterns
+        - maxPaletteEntries
         - maxChangedBlocks
         - maxInspectionVolume
+        - maxPerspectiveRayDistanceBudget
         - defaultInspectionResultLimit
         - maxInspectionResultLimit
+        - maxPerspectiveRays
         - maxCommandsPerRequest
         - maxCommandFeedbackCharacters
       properties:
+        maxConcurrentRequests:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Maximum authenticated bridge requests allowed to execute concurrently.
+        maxConcurrentInspections:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Maximum region and perspective inspections allowed to execute concurrently; cannot exceed maxConcurrentRequests.
         maxRequestBytes:
           type: integer
           format: int32
@@ -3290,13 +3306,24 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum distinct loaded chunks a region inspection may snapshot or a perspective view may check; cannot exceed maxTouchedChunks.
+          description: Maximum distinct loaded chunks a region inspection may snapshot; cannot exceed maxTouchedChunks.
+        maxPerspectiveTouchedChunks:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Maximum distinct loaded chunks a perspective view may check.
         maxBlockStatePatterns:
           type: integer
           format: int32
           minimum: 1
           maximum: 64
-          description: Maximum block-state patterns or palette entries in one operation; inspection include and exclude lists share this cap.
+          description: Maximum match patterns in one operation; inspection include and exclude lists share this cap.
+        maxPaletteEntries:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 256
+          description: Maximum exact block-state entries in one edit or get_blocks structure palette.
         maxChangedBlocks:
           type: integer
           format: int32
@@ -3306,7 +3333,12 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum blocks scanned by exact block retrieval or an orthographic view, and maximum configured perspective-view ray-distance budget; cannot exceed maxRegionVolume.
+          description: Maximum blocks scanned by exact block retrieval or an orthographic view; cannot exceed maxRegionVolume.
+        maxPerspectiveRayDistanceBudget:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Maximum perspective ray count multiplied by maximum ray distance.
         defaultInspectionResultLimit:
           type: integer
           format: int32
@@ -3316,7 +3348,12 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum caller-selectable exact-block, run, or visible-block result limit and maximum perspective-view ray count; cannot exceed maxInspectionVolume.
+          description: Maximum caller-selectable exact-block, run, or orthographic visible-block result limit; cannot exceed maxInspectionVolume.
+        maxPerspectiveRays:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Maximum rays in one perspective view; cannot exceed maxPerspectiveRayDistanceBudget.
         maxCommandsPerRequest:
           type: integer
           format: int32

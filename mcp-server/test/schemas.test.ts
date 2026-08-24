@@ -49,20 +49,26 @@ const isInvalidBridgeResponse = (error: unknown): boolean =>
 function serverStatusFixture() {
   const tools = Object.fromEntries(MCP_TOOL_NAMES.map((name) => [name, true])) as McpToolConfiguration;
   return {
-    builds: { minecraft: '26.2', paper: '26.2-112', dirtMcp: 'test', fawe: '2.15.4' },
+    builds: { minecraft: '26.2', paper: '26.2-116', dirtMcp: 'test', fawe: '2.15.4' },
     performance: { tpsOneMinute: 20, averageTickTimeMillis: 1 },
     players: { online: 0, maximum: 20, entries: [] },
     worlds: [],
     limits: {
+      maxConcurrentRequests: 32,
+      maxConcurrentInspections: 4,
       maxRequestBytes: 1_048_576,
       maxRegionVolume: 100,
       maxTouchedChunks: 10,
       maxInspectionTouchedChunks: 5,
+      maxPerspectiveTouchedChunks: 10,
       maxBlockStatePatterns: 64,
+      maxPaletteEntries: 256,
       maxChangedBlocks: 50,
       maxInspectionVolume: 80,
+      maxPerspectiveRayDistanceBudget: 100,
       defaultInspectionResultLimit: 10,
       maxInspectionResultLimit: 20,
+      maxPerspectiveRays: 50,
       maxCommandsPerRequest: 10,
       maxCommandFeedbackCharacters: 8_192,
     },
@@ -285,12 +291,15 @@ test('validates bounded server limits and their relationships', () => {
   }
   const invalidLimits = [
     { maxRequestBytes: INT32_MAX },
+    { maxConcurrentInspections: 33 },
     { maxInspectionTouchedChunks: 11 },
     { maxBlockStatePatterns: 65 },
+    { maxPaletteEntries: 257 },
     { maxChangedBlocks: 101 },
     { maxInspectionVolume: 101 },
     { defaultInspectionResultLimit: 21 },
     { maxInspectionResultLimit: 81 },
+    { maxPerspectiveRays: 101 },
   ];
   for (const limits of invalidLimits) {
     assert.equal(ServerStatusSchema.safeParse({ ...status, limits: { ...status.limits, ...limits } }).success, false);
@@ -476,6 +485,33 @@ test('validates weighted set-block palettes, placements, and cuboid runs', () =>
           { blockState: 'minecraft:dirt', weight: 30 },
         ],
       ],
+    }).success,
+    false,
+  );
+});
+
+test('accepts 256 exact palette entries and rejects 257 independently of pattern limits', () => {
+  const palette = Array.from({ length: 256 }, (_, index) => ({ blockState: `test:state_${index}` }));
+  const patterns = Array.from({ length: 64 }, (_, index) => `test:pattern_${index}`);
+
+  assert.equal(DestinationPaletteSchema.safeParse(palette).success, true);
+  assert.equal(DestinationPaletteSchema.safeParse([...palette, { blockState: 'test:state_256' }]).success, false);
+  assert.equal(SourceBlockStatePatternsSchema.safeParse(patterns).success, true);
+  assert.equal(SourceBlockStatePatternsSchema.safeParse([...patterns, 'test:pattern_64']).success, false);
+
+  const setInput = {
+    world: 'world',
+    label: 'Place a large palette',
+    origin: { x: 0, y: 0, z: 0 },
+    palettes: palette.map((entry) => [entry]),
+    placements: [[0, 0, 0, 0]],
+    runs: [],
+  };
+  assert.equal(SetBlocksInputSchema.safeParse(setInput).success, true);
+  assert.equal(
+    SetBlocksInputSchema.safeParse({
+      ...setInput,
+      palettes: [...setInput.palettes, [{ blockState: 'test:state_256' }]],
     }).success,
     false,
   );

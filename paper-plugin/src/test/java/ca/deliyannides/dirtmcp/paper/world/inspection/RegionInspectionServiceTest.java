@@ -20,6 +20,7 @@ import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockStructure.Placement;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockStructure.Run;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -151,7 +152,8 @@ final class RegionInspectionServiceTest {
     void appliesInspectionVolumeAndResultLimits() {
         FakeSnapshotSource source = new FakeSnapshotSource();
         RegionInspectionService service =
-                new RegionInspectionService(source, 100, 2, 2, 16, 8, new InspectionAdmission(1));
+                new RegionInspectionService(
+                        source, 100, 2, 2, 16, 8, 8, new InspectionAdmission(1));
         GetBlocks.Request oversized =
                 new GetBlocks.Request(
                         "world",
@@ -189,35 +191,40 @@ final class RegionInspectionServiceTest {
                 IllegalArgumentException.class,
                 () ->
                         new RegionInspectionService(
-                                source, 0, 1, 1, 1, 1, new InspectionAdmission(1)));
+                                source, 0, 1, 1, 1, 1, 1, new InspectionAdmission(1)));
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
                         new RegionInspectionService(
-                                source, 1, 0, 1, 1, 1, new InspectionAdmission(1)));
+                                source, 1, 0, 1, 1, 1, 1, new InspectionAdmission(1)));
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
                         new RegionInspectionService(
-                                source, 1, 1, 0, 1, 1, new InspectionAdmission(1)));
+                                source, 1, 1, 0, 1, 1, 1, new InspectionAdmission(1)));
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
                         new RegionInspectionService(
-                                source, 1, 1, 1, 0, 1, new InspectionAdmission(1)));
+                                source, 1, 1, 1, 0, 1, 1, new InspectionAdmission(1)));
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
                         new RegionInspectionService(
-                                source, 1, 1, 1, 1, 0, new InspectionAdmission(1)));
+                                source, 1, 1, 1, 1, 0, 1, new InspectionAdmission(1)));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new RegionInspectionService(
+                                source, 1, 1, 1, 1, 1, 0, new InspectionAdmission(1)));
         assertThrows(
                 NullPointerException.class,
-                () -> new RegionInspectionService(source, 1, 1, 1, 1, 1, null));
+                () -> new RegionInspectionService(source, 1, 1, 1, 1, 1, 1, null));
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
                         new RegionInspectionService(
-                                source, 1, 2, 1, 1, 1, new InspectionAdmission(1)));
+                                source, 1, 2, 1, 1, 1, 1, new InspectionAdmission(1)));
     }
 
     @Test
@@ -225,7 +232,7 @@ final class RegionInspectionServiceTest {
         FakeSnapshotSource source = new FakeSnapshotSource();
         RegionInspectionService service =
                 new RegionInspectionService(
-                        source, 100, 100, 10, 16, 2, new InspectionAdmission(1));
+                        source, 100, 100, 10, 16, 2, 8, new InspectionAdmission(1));
         GetBlocks.Request tooMany =
                 new GetBlocks.Request(
                         "world",
@@ -251,6 +258,82 @@ final class RegionInspectionServiceTest {
                         false,
                         1));
         assertEquals(List.of("stone"), source.includes);
+    }
+
+    @Test
+    void appliesThePaletteLimitIndependentlyFromThePatternLimit() throws Exception {
+        FakeSnapshotSource source = new FakeSnapshotSource();
+        source.samples.put(position(0, 0, 0), solid("stone"));
+        source.samples.put(position(1, 0, 0), solid("dirt"));
+        GetBlocks.Request request =
+                new GetBlocks.Request(
+                        "world",
+                        position(0, 0, 0),
+                        position(1, 0, 0),
+                        List.of(),
+                        List.of(),
+                        false,
+                        10);
+
+        RegionInspectionService twoPalettes =
+                new RegionInspectionService(
+                        source, 100, 100, 10, 16, 1, 2, new InspectionAdmission(1));
+        assertEquals(2, twoPalettes.getBlocks(request).palettes().size());
+
+        RegionInspectionService onePalette =
+                new RegionInspectionService(
+                        source, 100, 100, 10, 16, 1, 1, new InspectionAdmission(1));
+        assertEquals(
+                OperationFailure.RESULT_TOO_LARGE,
+                assertThrows(OperationException.class, () -> onePalette.getBlocks(request))
+                        .failure());
+    }
+
+    @Test
+    void admitsFourConcurrentInspectionsAndRejectsAZeroQueueFifth() throws Exception {
+        InspectionAdmission admission = new InspectionAdmission(4);
+        CountDownLatch entered = new CountDownLatch(4);
+        CountDownLatch release = new CountDownLatch(1);
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var inspections = new ArrayList<java.util.concurrent.Future<Integer>>();
+            for (int index = 0; index < 4; index++) {
+                inspections.add(
+                        executor.submit(
+                                () ->
+                                        admission.execute(
+                                                () -> {
+                                                    entered.countDown();
+                                                    try {
+                                                        if (!release.await(5, TimeUnit.SECONDS)) {
+                                                            throw new AssertionError(
+                                                                    "inspection test did not release");
+                                                        }
+                                                    } catch (InterruptedException exception) {
+                                                        Thread.currentThread().interrupt();
+                                                        throw new AssertionError(
+                                                                "inspection test interrupted",
+                                                                exception);
+                                                    }
+                                                    return 1;
+                                                })));
+            }
+
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            OperationException busy =
+                    assertThrows(OperationException.class, () -> admission.execute(() -> 1));
+            assertEquals(OperationFailure.SERVER_UNAVAILABLE, busy.failure());
+            assertEquals(
+                    new ErrorDetails.ServerUnavailable.InspectionBusy(4),
+                    busy.details().orElseThrow());
+
+            release.countDown();
+            for (var inspection : inspections) {
+                assertEquals(1, inspection.get(5, TimeUnit.SECONDS));
+            }
+        } finally {
+            release.countDown();
+        }
     }
 
     @Test
@@ -284,7 +367,7 @@ final class RegionInspectionServiceTest {
                 };
         RegionInspectionService service =
                 new RegionInspectionService(
-                        source, 100, 100, 10, 16, 8, new InspectionAdmission(1));
+                        source, 100, 100, 10, 16, 8, 8, new InspectionAdmission(1));
 
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             var first =
@@ -378,7 +461,7 @@ final class RegionInspectionServiceTest {
 
     private static RegionInspectionService service(FakeSnapshotSource source, int maxChunks) {
         return new RegionInspectionService(
-                source, 100, 100, 10, maxChunks, 8, new InspectionAdmission(1));
+                source, 100, 100, 10, maxChunks, 8, 8, new InspectionAdmission(1));
     }
 
     private static BlockPosition position(int x, int y, int z) {

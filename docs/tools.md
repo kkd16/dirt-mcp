@@ -49,7 +49,7 @@ type PaletteEntry = {
   blockState: string;
   weight?: number; // integer 1-100
 };
-type DestinationPalette = PaletteEntry[]; // 1-64 distinct exact states
+type DestinationPalette = PaletteEntry[]; // 1-256 distinct exact states
 
 type EditOperation = 'replace_region_blocks' | 'set_blocks';
 type EditLabel = string; // 1-120 Unicode code points; trimmed, single-line, and control-free
@@ -188,15 +188,21 @@ type Success = {
   }> | null;
   configuration: {
     limits: {
+      maxConcurrentRequests: positiveInt;
+      maxConcurrentInspections: positiveInt;
       maxRequestBytes: positiveInt;
       maxRegionVolume: positiveInt;
       maxTouchedChunks: positiveInt;
       maxInspectionTouchedChunks: positiveInt;
+      maxPerspectiveTouchedChunks: positiveInt;
       maxBlockStatePatterns: positiveInt;
+      maxPaletteEntries: positiveInt;
       maxChangedBlocks: positiveInt;
       maxInspectionVolume: positiveInt;
+      maxPerspectiveRayDistanceBudget: positiveInt;
       defaultInspectionResultLimit: positiveInt;
       maxInspectionResultLimit: positiveInt;
+      maxPerspectiveRays: positiveInt;
       maxCommandsPerRequest: positiveInt;
       maxCommandFeedbackCharacters: positiveInt;
     };
@@ -249,7 +255,7 @@ type Success = {
 Returns a replay-ready exact structure using singleton palettes, individual
 placements, and inclusive cuboids. Include patterns are applied first, followed
 by exclude patterns. The two pattern lists may contain at most 64 entries
-combined.
+combined. Exact output block states use the separate configured palette cap.
 
 ```ts
 type Input = {
@@ -545,9 +551,11 @@ type Success = {
 
 Hits are sparse and row-major. `crosshairHitIndex` addresses the `hits` array
 and is `null` when the center ray misses. The tool preflights loaded chunks and
-never loads terrain. A player source fails while that player is spectating
-another entity. Results describe server collision geometry, not entities,
-lighting, particles, resource packs, third-person state, or a client framebuffer.
+never loads terrain. Ray count, ray-count-times-distance work, and checked
+chunks have separate active limits. A player source fails while that player is
+spectating another entity. Results describe server collision geometry, not
+entities, lighting, particles, resource packs, third-person state, or a client
+framebuffer.
 
 ## Editing and undo
 
@@ -615,7 +623,7 @@ type Input = {
   world: string;
   label: EditLabel;
   origin: BlockPosition;
-  palettes: DestinationPalette[]; // at most 64 entries total
+  palettes: DestinationPalette[]; // at most 256 entries total
   placements: PalettePlacement[];
   runs: PaletteRun[];
   seed?: int32;

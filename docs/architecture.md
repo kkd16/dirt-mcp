@@ -62,6 +62,12 @@ The bridge listens only on `127.0.0.1`, requires bearer authentication, and
 admits a bounded number of concurrent requests. MCP calls remain synchronous;
 there is no job service, database, or remote transport.
 
+Inspections share a smaller non-queueing admission pool within the bridge
+request pool. Region snapshots and perspective traces use separate chunk and
+work budgets, while match patterns and exact-state palettes have separate item
+caps. This keeps each limit aligned with the resource it protects instead of
+letting one representation's ceiling constrain another.
+
 Paper-owned state is accessed through an explicit scheduler boundary. World and
 player lookup, chunk snapshots, block-data validation, plugin tickets, and
 command dispatch run where Paper requires them. Inspection algorithms and

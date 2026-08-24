@@ -34,10 +34,10 @@ export const BRIDGE_ROUTES = {
   replaceRegionBlocks: {
     method: 'POST',
     path: '/v1/replace-region-blocks',
-    timeoutMilliseconds: 120_000,
+    timeoutMilliseconds: 300_000,
     salvageEditId: true,
   },
-  setBlocks: { method: 'POST', path: '/v1/set-blocks', timeoutMilliseconds: 120_000, salvageEditId: true },
+  setBlocks: { method: 'POST', path: '/v1/set-blocks', timeoutMilliseconds: 300_000, salvageEditId: true },
   getEditHistory: {
     method: 'POST',
     path: '/v1/get-edit-history',
@@ -46,7 +46,7 @@ export const BRIDGE_ROUTES = {
   undoEdits: {
     method: 'POST',
     path: '/v1/undo-edits',
-    timeoutMilliseconds: 120_000,
+    timeoutMilliseconds: 300_000,
     salvageEditId: true,
   },
   runMinecraftCommands: {

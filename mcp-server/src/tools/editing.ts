@@ -7,7 +7,8 @@ import { ToolFailure, toolOutputSchema } from '../bridge/errors.ts';
 import {
   BlockPositionSchema,
   BoundsSchema,
-  MAX_BLOCK_STATE_ENTRIES,
+  MAX_BLOCK_STATE_PATTERNS,
+  MAX_PALETTE_ENTRIES,
   NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
   NonBlankStringSchema,
   PalettePlacementSchema,
@@ -30,7 +31,7 @@ import { inclusiveBlockVolume, normalizedBounds, requireMatchingWorld, sameBound
 export const SourceBlockStatePatternsSchema = z
   .array(NonBlankStringSchema)
   .min(1)
-  .max(MAX_BLOCK_STATE_ENTRIES)
+  .max(MAX_BLOCK_STATE_PATTERNS)
   .superRefine((patterns, context) => {
     const seen = new Set<string>();
     patterns.forEach((pattern, index) => {
@@ -63,7 +64,7 @@ const DestinationPaletteEntrySchema = z
 export const DestinationPaletteSchema = z
   .array(DestinationPaletteEntrySchema)
   .min(1)
-  .max(MAX_BLOCK_STATE_ENTRIES)
+  .max(MAX_PALETTE_ENTRIES)
   .superRefine((entries, context) => {
     const weightedCount = entries.filter((entry) => entry.weight !== undefined).length;
     if (weightedCount !== 0 && weightedCount !== entries.length) {
@@ -288,18 +289,18 @@ export const ReplaceRegionBlocksOutputSchema = z
 
 const SetBlocksPalettesSchema = z
   .array(DestinationPaletteSchema)
-  .max(MAX_BLOCK_STATE_ENTRIES)
+  .max(MAX_PALETTE_ENTRIES)
   .superRefine((palettes, context) => {
     const entryCount = palettes.reduce((sum, palette) => sum + palette.length, 0);
-    if (entryCount > MAX_BLOCK_STATE_ENTRIES) {
+    if (entryCount > MAX_PALETTE_ENTRIES) {
       context.addIssue({
         code: 'custom',
-        message: `Palettes may contain at most ${MAX_BLOCK_STATE_ENTRIES} entries in total.`,
+        message: `Palettes may contain at most ${MAX_PALETTE_ENTRIES} entries in total.`,
       });
     }
   })
   .describe(
-    `Weighted block-state palettes referenced by zero-based index; empty only for empty geometry, with at most ${MAX_BLOCK_STATE_ENTRIES} entries total.`,
+    `Weighted block-state palettes referenced by zero-based index; empty only for empty geometry, with at most ${MAX_PALETTE_ENTRIES} entries total.`,
   );
 
 export const SetBlocksInputSchema = z

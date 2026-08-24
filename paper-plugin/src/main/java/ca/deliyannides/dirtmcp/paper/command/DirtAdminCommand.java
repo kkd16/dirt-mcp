@@ -185,11 +185,19 @@ public final class DirtAdminCommand {
         appendValue(message, "max-region-volume", limits.maxRegionVolume());
         appendValue(message, "max-touched-chunks", limits.maxTouchedChunks());
         appendValue(message, "max-inspection-touched-chunks", limits.maxInspectionTouchedChunks());
+        appendValue(
+                message, "max-perspective-touched-chunks", limits.maxPerspectiveTouchedChunks());
         appendValue(message, "max-block-state-patterns", limits.maxBlockStatePatterns());
+        appendValue(message, "max-palette-entries", limits.maxPaletteEntries());
         appendValue(message, "max-changed-blocks", limits.maxChangedBlocks());
         appendValue(message, "max-inspection-volume", limits.maxInspectionVolume());
+        appendValue(
+                message,
+                "max-perspective-ray-distance-budget",
+                limits.maxPerspectiveRayDistanceBudget());
         appendValue(message, "default-inspection-results", limits.defaultInspectionResultLimit());
         appendValue(message, "max-inspection-results", limits.maxInspectionResultLimit());
+        appendValue(message, "max-perspective-rays", limits.maxPerspectiveRays());
         appendValue(message, "max-commands-per-request", limits.maxCommandsPerRequest());
         appendValue(
                 message, "max-command-feedback-characters", limits.maxCommandFeedbackCharacters());

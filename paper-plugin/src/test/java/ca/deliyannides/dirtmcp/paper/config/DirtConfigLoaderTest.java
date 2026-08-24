@@ -21,7 +21,7 @@ final class DirtConfigLoaderTest {
     void loadsTheCompleteShippedConfiguration() {
         DirtConfig config = DirtConfigLoader.load(defaultConfiguration(), null);
 
-        assertEquals(new DirtConfig.Bridge(8_765, 5, 5, 32, 2), config.bridge());
+        assertEquals(new DirtConfig.Bridge(8_765, 5, 5, 32, 4), config.bridge());
         assertEquals(EnumSet.allOf(McpTool.class), config.tools().enabled());
         assertEquals(McpTool.values().length, config.tools().flags().size());
         assertTrue(config.tools().flags().values().stream().allMatch(Boolean::booleanValue));
@@ -30,9 +30,10 @@ final class DirtConfigLoaderTest {
                 config.logging());
         assertEquals(
                 new DirtConfig.Limits(
-                        262_144, 262_144, 256, 32, 64, 65_536, 16_384, 512, 2_048, 10, 8_192),
+                        1_048_576, 1_048_576, 512, 128, 256, 64, 256, 262_144, 262_144, 131_072,
+                        1_024, 4_096, 2_048, 10, 8_192),
                 config.limits());
-        assertEquals(new DirtConfig.EditHistory(20, 100, 1_310_720), config.editHistory());
+        assertEquals(new DirtConfig.EditHistory(50, 200, 2_621_440), config.editHistory());
         assertEquals(new DirtConfig.Defaults(false, false), config.defaults());
     }
 
@@ -149,22 +150,27 @@ final class DirtConfigLoaderTest {
                 Arguments.of("limits.max-region-volume", 0),
                 Arguments.of("limits.max-touched-chunks", 0),
                 Arguments.of("limits.max-inspection-touched-chunks", 0),
-                Arguments.of("limits.max-inspection-touched-chunks", 257),
+                Arguments.of("limits.max-inspection-touched-chunks", 513),
+                Arguments.of("limits.max-perspective-touched-chunks", 0),
                 Arguments.of("limits.max-block-state-patterns", 0),
                 Arguments.of("limits.max-block-state-patterns", 65),
-                Arguments.of("limits.max-changed-blocks", 262_145),
-                Arguments.of("limits.max-inspection-volume", 262_145),
-                Arguments.of("limits.default-inspection-results", 2_049),
-                Arguments.of("limits.max-inspection-results", 16_385),
+                Arguments.of("limits.max-palette-entries", 0),
+                Arguments.of("limits.max-palette-entries", 257),
+                Arguments.of("limits.max-changed-blocks", 1_048_577),
+                Arguments.of("limits.max-inspection-volume", 1_048_577),
+                Arguments.of("limits.max-perspective-ray-distance-budget", 0),
+                Arguments.of("limits.default-inspection-results", 4_097),
+                Arguments.of("limits.max-inspection-results", 262_145),
+                Arguments.of("limits.max-perspective-rays", 131_073),
                 Arguments.of("limits.max-commands-per-request", 0),
                 Arguments.of("limits.max-command-feedback-characters", 0),
                 Arguments.of("edit-history.max-entries-per-world", null),
                 Arguments.of("edit-history.max-entries-per-world", 0),
-                Arguments.of("edit-history.max-entries-per-world", 101),
+                Arguments.of("edit-history.max-entries-per-world", 201),
                 Arguments.of("edit-history.max-entries-total", 0),
-                Arguments.of("edit-history.max-entries-total", 19),
+                Arguments.of("edit-history.max-entries-total", 49),
                 Arguments.of("edit-history.max-retained-changed-blocks", 0),
-                Arguments.of("edit-history.max-retained-changed-blocks", 65_535),
+                Arguments.of("edit-history.max-retained-changed-blocks", 262_143),
                 Arguments.of("limits.not-a-limit", 20),
                 Arguments.of("defaults.get-blocks-include-air", "false"),
                 Arguments.of("defaults.not-a-default", false),

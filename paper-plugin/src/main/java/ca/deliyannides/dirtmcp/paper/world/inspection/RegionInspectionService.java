@@ -22,6 +22,7 @@ public final class RegionInspectionService
     private final int maxInspectionResults;
     private final int maxTouchedChunks;
     private final int maxBlockStatePatterns;
+    private final int maxPaletteEntries;
     private final InspectionAdmission admission;
 
     public RegionInspectionService(
@@ -31,13 +32,15 @@ public final class RegionInspectionService
             int maxInspectionResults,
             int maxTouchedChunks,
             int maxBlockStatePatterns,
+            int maxPaletteEntries,
             InspectionAdmission admission) {
         if (maxRegionVolume < 1
                 || maxInspectionVolume < 1
                 || maxInspectionVolume > maxRegionVolume
                 || maxInspectionResults < 1
                 || maxTouchedChunks < 1
-                || maxBlockStatePatterns < 1) {
+                || maxBlockStatePatterns < 1
+                || maxPaletteEntries < 1) {
             throw new IllegalArgumentException("Inspection limits are invalid");
         }
         this.snapshots = Objects.requireNonNull(snapshots, "snapshots");
@@ -46,6 +49,7 @@ public final class RegionInspectionService
         this.maxInspectionResults = maxInspectionResults;
         this.maxTouchedChunks = maxTouchedChunks;
         this.maxBlockStatePatterns = maxBlockStatePatterns;
+        this.maxPaletteEntries = maxPaletteEntries;
         this.admission = Objects.requireNonNull(admission, "admission");
     }
 
@@ -110,7 +114,7 @@ public final class RegionInspectionService
                                     region.min(),
                                     blocks,
                                     request.maxResults(),
-                                    this.maxBlockStatePatterns);
+                                    this.maxPaletteEntries);
                     return new GetBlocks.Result(
                             capture.worldName(),
                             region.min(),

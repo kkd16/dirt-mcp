@@ -33,6 +33,7 @@ public final class FaweWorldEditor
     private final int maxRegionVolume;
     private final int maxTouchedChunks;
     private final int maxBlockStatePatterns;
+    private final int maxPaletteEntries;
     private final int maxChangedBlocks;
 
     public FaweWorldEditor(
@@ -50,6 +51,7 @@ public final class FaweWorldEditor
                 limits.maxRegionVolume(),
                 limits.maxTouchedChunks(),
                 limits.maxBlockStatePatterns(),
+                limits.maxPaletteEntries(),
                 limits.maxChangedBlocks(),
                 Objects.requireNonNull(history, "history"));
     }
@@ -59,18 +61,21 @@ public final class FaweWorldEditor
             int maxRegionVolume,
             int maxTouchedChunks,
             int maxBlockStatePatterns,
+            int maxPaletteEntries,
             int maxChangedBlocks,
             DirtConfig.EditHistory history) {
         this.platform = Objects.requireNonNull(platform, "platform");
         if (maxRegionVolume < 1
                 || maxTouchedChunks < 1
                 || maxBlockStatePatterns < 1
+                || maxPaletteEntries < 1
                 || maxChangedBlocks < 1) {
             throw new IllegalArgumentException("Edit and chunk limits must be positive");
         }
         this.maxRegionVolume = maxRegionVolume;
         this.maxTouchedChunks = maxTouchedChunks;
         this.maxBlockStatePatterns = maxBlockStatePatterns;
+        this.maxPaletteEntries = maxPaletteEntries;
         this.maxChangedBlocks = maxChangedBlocks;
         DirtConfig.EditHistory checkedHistory = Objects.requireNonNull(history, "history");
         if (maxChangedBlocks > checkedHistory.maxRetainedChangedBlocks()) {
@@ -825,13 +830,13 @@ public final class FaweWorldEditor
             List<DestinationPaletteEntry> palette = palettes.get(index);
             validatePalette(palette, "palettes[" + index + "]");
             entryCount += palette.size();
-            if (entryCount > this.maxBlockStatePatterns) {
+            if (entryCount > this.maxPaletteEntries) {
                 throw invalid(
                         "palettes may contain at most "
-                                + this.maxBlockStatePatterns
+                                + this.maxPaletteEntries
                                 + " entries in total",
                         new ErrorDetails.InvalidRequest.TooManyItems(
-                                List.of("palettes"), this.maxBlockStatePatterns));
+                                List.of("palettes"), this.maxPaletteEntries));
             }
         }
     }
@@ -958,11 +963,11 @@ public final class FaweWorldEditor
                     field + " must contain at least one entry",
                     new ErrorDetails.InvalidRequest.InvalidValue(field));
         }
-        if (palette.size() > this.maxBlockStatePatterns) {
+        if (palette.size() > this.maxPaletteEntries) {
             throw invalid(
-                    field + " may contain at most " + this.maxBlockStatePatterns + " entries",
+                    field + " may contain at most " + this.maxPaletteEntries + " entries",
                     new ErrorDetails.InvalidRequest.TooManyItems(
-                            List.of(field), this.maxBlockStatePatterns));
+                            List.of(field), this.maxPaletteEntries));
         }
         boolean weighted = false;
         boolean unweighted = false;

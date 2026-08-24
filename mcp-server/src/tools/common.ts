@@ -3,7 +3,8 @@ import * as z from 'zod/v4';
 
 export const INT32_MIN = -2_147_483_648;
 export const INT32_MAX = 2_147_483_647;
-export const MAX_BLOCK_STATE_ENTRIES = 64;
+export const MAX_BLOCK_STATE_PATTERNS = 64;
+export const MAX_PALETTE_ENTRIES = 256;
 export const BLOCK_AXES = ['x', 'y', 'z'] as const;
 
 const CANONICAL_UUID = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/;

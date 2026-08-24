@@ -8,7 +8,8 @@ import {
   BlockPositionSchema,
   EmptyInputSchema,
   INT32_MAX,
-  MAX_BLOCK_STATE_ENTRIES,
+  MAX_BLOCK_STATE_PATTERNS,
+  MAX_PALETTE_ENTRIES,
   READ_WORLD_ANNOTATIONS,
 } from './common.ts';
 import { McpToolConfigurationSchema, type McpToolConfiguration } from './configuration.ts';
@@ -55,27 +56,39 @@ const PingServerOutputSchema = z
 
 const LimitConfigurationSchema = z
   .object({
+    maxConcurrentRequests: PositiveInt32Schema.describe(
+      'Maximum authenticated bridge requests allowed to execute concurrently.',
+    ),
+    maxConcurrentInspections: PositiveInt32Schema.describe(
+      'Maximum region and perspective inspections allowed to execute concurrently.',
+    ),
     maxRequestBytes: PositiveInt32Schema.max(INT32_MAX - 1).describe(
       'Maximum JSON request-body size accepted by the bridge.',
     ),
     maxRegionVolume: PositiveInt32Schema.describe('Maximum cuboid mutation/count volume or explicit block placements.'),
     maxTouchedChunks: PositiveInt32Schema.describe('Maximum distinct loaded chunks one mutation may touch.'),
-    maxInspectionTouchedChunks: PositiveInt32Schema.describe(
-      'Maximum loaded chunks a region inspection may snapshot or a perspective view may check.',
+    maxInspectionTouchedChunks: PositiveInt32Schema.describe('Maximum loaded chunks a region inspection may snapshot.'),
+    maxPerspectiveTouchedChunks: PositiveInt32Schema.describe('Maximum loaded chunks a perspective view may check.'),
+    maxBlockStatePatterns: PositiveInt32Schema.max(MAX_BLOCK_STATE_PATTERNS).describe(
+      'Maximum match patterns in one operation; inspection include and exclude lists share this cap.',
     ),
-    maxBlockStatePatterns: PositiveInt32Schema.max(MAX_BLOCK_STATE_ENTRIES).describe(
-      'Maximum block-state patterns or palette entries in one operation; inspection include and exclude lists share this cap.',
+    maxPaletteEntries: PositiveInt32Schema.max(MAX_PALETTE_ENTRIES).describe(
+      'Maximum exact block-state entries in one edit or get_blocks structure palette.',
     ),
     maxChangedBlocks: PositiveInt32Schema.describe('Maximum blocks one edit may change.'),
     maxInspectionVolume: PositiveInt32Schema.describe(
-      'Maximum blocks scanned by a detailed region inspection or perspective ray-distance budget.',
+      'Maximum blocks scanned by an exact or orthographic region inspection.',
+    ),
+    maxPerspectiveRayDistanceBudget: PositiveInt32Schema.describe(
+      'Maximum perspective ray count multiplied by maximum ray distance.',
     ),
     defaultInspectionResultLimit: PositiveInt32Schema.describe(
       'Default exact-block, run, or visible-block result limit when maxResults is omitted.',
     ),
     maxInspectionResultLimit: PositiveInt32Schema.describe(
-      'Maximum caller-selected detailed-inspection result limit or perspective-view ray count.',
+      'Maximum caller-selected exact or orthographic inspection result limit.',
     ),
+    maxPerspectiveRays: PositiveInt32Schema.describe('Maximum rays in one perspective view.'),
     maxCommandsPerRequest: PositiveInt32Schema.describe(
       'Maximum commands accepted in one ordered Minecraft command batch.',
     ),
@@ -84,6 +97,10 @@ const LimitConfigurationSchema = z
     ),
   })
   .strict()
+  .refine((limits) => limits.maxConcurrentInspections <= limits.maxConcurrentRequests, {
+    message: 'maxConcurrentInspections must not exceed maxConcurrentRequests.',
+    path: ['maxConcurrentInspections'],
+  })
   .refine((limits) => limits.maxInspectionTouchedChunks <= limits.maxTouchedChunks, {
     message: 'maxInspectionTouchedChunks must not exceed maxTouchedChunks.',
     path: ['maxInspectionTouchedChunks'],
@@ -103,6 +120,10 @@ const LimitConfigurationSchema = z
   .refine((limits) => limits.maxInspectionResultLimit <= limits.maxInspectionVolume, {
     message: 'maxInspectionResultLimit must not exceed maxInspectionVolume.',
     path: ['maxInspectionResultLimit'],
+  })
+  .refine((limits) => limits.maxPerspectiveRays <= limits.maxPerspectiveRayDistanceBudget, {
+    message: 'maxPerspectiveRays must not exceed maxPerspectiveRayDistanceBudget.',
+    path: ['maxPerspectiveRays'],
   })
   .describe('Active limits that constrain Dirt inspection, mutation, and command tools.');
 

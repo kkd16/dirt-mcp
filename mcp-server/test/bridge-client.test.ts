@@ -17,6 +17,14 @@ const OTHER_EDIT_ID = '33333333-3333-4333-8333-333333333333';
 const INT32_MIN = -2_147_483_648;
 const INT32_MAX = 2_147_483_647;
 
+test('uses extended timeouts only for mutation and undo routes', () => {
+  assert.equal(BRIDGE_ROUTES.replaceRegionBlocks.timeoutMilliseconds, 300_000);
+  assert.equal(BRIDGE_ROUTES.setBlocks.timeoutMilliseconds, 300_000);
+  assert.equal(BRIDGE_ROUTES.undoEdits.timeoutMilliseconds, 300_000);
+  assert.equal(BRIDGE_ROUTES.runMinecraftCommands.timeoutMilliseconds, 120_000);
+  assert.equal(BRIDGE_ROUTES.getBlocks.timeoutMilliseconds, 30_000);
+});
+
 test('sends an authenticated exact bridge request through the injected fetch function', async () => {
   let requestedUrl: URL | undefined;
   let requestedInit: RequestInit | undefined;

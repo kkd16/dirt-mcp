@@ -86,7 +86,7 @@ final class DirtAdminCommandTest {
         assertTrue(plain.contains("● Running"));
         assertTrue(plain.contains("Bridge  127.0.0.1:8765"));
         assertTrue(plain.contains("Minecraft  26.2"));
-        assertTrue(plain.contains("Paper  Paper build 112"));
+        assertTrue(plain.contains("Paper  Paper build 116"));
         assertTrue(plain.contains("Dirt MCP  0.1.0-SNAPSHOT"));
         assertTrue(plain.contains("FAWE  2.15.4"));
         assertTrue(plain.contains("Performance  19.95 TPS  •  4.25 ms/tick"));
@@ -330,7 +330,8 @@ final class DirtAdminCommandTest {
                                 McpTool.GET_EDIT_HISTORY)),
                 new DirtConfig.Logging(DirtConfig.ConsoleLogLevel.WARNING, 2_000_000, 7),
                 new DirtConfig.Limits(
-                        262_144, 131_072, 128, 16, 32, 65_536, 8_192, 256, 1_024, 10, 8_192),
+                        262_144, 131_072, 128, 16, 32, 32, 64, 65_536, 8_192, 16_384, 256, 1_024,
+                        512, 10, 8_192),
                 new DirtConfig.EditHistory(10, 50, 655_360),
                 new DirtConfig.Defaults(true, true));
     }
@@ -339,7 +340,7 @@ final class DirtAdminCommandTest {
         GetServerStatus.Result result =
                 new GetServerStatus.Result(
                         new GetServerStatus.Builds(
-                                "26.2", "Paper build 112", "0.1.0-SNAPSHOT", "2.15.4"),
+                                "26.2", "Paper build 116", "0.1.0-SNAPSHOT", "2.15.4"),
                         new GetServerStatus.Performance(19.95, 4.25),
                         new GetServerStatus.PlayerSummary(
                                 1,
@@ -364,7 +365,8 @@ final class DirtAdminCommandTest {
                                         1)),
                         config().tools().flags(),
                         new GetServerStatus.EffectiveLogging("warning", 2_000_000, 7),
-                        new GetServerStatus.EffectiveLimits(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
+                        new GetServerStatus.EffectiveLimits(
+                                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
                         new GetServerStatus.EffectiveEditHistory(2, 3, 4),
                         new GetServerStatus.EffectiveDefaults(false, false));
         return () -> result;
