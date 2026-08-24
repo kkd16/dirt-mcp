@@ -5,12 +5,11 @@ import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionBlockAlgorithms.InspectedBlock;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.CapturedRegion;
-import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.Viewport;
+import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import ca.deliyannides.dirtmcp.paper.world.model.RegionGeometry;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -82,7 +81,7 @@ public final class RegionInspectionService
     }
 
     @Override
-    public GetBlocks.Result getBlocks(GetBlocks.Request request) throws OperationException {
+    public ExactBlockStructure getBlocks(GetBlocks.Request request) throws OperationException {
         validateGetBlocksRequest(request);
         validateMaxResults(request.maxResults());
         List<String> includes = canonicalPatterns(request.includeBlockStatePatterns());
@@ -109,23 +108,13 @@ public final class RegionInspectionService
                     List<InspectedBlock> blocks =
                             RegionBlockAlgorithms.collectBlocks(
                                     region, capture, request.includeAir());
-                    RegionBlockAlgorithms.PackedBlocks packed =
-                            RegionBlockAlgorithms.packBlocks(
-                                    region.min(),
-                                    blocks,
-                                    request.maxResults(),
-                                    this.maxPaletteEntries);
-                    return new GetBlocks.Result(
-                            capture.worldName(),
-                            region.min(),
-                            packed.palettes(),
-                            packed.placements(),
-                            packed.runs());
+                    return packStructure(
+                            capture.worldName(), region.min(), blocks, request.maxResults());
                 });
     }
 
     @Override
-    public ScanOrthographicView.Result scanOrthographicView(ScanOrthographicView.Request request)
+    public ExactBlockStructure scanOrthographicView(ScanOrthographicView.Request request)
             throws OperationException {
         if (request == null || request.origin() == null || request.direction() == null) {
             String field =
@@ -144,25 +133,24 @@ public final class RegionInspectionService
                     CapturedRegion capture =
                             this.snapshots.capture(
                                     request.world(), geometry.region(), List.of(), List.of());
-                    OrthographicViewAlgorithms.ViewGrid grid =
-                            OrthographicViewAlgorithms.collectGrid(request, geometry, capture);
-                    return new ScanOrthographicView.Result(
+                    List<InspectedBlock> blocks =
+                            OrthographicViewAlgorithms.collectBlocks(request, geometry, capture);
+                    return packStructure(
                             capture.worldName(),
-                            request.origin(),
-                            request.direction().name().toLowerCase(Locale.ROOT),
-                            geometry.basis(),
-                            new Viewport(
-                                    request.horizontalRadius(),
-                                    request.verticalRadius(),
-                                    request.maxDistance(),
-                                    request.depth()),
-                            geometry.region().bounds(),
-                            geometry.region().volume(),
-                            grid.visibleCellCount(),
-                            grid.blockStatePalette(),
-                            grid.blockStateIndexRows(),
-                            grid.distanceRows());
+                            geometry.region().min(),
+                            blocks,
+                            request.maxResults());
                 });
+    }
+
+    private ExactBlockStructure packStructure(
+            String world, BlockPosition origin, List<InspectedBlock> blocks, int maxResults)
+            throws OperationException {
+        RegionBlockAlgorithms.PackedBlocks packed =
+                RegionBlockAlgorithms.packBlocks(
+                        origin, blocks, maxResults, this.maxPaletteEntries);
+        return new ExactBlockStructure(
+                world, origin, packed.palettes(), packed.placements(), packed.runs());
     }
 
     private void validateMaxResults(int maxResults) throws OperationException {

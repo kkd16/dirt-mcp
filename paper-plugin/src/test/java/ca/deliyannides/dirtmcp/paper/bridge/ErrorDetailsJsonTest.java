@@ -158,9 +158,6 @@ final class ErrorDetailsJsonTest {
                         new ErrorDetails.ResultTooLarge.Palettes(9, 8),
                         "{reason:'palettes',minimumRequired:9,maximum:8}"),
                 detail(
-                        new ErrorDetails.ResultTooLarge.VisibleCells(9, 8),
-                        "{reason:'visible_cells',minimumRequired:9,maximum:8}"),
-                detail(
                         new ErrorDetails.ResultTooLarge.PerspectiveRays(9, 8),
                         "{reason:'perspective_rays',minimumRequired:9,maximum:8}"),
                 detail(

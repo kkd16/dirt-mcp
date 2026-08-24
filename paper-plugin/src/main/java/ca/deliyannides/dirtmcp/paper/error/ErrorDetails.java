@@ -292,12 +292,6 @@ public sealed interface ErrorDetails extends Serializable {
             }
         }
 
-        record VisibleCells(long minimumRequired, int maximum) implements ResultTooLarge {
-            public VisibleCells {
-                validateResultLimit(minimumRequired, maximum);
-            }
-        }
-
         record PerspectiveRays(long minimumRequired, int maximum) implements ResultTooLarge {
             public PerspectiveRays {
                 validateResultLimit(minimumRequired, maximum);

@@ -125,7 +125,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GetBlocksResponse'
+                $ref: '#/components/schemas/ExactBlockStructureResponse'
         '400':
           description: Invalid JSON, fields, coordinates, filters, options, or world height
           content:
@@ -172,11 +172,11 @@ paths:
               $ref: '#/components/schemas/ScanOrthographicViewRequest'
       responses:
         '200':
-          description: Lossless visible-cell grid and its world-aligned view basis
+          description: Replay-ready exact visible block structure
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ScanOrthographicViewResponse'
+                $ref: '#/components/schemas/ExactBlockStructureResponse'
         '400':
           description: Invalid JSON, fields, coordinates, view geometry, or world height
           content:
@@ -993,7 +993,6 @@ components:
                   enum:
                     - structure_entries
                     - palettes
-                    - visible_cells
                     - perspective_rays
                     - perspective_ray_distance
                 minimumRequired:
@@ -1640,7 +1639,7 @@ components:
         - $ref: '#/components/schemas/Int32'
         - $ref: '#/components/schemas/Int32'
       items: false
-    GetBlocksResponse:
+    ExactBlockStructureResponse:
       type: object
       additionalProperties: false
       required:
@@ -1654,7 +1653,7 @@ components:
           type: string
           minLength: 1
         origin:
-          description: Normalized minimum requested corner used by every relative tuple.
+          description: Normalized minimum inspection bound used by every relative tuple.
           $ref: '#/components/schemas/BlockPosition'
         palettes:
           type: array
@@ -1708,12 +1707,12 @@ components:
           type: integer
           format: int32
           minimum: 0
-          description: Viewport cells on each side of the center sightline along the response's horizontal basis.
+          description: Viewport cells on each side of the center sightline along the direction's horizontal axis.
         verticalRadius:
           type: integer
           format: int32
           minimum: 0
-          description: Viewport cells on each side of the center sightline along the response's vertical basis.
+          description: Viewport cells on each side of the center sightline along the direction's vertical axis.
         maxDistance:
           type: integer
           format: int32
@@ -1729,139 +1728,7 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Requested non-empty-cell cap; omission and maximum use plugin configuration.
-    AxisVector:
-      type: object
-      additionalProperties: false
-      required:
-        - x
-        - y
-        - z
-      properties:
-        x:
-          type: integer
-          format: int32
-          minimum: -1
-          maximum: 1
-        y:
-          type: integer
-          format: int32
-          minimum: -1
-          maximum: 1
-        z:
-          type: integer
-          format: int32
-          minimum: -1
-          maximum: 1
-    ViewBasis:
-      type: object
-      additionalProperties: false
-      description: World-axis unit vectors used to convert view-relative offsets to block positions.
-      required:
-        - forward
-        - horizontal
-        - vertical
-      properties:
-        forward:
-          $ref: '#/components/schemas/AxisVector'
-        horizontal:
-          $ref: '#/components/schemas/AxisVector'
-        vertical:
-          $ref: '#/components/schemas/AxisVector'
-    Viewport:
-      type: object
-      additionalProperties: false
-      required:
-        - horizontalRadius
-        - verticalRadius
-        - maxDistance
-        - depth
-      properties:
-        horizontalRadius:
-          type: integer
-          format: int32
-          minimum: 0
-        verticalRadius:
-          type: integer
-          format: int32
-          minimum: 0
-        maxDistance:
-          type: integer
-          format: int32
-          minimum: 1
-        depth:
-          type: integer
-          format: int32
-          minimum: 0
-          description: Zero-based non-air depth returned for each sightline.
-    ScanOrthographicViewResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - world
-        - origin
-        - direction
-        - basis
-        - viewport
-        - bounds
-        - scannedVolume
-        - visibleBlockCount
-        - blockStatePalette
-        - blockStateIndexRows
-        - distanceRows
-      properties:
-        world:
-          type: string
-          minLength: 1
-        origin:
-          $ref: '#/components/schemas/BlockPosition'
-        direction:
-          type: string
-          enum:
-            - north
-            - east
-            - south
-            - west
-            - up
-            - down
-        basis:
-          $ref: '#/components/schemas/ViewBasis'
-        viewport:
-          $ref: '#/components/schemas/Viewport'
-        bounds:
-          $ref: '#/components/schemas/Bounds'
-        scannedVolume:
-          type: integer
-          format: int64
-          minimum: 1
-        visibleBlockCount:
-          type: integer
-          format: int64
-          minimum: 0
-        blockStatePalette:
-          type: array
-          description: Canonical states indexed from one by blockStateIndexRows; zero means an empty sightline.
-          items:
-            type: string
-            minLength: 1
-        blockStateIndexRows:
-          type: array
-          description: Top-to-bottom rows and left-to-right cells containing palette indices; zero means an empty sightline.
-          items:
-            type: array
-            items:
-              type: integer
-              format: int32
-              minimum: 0
-        distanceRows:
-          type: array
-          description: Distances aligned with blockStateIndexRows; zero means an empty sightline.
-          items:
-            type: array
-            items:
-              type: integer
-              format: int32
-              minimum: 0
+          description: Maximum placements plus runs; omission and maximum use plugin configuration.
     PlayerSelector:
       type: string
       minLength: 1
@@ -3306,7 +3173,7 @@ components:
           format: int32
           minimum: 1
           maximum: 256
-          description: Maximum exact block-state entries in one edit or get_blocks structure palette.
+          description: Maximum exact block-state entries in one edit or exact inspection structure palette.
         maxChangedBlocks:
           type: integer
           format: int32
@@ -3326,12 +3193,12 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Default exact-block, run, or non-empty orthographic cell limit; cannot exceed maxInspectionResultLimit.
+          description: Default placement-plus-run limit for get_blocks and orthographic structures; cannot exceed maxInspectionResultLimit.
         maxInspectionResultLimit:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum caller-selectable exact-block, run, or non-empty orthographic cell limit; cannot exceed maxInspectionVolume.
+          description: Maximum caller-selectable placement-plus-run limit for exact inspection structures; cannot exceed maxInspectionVolume.
         maxPerspectiveRays:
           type: integer
           format: int32

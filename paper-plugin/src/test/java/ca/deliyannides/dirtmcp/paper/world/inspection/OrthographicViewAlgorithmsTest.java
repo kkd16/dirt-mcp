@@ -7,13 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
+import ca.deliyannides.dirtmcp.paper.world.inspection.OrthographicViewAlgorithms.AxisVector;
+import ca.deliyannides.dirtmcp.paper.world.inspection.OrthographicViewAlgorithms.ViewBasis;
 import ca.deliyannides.dirtmcp.paper.world.inspection.OrthographicViewAlgorithms.ViewGeometry;
+import ca.deliyannides.dirtmcp.paper.world.inspection.RegionBlockAlgorithms.InspectedBlock;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.BlockSample;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.CapturedRegion;
-import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.AxisVector;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.Direction;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.Request;
-import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.ViewBasis;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import java.util.List;
 import java.util.Map;
@@ -82,7 +83,7 @@ final class OrthographicViewAlgorithmsTest {
     }
 
     @Test
-    void returnsFirstNonAirCellPerSightlineInViewOrder() throws Exception {
+    void returnsFirstNonAirBlockPerSightlineInViewOrder() throws Exception {
         Request request = request(new BlockPosition(0, 0, 0), Direction.NORTH, 1, 1, 3, 10);
         ViewGeometry geometry = OrthographicViewAlgorithms.geometry(request, 1_000);
         Map<BlockPosition, BlockSample> states =
@@ -92,30 +93,26 @@ final class OrthographicViewAlgorithmsTest {
                         new BlockPosition(1, 1, -1), solid("stairs"),
                         new BlockPosition(0, 0, -3), solid("glass"));
 
-        OrthographicViewAlgorithms.ViewGrid grid =
-                OrthographicViewAlgorithms.collectGrid(request, geometry, viewCapture(states));
+        List<InspectedBlock> blocks =
+                OrthographicViewAlgorithms.collectBlocks(request, geometry, viewCapture(states));
 
-        assertEquals(3, grid.visibleCellCount());
-        assertEquals(List.of("glass", "stairs"), grid.blockStatePalette());
         assertEquals(
-                List.of(List.of(1, 0, 2), List.of(0, 1, 0), List.of(0, 0, 0)),
-                grid.blockStateIndexRows());
-        assertEquals(
-                List.of(List.of(2, 0, 1), List.of(0, 3, 0), List.of(0, 0, 0)), grid.distanceRows());
+                List.of(
+                        new InspectedBlock(new BlockPosition(-1, 1, -2), "glass"),
+                        new InspectedBlock(new BlockPosition(1, 1, -1), "stairs"),
+                        new InspectedBlock(new BlockPosition(0, 0, -3), "glass")),
+                blocks);
     }
 
     @Test
-    void returnsAnEmptyPaletteAndZeroCellsWhenNoSightlineHits() throws Exception {
+    void returnsNoBlocksWhenNoSightlineHits() throws Exception {
         Request request = request(new BlockPosition(0, 0, 0), Direction.NORTH, 1, 0, 2, 10);
         ViewGeometry geometry = OrthographicViewAlgorithms.geometry(request, 100);
 
-        OrthographicViewAlgorithms.ViewGrid grid =
-                OrthographicViewAlgorithms.collectGrid(request, geometry, viewCapture(Map.of()));
+        List<InspectedBlock> blocks =
+                OrthographicViewAlgorithms.collectBlocks(request, geometry, viewCapture(Map.of()));
 
-        assertEquals(0, grid.visibleCellCount());
-        assertEquals(List.of(), grid.blockStatePalette());
-        assertEquals(List.of(List.of(0, 0, 0)), grid.blockStateIndexRows());
-        assertEquals(List.of(List.of(0, 0, 0)), grid.distanceRows());
+        assertEquals(List.of(), blocks);
     }
 
     @Test
@@ -129,13 +126,10 @@ final class OrthographicViewAlgorithmsTest {
                         new BlockPosition(0, -3, 0), solid("dirt"),
                         new BlockPosition(0, -4, 0), solid("stone"));
 
-        OrthographicViewAlgorithms.ViewGrid grid =
-                OrthographicViewAlgorithms.collectGrid(request, geometry, viewCapture(states));
+        List<InspectedBlock> blocks =
+                OrthographicViewAlgorithms.collectBlocks(request, geometry, viewCapture(states));
 
-        assertEquals(1, grid.visibleCellCount());
-        assertEquals(List.of("dirt"), grid.blockStatePalette());
-        assertEquals(List.of(List.of(1)), grid.blockStateIndexRows());
-        assertEquals(List.of(List.of(3)), grid.distanceRows());
+        assertEquals(List.of(new InspectedBlock(new BlockPosition(0, -3, 0), "dirt")), blocks);
     }
 
     @Test
@@ -232,30 +226,27 @@ final class OrthographicViewAlgorithmsTest {
     }
 
     @Test
-    void rejectsVisibleResultsOverCapWithoutTruncating() throws Exception {
+    void defersThePackedEntryLimitUntilAfterCollection() throws Exception {
         Request request = request(new BlockPosition(0, 0, 0), Direction.NORTH, 1, 0, 1, 1);
         ViewGeometry geometry = OrthographicViewAlgorithms.geometry(request, 100);
 
-        OperationException exception =
-                assertThrows(
-                        OperationException.class,
-                        () ->
-                                OrthographicViewAlgorithms.collectGrid(
-                                        request,
-                                        geometry,
-                                        new CapturedRegion() {
-                                            @Override
-                                            public String worldName() {
-                                                return "world";
-                                            }
+        List<InspectedBlock> blocks =
+                OrthographicViewAlgorithms.collectBlocks(
+                        request,
+                        geometry,
+                        new CapturedRegion() {
+                            @Override
+                            public String worldName() {
+                                return "world";
+                            }
 
-                                            @Override
-                                            public BlockSample sample(BlockPosition position) {
-                                                return solid("stone");
-                                            }
-                                        }));
+                            @Override
+                            public BlockSample sample(BlockPosition position) {
+                                return solid("stone");
+                            }
+                        });
 
-        assertEquals(OperationFailure.RESULT_TOO_LARGE, exception.failure());
+        assertEquals(3, blocks.size());
     }
 
     private static void assertGeometry(

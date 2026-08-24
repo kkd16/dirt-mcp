@@ -1045,56 +1045,61 @@ try {
     maxDistance: 2,
   };
   const view = await bridgeRequest('/v1/scan-orthographic-view', viewRequest);
-  assert.equal(view.direction, 'north');
-  assert.deepEqual(view.basis, {
-    forward: { x: 0, y: 0, z: -1 },
-    horizontal: { x: 1, y: 0, z: 0 },
-    vertical: { x: 0, y: 1, z: 0 },
+  assert.deepEqual(view, {
+    world,
+    origin: { x: 0, y: 0, z: 0 },
+    palettes: [[{ blockState: regionState }]],
+    placements: [[0, 0, 0, 1]],
+    runs: [],
   });
-  assert.deepEqual(view.viewport, {
-    horizontalRadius: 0,
-    verticalRadius: 0,
-    maxDistance: 2,
-    depth: 0,
+
+  const replayView = await bridgeRequest('/v1/set-blocks', {
+    ...view,
+    label: 'Replay orthographic smoke view',
+    dryRun: true,
   });
-  assert.deepEqual(view.bounds, {
-    min: { x: 0, y: 0, z: 0 },
-    max: { x: 0, y: 0, z: 1 },
-  });
-  assert.equal(view.scannedVolume, 2);
-  assert.equal(view.visibleBlockCount, 1);
-  assert.deepEqual(view.blockStatePalette, [regionState]);
-  assert.deepEqual(view.blockStateIndexRows, [[1]]);
-  assert.deepEqual(view.distanceRows, [[1]]);
+  assert.equal(replayView.outcome, 'preview');
+  assert.equal(replayView.blockCount, 1);
+  assert.equal(replayView.changedBlockCount, 0);
 
   const deeperView = await bridgeRequest('/v1/scan-orthographic-view', {
     ...viewRequest,
     depth: 1,
   });
-  assert.deepEqual(deeperView.viewport, {
-    horizontalRadius: 0,
-    verticalRadius: 0,
-    maxDistance: 2,
-    depth: 1,
+  assert.deepEqual(deeperView, {
+    world,
+    origin: { x: 0, y: 0, z: 0 },
+    palettes: [[{ blockState: regionState }]],
+    placements: [[0, 0, 0, 0]],
+    runs: [],
   });
-  assert.equal(deeperView.visibleBlockCount, 1);
-  assert.deepEqual(deeperView.blockStatePalette, [regionState]);
-  assert.deepEqual(deeperView.blockStateIndexRows, [[1]]);
-  assert.deepEqual(deeperView.distanceRows, [[2]]);
 
-  const limitedView = await bridgeResponse('/v1/scan-orthographic-view', {
+  const viewExtension = await bridgeRequest('/v1/set-blocks', {
+    world,
+    label: 'Extend the orthographic smoke surface',
+    origin: { x: 0, y: 2, z: 0 },
+    palettes: [[{ blockState: regionState }]],
+    placements: [],
+    runs: [[0, 0, 0, 0, 0, 0, 1]],
+  });
+  assertCommittedEdit(viewExtension, 'set_blocks');
+  await assertEditHistory([viewExtension.edit, regionSet.edit]);
+
+  const limitedView = await bridgeRequest('/v1/scan-orthographic-view', {
     ...viewRequest,
+    origin: { ...viewRequest.origin, y: 1 },
     verticalRadius: 1,
     maxResults: 1,
   });
-  assert.equal(limitedView.status, 413);
-  assert.deepEqual(limitedView.body, {
-    error: {
-      code: 'result_too_large',
-      message: 'View result exceeds maxResults of 1 visible cells',
-      details: { reason: 'visible_cells', minimumRequired: 2, maximum: 1 },
-    },
+  assert.deepEqual(limitedView, {
+    world,
+    origin: { x: 0, y: 0, z: 0 },
+    palettes: [[{ blockState: regionState }]],
+    placements: [],
+    runs: [[0, 0, 0, 1, 0, 2, 1]],
   });
+  await undoRetained(viewExtension);
+  await assertEditHistory([regionSet.edit]);
 
   const exactRuns = await bridgeRequest('/v1/get-blocks', {
     ...region,

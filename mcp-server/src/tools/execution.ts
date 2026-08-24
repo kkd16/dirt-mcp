@@ -125,8 +125,7 @@ function resultLogFields(result: CallToolResult): LogFields {
     const blockStateCounts = objectValue(propertyValue(content, 'blockStateCounts'));
     resultCount =
       blockStateCounts === undefined
-        ? (integerValue(propertyValue(content, 'matchedBlockCount')) ??
-          integerValue(propertyValue(content, 'visibleBlockCount')))
+        ? integerValue(propertyValue(content, 'matchedBlockCount'))
         : Object.keys(blockStateCounts).length;
   }
 

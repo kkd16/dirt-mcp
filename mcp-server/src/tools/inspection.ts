@@ -112,10 +112,10 @@ const ExactPalettesSchema = z
   })
   .describe('First-seen exact singleton palettes referenced by placements and runs.');
 
-export const GetBlocksOutputSchema = z
+export const ExactBlockStructureOutputSchema = z
   .object({
     world: z.string().min(1).describe('Inspected world name.'),
-    origin: BlockPositionSchema.describe('Normalized minimum requested corner used by every relative tuple.'),
+    origin: BlockPositionSchema.describe('Normalized minimum inspection bound used by every relative tuple.'),
     palettes: ExactPalettesSchema,
     placements: z.array(PalettePlacementSchema).describe('Single matching blocks as origin-relative tuples.'),
     runs: z.array(PaletteRunSchema).describe('Matching blocks packed as origin-relative inclusive cuboids.'),
@@ -142,13 +142,13 @@ export const ScanOrthographicViewInputSchema = z
       .int()
       .min(0)
       .max(INT32_MAX)
-      .describe('Cells on each side of the center sightline along the returned horizontal basis.'),
+      .describe('Sightlines on each side of center along the direction-specific horizontal axis.'),
     verticalRadius: z
       .number()
       .int()
       .min(0)
       .max(INT32_MAX)
-      .describe('Cells on each side of the center sightline along the returned vertical basis.'),
+      .describe('Sightlines on each side of center along the direction-specific vertical axis.'),
     maxDistance: z
       .number()
       .int()
@@ -169,65 +169,16 @@ export const ScanOrthographicViewInputSchema = z
       .max(INT32_MAX)
       .optional()
       .describe(
-        'Maximum non-empty cells, bounded by the active inspection-result limit. Results fail instead of truncating.',
+        'Maximum returned placements plus runs, bounded by the active inspection-result limit. Results fail instead of truncating.',
       ),
   })
   .strict()
   .describe('Bounded orthographic sightlines scanned for a selected non-air depth.');
 
-const AxisVectorSchema = z
-  .object({
-    x: z.number().int().min(-1).max(1).describe('X component.'),
-    y: z.number().int().min(-1).max(1).describe('Y component.'),
-    z: z.number().int().min(-1).max(1).describe('Z component.'),
-  })
-  .strict()
-  .describe('A world-axis unit vector.');
-
-const ScanOrthographicViewOutputSchema = z
-  .object({
-    world: z.string().min(1).describe('Scanned world name.'),
-    origin: BlockPositionSchema,
-    direction: OrthographicViewDirectionSchema,
-    basis: z
-      .object({
-        forward: AxisVectorSchema.describe('Direction of increasing sightline distance.'),
-        horizontal: AxisVectorSchema.describe('Direction of increasing horizontal offset.'),
-        vertical: AxisVectorSchema.describe('Direction of increasing vertical offset.'),
-      })
-      .strict()
-      .describe('Basis for converting view-relative offsets to world positions.'),
-    viewport: z
-      .object({
-        horizontalRadius: z.number().int().nonnegative().describe('Horizontal radius used.'),
-        verticalRadius: z.number().int().nonnegative().describe('Vertical radius used.'),
-        maxDistance: z.number().int().positive().describe('Forward distance used.'),
-        depth: z.number().int().nonnegative().describe('Zero-based non-air depth returned.'),
-      })
-      .strict()
-      .describe('Resolved scan dimensions.'),
-    bounds: BoundsSchema.describe('Inclusive world-space bounds scanned.'),
-    scannedVolume: z.number().int().positive().describe('Total blocks checked across all sightlines.'),
-    visibleBlockCount: z.number().int().nonnegative().describe('Sightlines whose requested non-air block was found.'),
-    blockStatePalette: z
-      .array(z.string().min(1))
-      .describe('Canonical states indexed from 1 by blockStateIndexRows; index 0 means no visible block.'),
-    blockStateIndexRows: z
-      .array(z.array(z.number().int().min(0).max(INT32_MAX)))
-      .describe('Top-to-bottom rows and left-to-right cells containing palette indices; 0 means empty sightline.'),
-    distanceRows: z
-      .array(z.array(z.number().int().min(0).max(INT32_MAX)))
-      .describe('Distances aligned with blockStateIndexRows; 0 means empty sightline.'),
-  })
-  .strict()
-  .describe('Lossless compact orthographic scan.');
-
-type ScanOrthographicViewOutput = z.infer<typeof ScanOrthographicViewOutputSchema>;
-
 type CountRegionBlockStatesInput = z.infer<typeof CountRegionBlockStatesInputSchema>;
 type CountRegionBlockStatesOutput = z.infer<typeof CountRegionBlockStatesOutputSchema>;
 type GetBlocksInput = z.infer<typeof GetBlocksInputSchema>;
-type GetBlocksOutput = z.infer<typeof GetBlocksOutputSchema>;
+type ExactBlockStructureOutput = z.infer<typeof ExactBlockStructureOutputSchema>;
 type ScanOrthographicViewInput = z.infer<typeof ScanOrthographicViewInputSchema>;
 
 const VIEW_BASIS = {
@@ -289,17 +240,27 @@ export function requireMatchingCountRegionResponse(
   }
 }
 
-export function requireMatchingGetBlocksResponse(expected: GetBlocksInput, actual: GetBlocksOutput): void {
+interface ExactStructureExpectation {
+  readonly world: string;
+  readonly origin: z.infer<typeof BlockPositionSchema>;
+  readonly bounds: z.infer<typeof BoundsSchema>;
+  readonly maxResults: number | undefined;
+}
+
+function requireMatchingExactStructureResponse(
+  expected: ExactStructureExpectation,
+  actual: ExactBlockStructureOutput,
+): void {
   requireMatchingWorld(expected.world, actual.world);
-  const bounds = normalizedBounds(expected.min, expected.max);
+  const { bounds } = expected;
   const volume = inclusiveBlockVolume(bounds);
-  if (!sameCoordinates(bounds.min, actual.origin)) {
-    invalidBridgeResponse('Paper bridge block origin did not match the normalized requested minimum.');
+  if (!sameCoordinates(expected.origin, actual.origin)) {
+    invalidBridgeResponse('Paper bridge exact-structure origin did not match the requested inspection.');
   }
 
   const entryCount = actual.placements.length + actual.runs.length;
   if (expected.maxResults !== undefined && entryCount > expected.maxResults) {
-    invalidBridgeResponse('Paper bridge region result exceeded the requested maxResults.');
+    invalidBridgeResponse('Paper bridge exact structure exceeded the requested maxResults.');
   }
   const positions = new Set<string>();
   const referencedPalettes = new Set<number>();
@@ -311,7 +272,7 @@ export function requireMatchingGetBlocksResponse(expected: GetBlocksInput, actua
   };
   const addPlacement = (position: { readonly x: number; readonly y: number; readonly z: number }): void => {
     if (!containsPosition(bounds, position)) {
-      invalidBridgeResponse('Paper bridge returned block geometry outside the requested region.');
+      invalidBridgeResponse('Paper bridge returned block geometry outside the requested inspection.');
     }
     const key = `${position.x},${position.y},${position.z}`;
     if (positions.has(key)) {
@@ -345,86 +306,102 @@ export function requireMatchingGetBlocksResponse(expected: GetBlocksInput, actua
     }
   }
   if (structureBlockCount(actual.placements, actual.runs) > volume) {
-    invalidBridgeResponse('Paper bridge block structure exceeded the requested region volume.');
+    invalidBridgeResponse('Paper bridge block structure exceeded the requested inspection volume.');
   }
   if (referencedPalettes.size !== actual.palettes.length) {
     invalidBridgeResponse('Paper bridge returned an unused exact palette.');
   }
 }
 
+export function requireMatchingGetBlocksResponse(expected: GetBlocksInput, actual: ExactBlockStructureOutput): void {
+  const bounds = normalizedBounds(expected.min, expected.max);
+  requireMatchingExactStructureResponse(
+    { world: expected.world, origin: bounds.min, bounds, maxResults: expected.maxResults },
+    actual,
+  );
+}
+
 export function requireMatchingScanResponse(
   expected: ScanOrthographicViewInput,
-  actual: ScanOrthographicViewOutput,
+  actual: ExactBlockStructureOutput,
 ): void {
-  requireMatchingWorld(expected.world, actual.world);
   const basis = VIEW_BASIS[expected.direction];
-  if (
-    !sameCoordinates(expected.origin, actual.origin) ||
-    actual.direction !== expected.direction ||
-    !sameCoordinates(basis.forward, actual.basis.forward) ||
-    !sameCoordinates(basis.horizontal, actual.basis.horizontal) ||
-    !sameCoordinates(basis.vertical, actual.basis.vertical)
-  ) {
-    invalidBridgeResponse('Paper bridge view origin, direction, or basis did not match the request.');
-  }
-  if (
-    actual.viewport.horizontalRadius !== expected.horizontalRadius ||
-    actual.viewport.verticalRadius !== expected.verticalRadius ||
-    actual.viewport.maxDistance !== expected.maxDistance ||
-    actual.viewport.depth !== expected.depth
-  ) {
-    invalidBridgeResponse('Paper bridge returned a viewport different from the requested view.');
-  }
-
-  const width = BigInt(expected.horizontalRadius) * 2n + 1n;
-  const height = BigInt(expected.verticalRadius) * 2n + 1n;
-  const scannedVolume = width * height * BigInt(expected.maxDistance);
   const bounds = viewBounds(expected, basis);
-  if (BigInt(actual.scannedVolume) !== scannedVolume || !sameBounds(bounds, actual.bounds)) {
-    invalidBridgeResponse('Paper bridge returned invalid orthographic scan bounds or volume.');
-  }
-  const rowCount = Number(height);
-  const columnCount = Number(width);
-  if (actual.blockStateIndexRows.length !== rowCount || actual.distanceRows.length !== rowCount) {
-    invalidBridgeResponse('Paper bridge returned orthographic grid rows with the wrong height.');
-  }
-  if (new Set(actual.blockStatePalette).size !== actual.blockStatePalette.length) {
-    invalidBridgeResponse('Paper bridge returned duplicate orthographic palette entries.');
-  }
+  requireMatchingExactStructureResponse(
+    { world: expected.world, origin: bounds.min, bounds, maxResults: expected.maxResults },
+    actual,
+  );
 
-  const seenPaletteIndexes = new Set<number>();
-  let visibleCellCount = 0;
-  for (let row = 0; row < rowCount; row++) {
-    const blockStateIndexes = actual.blockStateIndexRows[row]!;
-    const distances = actual.distanceRows[row]!;
-    if (blockStateIndexes.length !== columnCount || distances.length !== columnCount) {
-      invalidBridgeResponse('Paper bridge returned orthographic grid rows with the wrong width.');
+  const footprints: ViewFootprint[] = [];
+  const addFootprint = (
+    from: z.infer<typeof BlockPositionSchema> | undefined,
+    to: z.infer<typeof BlockPositionSchema> | undefined,
+  ): void => {
+    if (from === undefined || to === undefined) {
+      invalidBridgeResponse('Paper bridge returned overflowing orthographic geometry.');
     }
-    for (let column = 0; column < columnCount; column++) {
-      const blockStateIndex = blockStateIndexes[column]!;
-      const distance = distances[column]!;
-      if ((blockStateIndex === 0) !== (distance === 0)) {
-        invalidBridgeResponse('Paper bridge returned misaligned orthographic state and distance cells.');
-      }
-      if (blockStateIndex > actual.blockStatePalette.length || distance > expected.maxDistance) {
-        invalidBridgeResponse('Paper bridge returned an orthographic cell outside its palette or viewport.');
-      }
-      if (blockStateIndex === 0) continue;
-      visibleCellCount++;
-      if (!seenPaletteIndexes.has(blockStateIndex)) {
-        if (blockStateIndex !== seenPaletteIndexes.size + 1) {
-          invalidBridgeResponse('Paper bridge orthographic palette was not in first-seen cell order.');
-        }
-        seenPaletteIndexes.add(blockStateIndex);
-      }
+    const fromView = viewCoordinates(from, expected.origin, basis);
+    const toView = viewCoordinates(to, expected.origin, basis);
+    if (fromView.distance !== toView.distance || fromView.distance < 1 || fromView.distance > expected.maxDistance) {
+      invalidBridgeResponse('Paper bridge returned orthographic geometry outside the requested viewport.');
     }
+    const footprint = {
+      minHorizontal: Math.min(fromView.horizontal, toView.horizontal),
+      maxHorizontal: Math.max(fromView.horizontal, toView.horizontal),
+      minVertical: Math.min(fromView.vertical, toView.vertical),
+      maxVertical: Math.max(fromView.vertical, toView.vertical),
+    };
+    if (
+      footprint.minHorizontal < -expected.horizontalRadius ||
+      footprint.maxHorizontal > expected.horizontalRadius ||
+      footprint.minVertical < -expected.verticalRadius ||
+      footprint.maxVertical > expected.verticalRadius
+    ) {
+      invalidBridgeResponse('Paper bridge returned orthographic geometry outside the requested viewport.');
+    }
+    if (footprints.some((other) => footprintsOverlap(footprint, other))) {
+      invalidBridgeResponse('Paper bridge returned multiple orthographic blocks on one sightline.');
+    }
+    footprints.push(footprint);
+  };
+
+  for (const placement of actual.placements) {
+    const position = resolveOffset(actual.origin, placement[1], placement[2], placement[3]);
+    addFootprint(position, position);
   }
-  if (actual.visibleBlockCount !== visibleCellCount || actual.blockStatePalette.length !== seenPaletteIndexes.size) {
-    invalidBridgeResponse('Paper bridge returned inconsistent orthographic grid counts.');
+  for (const run of actual.runs) {
+    addFootprint(
+      resolveOffset(actual.origin, run[1], run[2], run[3]),
+      resolveOffset(actual.origin, run[4], run[5], run[6]),
+    );
   }
-  if (expected.maxResults !== undefined && visibleCellCount > expected.maxResults) {
-    invalidBridgeResponse('Paper bridge view result exceeded the requested maxResults.');
-  }
+}
+
+interface ViewFootprint {
+  readonly minHorizontal: number;
+  readonly maxHorizontal: number;
+  readonly minVertical: number;
+  readonly maxVertical: number;
+}
+
+function footprintsOverlap(left: ViewFootprint, right: ViewFootprint): boolean {
+  return (
+    left.minHorizontal <= right.maxHorizontal &&
+    right.minHorizontal <= left.maxHorizontal &&
+    left.minVertical <= right.maxVertical &&
+    right.minVertical <= left.maxVertical
+  );
+}
+
+function viewCoordinates(
+  position: z.infer<typeof BlockPositionSchema>,
+  origin: z.infer<typeof BlockPositionSchema>,
+  basis: (typeof VIEW_BASIS)[keyof typeof VIEW_BASIS],
+): { readonly horizontal: number; readonly vertical: number; readonly distance: number } {
+  const delta = { x: position.x - origin.x, y: position.y - origin.y, z: position.z - origin.z };
+  const dot = (axis: (typeof basis)[keyof typeof basis]): number =>
+    delta.x * axis.x + delta.y * axis.y + delta.z * axis.z;
+  return { horizontal: dot(basis.horizontal), vertical: dot(basis.vertical), distance: dot(basis.forward) };
 }
 
 function viewPosition(
@@ -503,7 +480,7 @@ export function registerInspectionTools(
           ? ' The active ceilings are reported by get_server_status with include.configuration=true.'
           : ''),
       inputSchema: GetBlocksInputSchema,
-      outputSchema: toolOutputSchema(GetBlocksOutputSchema),
+      outputSchema: toolOutputSchema(ExactBlockStructureOutputSchema),
       annotations: READ_WORLD_ANNOTATIONS,
     },
     async (input, context) =>
@@ -516,7 +493,7 @@ export function registerInspectionTools(
           failureContext: 'Could not get blocks',
         },
         async (callId) => {
-          const result = await bridge.request(BRIDGE_ROUTES.getBlocks, callId, GetBlocksOutputSchema, input);
+          const result = await bridge.request(BRIDGE_ROUTES.getBlocks, callId, ExactBlockStructureOutputSchema, input);
           requireMatchingGetBlocksResponse(input, result);
           const entries = result.placements.length + result.runs.length;
           const blockCount = structureBlockCount(result.placements, result.runs);
@@ -534,12 +511,12 @@ export function registerInspectionTools(
     {
       title: 'Scan an orthographic view',
       description:
-        'Return a compact lossless grid for a selected zero-based non-air depth on each bounded world-axis sightline. Depth 0 is the first non-air block, 1 is the second, and so on.' +
+        'Return a selected zero-based non-air depth on each bounded world-axis sightline as replay-ready exact palettes, origin-relative placements, and inclusive cuboid runs. Depth 0 is the first non-air block, 1 is the second, and so on. Add a concise label to use the result directly with set_blocks.' +
         (toolConfiguration.get_server_status
           ? ' Active scan and result ceilings are reported by get_server_status with include.configuration=true.'
           : ''),
       inputSchema: ScanOrthographicViewInputSchema,
-      outputSchema: toolOutputSchema(ScanOrthographicViewOutputSchema),
+      outputSchema: toolOutputSchema(ExactBlockStructureOutputSchema),
       annotations: READ_WORLD_ANNOTATIONS,
     },
     async (input, context) =>
@@ -555,15 +532,15 @@ export function registerInspectionTools(
           const result = await bridge.request(
             BRIDGE_ROUTES.scanOrthographicView,
             callId,
-            ScanOrthographicViewOutputSchema,
+            ExactBlockStructureOutputSchema,
             input,
           );
           requireMatchingScanResponse(input, result);
-          const width = result.viewport.horizontalRadius * 2 + 1;
-          const height = result.viewport.verticalRadius * 2 + 1;
+          const entries = result.placements.length + result.runs.length;
+          const blockCount = structureBlockCount(result.placements, result.runs);
           return successResult(
             result,
-            `Scanned ${width}x${height} view: ${result.visibleBlockCount} visible cells using ${result.blockStatePalette.length} block states.`,
+            `Visible blocks: ${blockCount}; structure entries: ${entries}; palettes: ${result.palettes.length}; world: ${result.world}.`,
           );
         },
       ),

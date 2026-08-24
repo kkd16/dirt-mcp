@@ -143,8 +143,6 @@ final class ErrorDetailsJson {
                     result("structure_entries", value.minimumRequired(), value.maximum());
             case ErrorDetails.ResultTooLarge.Palettes value ->
                     result("palettes", value.minimumRequired(), value.maximum());
-            case ErrorDetails.ResultTooLarge.VisibleCells value ->
-                    result("visible_cells", value.minimumRequired(), value.maximum());
             case ErrorDetails.ResultTooLarge.PerspectiveRays value ->
                     result("perspective_rays", value.minimumRequired(), value.maximum());
             case ErrorDetails.ResultTooLarge.PerspectiveRayDistance value ->

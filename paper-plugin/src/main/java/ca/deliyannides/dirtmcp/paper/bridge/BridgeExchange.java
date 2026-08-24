@@ -12,10 +12,9 @@ import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdits;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks;
+import ca.deliyannides.dirtmcp.paper.world.inspection.ExactBlockStructure;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext;
-import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import com.google.gson.JsonElement;
@@ -341,11 +340,7 @@ public final class BridgeExchange {
                 this.bounds = bounds(result.bounds());
                 this.resultCount = (long) result.blockStateCounts().size();
             }
-            case GetBlocks.Result result -> this.resultCount = result.blockCount();
-            case ScanOrthographicView.Result result -> {
-                this.bounds = bounds(result.bounds());
-                this.resultCount = result.visibleBlockCount();
-            }
+            case ExactBlockStructure result -> this.resultCount = result.blockCount();
             case GetPlayerContext.Result ignored -> {
                 // Player context does not expose a result collection.
             }

@@ -22,8 +22,8 @@ import {
   UndoEditsOutputSchema,
 } from '../dist/tools/editing.js';
 import {
+  ExactBlockStructureOutputSchema,
   GetBlocksInputSchema,
-  GetBlocksOutputSchema,
   ScanOrthographicViewInputSchema,
 } from '../dist/tools/inspection.js';
 import {
@@ -115,7 +115,7 @@ test('applies inspection defaults and rejects combined pattern amplification', (
 });
 
 test('accepts every exact get-blocks structure with a label as set-blocks input', () => {
-  const exact = GetBlocksOutputSchema.parse({
+  const exact = ExactBlockStructureOutputSchema.parse({
     world: 'world',
     origin: { x: 100, y: 64, z: 100 },
     palettes: [[{ blockState: 'minecraft:stone_bricks' }], [{ blockState: 'minecraft:lantern' }]],
@@ -131,14 +131,14 @@ test('accepts every exact get-blocks structure with a label as set-blocks input'
     true,
   );
   assert.equal(
-    GetBlocksOutputSchema.safeParse({
+    ExactBlockStructureOutputSchema.safeParse({
       ...exact,
       palettes: [[{ blockState: 'minecraft:stone_bricks' }], [{ blockState: 'minecraft:stone_bricks' }]],
     }).success,
     false,
   );
 
-  const empty = GetBlocksOutputSchema.parse({
+  const empty = ExactBlockStructureOutputSchema.parse({
     world: 'world',
     origin: { x: 0, y: 0, z: 0 },
     palettes: [],

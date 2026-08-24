@@ -3,19 +3,17 @@ package ca.deliyannides.dirtmcp.paper.world.inspection;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
+import ca.deliyannides.dirtmcp.paper.world.inspection.RegionBlockAlgorithms.InspectedBlock;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.BlockSample;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.CapturedRegion;
-import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.AxisVector;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.Direction;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.Request;
-import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.ViewBasis;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import ca.deliyannides.dirtmcp.paper.world.model.RegionGeometry;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Objects;
 
 final class OrthographicViewAlgorithms {
     private OrthographicViewAlgorithms() {}
@@ -65,26 +63,17 @@ final class OrthographicViewAlgorithms {
                 basis, RegionGeometry.normalize(nearCorner, farCorner, maximumVolume));
     }
 
-    static ViewGrid collectGrid(Request request, ViewGeometry geometry, CapturedRegion capture)
+    static List<InspectedBlock> collectBlocks(
+            Request request, ViewGeometry geometry, CapturedRegion capture)
             throws OperationException {
-        int width = Math.toIntExact((long) request.horizontalRadius() * 2 + 1);
-        int height = Math.toIntExact((long) request.verticalRadius() * 2 + 1);
-        List<String> blockStatePalette = new ArrayList<>();
-        Map<String, Integer> paletteIndexes = new HashMap<>();
-        List<List<Integer>> blockStateIndexRows = new ArrayList<>(height);
-        List<List<Integer>> distanceRows = new ArrayList<>(height);
-        long visibleCellCount = 0;
+        List<InspectedBlock> blocks = new ArrayList<>();
         for (int vertical = request.verticalRadius();
                 vertical >= -request.verticalRadius();
                 vertical--) {
-            List<Integer> blockStateIndexRow = new ArrayList<>(width);
-            List<Integer> distanceRow = new ArrayList<>(width);
             for (int horizontal = -request.horizontalRadius();
                     horizontal <= request.horizontalRadius();
                     horizontal++) {
                 int remainingDepth = request.depth();
-                int blockStateIndex = 0;
-                int hitDistance = 0;
                 for (int distance = 1; ; distance++) {
                     BlockPosition position =
                             viewPosition(
@@ -96,25 +85,7 @@ final class OrthographicViewAlgorithms {
                     BlockSample sample = capture.sample(position);
                     if (!sample.air()) {
                         if (remainingDepth == 0) {
-                            visibleCellCount++;
-                            if (visibleCellCount > request.maxResults()) {
-                                throw new OperationException(
-                                        OperationFailure.RESULT_TOO_LARGE,
-                                        "View result exceeds maxResults of "
-                                                + request.maxResults()
-                                                + " visible cells",
-                                        new ErrorDetails.ResultTooLarge.VisibleCells(
-                                                (long) request.maxResults() + 1,
-                                                request.maxResults()));
-                            }
-                            Integer paletteIndex = paletteIndexes.get(sample.blockState());
-                            if (paletteIndex == null) {
-                                blockStatePalette.add(sample.blockState());
-                                paletteIndex = blockStatePalette.size();
-                                paletteIndexes.put(sample.blockState(), paletteIndex);
-                            }
-                            blockStateIndex = paletteIndex;
-                            hitDistance = distance;
+                            blocks.add(new InspectedBlock(position, sample.blockState()));
                             break;
                         }
                         remainingDepth--;
@@ -123,17 +94,9 @@ final class OrthographicViewAlgorithms {
                         break;
                     }
                 }
-                blockStateIndexRow.add(blockStateIndex);
-                distanceRow.add(hitDistance);
             }
-            blockStateIndexRows.add(List.copyOf(blockStateIndexRow));
-            distanceRows.add(List.copyOf(distanceRow));
         }
-        return new ViewGrid(
-                visibleCellCount,
-                List.copyOf(blockStatePalette),
-                List.copyOf(blockStateIndexRows),
-                List.copyOf(distanceRows));
+        return List.copyOf(blocks);
     }
 
     private static ViewBasis viewBasis(Direction direction) {
@@ -199,9 +162,13 @@ final class OrthographicViewAlgorithms {
 
     record ViewGeometry(ViewBasis basis, Cuboid region) {}
 
-    record ViewGrid(
-            long visibleCellCount,
-            List<String> blockStatePalette,
-            List<List<Integer>> blockStateIndexRows,
-            List<List<Integer>> distanceRows) {}
+    record AxisVector(int x, int y, int z) {}
+
+    record ViewBasis(AxisVector forward, AxisVector horizontal, AxisVector vertical) {
+        ViewBasis {
+            Objects.requireNonNull(forward, "forward");
+            Objects.requireNonNull(horizontal, "horizontal");
+            Objects.requireNonNull(vertical, "vertical");
+        }
+    }
 }

@@ -26,8 +26,9 @@ import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdits;
 import ca.deliyannides.dirtmcp.paper.world.edit.UndoEditsException;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
+import ca.deliyannides.dirtmcp.paper.world.inspection.ExactBlockStructure;
+import ca.deliyannides.dirtmcp.paper.world.inspection.ExactBlockStructure.ExactPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks.ExactPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView;
@@ -159,10 +160,10 @@ final class BridgeOperationEndpointsTest {
                     }
 
                     @Override
-                    public GetBlocks.Result getBlocks(GetBlocks.Request request)
+                    public ExactBlockStructure getBlocks(GetBlocks.Request request)
                             throws OperationException {
                         blocksRequest.set(request);
-                        return new GetBlocks.Result(
+                        return new ExactBlockStructure(
                                 request.world(),
                                 request.min(),
                                 List.of(
@@ -173,7 +174,7 @@ final class BridgeOperationEndpointsTest {
                     }
 
                     @Override
-                    public ScanOrthographicView.Result scanOrthographicView(
+                    public ExactBlockStructure scanOrthographicView(
                             ScanOrthographicView.Request request) throws OperationException {
                         viewRequest.set(request);
                         return super.scanOrthographicView(request);
@@ -254,6 +255,13 @@ final class BridgeOperationEndpointsTest {
             assertEquals(2, viewRequest.get().depth());
             assertEquals(40, viewRequest.get().maxResults());
             assertEquals(200, view.statusCode());
+            assertEquals(
+                    json(
+                            """
+                            {"world":"world","origin":{"x":8,"y":70,"z":9},
+                             "palettes":[],"placements":[],"runs":[]}
+                            """),
+                    json(view.body()));
         }
     }
 
@@ -772,10 +780,10 @@ final class BridgeOperationEndpointsTest {
         BridgeTestFixture.TestOperations operations =
                 new BridgeTestFixture.TestOperations() {
                     @Override
-                    public GetBlocks.Result getBlocks(GetBlocks.Request request)
+                    public ExactBlockStructure getBlocks(GetBlocks.Request request)
                             throws OperationException {
                         blocksRequest.set(request);
-                        return new GetBlocks.Result(
+                        return new ExactBlockStructure(
                                 request.world(), request.min(), List.of(), List.of(), List.of());
                     }
 

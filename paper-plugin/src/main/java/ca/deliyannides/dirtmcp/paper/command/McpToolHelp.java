@@ -81,11 +81,11 @@ final class McpToolHelp {
                                     + "horizontalRadius, verticalRadius, maxDistance; optional depth, "
                                     + "and maxResults. depth defaults to 0 and maxResults to the "
                                     + "active Paper default.",
-                            "world, origin, direction, basis, viewport, bounds, scannedVolume, "
-                                    + "visibleBlockCount, blockStatePalette, blockStateIndexRows, "
-                                    + "and distanceRows.",
+                            "world, normalized scan-min origin, exact singleton palettes, relative "
+                                    + "placements, and inclusive relative cuboid runs.",
                             "Read-only; depth is zero-based and the origin itself is not scanned. "
-                                    + "Active result ceilings fail the call rather than truncate.");
+                                    + "Add a label to use the result directly with set_blocks. Active "
+                                    + "size limits fail the call rather than truncate.");
             case REPLACE_REGION_BLOCKS ->
                     new ToolSpec(
                             "Replace region blocks",

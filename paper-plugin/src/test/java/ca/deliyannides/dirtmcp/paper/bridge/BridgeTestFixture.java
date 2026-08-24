@@ -28,6 +28,7 @@ import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdits;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
+import ca.deliyannides.dirtmcp.paper.world.inspection.ExactBlockStructure;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext;
@@ -182,34 +183,16 @@ final class BridgeTestFixture {
         }
 
         @Override
-        public GetBlocks.Result getBlocks(GetBlocks.Request request) throws OperationException {
-            return new GetBlocks.Result(
+        public ExactBlockStructure getBlocks(GetBlocks.Request request) throws OperationException {
+            return new ExactBlockStructure(
                     request.world(), request.min(), List.of(), List.of(), List.of());
         }
 
         @Override
-        public ScanOrthographicView.Result scanOrthographicView(
-                ScanOrthographicView.Request request) throws OperationException {
-            ScanOrthographicView.AxisVector forward = new ScanOrthographicView.AxisVector(0, 0, -1);
-            return new ScanOrthographicView.Result(
-                    request.world(),
-                    request.origin(),
-                    "north",
-                    new ScanOrthographicView.ViewBasis(
-                            forward,
-                            new ScanOrthographicView.AxisVector(1, 0, 0),
-                            new ScanOrthographicView.AxisVector(0, 1, 0)),
-                    new ScanOrthographicView.Viewport(
-                            request.horizontalRadius(),
-                            request.verticalRadius(),
-                            request.maxDistance(),
-                            request.depth()),
-                    new BlockBounds(request.origin(), request.origin()),
-                    1,
-                    0,
-                    List.of(),
-                    List.of(List.of(0)),
-                    List.of(List.of(0)));
+        public ExactBlockStructure scanOrthographicView(ScanOrthographicView.Request request)
+                throws OperationException {
+            return new ExactBlockStructure(
+                    request.world(), request.origin(), List.of(), List.of(), List.of());
         }
 
         @Override

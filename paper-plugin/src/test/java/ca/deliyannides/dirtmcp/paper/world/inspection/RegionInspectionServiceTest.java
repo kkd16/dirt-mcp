@@ -9,7 +9,7 @@ import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates.Request;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks.ExactPaletteEntry;
+import ca.deliyannides.dirtmcp.paper.world.inspection.ExactBlockStructure.ExactPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.BlockSample;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.CapturedRegion;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.Direction;
@@ -70,7 +70,7 @@ final class RegionInspectionServiceTest {
                         false,
                         4);
 
-        GetBlocks.Result result = service.getBlocks(request);
+        ExactBlockStructure result = service.getBlocks(request);
 
         assertEquals("resolved-world", result.world());
         assertEquals(position(0, 0, 0), result.origin());
@@ -98,7 +98,7 @@ final class RegionInspectionServiceTest {
                         false,
                         1);
 
-        GetBlocks.Result result = service.getBlocks(request);
+        ExactBlockStructure result = service.getBlocks(request);
 
         assertEquals(3, result.blockCount());
         assertEquals(List.of(), result.placements());
@@ -107,7 +107,7 @@ final class RegionInspectionServiceTest {
     }
 
     @Test
-    void returnsACompleteOrthographicViewContract() throws Exception {
+    void returnsAReplayReadyOrthographicStructure() throws Exception {
         FakeSnapshotSource source = new FakeSnapshotSource();
         source.samples.put(position(0, 0, -2), solid("stone"));
         RegionInspectionService service = service(source, 16);
@@ -115,14 +115,39 @@ final class RegionInspectionServiceTest {
                 new ScanOrthographicView.Request(
                         "world", position(0, 0, 0), Direction.NORTH, 0, 0, 3, 0, 2);
 
-        ScanOrthographicView.Result result = service.scanOrthographicView(request);
+        ExactBlockStructure result = service.scanOrthographicView(request);
 
-        assertEquals("north", result.direction());
-        assertEquals(3, result.scannedVolume());
-        assertEquals(1, result.visibleBlockCount());
-        assertEquals(List.of("stone"), result.blockStatePalette());
-        assertEquals(List.of(List.of(1)), result.blockStateIndexRows());
-        assertEquals(List.of(List.of(2)), result.distanceRows());
+        assertEquals("resolved-world", result.world());
+        assertEquals(position(0, 0, -3), result.origin());
+        assertEquals(List.of(List.of(new ExactPaletteEntry("stone"))), result.palettes());
+        assertEquals(List.of(new Placement(0, 0, 0, 1)), result.placements());
+        assertEquals(List.of(), result.runs());
+    }
+
+    @Test
+    void appliesTheOrthographicResultLimitAfterPacking() throws Exception {
+        FakeSnapshotSource source = new FakeSnapshotSource();
+        source.samples.put(position(-1, 0, -1), solid("stone"));
+        source.samples.put(position(0, 0, -1), solid("stone"));
+        source.samples.put(position(1, 0, -1), solid("stone"));
+        RegionInspectionService service = service(source, 16);
+        ScanOrthographicView.Request request =
+                new ScanOrthographicView.Request(
+                        "world", position(0, 0, 0), Direction.NORTH, 1, 0, 1, 0, 1);
+
+        ExactBlockStructure packed = service.scanOrthographicView(request);
+
+        assertEquals(position(-1, 0, -1), packed.origin());
+        assertEquals(List.of(), packed.placements());
+        assertEquals(List.of(new Run(0, 0, 0, 0, 2, 0, 0)), packed.runs());
+
+        source.samples.put(position(0, 0, -1), solid("dirt"));
+        OperationException exception =
+                assertThrows(OperationException.class, () -> service.scanOrthographicView(request));
+        assertEquals(OperationFailure.RESULT_TOO_LARGE, exception.failure());
+        assertEquals(
+                new ErrorDetails.ResultTooLarge.StructureEntries(2, 1),
+                exception.details().orElseThrow());
     }
 
     @Test

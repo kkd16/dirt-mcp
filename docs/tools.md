@@ -271,13 +271,15 @@ type Input = {
 type PalettePlacement = [paletteIndex: nonnegativeInt32, x: int32, y: int32, z: int32];
 type PaletteRun = [paletteIndex: nonnegativeInt32, x: int32, y: int32, z: int32, toX: int32, toY: int32, toZ: int32];
 
-type Success = {
+type ExactBlockStructure = {
   world: string;
   origin: BlockPosition;
   palettes: Array<[{ blockState: string }]>;
   placements: PalettePlacement[];
   runs: PaletteRun[];
 };
+
+type Success = ExactBlockStructure;
 ```
 
 Every tuple coordinate is a signed offset from `origin`; run endpoints are
@@ -297,12 +299,12 @@ first non-air block on each line, `depth=1` the second, and so on; air gaps do
 not increase depth. Scanning starts at distance one and excludes the origin.
 
 Horizontal views use world-up vertically. Up and down views use east
-horizontally and north vertically. Results use compact, lossless palette and
-distance matrices.
+horizontally and north vertically. Results use the same replay-ready exact
+structure as `get_blocks` and can be passed to `set_blocks` after adding its
+required `label`.
 
 ```ts
 type Direction = 'north' | 'east' | 'south' | 'west' | 'up' | 'down';
-type AxisVector = { x: -1 | 0 | 1; y: -1 | 0 | 1; z: -1 | 0 | 1 };
 
 type Input = {
   world: string;
@@ -312,38 +314,16 @@ type Input = {
   verticalRadius: nonnegativeInt;
   maxDistance: positiveInt;
   depth?: nonnegativeInt; // default 0
-  maxResults?: positiveInt; // non-empty-cell cap; fails rather than truncates
+  maxResults?: positiveInt; // maximum placements plus runs; fails rather than truncates
 };
 
-type ViewMetadata = {
-  world: string;
-  origin: BlockPosition;
-  direction: Direction;
-  basis: {
-    forward: AxisVector;
-    horizontal: AxisVector;
-    vertical: AxisVector;
-  };
-  viewport: {
-    horizontalRadius: nonnegativeInt;
-    verticalRadius: nonnegativeInt;
-    maxDistance: positiveInt;
-    depth: nonnegativeInt;
-  };
-  bounds: Bounds;
-  scannedVolume: positiveInt;
-  visibleBlockCount: nonnegativeInt;
-};
-
-type Success = ViewMetadata & {
-  blockStatePalette: string[];
-  blockStateIndexRows: nonnegativeInt[][];
-  distanceRows: nonnegativeInt[][];
-};
+type Success = ExactBlockStructure;
 ```
 
-Palette indices start at one; zero in either aligned matrix means the
-sightline was empty.
+`origin` is the normalized minimum of the scanned bounds. The exact selected
+blocks are packed in Y/Z/X order using the same zero-based palettes and greedy
++X, +Z, then +Y cuboids as `get_blocks`. Empty views return empty palettes and
+geometry arrays.
 
 ### `get_player_context`
 

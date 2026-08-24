@@ -3,7 +3,7 @@ package ca.deliyannides.dirtmcp.paper.world.inspection;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks.ExactPaletteEntry;
+import ca.deliyannides.dirtmcp.paper.world.inspection.ExactBlockStructure.ExactPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.BlockSample;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.CapturedRegion;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
@@ -11,12 +11,18 @@ import ca.deliyannides.dirtmcp.paper.world.model.BlockStructure.Placement;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockStructure.Run;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 final class RegionBlockAlgorithms {
+    private static final Comparator<InspectedBlock> BLOCK_ORDER =
+            Comparator.comparingInt((InspectedBlock block) -> block.position().y())
+                    .thenComparingInt(block -> block.position().z())
+                    .thenComparingInt(block -> block.position().x());
+
     private RegionBlockAlgorithms() {}
 
     static Map<String, Long> countBlockStates(Cuboid region, CapturedRegion capture) {
@@ -56,7 +62,8 @@ final class RegionBlockAlgorithms {
         Map<String, Integer> paletteIndexes = new HashMap<>();
         List<List<ExactPaletteEntry>> palettes = new ArrayList<>();
         Map<BlockPosition, Integer> remaining = new HashMap<>();
-        for (InspectedBlock block : blocks) {
+        List<InspectedBlock> orderedBlocks = blocks.stream().sorted(BLOCK_ORDER).toList();
+        for (InspectedBlock block : orderedBlocks) {
             Integer paletteIndex = paletteIndexes.get(block.blockState());
             if (paletteIndex == null) {
                 if (palettes.size() >= maxPalettes) {
@@ -75,7 +82,7 @@ final class RegionBlockAlgorithms {
         List<Placement> placements = new ArrayList<>();
         List<Run> runs = new ArrayList<>();
         int entryCount = 0;
-        for (InspectedBlock block : blocks) {
+        for (InspectedBlock block : orderedBlocks) {
             Integer paletteIndex = remaining.get(block.position());
             if (paletteIndex == null) {
                 continue;

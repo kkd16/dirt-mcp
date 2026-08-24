@@ -214,10 +214,6 @@ const ResultTooLargeDetailsSchema = z.discriminatedUnion('reason', [
     minimumRequired: PositiveJsonSafeIntegerSchema.describe('Known lower bound on the required exact palettes.'),
     maximum: PositiveInt32Schema.describe('Maximum accepted palette count.'),
   }).refine((details) => details.minimumRequired > details.maximum, 'minimumRequired must exceed maximum.'),
-  reasonWith('visible_cells', {
-    minimumRequired: PositiveJsonSafeIntegerSchema.describe('Known lower bound on the required non-empty cells.'),
-    maximum: PositiveInt32Schema.describe('Maximum accepted non-empty cells.'),
-  }).refine((details) => details.minimumRequired > details.maximum, 'minimumRequired must exceed maximum.'),
   reasonWith('perspective_rays', {
     minimumRequired: PositiveJsonSafeIntegerSchema.describe('Requested perspective-ray count.'),
     maximum: PositiveInt32Schema.describe('Maximum accepted perspective-ray count.'),

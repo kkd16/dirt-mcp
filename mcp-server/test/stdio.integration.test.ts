@@ -199,28 +199,18 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   };
   const view = {
     world: 'world',
-    origin: { x: 1, y: 2, z: 4 },
-    direction: 'north',
-    basis: {
-      forward: { x: 0, y: 0, z: -1 },
-      horizontal: { x: 1, y: 0, z: 0 },
-      vertical: { x: 0, y: 1, z: 0 },
-    },
-    viewport: { horizontalRadius: 1, verticalRadius: 1, maxDistance: 3, depth: 1 },
-    bounds: { min: { x: 0, y: 1, z: 1 }, max: { x: 2, y: 3, z: 3 } },
-    scannedVolume: 27,
-    visibleBlockCount: 3,
-    blockStatePalette: ['minecraft:stone', 'minecraft:oak_stairs[facing=north]', 'minecraft:gold_block'],
-    blockStateIndexRows: [
-      [1, 0, 2],
-      [0, 3, 0],
-      [0, 0, 0],
+    origin: { x: 0, y: 1, z: 1 },
+    palettes: [
+      [{ blockState: 'minecraft:gold_block' }],
+      [{ blockState: 'minecraft:stone' }],
+      [{ blockState: 'minecraft:oak_stairs[facing=north]' }],
     ],
-    distanceRows: [
-      [2, 0, 1],
-      [0, 3, 0],
-      [0, 0, 0],
+    placements: [
+      [0, 1, 1, 0],
+      [1, 0, 2, 1],
+      [2, 2, 2, 2],
     ],
+    runs: [],
   };
   const perspectiveHorizontalFov = (2 * Math.atan(Math.tan((70 * Math.PI) / 360) * (21 / 13)) * 180) / Math.PI;
   const playerContext = {
@@ -503,6 +493,9 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   );
   const listedView = listedTools.find((tool) => tool.name === 'scan_orthographic_view');
   assert.ok(listedView);
+  const listedGetBlocks = listedTools.find((tool) => tool.name === 'get_blocks');
+  assert.ok(listedGetBlocks);
+  assert.deepEqual(listedView.outputSchema, listedGetBlocks.outputSchema);
   const viewInputSchema = listedView.inputSchema as {
     readonly properties: { readonly depth: unknown };
   };
@@ -622,7 +615,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.deepEqual(
     viewed.result,
     completeResult({
-      content: [{ type: 'text', text: 'Scanned 3x3 view: 3 visible cells using 3 block states.' }],
+      content: [{ type: 'text', text: 'Visible blocks: 3; structure entries: 3; palettes: 3; world: world.' }],
       structuredContent: view,
     }),
   );
@@ -643,7 +636,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
       content: [
         {
           type: 'text',
-          text: 'Scanned 3x3 view: 3 visible cells using 3 block states.',
+          text: 'Visible blocks: 3; structure entries: 3; palettes: 3; world: world.',
         },
       ],
       structuredContent: view,

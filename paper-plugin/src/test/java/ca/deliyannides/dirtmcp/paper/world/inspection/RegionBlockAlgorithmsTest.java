@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks.ExactPaletteEntry;
+import ca.deliyannides.dirtmcp.paper.world.inspection.ExactBlockStructure.ExactPaletteEntry;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionBlockAlgorithms.InspectedBlock;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionBlockAlgorithms.PackedBlocks;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.BlockSample;
@@ -47,15 +47,15 @@ final class RegionBlockAlgorithmsTest {
     void packsFirstSeenPalettesAndGreedyXZYCuboids() throws Exception {
         List<InspectedBlock> blocks =
                 List.of(
-                        block(0, 0, 0, "stone"),
-                        block(1, 0, 0, "stone"),
-                        block(0, 0, 1, "stone"),
-                        block(1, 0, 1, "stone"),
-                        block(0, 1, 0, "stone"),
-                        block(1, 1, 0, "stone"),
+                        block(3, 1, 1, "lantern"),
                         block(0, 1, 1, "stone"),
                         block(1, 1, 1, "stone"),
-                        block(3, 1, 1, "lantern"));
+                        block(1, 1, 0, "stone"),
+                        block(0, 1, 0, "stone"),
+                        block(1, 0, 1, "stone"),
+                        block(0, 0, 1, "stone"),
+                        block(1, 0, 0, "stone"),
+                        block(0, 0, 0, "stone"));
 
         PackedBlocks packed =
                 RegionBlockAlgorithms.packBlocks(new BlockPosition(0, 0, 0), blocks, 2, 64);

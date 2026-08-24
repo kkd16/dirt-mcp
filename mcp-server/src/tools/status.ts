@@ -73,7 +73,7 @@ const LimitConfigurationSchema = z
       'Maximum match patterns in one operation; inspection include and exclude lists share this cap.',
     ),
     maxPaletteEntries: PositiveInt32Schema.max(MAX_PALETTE_ENTRIES).describe(
-      'Maximum exact block-state entries in one edit or get_blocks structure palette.',
+      'Maximum exact block-state entries in one edit or exact inspection structure palette.',
     ),
     maxChangedBlocks: PositiveInt32Schema.describe('Maximum blocks one edit may change.'),
     maxInspectionVolume: PositiveInt32Schema.describe(
@@ -83,7 +83,7 @@ const LimitConfigurationSchema = z
       'Maximum perspective ray count multiplied by maximum ray distance.',
     ),
     defaultInspectionResultLimit: PositiveInt32Schema.describe(
-      'Default exact-block, run, or non-empty orthographic cell limit when maxResults is omitted.',
+      'Default placement-plus-run limit for exact get_blocks and orthographic structures when maxResults is omitted.',
     ),
     maxInspectionResultLimit: PositiveInt32Schema.describe(
       'Maximum caller-selected exact or orthographic inspection result limit.',

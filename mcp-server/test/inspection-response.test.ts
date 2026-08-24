@@ -160,32 +160,22 @@ const scanInput = ScanOrthographicViewInputSchema.parse({
 function scanOutput(): ScanOutput {
   return {
     world: 'world',
-    origin: { x: 1, y: 2, z: 4 },
-    direction: 'north',
-    basis: {
-      forward: { x: 0, y: 0, z: -1 },
-      horizontal: { x: 1, y: 0, z: 0 },
-      vertical: { x: 0, y: 1, z: 0 },
-    },
-    viewport: { horizontalRadius: 1, verticalRadius: 1, maxDistance: 3, depth: 1 },
-    bounds: { min: { x: 0, y: 1, z: 1 }, max: { x: 2, y: 3, z: 3 } },
-    scannedVolume: 27,
-    visibleBlockCount: 3,
-    blockStatePalette: ['minecraft:stone', 'minecraft:dirt', 'minecraft:gold_block'],
-    blockStateIndexRows: [
-      [1, 0, 2],
-      [0, 3, 0],
-      [0, 0, 0],
+    origin: { x: 0, y: 1, z: 1 },
+    palettes: [
+      [{ blockState: 'minecraft:gold_block' }],
+      [{ blockState: 'minecraft:stone' }],
+      [{ blockState: 'minecraft:dirt' }],
     ],
-    distanceRows: [
-      [2, 0, 1],
-      [0, 3, 0],
-      [0, 0, 0],
+    placements: [
+      [0, 1, 1, 0],
+      [1, 0, 2, 1],
+      [2, 2, 2, 2],
     ],
+    runs: [],
   };
 }
 
-test('correlates orthographic metadata, geometry, counts, palette, and grid cells', () => {
+test('correlates orthographic exact geometry with its viewport', () => {
   assert.doesNotThrow(() => requireMatchingScanResponse(scanInput, scanOutput()));
   assert.doesNotThrow(() => requireMatchingScanResponse({ ...scanInput, maxResults: undefined }, scanOutput()));
 
@@ -194,67 +184,50 @@ test('correlates orthographic metadata, geometry, counts, palette, and grid cell
   assertInvalid(() => requireMatchingScanResponse(scanInput, wrongWorld));
 
   const wrongOrigin = scanOutput();
-  wrongOrigin.origin.x = 0;
+  wrongOrigin.origin.x = 1;
   assertInvalid(() => requireMatchingScanResponse(scanInput, wrongOrigin));
-
-  const wrongDirection = scanOutput();
-  wrongDirection.direction = 'south';
-  assertInvalid(() => requireMatchingScanResponse(scanInput, wrongDirection));
-
-  const wrongBasis = scanOutput();
-  wrongBasis.basis.vertical = { x: 0, y: -1, z: 0 };
-  assertInvalid(() => requireMatchingScanResponse(scanInput, wrongBasis));
-
-  for (const viewport of [{ horizontalRadius: 0 }, { verticalRadius: 0 }, { maxDistance: 2 }, { depth: 0 }]) {
-    const wrongViewport = scanOutput();
-    wrongViewport.viewport = { ...wrongViewport.viewport, ...viewport };
-    assertInvalid(() => requireMatchingScanResponse(scanInput, wrongViewport));
-  }
-
-  const wrongVolume = scanOutput();
-  wrongVolume.scannedVolume = 26;
-  assertInvalid(() => requireMatchingScanResponse(scanInput, wrongVolume));
-
-  const wrongBounds = scanOutput();
-  wrongBounds.bounds.min.z = 0;
-  assertInvalid(() => requireMatchingScanResponse(scanInput, wrongBounds));
-
-  const wrongCount = scanOutput();
-  wrongCount.visibleBlockCount = 2;
-  assertInvalid(() => requireMatchingScanResponse(scanInput, wrongCount));
 
   assertInvalid(() => requireMatchingScanResponse({ ...scanInput, maxResults: 2 }, scanOutput()));
 
-  const wrongHeight = scanOutput();
-  wrongHeight.blockStateIndexRows.pop();
-  assertInvalid(() => requireMatchingScanResponse(scanInput, wrongHeight));
-
-  const wrongWidth = scanOutput();
-  wrongWidth.distanceRows[0]!.pop();
-  assertInvalid(() => requireMatchingScanResponse(scanInput, wrongWidth));
-
-  const misaligned = scanOutput();
-  misaligned.distanceRows[0]![0] = 0;
-  assertInvalid(() => requireMatchingScanResponse(scanInput, misaligned));
-
   const outsidePalette = scanOutput();
-  outsidePalette.blockStateIndexRows[0]![0] = 4;
+  outsidePalette.placements[0]![0] = 3;
   assertInvalid(() => requireMatchingScanResponse(scanInput, outsidePalette));
 
-  const outsideDistance = scanOutput();
-  outsideDistance.distanceRows[0]![0] = 4;
-  assertInvalid(() => requireMatchingScanResponse(scanInput, outsideDistance));
-
-  const wrongPaletteOrder = scanOutput();
-  wrongPaletteOrder.blockStateIndexRows[0]![0] = 2;
-  wrongPaletteOrder.blockStateIndexRows[0]![2] = 1;
-  assertInvalid(() => requireMatchingScanResponse(scanInput, wrongPaletteOrder));
-
   const unusedPaletteEntry = scanOutput();
-  unusedPaletteEntry.blockStatePalette.push('minecraft:diamond_block');
+  unusedPaletteEntry.palettes.push([{ blockState: 'minecraft:diamond_block' }]);
   assertInvalid(() => requireMatchingScanResponse(scanInput, unusedPaletteEntry));
 
-  const duplicatePaletteEntry = scanOutput();
-  duplicatePaletteEntry.blockStatePalette[1] = 'minecraft:stone';
-  assertInvalid(() => requireMatchingScanResponse(scanInput, duplicatePaletteEntry));
+  const duplicateSightline = scanOutput();
+  duplicateSightline.placements.push([0, 1, 1, 1]);
+  assertInvalid(() => requireMatchingScanResponse({ ...scanInput, maxResults: 4 }, duplicateSightline));
+
+  const horizontalRun = scanOutput();
+  horizontalRun.palettes = [[{ blockState: 'minecraft:stone' }]];
+  horizontalRun.placements = [];
+  horizontalRun.runs = [[0, 0, 1, 0, 2, 1, 0]];
+  assert.doesNotThrow(() => requireMatchingScanResponse({ ...scanInput, maxResults: 1 }, horizontalRun));
+
+  const forwardRun = scanOutput();
+  forwardRun.palettes = [[{ blockState: 'minecraft:stone' }]];
+  forwardRun.placements = [];
+  forwardRun.runs = [[0, 1, 1, 0, 1, 1, 1]];
+  assertInvalid(() => requireMatchingScanResponse({ ...scanInput, maxResults: 1 }, forwardRun));
+
+  const hugeInput = ScanOrthographicViewInputSchema.parse({
+    world: 'world',
+    origin: { x: 0, y: 0, z: 1_000_000_001 },
+    direction: 'north',
+    horizontalRadius: 0,
+    verticalRadius: 0,
+    maxDistance: 1_000_000_000,
+    maxResults: 1,
+  });
+  const hugeForwardRun: ScanOutput = {
+    world: 'world',
+    origin: { x: 0, y: 0, z: 1 },
+    palettes: [[{ blockState: 'minecraft:stone' }]],
+    placements: [],
+    runs: [[0, 0, 0, 0, 0, 0, 999_999_999]],
+  };
+  assertInvalid(() => requireMatchingScanResponse(hugeInput, hugeForwardRun));
 });

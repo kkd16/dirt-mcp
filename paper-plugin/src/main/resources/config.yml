@@ -52,7 +52,7 @@ limits:
   max-perspective-touched-chunks: 256
   # Maximum source or inspection match patterns; inspection filters share it.
   max-block-state-patterns: 64
-  # Maximum exact block-state entries in one edit or get_blocks structure palette.
+  # Maximum exact block-state entries in one edit or exact inspection structure palette.
   max-palette-entries: 256
   # Maximum blocks one mutation may change; cannot exceed max-region-volume.
   max-changed-blocks: 262144
