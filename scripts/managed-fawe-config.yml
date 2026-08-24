@@ -1,0 +1,6 @@
+# The managed server uses a pinned FAWE build. Keep its smoke tests independent
+# of external update services and their availability or rate limits.
+enabled-components:
+  snapshot-update-notifications: false
+  release-update-notifications: false
+  notify-update-ingame: false
