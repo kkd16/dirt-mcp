@@ -6,14 +6,17 @@ import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 public final class BridgeServer implements AutoCloseable {
     private static final String LOOPBACK_ADDRESS = "127.0.0.1";
+    private static final String CAPABILITIES_OPERATION_ID = "getCapabilities";
     private static final int HTTP_BACKLOG = 0;
 
     private final DirtConfig config;
@@ -30,14 +33,36 @@ public final class BridgeServer implements AutoCloseable {
         this.log = Objects.requireNonNull(log, "log");
         BearerAuthenticator authenticator =
                 new BearerAuthenticator(Objects.requireNonNull(bearerToken, "bearerToken"));
+        List<BridgeEndpoint> completeEndpoints = requireCompleteOperationCatalog(endpoints);
         this.dispatcher =
                 new BridgeDispatcher(
-                        Objects.requireNonNull(endpoints, "endpoints"),
+                        completeEndpoints,
+                        config.bridge().allowedOperations(),
                         authenticator,
                         config.bridge().maxConcurrentRequests(),
-                        config.limits().maxRequestBytes(),
+                        config.bridge().maxRequestBytes(),
                         config.bridge().requestBodyTimeoutSeconds(),
                         log);
+    }
+
+    private static List<BridgeEndpoint> requireCompleteOperationCatalog(
+            List<BridgeEndpoint> endpoints) {
+        List<BridgeEndpoint> copy = List.copyOf(Objects.requireNonNull(endpoints, "endpoints"));
+        Set<String> expected = new HashSet<>();
+        expected.add(CAPABILITIES_OPERATION_ID);
+        for (BridgeOperation operation : BridgeOperation.values()) {
+            expected.add(operation.operationId());
+        }
+        Set<String> actual = new HashSet<>();
+        for (BridgeEndpoint endpoint : copy) {
+            actual.add(Objects.requireNonNull(endpoint, "endpoint").operationId());
+        }
+        if (!actual.equals(expected)) {
+            throw new IllegalArgumentException(
+                    "Bridge endpoints must contain the mandatory capabilities operation and every "
+                            + "configurable operation");
+        }
+        return copy;
     }
 
     public synchronized void start() throws IOException {

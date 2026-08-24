@@ -15,8 +15,8 @@ public final class CountRegionBlockStatesEndpoint implements BridgeEndpoint {
     }
 
     @Override
-    public String operation() {
-        return "count_region_block_states";
+    public String operationId() {
+        return "countRegionBlockStates";
     }
 
     @Override
@@ -33,8 +33,10 @@ public final class CountRegionBlockStatesEndpoint implements BridgeEndpoint {
     public void handle(BridgeExchange exchange) throws IOException, OperationException {
         CountRegionBlockStates.Request request =
                 CountRegionBlockStatesRequestDecoder.decode(exchange);
-        exchange.world(request.world());
-        exchange.ok(this.operation.countRegionBlockStates(request));
+        exchange.auditField("world", request.world());
+        CountRegionBlockStates.Result result = this.operation.countRegionBlockStates(request);
+        exchange.auditField("result_count", result.blockStateCounts().size());
+        exchange.ok(result);
     }
 
     @Override

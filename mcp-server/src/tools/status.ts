@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import type { BridgeClient } from '../bridge/client.ts';
 import { BRIDGE_ROUTES } from '../bridge/contract.ts';
-import { toolOutputSchema } from '../bridge/errors.ts';
+import type { components } from '../generated/openapi.ts';
 import type { DirtLogger } from '../logging.ts';
 import {
   BlockPositionSchema,
@@ -12,7 +12,7 @@ import {
   MAX_PALETTE_ENTRIES,
   READ_WORLD_ANNOTATIONS,
 } from './common.ts';
-import { McpToolConfigurationSchema, type McpToolConfiguration } from './configuration.ts';
+import type { McpToolConfiguration } from './configuration.ts';
 import { executeToolCall, successResult } from './execution.ts';
 
 const PositiveInt32Schema = z.number().int().min(1).max(INT32_MAX);
@@ -36,7 +36,7 @@ const ServerStatusIncludeOptionsSchema = z
     configuration: z
       .boolean()
       .default(DEFAULT_STATUS_INCLUDE.configuration)
-      .describe('Include active limits, edit-history settings, defaults, logging, and MCP tool availability.'),
+      .describe('Include active operation limits and bounded edit-history settings.'),
   })
   .strict()
   .default(DEFAULT_STATUS_INCLUDE)
@@ -52,21 +52,14 @@ const PingServerOutputSchema = z
     status: z.literal('ok').describe('All Dirt, Paper, and FAWE health checks passed.'),
   })
   .strict()
-  .describe('Successful end-to-end Dirt server health check.');
+  .describe('Successful end-to-end Dirt server health check.') satisfies z.ZodType<
+  components['schemas']['PingResponse']
+>;
 
 const LimitConfigurationSchema = z
   .object({
-    maxConcurrentRequests: PositiveInt32Schema.describe(
-      'Maximum authenticated bridge requests allowed to execute concurrently.',
-    ),
-    maxConcurrentInspections: PositiveInt32Schema.describe(
-      'Maximum region and perspective inspections allowed to execute concurrently.',
-    ),
-    maxRequestBytes: PositiveInt32Schema.max(INT32_MAX - 1).describe(
-      'Maximum JSON request-body size accepted by the bridge.',
-    ),
     maxRegionVolume: PositiveInt32Schema.describe('Maximum cuboid mutation/count volume or explicit block placements.'),
-    maxTouchedChunks: PositiveInt32Schema.describe('Maximum distinct loaded chunks one mutation may touch.'),
+    maxEditTouchedChunks: PositiveInt32Schema.describe('Maximum distinct loaded chunks one mutation may touch.'),
     maxInspectionTouchedChunks: PositiveInt32Schema.describe('Maximum loaded chunks a region inspection may snapshot.'),
     maxPerspectiveTouchedChunks: PositiveInt32Schema.describe('Maximum loaded chunks a perspective view may check.'),
     maxBlockStatePatterns: PositiveInt32Schema.max(MAX_BLOCK_STATE_PATTERNS).describe(
@@ -82,9 +75,6 @@ const LimitConfigurationSchema = z
     maxPerspectiveRayDistanceBudget: PositiveInt32Schema.describe(
       'Maximum perspective ray count multiplied by maximum ray distance.',
     ),
-    defaultInspectionResultLimit: PositiveInt32Schema.describe(
-      'Default placement-plus-run limit for exact get_blocks and orthographic structures when maxResults is omitted.',
-    ),
     maxInspectionResultLimit: PositiveInt32Schema.describe(
       'Maximum caller-selected exact or orthographic inspection result limit.',
     ),
@@ -97,34 +87,6 @@ const LimitConfigurationSchema = z
     ),
   })
   .strict()
-  .refine((limits) => limits.maxConcurrentInspections <= limits.maxConcurrentRequests, {
-    message: 'maxConcurrentInspections must not exceed maxConcurrentRequests.',
-    path: ['maxConcurrentInspections'],
-  })
-  .refine((limits) => limits.maxInspectionTouchedChunks <= limits.maxTouchedChunks, {
-    message: 'maxInspectionTouchedChunks must not exceed maxTouchedChunks.',
-    path: ['maxInspectionTouchedChunks'],
-  })
-  .refine((limits) => limits.maxChangedBlocks <= limits.maxRegionVolume, {
-    message: 'maxChangedBlocks must not exceed maxRegionVolume.',
-    path: ['maxChangedBlocks'],
-  })
-  .refine((limits) => limits.maxInspectionVolume <= limits.maxRegionVolume, {
-    message: 'maxInspectionVolume must not exceed maxRegionVolume.',
-    path: ['maxInspectionVolume'],
-  })
-  .refine((limits) => limits.defaultInspectionResultLimit <= limits.maxInspectionResultLimit, {
-    message: 'defaultInspectionResultLimit must not exceed maxInspectionResultLimit.',
-    path: ['defaultInspectionResultLimit'],
-  })
-  .refine((limits) => limits.maxInspectionResultLimit <= limits.maxInspectionVolume, {
-    message: 'maxInspectionResultLimit must not exceed maxInspectionVolume.',
-    path: ['maxInspectionResultLimit'],
-  })
-  .refine((limits) => limits.maxPerspectiveRays <= limits.maxPerspectiveRayDistanceBudget, {
-    message: 'maxPerspectiveRays must not exceed maxPerspectiveRayDistanceBudget.',
-    path: ['maxPerspectiveRays'],
-  })
   .describe('Active limits that constrain Dirt inspection, mutation, and command tools.');
 
 export const EditHistoryConfigurationSchema = z
@@ -136,38 +98,13 @@ export const EditHistoryConfigurationSchema = z
     ),
   })
   .strict()
-  .refine(
-    (history) => history.maxEntriesPerWorld <= history.maxEntriesTotal,
-    'maxEntriesPerWorld must not exceed maxEntriesTotal.',
-  )
   .describe('Active bounded in-memory edit-history retention settings.');
-
-const DefaultConfigurationSchema = z
-  .object({
-    getBlocksIncludeAir: z.boolean().describe('Default air inclusion for exact block retrieval.'),
-    editDryRun: z.boolean().describe('Default dry-run behavior for every Dirt block-edit tool.'),
-  })
-  .strict()
-  .describe('Active optional-argument defaults for Dirt tools.');
-
-export const LoggingConfigurationSchema = z
-  .object({
-    consoleLevel: z.enum(['info', 'warning', 'error']).describe('Minimum severity shown in the Paper console.'),
-    detailFileMaxBytes: PositiveInt32Schema.describe(
-      'Approximate maximum bytes in each Paper JSONL detail-log generation before rotation.',
-    ),
-    detailFileRetainedFiles: PositiveInt32Schema.min(2)
-      .max(100)
-      .describe('Rotating Paper JSONL detail-log generations retained, including the active generation.'),
-  })
-  .strict()
-  .describe('Active Paper console threshold and rotating detail-log limits.');
 
 const BuildsSchema = z
   .object({
     minecraft: z.string().min(1).describe('Running Minecraft build.'),
     paper: z.string().min(1).describe('Full running Paper build identifier.'),
-    dirtMcp: z.string().min(1).describe('Running Dirt MCP Paper plugin build.'),
+    dirtPlugin: z.string().min(1).describe('Running Dirt Paper plugin build.'),
     fawe: z.string().min(1).describe('Running FastAsyncWorldEdit build.'),
   })
   .strict()
@@ -225,40 +162,12 @@ const WorldsSchema = z
 const ServerConfigurationShape = {
   limits: LimitConfigurationSchema,
   editHistory: EditHistoryConfigurationSchema,
-  defaults: DefaultConfigurationSchema,
-  logging: LoggingConfigurationSchema,
-  tools: McpToolConfigurationSchema,
-};
-
-const hasSufficientHistoryCapacity = (configuration: {
-  limits: z.infer<typeof LimitConfigurationSchema>;
-  editHistory: z.infer<typeof EditHistoryConfigurationSchema>;
-}): boolean => configuration.editHistory.maxRetainedChangedBlocks >= configuration.limits.maxChangedBlocks;
-
-const HISTORY_CAPACITY_REFINEMENT = {
-  message: 'maxRetainedChangedBlocks must be at least maxChangedBlocks.',
-  path: ['editHistory', 'maxRetainedChangedBlocks'],
 };
 
 const ServerConfigurationSchema = z
   .object(ServerConfigurationShape)
   .strict()
-  .refine(hasSufficientHistoryCapacity, HISTORY_CAPACITY_REFINEMENT)
-  .describe('Active Dirt limits, retention, defaults, logging, and MCP tool availability.');
-
-export const ServerStatusSchema = z
-  .object({
-    builds: BuildsSchema,
-    performance: PerformanceSchema,
-    players: PlayerSummarySchema,
-    worlds: WorldsSchema,
-    ...ServerConfigurationShape,
-  })
-  .strict()
-  .refine(hasSufficientHistoryCapacity, HISTORY_CAPACITY_REFINEMENT)
-  .describe(
-    'Current lightweight Paper context, limits, edit-history retention, defaults, logging, and MCP tool availability for grounding subsequent Dirt calls.',
-  );
+  .describe('Active Dirt operation limits and edit-history retention.');
 
 export const GetServerStatusOutputSchema = z
   .object({
@@ -271,22 +180,17 @@ export const GetServerStatusOutputSchema = z
     ),
   })
   .strict()
-  .describe('Current server status projected to the requested optional sections.');
+  .describe('Current server status projected to the requested optional sections.') satisfies z.ZodType<
+  components['schemas']['ServerStatusResponse']
+>;
 
 type GetServerStatusInput = z.infer<typeof GetServerStatusInputSchema>;
-type ServerStatus = z.infer<typeof ServerStatusSchema>;
 
-export function projectServerStatus(
-  input: GetServerStatusInput,
-  status: ServerStatus,
-): z.infer<typeof GetServerStatusOutputSchema> {
-  const { builds, performance, players, worlds, ...configuration } = status;
+function bridgeStatusRequest(input: GetServerStatusInput): components['schemas']['ServerStatusRequest'] {
   return {
-    builds,
-    performance,
-    players: input.include.players ? players : null,
-    worlds: input.include.worlds ? worlds : null,
-    configuration: input.include.configuration ? configuration : null,
+    includePlayers: input.include.players,
+    includeWorlds: input.include.worlds,
+    includeConfiguration: input.include.configuration,
   };
 }
 
@@ -296,62 +200,75 @@ export function registerStatusTools(
   toolConfiguration: McpToolConfiguration,
   logger: DirtLogger,
 ): void {
-  const pingServer = server.registerTool(
-    'ping_server',
-    {
-      title: 'Ping Dirt server',
-      description:
-        'Run a non-mutating end-to-end health check across the authenticated bridge, Dirt plugin, Paper, and a Paper-backed FAWE session. Returns only status ok on success.',
-      inputSchema: EmptyInputSchema,
-      outputSchema: toolOutputSchema(PingServerOutputSchema),
-      annotations: READ_WORLD_ANNOTATIONS,
-    },
-    async (_input, context) =>
-      executeToolCall(
-        logger,
-        {
-          operation: 'ping_server',
-          context,
-          failureContext: `Dirt server health check failed at ${bridge.origin}`,
-        },
-        async (callId) => {
-          const result = await bridge.request(BRIDGE_ROUTES.ping, callId, PingServerOutputSchema);
-          return successResult(result, 'ok');
-        },
-      ),
-  );
-  if (!toolConfiguration.ping_server) pingServer.disable();
+  if (toolConfiguration.ping_server) {
+    server.registerTool(
+      'ping_server',
+      {
+        title: 'Ping Dirt server',
+        description:
+          'Run a non-mutating end-to-end health check across the authenticated bridge, Dirt plugin, Paper, and a Paper-backed FAWE session. Returns only status ok on success.',
+        inputSchema: EmptyInputSchema,
+        outputSchema: PingServerOutputSchema,
+        annotations: READ_WORLD_ANNOTATIONS,
+      },
+      async (_input, context) =>
+        executeToolCall(
+          logger,
+          {
+            operation: 'ping_server',
+            context,
+            failureContext: `Dirt server health check failed at ${bridge.origin}`,
+          },
+          async (callId) => {
+            const result = await bridge.request(
+              BRIDGE_ROUTES.ping,
+              callId,
+              PingServerOutputSchema,
+              undefined,
+              context.mcpReq.signal,
+            );
+            return successResult(result, 'ok');
+          },
+        ),
+    );
+  }
 
-  const getServerStatus = server.registerTool(
-    'get_server_status',
-    {
-      title: 'Get Dirt server status',
-      description:
-        'Return current builds and performance plus selected player, world, and configuration sections. Worlds default on; players and configuration default off. Use include.configuration=true to inspect active limits and defaults.',
-      inputSchema: GetServerStatusInputSchema,
-      outputSchema: toolOutputSchema(GetServerStatusOutputSchema),
-      annotations: READ_WORLD_ANNOTATIONS,
-    },
-    async (input, context) =>
-      executeToolCall(
-        logger,
-        {
-          operation: 'get_server_status',
-          context,
-          failureContext: `Could not get Dirt server status from ${bridge.origin}`,
-        },
-        async (callId) => {
-          const status = await bridge.request(BRIDGE_ROUTES.serverStatus, callId, ServerStatusSchema);
-          const result = projectServerStatus(input, status);
-          const summary = [`Paper ${result.builds.paper}`];
-          if (result.players !== null) summary.push(`players ${result.players.online}/${result.players.maximum}`);
-          if (result.worlds !== null) {
-            const worldNames = result.worlds.map((world) => world.name).join(', ') || 'none';
-            summary.push(`loaded worlds: ${worldNames}`);
-          }
-          return successResult(result, `${summary.join('; ')}.`);
-        },
-      ),
-  );
-  if (!toolConfiguration.get_server_status) getServerStatus.disable();
+  if (toolConfiguration.get_server_status) {
+    server.registerTool(
+      'get_server_status',
+      {
+        title: 'Get Dirt server status',
+        description:
+          'Return current builds and performance plus selected player, world, and configuration sections. Worlds default on; players and configuration default off.',
+        inputSchema: GetServerStatusInputSchema,
+        outputSchema: GetServerStatusOutputSchema,
+        annotations: READ_WORLD_ANNOTATIONS,
+      },
+      async (input, context) =>
+        executeToolCall(
+          logger,
+          {
+            operation: 'get_server_status',
+            context,
+            failureContext: `Could not get Dirt server status from ${bridge.origin}`,
+          },
+          async (callId) => {
+            const result = await bridge.request(
+              BRIDGE_ROUTES.serverStatus,
+              callId,
+              GetServerStatusOutputSchema,
+              bridgeStatusRequest(input),
+              context.mcpReq.signal,
+            );
+            const summary = [`Paper ${result.builds.paper}`];
+            if (result.players !== null) summary.push(`players ${result.players.online}/${result.players.maximum}`);
+            if (result.worlds !== null) {
+              const worldNames = result.worlds.map((world) => world.name).join(', ') || 'none';
+              summary.push(`loaded worlds: ${worldNames}`);
+            }
+            return successResult(result, `${summary.join('; ')}.`);
+          },
+        ),
+    );
+  }
 }

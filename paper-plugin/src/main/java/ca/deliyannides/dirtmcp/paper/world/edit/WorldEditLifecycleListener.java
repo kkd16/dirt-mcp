@@ -7,9 +7,9 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.world.WorldUnloadEvent;
 
 public final class WorldEditLifecycleListener implements Listener {
-    private final FaweWorldEditor editor;
+    private final WorldEditService editor;
 
-    public WorldEditLifecycleListener(FaweWorldEditor editor) {
+    public WorldEditLifecycleListener(WorldEditService editor) {
         this.editor = Objects.requireNonNull(editor, "editor");
     }
 

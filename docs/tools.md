@@ -7,16 +7,21 @@ The usual workflow is:
 inspect -> preview -> edit -> verify -> undo if needed
 ```
 
-Tool availability comes from Paper's `tools` allowlist and is fixed when Paper
-and the MCP server start. Disabled tools do not appear in discovery.
+The MCP server owns this catalog, its schemas, annotations, and model-facing
+defaults. At startup it reads Paper's allowed bridge operation IDs from
+`/v1/capabilities` and registers only the corresponding tools. Operations that
+are not admitted do not appear in MCP discovery.
 
 ## What is sent over MCP?
 
 Yes: MCP stdio messages are JSON-RPC, and each tool's arguments and structured
 result are JSON objects. During discovery, `tools/list` advertises an
 `inputSchema` and `outputSchema` in JSON Schema. Those live schemas, generated
-from Dirt's Zod schemas, are the exact machine-readable contract. Every input
-object is strict, so unknown fields are rejected.
+from Dirt's Zod schemas, define the machine-readable structure for inputs and
+non-error completions. Dirt also enforces documented cross-field refinements at
+runtime. Every input object is strict, so unknown fields are rejected. Results
+with `isError=true` instead use the common, command, or partial-undo failure
+shapes documented below.
 
 The agent chooses `name` and `arguments`. The MCP host adds the JSON-RPC
 envelope and protocol metadata. A complete call looks like this:
@@ -67,7 +72,9 @@ only the exact `arguments` it supplies and the `structuredContent` it uses.
 Example values are concrete JSON payloads, not a replacement for the exhaustive
 schemas returned by `tools/list`. The
 [OpenAPI contract](../protocol/openapi.yaml) describes the separate, internal
-HTTP bridge between the MCP server and Paper.
+HTTP bridge between the MCP server and Paper. MCP generates an
+`X-Dirt-Call-Id` UUIDv4 for every bridge request and fully materializes fixed
+defaults before sending it.
 
 ## Tools at a glance
 
@@ -95,9 +102,10 @@ HTTP bridge between the MCP server and Paper.
   may be supplied in either order, and are normalized in results.
 - A canonical state includes its namespace and resolved properties, for example
   `minecraft:oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]`.
-  A match pattern may omit properties; a destination state may not.
-- Configured request, region, chunk, result, palette, change, command,
-  concurrency, and history limits still apply. Read active values with
+  A match pattern may omit properties to match any value. A destination may omit
+  properties; Paper resolves those properties to its defaults before editing.
+- Paper's request, region, chunk, result, palette, change, command, concurrency,
+  and history safety limits still apply. Read client-relevant operation values with
   `get_server_status` and `include.configuration=true`. Inspections and edits
   fail rather than truncate when a hard limit is exceeded.
 - Inspection structures use zero-based palette indices and origin-relative
@@ -133,6 +141,9 @@ Structured result:
 Use this to inspect runtime versions and health, discover loaded worlds and
 players, or read the active limits that constrain other tools.
 
+MCP sends these selections as three explicit booleans in the bridge's
+`POST /v1/server-status` request.
+
 Arguments:
 
 ```json
@@ -152,7 +163,7 @@ Structured result:
   "builds": {
     "minecraft": "26.2",
     "paper": "26.2-116-main",
-    "dirtMcp": "0.1.0",
+    "dirtPlugin": "0.1.0",
     "fawe": "2.15.4"
   },
   "performance": {
@@ -177,9 +188,10 @@ Structured result:
 }
 ```
 
-`worlds` defaults to included; `players` and `configuration` default to
-excluded. Excluded sections are always `null`. Configuration includes every
-active limit, edit-history setting, default, logging setting, and tool toggle.
+The MCP defaults include worlds and exclude players and configuration. Excluded
+sections are always `null`. Configuration contains client-relevant operation
+limits and bounded edit-history settings; it does not expose transport,
+concurrency, logging, or MCP tool policy.
 
 ## Inspection
 
@@ -248,10 +260,11 @@ Structured result:
 ```
 
 Include patterns are applied first, then exclusions. The two pattern arrays may
-contain at most 64 entries combined. Omitted `includeAir` uses the Paper default.
-Omitted `maxResults` uses the configured default; exceeding it fails rather than
-truncates. Add `label` to the result before sending it to `set_blocks`; changing
-`origin` copies the structure elsewhere.
+contain at most 64 entries combined. MCP defaults both arrays to empty,
+`includeAir` to false, and `maxResults` to 1024 before calling Paper. Exceeding
+the effective Paper limit fails rather than truncates. Add `label` to the result
+before sending it to `set_blocks`; changing `origin` copies the structure
+elsewhere.
 
 ### `scan_orthographic_view`
 
@@ -295,7 +308,8 @@ Structured result:
 
 Scanning starts one block away and excludes the requested origin. Directions
 are `north`, `east`, `south`, `west`, `up`, or `down`. The result has the same
-copy-ready structure as `get_blocks`.
+copy-ready structure as `get_blocks`. MCP defaults `depth` to 0 and
+`maxResults` to 1024 before calling Paper.
 
 ### `get_player_context`
 
@@ -356,10 +370,10 @@ Structured result:
 ```
 
 The selector is an exact case-insensitive online name or canonical UUID.
-Equipment defaults on; inventory, ender chest, vitals, movement, client data,
-and effects default off. Every excluded optional section is `null`. The capture
-is point-in-time, so recapture it before relying on player state that may have
-changed.
+MCP defaults equipment on and inventory, ender chest, vitals, movement, client
+data, and effects off, then sends every include boolean to Paper. Every excluded
+optional section is `null`. The capture is point-in-time, so recapture it before
+relying on player state that may have changed.
 
 ### `get_perspective_view`
 
@@ -425,8 +439,9 @@ Structured result:
 }
 ```
 
-The viewport defaults to 21 by 13 rays, 70-degree vertical FOV, and 32-block
-distance. Width and height must be odd. Palette indices in hits are one-based;
+MCP defaults the viewport to 21 by 13 rays, 70-degree vertical FOV, 32-block
+distance, no fluid collision, and retaining passable collisions, then sends all
+options to Paper. Width and height must be odd. Palette indices in hits are one-based;
 `crosshairHitIndex` is a zero-based index into `hits`, or `null` on a miss. This
 is collision geometry, not entities, lighting, particles, resource packs, or a
 client framebuffer. No terrain is loaded.
@@ -437,8 +452,15 @@ Both edit tools return `outcome` as `preview`, `no_change`, or `committed`.
 Only a positive committed edit has a non-null `edit` record. Committed success
 means FAWE finished and Dirt retained the undo data.
 
-A palette contains one or more exact destination states. Omit every `weight`
-for equal probability, or give every entry a whole-number weight whose total is 100. Selection happens independently at every coordinate.
+At the MCP surface, `dryRun` defaults to false, `seed` is optional, and
+`maxChangedBlocks` is optional. Before calling Paper, MCP generates any omitted
+seed and sends null for an omitted caller ceiling; the bridge request itself is
+fully explicit.
+
+A palette contains one or more destination block-state inputs, which Paper
+resolves to exact states. Omit every `weight` for equal probability, or give
+every entry a whole-number weight whose total is 100. Selection happens
+independently at every coordinate.
 
 ### `replace_region_blocks`
 
@@ -470,8 +492,6 @@ Structured result:
     "min": { "x": 1, "y": 2, "z": 3 },
     "max": { "x": 2, "y": 2, "z": 3 }
   },
-  "sourceBlockStatePatterns": ["minecraft:stone"],
-  "destinationPalette": [{ "blockState": "minecraft:dirt", "weight": 100 }],
   "seed": 123,
   "outcome": "preview",
   "edit": null,
@@ -481,7 +501,8 @@ Structured result:
 ```
 
 Source patterns may omit state properties and are unioned. `maxChangedBlocks`
-adds a stricter per-call ceiling. Omitted `dryRun` uses the Paper default.
+adds a stricter per-call ceiling; omission means no caller ceiling beyond
+Paper's safety cap.
 
 ### `set_blocks`
 
@@ -518,12 +539,6 @@ Structured result:
     "min": { "x": 1, "y": 2, "z": 3 },
     "max": { "x": 5, "y": 2, "z": 3 }
   },
-  "palettes": [
-    [
-      { "blockState": "minecraft:stone", "weight": 75 },
-      { "blockState": "minecraft:glass", "weight": 25 }
-    ]
-  ],
   "seed": 123,
   "outcome": "committed",
   "edit": {
@@ -613,8 +628,9 @@ Structured result:
 
 ```json
 {
+  "outcome": "completed",
   "world": "world",
-  "edits": [
+  "undoneEdits": [
     {
       "editId": "11111111-1111-4111-8111-111111111111",
       "callId": "33333333-3333-4333-8333-333333333333",
@@ -638,8 +654,10 @@ Structured result:
 
 Undo validates the complete array before restoration, then runs sequentially.
 If execution stops, newer edits already restored remain consumed and the
-failure's `undoneEdits` contains that successful prefix. The failed edit remains
-retained. Read history again before retrying.
+HTTP bridge result has `outcome="partial"`, its `undoneEdits` contains that
+successful prefix, and `failure.editId` identifies the retained failed edit.
+MCP converts that partial result into `isError=true`. Read history again before
+retrying.
 
 ## Commands
 
@@ -685,7 +703,7 @@ Structured result:
 }
 ```
 
-Dirt strips outer Java whitespace and one optional leading slash. Commands run
+Paper strips outer Java whitespace and one optional leading slash. Commands run
 once, in order, through an operator-level sender that is not a player or the
 literal console. A `dispatched` outcome means Paper invoked a target, not that
 the command reported semantic success.
@@ -701,8 +719,8 @@ Inspect state before retrying after an ambiguous timeout or disconnect.
 
 A Dirt execution failure sets `isError=true`. Its text content is only a
 summary; use the structured error. Correctable failures include code-specific
-`details`. Internal failures deliberately do not. `editId`, when present, means
-history may need reconciliation before retrying.
+`details`. Internal failures deliberately do not. Only mutation failures can
+include `editId`; it means edit history may need reconciliation before retrying.
 
 ```json
 {
@@ -738,6 +756,7 @@ retained, and older requested edits were not attempted:
 ```json
 {
   "callId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "world": "world",
   "error": {
     "code": "world_unavailable",
     "message": "Undo stopped",

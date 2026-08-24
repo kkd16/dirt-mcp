@@ -12,53 +12,112 @@ servers:
 security:
   - bearerAuth: []
 paths:
-  /v1/ping:
+  /v1/capabilities:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
     get:
-      operationId: pingServer
-      summary: Verify the authenticated Dirt-to-Paper-to-FAWE path without mutation
+      operationId: getCapabilities
+      summary: List bridge operations currently allowed by the Paper plugin
       responses:
         '200':
-          description: Every Dirt MCP runtime layer is ready
+          description: Allowed configurable operations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilitiesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/GetMethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/BridgeBusy'
+  /v1/ping:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
+    get:
+      operationId: pingServer
+      summary: Verify that the Paper plugin and required editing dependency are ready
+      responses:
+        '200':
+          description: The Paper bridge and required runtime dependency are ready
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/PingResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperationDisabled'
         '405':
           $ref: '#/components/responses/GetMethodNotAllowed'
         '500':
           $ref: '#/components/responses/InternalError'
         '503':
-          description: Dirt, Paper, or FAWE is not ready
+          description: Bridge admission is full, or Paper or FAWE is not ready
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/BridgeBusyError'
+                      - $ref: '#/components/schemas/UnhealthyError'
   /v1/server-status:
-    get:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
+    post:
       operationId: getServerStatus
-      summary: Report current server, player, world, build, limit, logging, and MCP tool context
+      summary: Report server status with explicitly selected optional sections
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServerStatusRequest'
       responses:
         '200':
-          description: Lightweight current server and active Dirt configuration context
+          description: Current Paper status and the requested optional sections
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServerStatusResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperationDisabled'
         '405':
-          $ref: '#/components/responses/GetMethodNotAllowed'
+          $ref: '#/components/responses/PostMethodNotAllowed'
         '500':
           $ref: '#/components/responses/InternalError'
         '503':
-          description: Current Paper context is unavailable
+          description: Bridge admission is full or current Paper context is unavailable
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/BridgeBusyError'
+                      - $ref: '#/components/schemas/ServerUnavailableError'
   /v1/count-region-block-states:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
     post:
       operationId: countRegionBlockStates
       summary: Count block states in a bounded region of loaded chunks
@@ -76,19 +135,23 @@ paths:
               schema:
                 $ref: '#/components/schemas/CountRegionBlockStatesResponse'
         '400':
-          description: Invalid JSON, fields, coordinates, or world height
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperationDisabled'
         '404':
           description: World is not loaded
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    $ref: '#/components/schemas/WorldNotFoundError'
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '413':
@@ -96,20 +159,33 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    $ref: '#/components/schemas/RegionTooLargeError'
         '500':
-          description: Unexpected inspection failure
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/InternalError'
         '503':
-          description: Region contains an unloaded chunk, inspection was interrupted, or inspection capacity is exhausted
+          description: Bridge admission is full, or inspection capacity or required world state is unavailable
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/BridgeBusyError'
+                      - $ref: '#/components/schemas/ServerUnavailableError'
+                      - $ref: '#/components/schemas/WorldUnavailableError'
   /v1/get-blocks:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
     post:
       operationId: getBlocks
       summary: Return replay-ready exact block structure from a bounded region of loaded chunks
@@ -127,19 +203,23 @@ paths:
               schema:
                 $ref: '#/components/schemas/ExactBlockStructureResponse'
         '400':
-          description: Invalid JSON, fields, coordinates, filters, options, or world height
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperationDisabled'
         '404':
           description: World is not loaded
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    $ref: '#/components/schemas/WorldNotFoundError'
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '413':
@@ -147,20 +227,35 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/RegionTooLargeError'
+                      - $ref: '#/components/schemas/ResultTooLargeError'
         '500':
-          description: Unexpected inspection failure
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/InternalError'
         '503':
-          description: Region contains an unloaded chunk, inspection was interrupted, or inspection capacity is exhausted
+          description: Bridge admission is full, or inspection capacity or required world state is unavailable
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/BridgeBusyError'
+                      - $ref: '#/components/schemas/ServerUnavailableError'
+                      - $ref: '#/components/schemas/WorldUnavailableError'
   /v1/scan-orthographic-view:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
     post:
       operationId: scanOrthographicView
       summary: Return a selected non-air depth along each sightline in an orthographic view
@@ -178,19 +273,23 @@ paths:
               schema:
                 $ref: '#/components/schemas/ExactBlockStructureResponse'
         '400':
-          description: Invalid JSON, fields, coordinates, view geometry, or world height
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperationDisabled'
         '404':
           description: World is not loaded
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    $ref: '#/components/schemas/WorldNotFoundError'
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '413':
@@ -198,20 +297,35 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/RegionTooLargeError'
+                      - $ref: '#/components/schemas/ResultTooLargeError'
         '500':
-          description: Unexpected inspection failure
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/InternalError'
         '503':
-          description: View contains an unloaded chunk, inspection was interrupted, or inspection capacity is exhausted
+          description: Bridge admission is full, or inspection capacity or required world state is unavailable
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/BridgeBusyError'
+                      - $ref: '#/components/schemas/ServerUnavailableError'
+                      - $ref: '#/components/schemas/WorldUnavailableError'
   /v1/get-player-context:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
     post:
       operationId: getPlayerContext
       summary: Capture an online player's pose and optional state
@@ -229,34 +343,57 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetPlayerContextResponse'
         '400':
-          description: Invalid player selector or include flags
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperationDisabled'
         '404':
           description: The selected player is not online
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    $ref: '#/components/schemas/PlayerNotFoundError'
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
+        '409':
+          description: The selected player state cannot be represented safely
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    $ref: '#/components/schemas/PlayerUnavailableError'
         '500':
-          description: Unexpected player-context failure
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/InternalError'
         '503':
-          description: Paper access was interrupted or unavailable
+          description: Bridge admission is full or required Paper world state is unavailable
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/BridgeBusyError'
+                      - $ref: '#/components/schemas/ServerUnavailableError'
+                      - $ref: '#/components/schemas/WorldUnavailableError'
   /v1/get-perspective-view:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
     post:
       operationId: getPerspectiveView
       summary: Trace a bounded perspective block view from a player or arbitrary camera
@@ -274,19 +411,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetPerspectiveViewResponse'
         '400':
-          description: Invalid source, coordinates, rotation, or perspective options
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperationDisabled'
         '404':
           description: The selected player is not online or the selected world is not loaded
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/PlayerNotFoundError'
+                      - $ref: '#/components/schemas/WorldNotFoundError'
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '409':
@@ -294,31 +437,50 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    $ref: '#/components/schemas/PlayerUnavailableError'
         '413':
           description: The ray count, ray-distance budget, or checked-chunk count exceeds its inspection limit
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/RegionTooLargeError'
+                      - $ref: '#/components/schemas/ResultTooLargeError'
         '500':
-          description: Unexpected perspective-view failure
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/InternalError'
         '503':
-          description: A required chunk is unloaded, Paper access was interrupted, or inspection capacity is exhausted
+          description: Bridge admission is full, or inspection capacity or required world state is unavailable
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/BridgeBusyError'
+                      - $ref: '#/components/schemas/ServerUnavailableError'
+                      - $ref: '#/components/schemas/WorldUnavailableError'
   /v1/replace-region-blocks:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
     post:
       operationId: replaceRegionBlocks
       summary: Replace block-state patterns with a weighted palette in loaded chunks
-      parameters:
-        - $ref: '#/components/parameters/DirtCallId'
       requestBody:
         required: true
         content:
@@ -333,19 +495,23 @@ paths:
               schema:
                 $ref: '#/components/schemas/ReplaceRegionBlocksResponse'
         '400':
-          description: Invalid call ID, JSON, fields, coordinates, world height, or block state
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperationDisabled'
         '404':
           description: World is not loaded
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    $ref: '#/components/schemas/WorldNotFoundError'
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '409':
@@ -353,31 +519,64 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    $ref: '#/components/schemas/WorldBusyError'
         '413':
           description: Region volume or touched chunks exceed configured limits, or the exact changed-block count exceeds the effective configured/request ceiling
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/ChangeLimitExceededError'
+                      - $ref: '#/components/schemas/RegionTooLargeError'
         '500':
-          description: Unexpected edit failure
+          description: Unexpected failure before or after mutation execution began
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/InternalErrorDetail'
+                      - $ref: '#/components/schemas/MutationInternalError'
         '503':
-          description: Region contains an unloaded chunk, editing was interrupted, or bounded history capacity was unavailable before mutation
+          description: Bridge, world, editing, or bounded undo-history capacity is unavailable
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/BridgeBusyError'
+                      - $ref: '#/components/schemas/HistoryCapacityExceededError'
+                      - $ref: '#/components/schemas/ServerUnavailableError'
+                      - $ref: '#/components/schemas/WorldUnavailableError'
+                      - $ref: '#/components/schemas/MutationWorldUnavailableError'
   /v1/set-blocks:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
     post:
       operationId: setBlocks
       summary: Place weighted-palette states from origin-relative placements and cuboids in one edit
-      parameters:
-        - $ref: '#/components/parameters/DirtCallId'
       requestBody:
         required: true
         content:
@@ -392,19 +591,23 @@ paths:
               schema:
                 $ref: '#/components/schemas/SetBlocksResponse'
         '400':
-          description: Invalid call ID, JSON, fields, palettes, geometry, resolved coordinates, world height, block state, or overlapping block
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperationDisabled'
         '404':
           description: World is not loaded
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    $ref: '#/components/schemas/WorldNotFoundError'
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '409':
@@ -412,26 +615,61 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    $ref: '#/components/schemas/WorldBusyError'
         '413':
           description: Expanded block count or touched chunks exceed configured limits, or the changed-block count exceeds the effective configured/request ceiling
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/ChangeLimitExceededError'
+                      - $ref: '#/components/schemas/RegionTooLargeError'
         '500':
-          description: Unexpected edit failure
+          description: Unexpected failure before or after mutation execution began
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/InternalErrorDetail'
+                      - $ref: '#/components/schemas/MutationInternalError'
         '503':
-          description: A represented block is in an unloaded chunk, editing was interrupted, or bounded history capacity was unavailable before mutation
+          description: Bridge, world, editing, or bounded undo-history capacity is unavailable
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/BridgeBusyError'
+                      - $ref: '#/components/schemas/HistoryCapacityExceededError'
+                      - $ref: '#/components/schemas/ServerUnavailableError'
+                      - $ref: '#/components/schemas/WorldUnavailableError'
+                      - $ref: '#/components/schemas/MutationWorldUnavailableError'
   /v1/get-edit-history:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
     post:
       operationId: getEditHistory
       summary: Return the retained undoable Dirt edit history for a loaded world
@@ -449,19 +687,23 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetEditHistoryResponse'
         '400':
-          description: Invalid JSON or fields
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperationDisabled'
         '404':
           description: World is not loaded
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    $ref: '#/components/schemas/WorldNotFoundError'
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '409':
@@ -469,25 +711,36 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    $ref: '#/components/schemas/WorldBusyError'
         '500':
-          description: Unexpected history lookup failure
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/InternalError'
         '503':
-          description: Edit history is unavailable
+          description: Bridge admission, Paper, or the selected world is unavailable
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/BridgeBusyError'
+                      - $ref: '#/components/schemas/ServerUnavailableError'
+                      - $ref: '#/components/schemas/WorldUnavailableError'
   /v1/undo-edits:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
     post:
       operationId: undoEdits
       summary: Undo an exact newest-first prefix of retained Dirt edits in a loaded world
-      parameters:
-        - $ref: '#/components/parameters/DirtCallId'
       requestBody:
         required: true
         content:
@@ -496,25 +749,31 @@ paths:
               $ref: '#/components/schemas/UndoEditsRequest'
       responses:
         '200':
-          description: Every requested edit was restored and consumed in newest-first order
+          description: Complete undo or partial progress through a runtime failure
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/UndoEditsResponse'
         '400':
-          description: Invalid call ID, JSON, fields, or edit ID list
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperationDisabled'
         '404':
           description: World is not loaded or a requested edit is not retained
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/EditNotFoundError'
+                      - $ref: '#/components/schemas/WorldNotFoundError'
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '409':
@@ -522,29 +781,38 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/EditNotLatestError'
+                      - $ref: '#/components/schemas/WorldBusyError'
         '500':
-          description: Unexpected failure before execution, or runtime failure after zero or more edits were undone
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - $ref: '#/components/schemas/Error'
-                  - $ref: '#/components/schemas/UndoEditsRuntimeError'
+          $ref: '#/components/responses/InternalError'
         '503':
-          description: Undo was unavailable before execution, or runtime execution was interrupted, lost its world, or could not load an existing touched chunk
+          description: Undo is unavailable before execution begins
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: '#/components/schemas/Error'
-                  - $ref: '#/components/schemas/UndoEditsRuntimeError'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/BridgeBusyError'
+                      - $ref: '#/components/schemas/ServerUnavailableError'
+                      - $ref: '#/components/schemas/WorldUnavailableError'
   /v1/run-minecraft-commands:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
     post:
       operationId: runMinecraftCommands
       summary: Run registered Minecraft commands sequentially with operator-level permissions
-      parameters:
-        - $ref: '#/components/parameters/DirtCallId'
       requestBody:
         required: true
         content:
@@ -559,43 +827,87 @@ paths:
               schema:
                 $ref: '#/components/schemas/RunMinecraftCommandsResponse'
         '400':
-          description: Invalid call ID, JSON, fields, command strings, or command count
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperationDisabled'
         '405':
           $ref: '#/components/responses/PostMethodNotAllowed'
         '500':
-          description: Unexpected command-runner failure; earlier commands may already have taken effect
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/InternalError'
         '503':
-          description: Bridge admission capacity or Paper command execution is unavailable, or the main-thread scheduler boundary could not be crossed
+          description: Bridge admission or Paper command execution is unavailable
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                additionalProperties: false
+                required:
+                  - error
+                properties:
+                  error:
+                    oneOf:
+                      - $ref: '#/components/schemas/BridgeBusyError'
+                      - $ref: '#/components/schemas/ServerUnavailableError'
 components:
   parameters:
     DirtCallId:
       name: X-Dirt-Call-Id
       in: header
       required: true
-      description: UUIDv4 mutation correlation ID. Creating edits retain it as callId; successful undo returns it as undoCallId.
+      description: Caller-generated UUIDv4 for request correlation. Mutations retain it in edit metadata, and undo results return it as undoCallId.
       schema:
         $ref: '#/components/schemas/UuidV4'
   responses:
+    BadRequest:
+      description: The call ID, JSON body, or request fields are invalid
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - error
+            properties:
+              error:
+                $ref: '#/components/schemas/InvalidRequestError'
+    BridgeBusy:
+      description: Authenticated bridge admission capacity is exhausted
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - error
+            properties:
+              error:
+                $ref: '#/components/schemas/BridgeBusyError'
     InternalError:
       description: Unexpected internal failure
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/Error'
+            type: object
+            additionalProperties: false
+            required:
+              - error
+            properties:
+              error:
+                $ref: '#/components/schemas/InternalErrorDetail'
+    OperationDisabled:
+      description: The authenticated caller requested an administratively disabled operation
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - error
+            properties:
+              error:
+                $ref: '#/components/schemas/OperationDisabledError'
     Unauthorized:
       description: Missing or invalid bearer token
       headers:
@@ -606,7 +918,13 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/Error'
+            type: object
+            additionalProperties: false
+            required:
+              - error
+            properties:
+              error:
+                $ref: '#/components/schemas/UnauthorizedError'
     GetMethodNotAllowed:
       description: Method not allowed
       headers:
@@ -616,7 +934,13 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/Error'
+            type: object
+            additionalProperties: false
+            required:
+              - error
+            properties:
+              error:
+                $ref: '#/components/schemas/MethodNotAllowedError'
     PostMethodNotAllowed:
       description: Method not allowed
       headers:
@@ -626,44 +950,21 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/Error'
+            type: object
+            additionalProperties: false
+            required:
+              - error
+            properties:
+              error:
+                $ref: '#/components/schemas/MethodNotAllowedError'
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
   schemas:
-    Error:
-      type: object
-      additionalProperties: false
-      required:
-        - error
-      properties:
-        error:
-          $ref: '#/components/schemas/BridgeError'
-    BridgeError:
-      description: Code-discriminated error. Correctable failures require strict machine-readable details; internal errors deliberately omit them.
-      oneOf:
-        - $ref: '#/components/schemas/BridgeBusyError'
-        - $ref: '#/components/schemas/ChangeLimitExceededError'
-        - $ref: '#/components/schemas/EditNotFoundError'
-        - $ref: '#/components/schemas/EditNotLatestError'
-        - $ref: '#/components/schemas/HistoryCapacityExceededError'
-        - $ref: '#/components/schemas/InternalErrorDetail'
-        - $ref: '#/components/schemas/InvalidRequestError'
-        - $ref: '#/components/schemas/MethodNotAllowedError'
-        - $ref: '#/components/schemas/NotFoundError'
-        - $ref: '#/components/schemas/PlayerNotFoundError'
-        - $ref: '#/components/schemas/PlayerUnavailableError'
-        - $ref: '#/components/schemas/RegionTooLargeError'
-        - $ref: '#/components/schemas/ResultTooLargeError'
-        - $ref: '#/components/schemas/ServerUnavailableError'
-        - $ref: '#/components/schemas/UnauthorizedError'
-        - $ref: '#/components/schemas/UnhealthyError'
-        - $ref: '#/components/schemas/WorldBusyError'
-        - $ref: '#/components/schemas/WorldNotFoundError'
-        - $ref: '#/components/schemas/WorldUnavailableError'
     BridgeErrorCode:
       type: string
+      description: Error codes returned by bridge operations or authenticated route dispatch.
       enum:
         - bridge_busy
         - change_limit_exceeded
@@ -673,11 +974,12 @@ components:
         - internal_error
         - invalid_request
         - method_not_allowed
-        - not_found
+        - operation_disabled
         - player_not_found
         - player_unavailable
         - region_too_large
         - result_too_large
+        - route_not_found
         - server_unavailable
         - unauthorized
         - unhealthy
@@ -692,9 +994,6 @@ components:
       properties:
         code:
           $ref: '#/components/schemas/BridgeErrorCode'
-        editId:
-          description: Edit transaction associated with a failure that may need reconciliation against retained history; an absent history record means no undoable edit remains.
-          $ref: '#/components/schemas/UuidV4'
         message:
           type: string
           minLength: 1
@@ -806,6 +1105,19 @@ components:
             code:
               const: internal_error
       unevaluatedProperties: false
+    MutationInternalError:
+      description: Internal mutation failure whose edit may need reconciliation against retained history.
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - editId
+          properties:
+            code:
+              const: internal_error
+            editId:
+              $ref: '#/components/schemas/UuidV4'
+      unevaluatedProperties: false
     InvalidRequestError:
       allOf:
         - $ref: '#/components/schemas/BridgeErrorBase'
@@ -839,7 +1151,7 @@ components:
                     - GET
                     - POST
       unevaluatedProperties: false
-    NotFoundError:
+    OperationDisabledError:
       allOf:
         - $ref: '#/components/schemas/BridgeErrorBase'
         - type: object
@@ -847,15 +1159,15 @@ components:
             - details
           properties:
             code:
-              const: not_found
+              const: operation_disabled
             details:
               type: object
               additionalProperties: false
               required:
-                - reason
+                - operationId
               properties:
-                reason:
-                  const: route_not_found
+                operationId:
+                  $ref: '#/components/schemas/BridgeOperationId'
       unevaluatedProperties: false
     PlayerNotFoundError:
       allOf:
@@ -1098,6 +1410,22 @@ components:
             details:
               $ref: '#/components/schemas/WorldUnavailableDetails'
       unevaluatedProperties: false
+    MutationWorldUnavailableError:
+      description: Mutation failure whose edit may need reconciliation against retained history.
+      allOf:
+        - $ref: '#/components/schemas/BridgeErrorBase'
+        - type: object
+          required:
+            - details
+            - editId
+          properties:
+            code:
+              const: world_unavailable
+            details:
+              $ref: '#/components/schemas/MutationWorldUnavailableDetails'
+            editId:
+              $ref: '#/components/schemas/UuidV4'
+      unevaluatedProperties: false
     InvalidRequestDetails:
       oneOf:
         - type: object
@@ -1237,10 +1565,16 @@ components:
               minLength: 1
               pattern: '.*\S.*'
             requested:
-              allOf:
-                - $ref: '#/components/schemas/PositiveJsonSafeInteger'
-                - not:
-                    const: 100
+              description: Rejected positive JSON-safe integer total, excluding 100.
+              oneOf:
+                - type: integer
+                  format: int64
+                  minimum: 1
+                  maximum: 99
+                - type: integer
+                  format: int64
+                  minimum: 101
+                  maximum: 9007199254740991
             required:
               const: 100
     RegionTooLargeDetails:
@@ -1399,9 +1733,6 @@ components:
                 - stopping
                 - interrupted
                 - paper_unavailable
-                - operation_failed
-                - rollback_failed
-                - rolled_back
         - type: object
           additionalProperties: false
           required:
@@ -1432,6 +1763,49 @@ components:
               pattern: '.*\S.*'
             chunk:
               $ref: '#/components/schemas/ChunkPosition'
+    MutationWorldUnavailableDetails:
+      description: World-unavailable reasons emitted after a mutation or undo has begun.
+      oneOf:
+        - $ref: '#/components/schemas/WorldUnavailableDetails'
+        - type: object
+          additionalProperties: false
+          required:
+            - reason
+          properties:
+            reason:
+              type: string
+              enum:
+                - operation_failed
+                - rollback_failed
+                - rolled_back
+    BridgeOperationId:
+      type: string
+      description: Configurable bridge operationId; getCapabilities is the mandatory control-plane operation and is not configurable.
+      enum:
+        - pingServer
+        - getServerStatus
+        - countRegionBlockStates
+        - getBlocks
+        - scanOrthographicView
+        - getPlayerContext
+        - getPerspectiveView
+        - replaceRegionBlocks
+        - setBlocks
+        - getEditHistory
+        - undoEdits
+        - runMinecraftCommands
+    CapabilitiesResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - operations
+      properties:
+        operations:
+          type: array
+          uniqueItems: true
+          description: Enabled configurable operation IDs.
+          items:
+            $ref: '#/components/schemas/BridgeOperationId'
     Uuid:
       type: string
       format: uuid
@@ -1565,6 +1939,10 @@ components:
         - world
         - min
         - max
+        - includeBlockStatePatterns
+        - excludeBlockStatePatterns
+        - includeAir
+        - maxResults
       properties:
         world:
           type: string
@@ -1577,6 +1955,7 @@ components:
         includeBlockStatePatterns:
           type: array
           maxItems: 64
+          uniqueItems: true
           description: Block-state patterns to include; include and exclude lists are limited to 64 entries combined.
           items:
             type: string
@@ -1585,6 +1964,7 @@ components:
         excludeBlockStatePatterns:
           type: array
           maxItems: 64
+          uniqueItems: true
           description: Block-state patterns to exclude after include filtering; both lists are limited to 64 entries combined.
           items:
             type: string
@@ -1592,12 +1972,10 @@ components:
             pattern: '.*\S.*'
         includeAir:
           type: boolean
-          description: Include air-family states; omission uses the configured default.
+          description: Whether to include air-family states.
         maxResults:
-          type: integer
-          format: int32
-          minimum: 1
-          description: Maximum placements plus runs; it cannot exceed the configured inspection-result limit.
+          description: Caller ceiling on placements plus runs; Paper also enforces its safety maximum.
+          $ref: '#/components/schemas/PositiveInt32'
     ExactPaletteEntry:
       type: object
       additionalProperties: false
@@ -1685,6 +2063,8 @@ components:
         - horizontalRadius
         - verticalRadius
         - maxDistance
+        - depth
+        - maxResults
       properties:
         world:
           type: string
@@ -1722,70 +2102,60 @@ components:
           type: integer
           format: int32
           minimum: 0
-          default: 0
           description: Zero-based non-air hit to return on each sightline; 0 is the first, 1 is the second, and so on.
         maxResults:
-          type: integer
-          format: int32
-          minimum: 1
-          description: Maximum placements plus runs; omission and maximum use plugin configuration.
+          description: Caller ceiling on placements plus runs; Paper also enforces its safety maximum.
+          $ref: '#/components/schemas/PositiveInt32'
     PlayerSelector:
       type: string
       minLength: 1
       maxLength: 36
       pattern: '.*\S.*'
-      description: Case-insensitive exact online player name (available from get_server_status when enabled) or canonical UUID.
+      description: Case-insensitive exact online player name (available from the server-status response when players are included) or canonical UUID.
     PlayerContextIncludeOptions:
       type: object
       additionalProperties: false
+      required:
+        - equipment
+        - inventory
+        - enderChest
+        - vitals
+        - movement
+        - client
+        - effects
       properties:
         equipment:
           type: boolean
-          default: true
           description: Include the selected hotbar slot, held items, and armor.
         inventory:
           type: boolean
-          default: false
           description: Include occupied player storage slots, excluding equipment and off-hand.
         enderChest:
           type: boolean
-          default: false
           description: Include occupied ender-chest slots.
         vitals:
           type: boolean
-          default: false
           description: Include health, food, air, experience, fire, and freeze state.
         movement:
           type: boolean
-          default: false
           description: Include velocity, flight state, and movement/posture flags.
         client:
           type: boolean
-          default: false
           description: Include ping, locale, and client/server view distances.
         effects:
           type: boolean
-          default: false
           description: Include sorted active potion effects.
     GetPlayerContextRequest:
       type: object
       additionalProperties: false
       required:
         - player
+        - include
       properties:
         player:
           $ref: '#/components/schemas/PlayerSelector'
         include:
-          allOf:
-            - $ref: '#/components/schemas/PlayerContextIncludeOptions'
-          default:
-            equipment: true
-            inventory: false
-            enderChest: false
-            vitals: false
-            movement: false
-            client: false
-            effects: false
+          $ref: '#/components/schemas/PlayerContextIncludeOptions'
     ExactPosition:
       type: object
       additionalProperties: false
@@ -1895,6 +2265,12 @@ components:
       additionalProperties: false
       required:
         - source
+        - width
+        - height
+        - verticalFieldOfViewDegrees
+        - maxDistance
+        - fluidCollision
+        - ignorePassableBlocks
       properties:
         source:
           $ref: '#/components/schemas/PerspectiveSource'
@@ -1903,7 +2279,6 @@ components:
           format: int32
           minimum: 1
           maximum: 255
-          default: 21
           description: Odd number of left-to-right ray columns.
           not:
             multipleOf: 2
@@ -1912,7 +2287,6 @@ components:
           format: int32
           minimum: 1
           maximum: 255
-          default: 13
           description: Odd number of top-to-bottom ray rows.
           not:
             multipleOf: 2
@@ -1921,14 +2295,12 @@ components:
           format: int32
           minimum: 1
           maximum: 170
-          default: 70
           description: Vertical projection angle. Paper cannot observe a client's configured or dynamically modified FOV.
         maxDistance:
           type: integer
           format: int32
           minimum: 1
           maximum: 128
-          default: 32
           description: Maximum Euclidean block-ray distance from cameraPosition.
         fluidCollision:
           type: string
@@ -1936,10 +2308,8 @@ components:
             - never
             - source_only
             - always
-          default: never
         ignorePassableBlocks:
           type: boolean
-          default: false
           description: Whether passable but collidable blocks are ignored by Paper ray tracing.
     PerspectiveViewBasis:
       type: object
@@ -1973,11 +2343,15 @@ components:
           format: int32
           minimum: 1
           maximum: 255
+          not:
+            multipleOf: 2
         height:
           type: integer
           format: int32
           minimum: 1
           maximum: 255
+          not:
+            multipleOf: 2
         verticalFieldOfViewDegrees:
           type: integer
           format: int32
@@ -2531,7 +2905,7 @@ components:
           type: string
           minLength: 1
           pattern: '.*\S.*'
-          description: Exact canonical block state to place.
+          description: Block-state string that Paper resolves to the exact state to place; omitted properties use Paper defaults.
         weight:
           type: integer
           minimum: 1
@@ -2603,6 +2977,9 @@ components:
         - max
         - sourceBlockStatePatterns
         - destinationPalette
+        - seed
+        - dryRun
+        - maxChangedBlocks
       properties:
         world:
           type: string
@@ -2628,20 +3005,20 @@ components:
           type: array
           minItems: 1
           maxItems: 256
-          description: Exact destination states; weights are all omitted for equal probability or all total 100.
+          description: Destination block-state inputs resolved by Paper; weights are all omitted for equal probability or all total 100.
           items:
             $ref: '#/components/schemas/DestinationPaletteEntry'
         seed:
-          type: integer
-          format: int32
-          description: A supplied seed is echoed in the response; omission generates and returns a fresh seed.
+          description: Deterministic int32 palette seed selected by the caller.
+          $ref: '#/components/schemas/Int32'
         dryRun:
           type: boolean
-          description: True requires a preview outcome, false excludes preview, and omission uses the configured replace default.
+          description: True previews without mutation; false applies and records non-empty changes.
         maxChangedBlocks:
-          allOf:
+          description: Caller ceiling on changed blocks, or null to use the server-selected ceiling.
+          oneOf:
             - $ref: '#/components/schemas/PositiveInt32'
-          description: Optional caller ceiling on the changed-block count. Dirt enforces the lower of this value and the configured maximum during exact preflight and FAWE execution; live drift uses normal rollback or recovery handling.
+            - type: 'null'
     ReplaceRegionBlocksResponse:
       type: object
       additionalProperties: false
@@ -2674,8 +3051,6 @@ components:
       required:
         - world
         - bounds
-        - sourceBlockStatePatterns
-        - destinationPalette
         - seed
         - outcome
         - edit
@@ -2688,25 +3063,10 @@ components:
         bounds:
           description: Normalized inclusive bounds from the requested corners.
           $ref: '#/components/schemas/Bounds'
-        sourceBlockStatePatterns:
-          type: array
-          minItems: 1
-          maxItems: 64
-          uniqueItems: true
-          items:
-            type: string
-            minLength: 1
-            pattern: '.*\S.*'
-        destinationPalette:
-          type: array
-          minItems: 1
-          maxItems: 256
-          items:
-            $ref: '#/components/schemas/DestinationPaletteEntry'
         seed:
           type: integer
           format: int32
-          description: Supplied request seed, or the generated seed when the request omitted one.
+          description: Supplied request seed.
         outcome:
           type: string
           description: Explicit dryRun=true requires preview; false excludes preview.
@@ -2738,6 +3098,9 @@ components:
         - palettes
         - placements
         - runs
+        - seed
+        - dryRun
+        - maxChangedBlocks
       properties:
         world:
           type: string
@@ -2755,7 +3118,7 @@ components:
             type: array
             minItems: 1
             maxItems: 256
-            description: Exact states; weights are all omitted for equal probability or all supplied as whole percentages totaling 100.
+            description: Block-state inputs resolved by Paper; weights are all omitted for equal probability or all supplied as whole percentages totaling 100.
             items:
               $ref: '#/components/schemas/DestinationPaletteEntry'
         placements:
@@ -2769,16 +3132,16 @@ components:
           items:
             $ref: '#/components/schemas/PaletteRun'
         seed:
-          type: integer
-          format: int32
-          description: A supplied seed is echoed in the response; omission generates and returns a fresh seed.
+          description: Deterministic int32 palette seed selected by the caller.
+          $ref: '#/components/schemas/Int32'
         dryRun:
           type: boolean
-          description: True requires a preview outcome, false excludes preview, and omission uses the configured set-blocks default.
+          description: True previews without mutation; false applies and records non-empty changes.
         maxChangedBlocks:
-          allOf:
+          description: Caller ceiling on changed blocks, or null to use the server-selected ceiling.
+          oneOf:
             - $ref: '#/components/schemas/PositiveInt32'
-          description: Optional caller ceiling on the changed-block count. Dirt enforces the lower of this value and the configured maximum during exact preflight and FAWE execution; live drift uses normal rollback or recovery handling.
+            - type: 'null'
     SetBlocksResponse:
       type: object
       additionalProperties: false
@@ -2811,7 +3174,6 @@ components:
       required:
         - world
         - bounds
-        - palettes
         - seed
         - outcome
         - edit
@@ -2827,20 +3189,10 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Bounds'
             - type: 'null'
-        palettes:
-          type: array
-          maxItems: 256
-          description: Canonical palettes used by the edit, or an empty array for empty geometry.
-          items:
-            type: array
-            minItems: 1
-            maxItems: 256
-            items:
-              $ref: '#/components/schemas/DestinationPaletteEntry'
         seed:
           type: integer
           format: int32
-          description: Supplied request seed, or the generated seed when the request omitted one.
+          description: Supplied request seed.
         outcome:
           type: string
           description: Explicit dryRun=true requires preview; false excludes preview.
@@ -2913,19 +3265,32 @@ components:
           items:
             $ref: '#/components/schemas/UuidV4'
     UndoEditsResponse:
+      description: Result discriminated by whether every requested edit was undone.
+      oneOf:
+        - $ref: '#/components/schemas/UndoEditsCompletedResult'
+        - $ref: '#/components/schemas/UndoEditsPartialResult'
+      discriminator:
+        propertyName: outcome
+        mapping:
+          completed: '#/components/schemas/UndoEditsCompletedResult'
+          partial: '#/components/schemas/UndoEditsPartialResult'
+    UndoEditsCompletedResult:
       type: object
       additionalProperties: false
       required:
+        - outcome
         - world
-        - edits
+        - undoneEdits
         - undoCallId
         - undoneAt
       properties:
+        outcome:
+          const: completed
         world:
           type: string
           minLength: 1
           pattern: '.*\S.*'
-        edits:
+        undoneEdits:
           type: array
           minItems: 1
           uniqueItems: true
@@ -2938,26 +3303,36 @@ components:
           type: string
           format: date-time
           description: Timestamp recorded after the complete requested prefix was undone.
-    UndoEditsRuntimeError:
+    UndoEditsPartialResult:
       type: object
       additionalProperties: false
-      description: Runtime undo failure after exact-prefix validation. Successful earlier undos remain consumed; error.editId identifies the current retained edit that failed.
+      description: Runtime failure after prefix validation; successful earlier undos remain consumed.
       required:
-        - error
+        - outcome
+        - world
+        - undoCallId
         - undoneEdits
+        - failure
       properties:
-        error:
-          allOf:
-            - $ref: '#/components/schemas/BridgeError'
-            - type: object
-              required:
-                - editId
+        outcome:
+          const: partial
+        world:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+        undoCallId:
+          $ref: '#/components/schemas/UuidV4'
         undoneEdits:
           type: array
           uniqueItems: true
-          description: Successfully restored and consumed prefix before the failure, newest first. Present and empty when the first requested edit failed during execution.
+          description: Successfully restored and consumed prefix before the failure, newest first; empty when the first edit failed.
           items:
             $ref: '#/components/schemas/EditRecord'
+        failure:
+          description: Failure for the retained edit identified by failure.editId.
+          oneOf:
+            - $ref: '#/components/schemas/MutationInternalError'
+            - $ref: '#/components/schemas/MutationWorldUnavailableError'
     RunMinecraftCommandsRequest:
       type: object
       additionalProperties: false
@@ -3104,15 +3479,12 @@ components:
           description: Non-empty attempted prefix in original order. All non-final results are dispatched; the final result is the first failure, or every supplied command was dispatched.
           items:
             $ref: '#/components/schemas/CommandResult'
-    LimitConfiguration:
+    OperationLimitConfiguration:
       type: object
       additionalProperties: false
       required:
-        - maxConcurrentRequests
-        - maxConcurrentInspections
-        - maxRequestBytes
         - maxRegionVolume
-        - maxTouchedChunks
+        - maxEditTouchedChunks
         - maxInspectionTouchedChunks
         - maxPerspectiveTouchedChunks
         - maxBlockStatePatterns
@@ -3120,34 +3492,17 @@ components:
         - maxChangedBlocks
         - maxInspectionVolume
         - maxPerspectiveRayDistanceBudget
-        - defaultInspectionResultLimit
         - maxInspectionResultLimit
         - maxPerspectiveRays
         - maxCommandsPerRequest
         - maxCommandFeedbackCharacters
       properties:
-        maxConcurrentRequests:
-          type: integer
-          format: int32
-          minimum: 1
-          description: Maximum authenticated bridge requests allowed to execute concurrently.
-        maxConcurrentInspections:
-          type: integer
-          format: int32
-          minimum: 1
-          description: Maximum region and perspective inspections allowed to execute concurrently; cannot exceed maxConcurrentRequests.
-        maxRequestBytes:
-          type: integer
-          format: int32
-          minimum: 1
-          maximum: 2147483646
-          description: Maximum JSON request-body size accepted by the bridge; capped below the signed 32-bit maximum so over-limit detection cannot overflow.
         maxRegionVolume:
           type: integer
           format: int32
           minimum: 1
           description: Maximum cuboid mutation/count volume or placements in set_blocks.
-        maxTouchedChunks:
+        maxEditTouchedChunks:
           type: integer
           format: int32
           minimum: 1
@@ -3156,7 +3511,7 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum distinct loaded chunks a region inspection may snapshot; cannot exceed maxTouchedChunks.
+          description: Maximum distinct loaded chunks a region inspection may snapshot.
         maxPerspectiveTouchedChunks:
           type: integer
           format: int32
@@ -3189,11 +3544,6 @@ components:
           format: int32
           minimum: 1
           description: Maximum perspective ray count multiplied by maximum ray distance.
-        defaultInspectionResultLimit:
-          type: integer
-          format: int32
-          minimum: 1
-          description: Default placement-plus-run limit for get_blocks and orthographic structures; cannot exceed maxInspectionResultLimit.
         maxInspectionResultLimit:
           type: integer
           format: int32
@@ -3236,88 +3586,19 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum sum of changed-block counts across all retained undoable edits; must be at least LimitConfiguration.maxChangedBlocks.
-    DefaultConfiguration:
+          description: Maximum sum of changed-block counts across all retained undoable edits; must be at least OperationLimitConfiguration.maxChangedBlocks.
+    ServerStatusConfiguration:
       type: object
       additionalProperties: false
+      description: Client-relevant operation limits; excludes transport, concurrency, logging, defaults, and MCP policy.
       required:
-        - getBlocksIncludeAir
-        - editDryRun
+        - limits
+        - editHistory
       properties:
-        getBlocksIncludeAir:
-          type: boolean
-        editDryRun:
-          type: boolean
-          description: Default dry-run behavior for every Dirt block-edit tool.
-    LoggingConfiguration:
-      type: object
-      additionalProperties: false
-      description: Active operator-console threshold and rotating Paper detail-log limits.
-      required:
-        - consoleLevel
-        - detailFileMaxBytes
-        - detailFileRetainedFiles
-      properties:
-        consoleLevel:
-          type: string
-          enum:
-            - info
-            - warning
-            - error
-          description: Minimum severity emitted to the Paper server console.
-        detailFileMaxBytes:
-          type: integer
-          format: int32
-          minimum: 1
-          description: Approximate maximum bytes in each Paper JSONL detail-log generation before rotation.
-        detailFileRetainedFiles:
-          type: integer
-          format: int32
-          minimum: 2
-          maximum: 100
-          description: Number of rotating Paper JSONL detail-log generations retained, including the active generation.
-    ToolConfiguration:
-      type: object
-      additionalProperties: false
-      description: Resolved MCP tool allowlist. Every flag is reported; a tool omitted from YAML resolves to false.
-      required:
-        - ping_server
-        - get_server_status
-        - count_region_block_states
-        - get_blocks
-        - scan_orthographic_view
-        - get_player_context
-        - get_perspective_view
-        - replace_region_blocks
-        - set_blocks
-        - get_edit_history
-        - undo_edits
-        - run_minecraft_commands
-      properties:
-        ping_server:
-          type: boolean
-        get_server_status:
-          type: boolean
-        count_region_block_states:
-          type: boolean
-        get_blocks:
-          type: boolean
-        scan_orthographic_view:
-          type: boolean
-        get_player_context:
-          type: boolean
-        get_perspective_view:
-          type: boolean
-        replace_region_blocks:
-          type: boolean
-        set_blocks:
-          type: boolean
-        get_edit_history:
-          type: boolean
-        undo_edits:
-          type: boolean
-        run_minecraft_commands:
-          type: boolean
+        limits:
+          $ref: '#/components/schemas/OperationLimitConfiguration'
+        editHistory:
+          $ref: '#/components/schemas/EditHistoryConfiguration'
     PingResponse:
       type: object
       additionalProperties: false
@@ -3332,7 +3613,7 @@ components:
       required:
         - minecraft
         - paper
-        - dirtMcp
+        - dirtPlugin
         - fawe
       properties:
         minecraft:
@@ -3341,7 +3622,7 @@ components:
         paper:
           type: string
           minLength: 1
-        dirtMcp:
+        dirtPlugin:
           type: string
           minLength: 1
         fawe:
@@ -3456,6 +3737,20 @@ components:
           type: integer
           format: int32
           minimum: 0
+    ServerStatusRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - includePlayers
+        - includeWorlds
+        - includeConfiguration
+      properties:
+        includePlayers:
+          type: boolean
+        includeWorlds:
+          type: boolean
+        includeConfiguration:
+          type: boolean
     ServerStatusResponse:
       type: object
       additionalProperties: false
@@ -3464,29 +3759,26 @@ components:
         - performance
         - players
         - worlds
-        - limits
-        - editHistory
-        - defaults
-        - logging
-        - tools
+        - configuration
       properties:
         builds:
           $ref: '#/components/schemas/ServerBuilds'
         performance:
           $ref: '#/components/schemas/ServerPerformance'
         players:
-          $ref: '#/components/schemas/PlayerSummary'
+          description: Player summary when requested; otherwise null.
+          oneOf:
+            - $ref: '#/components/schemas/PlayerSummary'
+            - type: 'null'
         worlds:
-          type: array
-          items:
-            $ref: '#/components/schemas/WorldStatus'
-        limits:
-          $ref: '#/components/schemas/LimitConfiguration'
-        editHistory:
-          $ref: '#/components/schemas/EditHistoryConfiguration'
-        defaults:
-          $ref: '#/components/schemas/DefaultConfiguration'
-        logging:
-          $ref: '#/components/schemas/LoggingConfiguration'
-        tools:
-          $ref: '#/components/schemas/ToolConfiguration'
+          description: Loaded worlds when requested; otherwise null.
+          oneOf:
+            - type: array
+              items:
+                $ref: '#/components/schemas/WorldStatus'
+            - type: 'null'
+        configuration:
+          description: Client-relevant operation configuration when requested; otherwise null.
+          oneOf:
+            - $ref: '#/components/schemas/ServerStatusConfiguration'
+            - type: 'null'

@@ -13,22 +13,23 @@ bridge:
   max-concurrent-requests: 32
   # Maximum concurrent inspections; cannot exceed max-concurrent-requests.
   max-concurrent-inspections: 4
-
-# MCP tool allowlist. Only tools explicitly set to true are exposed; a missing
-# section or key defaults to false.
-tools:
-  ping_server: true
-  get_server_status: true
-  count_region_block_states: true
-  get_blocks: true
-  scan_orthographic_view: true
-  get_player_context: true
-  get_perspective_view: true
-  replace_region_blocks: true
-  set_blocks: true
-  get_edit_history: true
-  undo_edits: true
-  run_minecraft_commands: true
+  # Maximum JSON request body (1-67108864 bytes). Oversized requests fail before parsing or mutation.
+  max-request-bytes: 1048576
+  # Authenticated bridge operations admitted by Paper. Values are exact OpenAPI
+  # operationIds; an empty list disables every operation except capabilities.
+  allowed-operations:
+    - pingServer
+    - getServerStatus
+    - countRegionBlockStates
+    - getBlocks
+    - scanOrthographicView
+    - getPlayerContext
+    - getPerspectiveView
+    - replaceRegionBlocks
+    - setBlocks
+    - getEditHistory
+    - undoEdits
+    - runMinecraftCommands
 
 logging:
   # Minimum severity shown in the Paper console: info, warning, or error.
@@ -40,12 +41,10 @@ logging:
   detail-file-retained-files: 5
 
 limits:
-  # Maximum JSON request body. Oversized requests fail before parsing or mutation.
-  max-request-bytes: 1048576
   # Maximum inclusive cuboid volume or expanded set-blocks geometry in one operation.
   max-region-volume: 1048576
   # Maximum distinct loaded chunks one edit may touch.
-  max-touched-chunks: 512
+  max-edit-touched-chunks: 512
   # Maximum distinct loaded chunks one region inspection may snapshot.
   max-inspection-touched-chunks: 128
   # Maximum distinct loaded chunks one perspective ray set may check.
@@ -60,10 +59,7 @@ limits:
   max-inspection-volume: 262144
   # Maximum conservative perspective ray-count x distance work budget.
   max-perspective-ray-distance-budget: 131072
-  # get_blocks structure-entry and orthographic maxResults used when omitted;
-  # cannot exceed max-inspection-results.
-  default-inspection-results: 1024
-  # Highest get_blocks structure-entry or orthographic maxResults.
+  # Highest exact-structure entry or orthographic maxResults.
   max-inspection-results: 4096
   # Maximum rays in one perspective view.
   max-perspective-rays: 2048
@@ -80,9 +76,3 @@ edit-history:
   # Sum of changed blocks across retained undo entries; must accommodate one
   # max-changed-blocks edit.
   max-retained-changed-blocks: 2621440
-
-defaults:
-  # Whether get_blocks includes air-family states when includeAir is omitted.
-  get-blocks-include-air: false
-  # Dry-run value used when a block-edit request omits dryRun.
-  edit-dry-run: false

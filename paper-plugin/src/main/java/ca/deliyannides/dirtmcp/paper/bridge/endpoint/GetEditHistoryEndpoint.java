@@ -15,8 +15,8 @@ public final class GetEditHistoryEndpoint implements BridgeEndpoint {
     }
 
     @Override
-    public String operation() {
-        return "get_edit_history";
+    public String operationId() {
+        return "getEditHistory";
     }
 
     @Override
@@ -32,8 +32,10 @@ public final class GetEditHistoryEndpoint implements BridgeEndpoint {
     @Override
     public void handle(BridgeExchange exchange) throws IOException, OperationException {
         GetEditHistory.Request request = GetEditHistoryRequestDecoder.decode(exchange);
-        exchange.world(request.world());
-        exchange.ok(this.operation.getEditHistory(request));
+        exchange.auditField("world", request.world());
+        GetEditHistory.Result result = this.operation.getEditHistory(request);
+        exchange.auditField("result_count", result.edits().size());
+        exchange.ok(result);
     }
 
     @Override

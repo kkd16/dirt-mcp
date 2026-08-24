@@ -5,10 +5,9 @@ import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.Builds;
-import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.EffectiveDefaults;
+import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.EffectiveConfiguration;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.EffectiveEditHistory;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.EffectiveLimits;
-import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.EffectiveLogging;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.OnlinePlayer;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.Performance;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus.PlayerSummary;
@@ -79,20 +78,27 @@ public final class BukkitServerStatusAccess implements PaperServerStatusService.
     }
 
     @Override
-    public GetServerStatus.Result captureStatus() throws OperationException {
+    public GetServerStatus.Result captureStatus(GetServerStatus.Request request)
+            throws OperationException {
+        Objects.requireNonNull(request, "request");
         Server server = this.plugin.getServer();
         Plugin fawe = requireFawe(server, OperationFailure.SERVER_UNAVAILABLE);
-        List<OnlinePlayer> players =
-                server.getOnlinePlayers().stream()
-                        .map(BukkitServerStatusAccess::onlinePlayer)
-                        .sorted((left, right) -> left.name().compareToIgnoreCase(right.name()))
-                        .toList();
+        PlayerSummary players = null;
+        if (request.includePlayers()) {
+            List<OnlinePlayer> entries =
+                    server.getOnlinePlayers().stream()
+                            .map(BukkitServerStatusAccess::onlinePlayer)
+                            .sorted((left, right) -> left.name().compareToIgnoreCase(right.name()))
+                            .toList();
+            players = new PlayerSummary(entries.size(), server.getMaxPlayers(), entries);
+        }
         List<WorldStatus> worlds =
-                server.getWorlds().stream().map(BukkitServerStatusAccess::worldStatus).toList();
+                request.includeWorlds()
+                        ? server.getWorlds().stream()
+                                .map(BukkitServerStatusAccess::worldStatus)
+                                .toList()
+                        : null;
         double[] tps = server.getTPS();
-        DirtConfig.Limits limits = this.config.limits();
-        DirtConfig.EditHistory editHistory = this.config.editHistory();
-        DirtConfig.Defaults defaults = this.config.defaults();
         return new GetServerStatus.Result(
                 new Builds(
                         server.getMinecraftVersion(),
@@ -100,19 +106,18 @@ public final class BukkitServerStatusAccess implements PaperServerStatusService.
                         this.plugin.getPluginMeta().getVersion(),
                         fawe.getPluginMeta().getVersion()),
                 new Performance(tps[0], server.getAverageTickTime()),
-                new PlayerSummary(players.size(), server.getMaxPlayers(), players),
+                players,
                 worlds,
-                this.config.tools().flags(),
-                new EffectiveLogging(
-                        this.config.logging().consoleLevel().configName(),
-                        this.config.logging().detailFileMaxBytes(),
-                        this.config.logging().detailFileRetainedFiles()),
+                request.includeConfiguration() ? configuration() : null);
+    }
+
+    private EffectiveConfiguration configuration() {
+        DirtConfig.Limits limits = this.config.limits();
+        DirtConfig.EditHistory editHistory = this.config.editHistory();
+        return new EffectiveConfiguration(
                 new EffectiveLimits(
-                        this.config.bridge().maxConcurrentRequests(),
-                        this.config.bridge().maxConcurrentInspections(),
-                        limits.maxRequestBytes(),
                         limits.maxRegionVolume(),
-                        limits.maxTouchedChunks(),
+                        limits.maxEditTouchedChunks(),
                         limits.maxInspectionTouchedChunks(),
                         limits.maxPerspectiveTouchedChunks(),
                         limits.maxBlockStatePatterns(),
@@ -120,7 +125,6 @@ public final class BukkitServerStatusAccess implements PaperServerStatusService.
                         limits.maxChangedBlocks(),
                         limits.maxInspectionVolume(),
                         limits.maxPerspectiveRayDistanceBudget(),
-                        limits.defaultInspectionResultLimit(),
                         limits.maxInspectionResultLimit(),
                         limits.maxPerspectiveRays(),
                         limits.maxCommandsPerRequest(),
@@ -128,8 +132,7 @@ public final class BukkitServerStatusAccess implements PaperServerStatusService.
                 new EffectiveEditHistory(
                         editHistory.maxEntriesPerWorld(),
                         editHistory.maxEntriesTotal(),
-                        editHistory.maxRetainedChangedBlocks()),
-                new EffectiveDefaults(defaults.getBlocksIncludeAir(), defaults.editDryRun()));
+                        editHistory.maxRetainedChangedBlocks()));
     }
 
     private static Plugin requireFawe(Server server, OperationFailure failure)

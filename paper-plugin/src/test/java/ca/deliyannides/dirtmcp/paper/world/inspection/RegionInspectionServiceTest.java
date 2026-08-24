@@ -247,7 +247,7 @@ final class RegionInspectionServiceTest {
     }
 
     @Test
-    void capsRawPatternCountAndDeduplicatesBeforePaperCapture() throws Exception {
+    void capsPatternCountAndRejectsDuplicatesBeforePaperCapture() throws Exception {
         FakeSnapshotSource source = new FakeSnapshotSource();
         RegionInspectionService service =
                 new RegionInspectionService(
@@ -267,16 +267,23 @@ final class RegionInspectionServiceTest {
                 assertThrows(OperationException.class, () -> service.getBlocks(tooMany)).failure());
         assertFalse(source.captured);
 
-        service.getBlocks(
-                new GetBlocks.Request(
-                        "world",
-                        position(0, 0, 0),
-                        position(0, 0, 0),
-                        List.of("stone", "stone"),
-                        List.of(),
-                        false,
-                        1));
-        assertEquals(List.of("stone"), source.includes);
+        OperationException duplicate =
+                assertThrows(
+                        OperationException.class,
+                        () ->
+                                service.getBlocks(
+                                        new GetBlocks.Request(
+                                                "world",
+                                                position(0, 0, 0),
+                                                position(0, 0, 0),
+                                                List.of("stone", "stone"),
+                                                List.of(),
+                                                false,
+                                                1)));
+        assertEquals(
+                new ErrorDetails.InvalidRequest.Duplicate("includeBlockStatePatterns[1]"),
+                duplicate.details().orElseThrow());
+        assertFalse(source.captured);
     }
 
     @Test
@@ -434,8 +441,10 @@ final class RegionInspectionServiceTest {
                                                 "world",
                                                 position(0, 0, 0),
                                                 position(0, 0, 0),
-                                                java.util.Collections.nCopies(5, "stone"),
-                                                java.util.Collections.nCopies(4, "dirt"),
+                                                List.of(
+                                                        "stone0", "stone1", "stone2", "stone3",
+                                                        "stone4"),
+                                                List.of("dirt0", "dirt1", "dirt2", "dirt3"),
                                                 false,
                                                 1)));
         assertEquals(
@@ -452,21 +461,6 @@ final class RegionInspectionServiceTest {
         assertEquals(
                 OperationFailure.INVALID_REQUEST,
                 assertThrows(OperationException.class, () -> service.getBlocks(null)).failure());
-        assertEquals(
-                OperationFailure.INVALID_REQUEST,
-                assertThrows(
-                                OperationException.class,
-                                () ->
-                                        service.getBlocks(
-                                                new GetBlocks.Request(
-                                                        "world",
-                                                        position(0, 0, 0),
-                                                        position(0, 0, 0),
-                                                        java.util.Collections.singletonList(null),
-                                                        List.of(),
-                                                        false,
-                                                        1)))
-                        .failure());
         assertEquals(
                 OperationFailure.INVALID_REQUEST,
                 assertThrows(

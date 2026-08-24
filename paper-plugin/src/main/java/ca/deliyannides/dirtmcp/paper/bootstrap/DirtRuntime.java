@@ -1,6 +1,7 @@
 package ca.deliyannides.dirtmcp.paper.bootstrap;
 
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeServer;
+import ca.deliyannides.dirtmcp.paper.bridge.endpoint.CapabilitiesEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.CountRegionBlockStatesEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetEditHistoryEndpoint;
@@ -22,8 +23,9 @@ import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.platform.PaperMainThread;
 import ca.deliyannides.dirtmcp.paper.status.BukkitServerStatusAccess;
 import ca.deliyannides.dirtmcp.paper.status.PaperServerStatusService;
-import ca.deliyannides.dirtmcp.paper.world.edit.FaweWorldEditor;
+import ca.deliyannides.dirtmcp.paper.world.edit.PaperWorldEditServiceFactory;
 import ca.deliyannides.dirtmcp.paper.world.edit.WorldEditLifecycleListener;
+import ca.deliyannides.dirtmcp.paper.world.edit.WorldEditService;
 import ca.deliyannides.dirtmcp.paper.world.inspection.BukkitPerspectiveViewAccess;
 import ca.deliyannides.dirtmcp.paper.world.inspection.BukkitPlayerContextAccess;
 import ca.deliyannides.dirtmcp.paper.world.inspection.InspectionAdmission;
@@ -43,7 +45,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 /** Owns the Paper plugin's services and their shutdown order. */
 public final class DirtRuntime implements AutoCloseable {
     private final PaperMainThread mainThread;
-    private final FaweWorldEditor worldEditor;
+    private final WorldEditService worldEditor;
     private final WorldEditLifecycleListener worldLifecycle;
     private final BridgeServer bridge;
     private final DirtLog log;
@@ -51,7 +53,7 @@ public final class DirtRuntime implements AutoCloseable {
 
     private DirtRuntime(
             PaperMainThread mainThread,
-            FaweWorldEditor worldEditor,
+            WorldEditService worldEditor,
             WorldEditLifecycleListener worldLifecycle,
             BridgeServer bridge,
             DirtLog log) {
@@ -71,7 +73,7 @@ public final class DirtRuntime implements AutoCloseable {
         Objects.requireNonNull(log, "log");
 
         PaperMainThread mainThread = new PaperMainThread(plugin);
-        FaweWorldEditor worldEditor = null;
+        WorldEditService worldEditor = null;
         WorldEditLifecycleListener worldLifecycle = null;
         BridgeServer bridge = null;
         try {
@@ -93,16 +95,17 @@ public final class DirtRuntime implements AutoCloseable {
                             inspectionAdmission);
             PaperPlayerContextService playerContext =
                     new PaperPlayerContextService(
-                            mainThread, new BukkitPlayerContextAccess(plugin.getServer()));
+                            mainThread,
+                            new BukkitPlayerContextAccess(plugin.getServer()),
+                            inspectionAdmission);
             PaperPerspectiveViewService perspectiveView =
                     new PaperPerspectiveViewService(
                             mainThread,
-                            new BukkitPerspectiveViewAccess(
-                                    plugin.getServer(),
-                                    limits.maxPerspectiveRays(),
-                                    limits.maxPerspectiveRayDistanceBudget(),
-                                    limits.maxPerspectiveTouchedChunks()),
-                            inspectionAdmission);
+                            new BukkitPerspectiveViewAccess(plugin.getServer()),
+                            inspectionAdmission,
+                            limits.maxPerspectiveRays(),
+                            limits.maxPerspectiveRayDistanceBudget(),
+                            limits.maxPerspectiveTouchedChunks());
             PaperCommandService commands =
                     new PaperCommandService(
                             mainThread,
@@ -110,7 +113,8 @@ public final class DirtRuntime implements AutoCloseable {
                             limits.maxCommandsPerRequest(),
                             limits.maxCommandFeedbackCharacters());
             worldEditor =
-                    new FaweWorldEditor(plugin, mainThread, limits, config.editHistory(), log);
+                    PaperWorldEditServiceFactory.create(
+                            plugin, mainThread, limits, config.editHistory(), log);
             worldLifecycle = new WorldEditLifecycleListener(worldEditor);
             plugin.getServer().getPluginManager().registerEvents(worldLifecycle, plugin);
 
@@ -119,15 +123,16 @@ public final class DirtRuntime implements AutoCloseable {
                             config,
                             bearerToken,
                             List.of(
+                                    new CapabilitiesEndpoint(config.bridge().allowedOperations()),
                                     new PingEndpoint(status),
                                     new ServerStatusEndpoint(status),
                                     new CountRegionBlockStatesEndpoint(inspection),
-                                    new GetBlocksEndpoint(inspection, config),
-                                    new ScanOrthographicViewEndpoint(inspection, config),
+                                    new GetBlocksEndpoint(inspection),
+                                    new ScanOrthographicViewEndpoint(inspection),
                                     new GetPlayerContextEndpoint(playerContext),
                                     new GetPerspectiveViewEndpoint(perspectiveView),
-                                    new ReplaceRegionBlocksEndpoint(worldEditor, config),
-                                    new SetBlocksEndpoint(worldEditor, config),
+                                    new ReplaceRegionBlocksEndpoint(worldEditor),
+                                    new SetBlocksEndpoint(worldEditor),
                                     new GetEditHistoryEndpoint(worldEditor),
                                     new UndoEditsEndpoint(worldEditor),
                                     new RunMinecraftCommandsEndpoint(commands)),
@@ -143,7 +148,9 @@ public final class DirtRuntime implements AutoCloseable {
             LogContext context =
                     LogContext.of("plugin_version", plugin.getPluginMeta().getVersion())
                             .with("port", bridge.boundPort())
-                            .with("enabled_tool_count", config.tools().enabled().size())
+                            .with(
+                                    "allowed_operation_count",
+                                    config.bridge().allowedOperations().size())
                             .with("detail_file_available", log.hasDetailFile());
             log.info("runtime", "runtime.started", message, context);
             return new DirtRuntime(mainThread, worldEditor, worldLifecycle, bridge, log);
@@ -191,7 +198,7 @@ public final class DirtRuntime implements AutoCloseable {
                                 event.registrar()
                                         .register(
                                                 adminCommand.command(),
-                                                "Inspect Dirt MCP status, configuration, and tools"));
+                                                "Inspect Dirt MCP status and configuration"));
     }
 
     @Override

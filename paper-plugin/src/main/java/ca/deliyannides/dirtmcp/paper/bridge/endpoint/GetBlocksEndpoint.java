@@ -2,7 +2,6 @@ package ca.deliyannides.dirtmcp.paper.bridge.endpoint;
 
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
-import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ExactBlockStructure;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks;
@@ -11,16 +10,14 @@ import java.util.Objects;
 
 public final class GetBlocksEndpoint implements BridgeEndpoint {
     private final GetBlocks operation;
-    private final DirtConfig config;
 
-    public GetBlocksEndpoint(GetBlocks operation, DirtConfig config) {
+    public GetBlocksEndpoint(GetBlocks operation) {
         this.operation = Objects.requireNonNull(operation, "operation");
-        this.config = Objects.requireNonNull(config, "config");
     }
 
     @Override
-    public String operation() {
-        return "get_blocks";
+    public String operationId() {
+        return "getBlocks";
     }
 
     @Override
@@ -35,10 +32,10 @@ public final class GetBlocksEndpoint implements BridgeEndpoint {
 
     @Override
     public void handle(BridgeExchange exchange) throws IOException, OperationException {
-        GetBlocks.Request request = GetBlocksRequestDecoder.decode(exchange, this.config);
-        exchange.world(request.world());
+        GetBlocks.Request request = GetBlocksRequestDecoder.decode(exchange);
+        exchange.auditField("world", request.world());
         ExactBlockStructure result = this.operation.getBlocks(request);
-        exchange.bounds(request.min(), request.max());
+        exchange.auditField("result_count", result.blockCount());
         exchange.ok(result);
     }
 

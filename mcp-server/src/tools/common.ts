@@ -5,8 +5,6 @@ export const INT32_MIN = -2_147_483_648;
 export const INT32_MAX = 2_147_483_647;
 export const MAX_BLOCK_STATE_PATTERNS = 64;
 export const MAX_PALETTE_ENTRIES = 256;
-export const BLOCK_AXES = ['x', 'y', 'z'] as const;
-
 const CANONICAL_UUID = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/;
 
 export const SignedInt32Schema = z.number().int().min(INT32_MIN).max(INT32_MAX);
@@ -14,7 +12,7 @@ const PaletteIndexSchema = z.number().int().min(0).max(INT32_MAX);
 
 export const PalettePlacementSchema = z
   .tuple([PaletteIndexSchema, SignedInt32Schema, SignedInt32Schema, SignedInt32Schema])
-  .rest(z.never())
+  .meta({ minItems: 4, maxItems: 4, items: false })
   .describe('Exact [paletteIndex, x, y, z] tuple with origin-relative coordinates.');
 
 export const PaletteRunSchema = z
@@ -27,19 +25,16 @@ export const PaletteRunSchema = z
     SignedInt32Schema,
     SignedInt32Schema,
   ])
-  .rest(z.never())
+  .meta({ minItems: 7, maxItems: 7, items: false })
   .describe('Exact [paletteIndex, x, y, z, toX, toY, toZ] inclusive origin-relative cuboid tuple.');
 
 export const NonBlankStringSchema = z
   .string()
   .min(1)
-  .refine((value) => value.trim().length > 0, 'Must contain a non-whitespace character.');
+  .refine((value) => value.trim().length > 0, 'Must contain a non-whitespace character.')
+  .meta({ pattern: '.*\\S.*' });
 
 export const CanonicalUuidSchema = z.string().regex(CANONICAL_UUID);
-
-export function isCanonicalUuid(value: string): boolean {
-  return CANONICAL_UUID.test(value);
-}
 
 export const PlayerIdentitySchema = z.object({ name: NonBlankStringSchema, uuid: CanonicalUuidSchema }).strict();
 
@@ -61,10 +56,7 @@ export const ExactPositionSchema = z
 
 export const RotationSchema = z.object({ yaw: z.number(), pitch: z.number() }).strict();
 
-export const UnitVectorSchema = ExactPositionSchema.refine(
-  (vector) => Math.abs(vector.x * vector.x + vector.y * vector.y + vector.z * vector.z - 1) <= 1e-6,
-  'Vector must have unit length.',
-);
+export const UnitVectorSchema = ExactPositionSchema.describe('Unit vector calculated by Paper.');
 
 export const BoundsSchema = z
   .object({
@@ -72,17 +64,6 @@ export const BoundsSchema = z
     max: BlockPositionSchema.describe('Inclusive maximum corner after coordinate normalization.'),
   })
   .strict()
-  .superRefine((bounds, context) => {
-    for (const axis of BLOCK_AXES) {
-      if (bounds.min[axis] > bounds.max[axis]) {
-        context.addIssue({
-          code: 'custom',
-          path: ['max', axis],
-          message: `Normalized maximum ${axis.toUpperCase()} must not be less than minimum ${axis.toUpperCase()}.`,
-        });
-      }
-    }
-  })
   .describe('Normalized inclusive region bounds.');
 
 export const DimensionsSchema = z

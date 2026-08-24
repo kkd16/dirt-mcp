@@ -19,6 +19,7 @@ import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.status.PingServer;
+import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.InetAddress;
@@ -109,7 +110,7 @@ final class BridgeServerProtocolTest {
                                 HttpResponse.BodyHandlers.ofString());
                 assertEquals(404, response.statusCode());
                 assertEquals(
-                        "not_found",
+                        "route_not_found",
                         json(response.body())
                                 .getAsJsonObject()
                                 .getAsJsonObject("error")
@@ -180,7 +181,8 @@ final class BridgeServerProtocolTest {
         BridgeTestFixture.TestOperations operations =
                 new BridgeTestFixture.TestOperations() {
                     @Override
-                    public PingServer.Result ping() throws OperationException {
+                    public SetBlocks.Result setBlocks(SetBlocks.Request request, UUID callId)
+                            throws OperationException {
                         throw new OperationException(
                                 OperationFailure.INTERNAL_ERROR, "edit failed", null, null, editId);
                     }
@@ -192,7 +194,19 @@ final class BridgeServerProtocolTest {
 
             HttpResponse<String> response =
                     client.send(
-                            authorized(bridge, "/v1/ping").GET().build(),
+                            authorized(bridge, "/v1/set-blocks")
+                                    .header("Content-Type", "application/json")
+                                    .POST(
+                                            HttpRequest.BodyPublishers.ofString(
+                                                    """
+                                                    {"world":"world",
+                                                     "origin":{"x":0,"y":0,"z":0},
+                                                     "palettes":[[{"blockState":"minecraft:stone"}]],
+                                                     "placements":[[0,0,0,0]],"runs":[],
+                                                     "seed":1,"dryRun":false,"label":"test",
+                                                     "maxChangedBlocks":null}
+                                                    """))
+                                    .build(),
                             HttpResponse.BodyHandlers.ofString());
 
             assertEquals(500, response.statusCode());
@@ -205,7 +219,7 @@ final class BridgeServerProtocolTest {
                     json(response.body()));
             assertTrue(audited.await(2, TimeUnit.SECONDS));
             LogRecord audit = requestRecords(records).getFirst();
-            assertEquals(Level.WARNING, audit.getLevel());
+            assertEquals(Level.SEVERE, audit.getLevel());
             assertEquals(editId, context(audit).values().get("edit_id"));
         }
     }
@@ -383,7 +397,7 @@ final class BridgeServerProtocolTest {
             assertTrue(oversized.startsWith("HTTP/1.1 400"));
             assertTrue(oversized.contains("invalid_request"));
             assertTrue(malformed.startsWith("HTTP/1.1 400"));
-            assertTrue(malformed.contains("valid JSON values"));
+            assertTrue(malformed.contains("strict JSON"));
         }
     }
 
@@ -444,7 +458,7 @@ final class BridgeServerProtocolTest {
             LogRecord audit = audits.getFirst();
             assertEquals(Level.SEVERE, audit.getLevel());
             assertEquals("secret detail", audit.getThrown().getMessage());
-            assertEquals("ping_server", context(audit).values().get("operation"));
+            assertEquals("pingServer", context(audit).values().get("operation_id"));
             assertEquals(500, context(audit).values().get("http_status"));
         }
     }
@@ -485,7 +499,7 @@ final class BridgeServerProtocolTest {
                     client.send(
                             authorized(bridge, "/v1/set-blocks")
                                     .header("Content-Type", "application/json")
-                                    .header(
+                                    .setHeader(
                                             "X-Dirt-Call-Id",
                                             "123e4567-e89b-42d3-a456-426614174000")
                                     .POST(
@@ -496,7 +510,9 @@ final class BridgeServerProtocolTest {
                                                      "palettes":[[{"blockState":
                                                      "minecraft:secret_gold_block"}]],
                                                      "placements":[[0,0,0,0]],"runs":[],
-                                                     "label":"private-label-payload"}
+                                                     "seed":1,"dryRun":false,
+                                                     "label":"private-label-payload",
+                                                     "maxChangedBlocks":null}
                                                     """))
                                     .build(),
                             HttpResponse.BodyHandlers.ofString());
@@ -505,7 +521,7 @@ final class BridgeServerProtocolTest {
                     client.send(
                             authorized(bridge, "/v1/run-minecraft-commands")
                                     .header("Content-Type", "application/json")
-                                    .header(
+                                    .setHeader(
                                             "X-Dirt-Call-Id",
                                             "223e4567-e89b-42d3-a456-426614174000")
                                     .POST(
@@ -524,18 +540,19 @@ final class BridgeServerProtocolTest {
                     calls.stream()
                             .filter(
                                     record ->
-                                            "set_blocks"
+                                            "setBlocks"
                                                     .equals(
                                                             context(record)
                                                                     .values()
-                                                                    .get("operation")))
+                                                                    .get("operation_id")))
                             .findFirst()
                             .orElseThrow();
             assertEquals(Level.INFO, editAudit.getLevel());
             LogContext editContext = context(editAudit);
             assertEquals("audit-world", editContext.values().get("world"));
             assertEquals(
-                    "123e4567-e89b-42d3-a456-426614174000", editContext.values().get("call_id"));
+                    UUID.fromString("123e4567-e89b-42d3-a456-426614174000"),
+                    editContext.values().get("call_id"));
             assertEquals("committed", editContext.values().get("outcome"));
             assertEquals(1L, editContext.values().get("changed_block_count"));
 
@@ -543,19 +560,19 @@ final class BridgeServerProtocolTest {
                     calls.stream()
                             .filter(
                                     record ->
-                                            "run_minecraft_commands"
+                                            "runMinecraftCommands"
                                                     .equals(
                                                             context(record)
                                                                     .values()
-                                                                    .get("operation")))
+                                                                    .get("operation_id")))
                             .findFirst()
                             .orElseThrow();
             assertEquals(Level.WARNING, commandAudit.getLevel());
-            assertTrue(commandAudit.getMessage().contains("2 attempted; stopped at first failure"));
+            assertEquals("Dirt MCP bridge request completed", commandAudit.getMessage());
             assertEquals("partial_failure", context(commandAudit).values().get("outcome"));
-            assertEquals(2L, context(commandAudit).values().get("result_count"));
+            assertEquals(2, context(commandAudit).values().get("result_count"));
             assertEquals(
-                    "223e4567-e89b-42d3-a456-426614174000",
+                    UUID.fromString("223e4567-e89b-42d3-a456-426614174000"),
                     context(commandAudit).values().get("call_id"));
 
             String auditText =
@@ -687,6 +704,9 @@ final class BridgeServerProtocolTest {
                             + "Host: 127.0.0.1\r\n"
                             + "Authorization: Bearer "
                             + BridgeTestFixture.TOKEN
+                            + "\r\n"
+                            + "X-Dirt-Call-Id: "
+                            + BridgeTestFixture.CALL_ID
                             + "\r\n"
                             + "Content-Type: application/json\r\n"
                             + "Content-Length: "

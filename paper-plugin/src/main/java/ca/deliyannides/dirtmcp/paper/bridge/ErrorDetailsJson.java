@@ -6,16 +6,12 @@ import com.google.gson.JsonObject;
 import java.util.List;
 import java.util.Objects;
 
-final class ErrorDetailsJson {
+public final class ErrorDetailsJson {
     private ErrorDetailsJson() {}
 
-    static String code(ErrorDetails details) {
+    public static String code(ErrorDetails details) {
         Objects.requireNonNull(details, "details");
         return switch (details) {
-            case ErrorDetails.Unauthorized ignored -> "unauthorized";
-            case ErrorDetails.NotFound ignored -> "not_found";
-            case ErrorDetails.MethodNotAllowed ignored -> "method_not_allowed";
-            case ErrorDetails.BridgeBusy ignored -> "bridge_busy";
             case ErrorDetails.InvalidRequest ignored -> "invalid_request";
             case ErrorDetails.ChangeLimitExceeded ignored -> "change_limit_exceeded";
             case ErrorDetails.EditNotFound ignored -> "edit_not_found";
@@ -33,20 +29,9 @@ final class ErrorDetailsJson {
         };
     }
 
-    static JsonObject serialize(ErrorDetails details) {
+    public static JsonObject serialize(ErrorDetails details) {
         Objects.requireNonNull(details, "details");
         return switch (details) {
-            case ErrorDetails.Unauthorized ignored -> reason("authentication_failed");
-            case ErrorDetails.NotFound ignored -> reason("route_not_found");
-            case ErrorDetails.MethodNotAllowed value ->
-                    property("allowedMethod", value.allowedMethod());
-            case ErrorDetails.BridgeBusy value ->
-                    property("maximumConcurrentRequests", value.maximumConcurrentRequests());
-            case ErrorDetails.InvalidRequest.UnsupportedMediaType value ->
-                    property(reason("unsupported_media_type"), "expected", value.expected());
-            case ErrorDetails.InvalidRequest.BodyTooLarge value ->
-                    property(reason("body_too_large"), "maximumBytes", value.maximumBytes());
-            case ErrorDetails.InvalidRequest.MalformedJson ignored -> reason("malformed_json");
             case ErrorDetails.InvalidRequest.Missing value ->
                     property(reason("missing"), "field", value.field());
             case ErrorDetails.InvalidRequest.InvalidValue value ->

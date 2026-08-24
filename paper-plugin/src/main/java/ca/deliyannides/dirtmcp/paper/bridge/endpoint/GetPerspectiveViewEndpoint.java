@@ -15,8 +15,8 @@ public final class GetPerspectiveViewEndpoint implements BridgeEndpoint {
     }
 
     @Override
-    public String operation() {
-        return "get_perspective_view";
+    public String operationId() {
+        return "getPerspectiveView";
     }
 
     @Override
@@ -34,7 +34,8 @@ public final class GetPerspectiveViewEndpoint implements BridgeEndpoint {
         GetPerspectiveView.Result result =
                 this.operation.getPerspectiveView(
                         GetPerspectiveViewRequestDecoder.decode(exchange));
-        exchange.world(result.world());
+        exchange.auditField("world", result.world());
+        exchange.auditField("result_count", result.hits().size());
         exchange.ok(result);
     }
 

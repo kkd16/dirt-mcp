@@ -3,4 +3,4 @@ command = "bash"
 args = ["scripts/run-dirt-mcp"]
 cwd = "."
 enabled = true
-tool_timeout_sec = 130
+tool_timeout_sec = 310

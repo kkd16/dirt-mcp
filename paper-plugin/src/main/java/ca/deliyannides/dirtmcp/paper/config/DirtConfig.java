@@ -1,24 +1,12 @@
 package ca.deliyannides.dirtmcp.paper.config;
 
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Set;
+import ca.deliyannides.dirtmcp.paper.bridge.BridgeOperation;
+import java.util.HashSet;
+import java.util.List;
 
-public record DirtConfig(
-        Bridge bridge,
-        Tools tools,
-        Logging logging,
-        Limits limits,
-        EditHistory editHistory,
-        Defaults defaults) {
+public record DirtConfig(Bridge bridge, Logging logging, Limits limits, EditHistory editHistory) {
     public DirtConfig {
-        if (bridge == null
-                || tools == null
-                || logging == null
-                || limits == null
-                || editHistory == null
-                || defaults == null) {
+        if (bridge == null || logging == null || limits == null || editHistory == null) {
             throw new IllegalArgumentException("Configuration sections are required");
         }
         requireAtMost(
@@ -77,33 +65,16 @@ public record DirtConfig(
         }
     }
 
-    public record Tools(Set<McpTool> enabled) {
-        public Tools {
-            if (enabled == null) {
-                throw new IllegalArgumentException("tools configuration is required");
-            }
-            enabled = Set.copyOf(enabled);
-        }
-
-        public boolean isEnabled(McpTool tool) {
-            return this.enabled.contains(tool);
-        }
-
-        public Map<String, Boolean> flags() {
-            Map<String, Boolean> flags = new LinkedHashMap<>();
-            for (McpTool tool : McpTool.values()) {
-                flags.put(tool.id(), isEnabled(tool));
-            }
-            return Collections.unmodifiableMap(flags);
-        }
-    }
-
     public record Bridge(
             int port,
             int shutdownDelaySeconds,
             int requestBodyTimeoutSeconds,
             int maxConcurrentRequests,
-            int maxConcurrentInspections) {
+            int maxConcurrentInspections,
+            int maxRequestBytes,
+            List<BridgeOperation> allowedOperations) {
+        private static final int MAXIMUM_REQUEST_BYTES = 64 * 1024 * 1024;
+
         public Bridge {
             if (port < 1 || port > 65_535) {
                 throw new IllegalArgumentException("bridge.port must be between 1 and 65535");
@@ -125,13 +96,28 @@ public record DirtConfig(
                         "bridge.max-concurrent-inspections must be positive and not exceed "
                                 + "bridge.max-concurrent-requests");
             }
+            if (maxRequestBytes < 1 || maxRequestBytes > MAXIMUM_REQUEST_BYTES) {
+                throw new IllegalArgumentException(
+                        "bridge.max-request-bytes must be between 1 and " + MAXIMUM_REQUEST_BYTES);
+            }
+            if (allowedOperations == null) {
+                throw new IllegalArgumentException("bridge.allowed-operations is required");
+            }
+            if (allowedOperations.stream().anyMatch(java.util.Objects::isNull)) {
+                throw new IllegalArgumentException(
+                        "bridge.allowed-operations must contain only operationIds");
+            }
+            allowedOperations = List.copyOf(allowedOperations);
+            if (new HashSet<>(allowedOperations).size() != allowedOperations.size()) {
+                throw new IllegalArgumentException(
+                        "bridge.allowed-operations must not contain duplicates");
+            }
         }
     }
 
     public record Limits(
-            int maxRequestBytes,
             int maxRegionVolume,
-            int maxTouchedChunks,
+            int maxEditTouchedChunks,
             int maxInspectionTouchedChunks,
             int maxPerspectiveTouchedChunks,
             int maxBlockStatePatterns,
@@ -139,19 +125,13 @@ public record DirtConfig(
             int maxChangedBlocks,
             int maxInspectionVolume,
             int maxPerspectiveRayDistanceBudget,
-            int defaultInspectionResultLimit,
             int maxInspectionResultLimit,
             int maxPerspectiveRays,
             int maxCommandsPerRequest,
             int maxCommandFeedbackCharacters) {
         public Limits {
-            if (maxRequestBytes < 1 || maxRequestBytes == Integer.MAX_VALUE) {
-                throw new IllegalArgumentException(
-                        "limits.max-request-bytes must be positive and less than "
-                                + Integer.MAX_VALUE);
-            }
             requirePositive("limits.max-region-volume", maxRegionVolume);
-            requirePositive("limits.max-touched-chunks", maxTouchedChunks);
+            requirePositive("limits.max-edit-touched-chunks", maxEditTouchedChunks);
             requirePositive("limits.max-inspection-touched-chunks", maxInspectionTouchedChunks);
             requirePositive("limits.max-perspective-touched-chunks", maxPerspectiveTouchedChunks);
             requirePositive("limits.max-block-state-patterns", maxBlockStatePatterns);
@@ -160,16 +140,10 @@ public record DirtConfig(
             requirePositive("limits.max-inspection-volume", maxInspectionVolume);
             requirePositive(
                     "limits.max-perspective-ray-distance-budget", maxPerspectiveRayDistanceBudget);
-            requirePositive("limits.default-inspection-results", defaultInspectionResultLimit);
             requirePositive("limits.max-inspection-results", maxInspectionResultLimit);
             requirePositive("limits.max-perspective-rays", maxPerspectiveRays);
             requirePositive("limits.max-commands-per-request", maxCommandsPerRequest);
             requirePositive("limits.max-command-feedback-characters", maxCommandFeedbackCharacters);
-            requireAtMost(
-                    "limits.max-inspection-touched-chunks",
-                    maxInspectionTouchedChunks,
-                    "limits.max-touched-chunks",
-                    maxTouchedChunks);
             requireAtMost(
                     "limits.max-block-state-patterns",
                     maxBlockStatePatterns,
@@ -187,11 +161,6 @@ public record DirtConfig(
                     maxInspectionVolume,
                     "limits.max-region-volume",
                     maxRegionVolume);
-            requireAtMost(
-                    "limits.default-inspection-results",
-                    defaultInspectionResultLimit,
-                    "limits.max-inspection-results",
-                    maxInspectionResultLimit);
             requireAtMost(
                     "limits.max-inspection-results",
                     maxInspectionResultLimit,
@@ -218,8 +187,6 @@ public record DirtConfig(
                     maxEntriesTotal);
         }
     }
-
-    public record Defaults(boolean getBlocksIncludeAir, boolean editDryRun) {}
 
     private static void requirePositive(String path, int value) {
         if (value < 1) {

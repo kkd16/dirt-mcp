@@ -9,12 +9,12 @@ import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.PlayerS
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.ResolvedLocationSource;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.ResolvedPlayerSource;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.ResolvedSource;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.ViewBasis;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.ViewHit;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.ViewRequest;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.Viewport;
-import ca.deliyannides.dirtmcp.paper.world.inspection.PaperPerspectiveViewService.PerspectiveViewAccess;
-import ca.deliyannides.dirtmcp.paper.world.inspection.PerspectiveViewAlgorithms.ChunkCoordinate;
+import ca.deliyannides.dirtmcp.paper.world.inspection.PerspectiveViewAccess.CameraSnapshot;
+import ca.deliyannides.dirtmcp.paper.world.inspection.PerspectiveViewAccess.Chunk;
+import ca.deliyannides.dirtmcp.paper.world.inspection.PerspectiveViewAccess.Projection;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockCoordinates;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.ExactPosition;
@@ -40,76 +40,65 @@ import org.bukkit.util.RayTraceResult;
 /** Paper adapter for one coherent real-player or synthetic perspective projection. */
 public final class BukkitPerspectiveViewAccess implements PerspectiveViewAccess {
     private final Server server;
-    private final int maximumRays;
-    private final int maximumRayDistanceBudget;
-    private final int maximumCheckedChunks;
 
-    public BukkitPerspectiveViewAccess(
-            Server server,
-            int maximumRays,
-            int maximumRayDistanceBudget,
-            int maximumCheckedChunks) {
-        if (maximumRays < 1 || maximumRayDistanceBudget < 1 || maximumCheckedChunks < 1) {
-            throw new IllegalArgumentException("Perspective view limits must be positive");
-        }
+    public BukkitPerspectiveViewAccess(Server server) {
         this.server = Objects.requireNonNull(server, "server");
-        this.maximumRays = maximumRays;
-        this.maximumRayDistanceBudget = maximumRayDistanceBudget;
-        this.maximumCheckedChunks = maximumCheckedChunks;
     }
 
     @Override
-    public GetPerspectiveView.Result capture(GetPerspectiveView.Request request)
+    public CameraSnapshot captureCamera(GetPerspectiveView.Source source)
             throws OperationException {
         Instant capturedAt = Instant.now();
-        Camera camera = resolveCamera(request.source());
-        ViewRequest view = request.options();
-        PerspectiveViewAlgorithms.Geometry geometry =
-                PerspectiveViewAlgorithms.geometry(
-                        view,
-                        camera.lookDirection(),
-                        camera.location().getYaw(),
-                        this.maximumRays,
-                        this.maximumRayDistanceBudget);
-        String outOfRangeAxis =
-                PerspectiveViewAlgorithms.firstOutOfRangeEndpointAxis(
-                        camera.position().x(),
-                        camera.position().y(),
-                        camera.position().z(),
-                        view.maxDistance(),
-                        geometry.directions());
-        if (outOfRangeAxis != null) {
-            throw endpointOutOfRange(request.source(), outOfRangeAxis);
+        Camera camera = resolveCamera(source);
+        return new CameraSnapshot(
+                capturedAt,
+                camera.source(),
+                camera.world().getName(),
+                camera.world().getUID(),
+                camera.world().getMinHeight(),
+                camera.world().getMaxHeight(),
+                camera.position(),
+                camera.rotation(),
+                camera.lookDirection());
+    }
+
+    @Override
+    public GetPerspectiveView.Result trace(
+            ViewRequest request, CameraSnapshot camera, Projection projection)
+            throws OperationException {
+        World world = this.server.getWorld(camera.worldId());
+        if (world == null || !camera.world().equals(world.getName())) {
+            throw new OperationException(
+                    OperationFailure.WORLD_UNAVAILABLE,
+                    "World was unloaded during perspective capture: " + camera.world(),
+                    new ErrorDetails.WorldUnavailable.WorldUnloaded(camera.world()));
         }
-        Set<ChunkCoordinate> chunks =
-                PerspectiveViewAlgorithms.requiredChunks(
+        requireLoadedChunks(world, projection.requiredChunks());
+        Location location =
+                new Location(
+                        world,
                         camera.position().x(),
                         camera.position().y(),
                         camera.position().z(),
-                        camera.world().getMinHeight(),
-                        camera.world().getMaxHeight(),
-                        view.maxDistance(),
-                        geometry.directions());
-        int checkedChunkCount = requireLoadedChunks(camera.world(), chunks);
+                        (float) camera.rotation().yaw(),
+                        (float) camera.rotation().pitch());
 
         Map<String, Integer> paletteIndexes = new LinkedHashMap<>();
         List<ViewHit> hits = new ArrayList<>();
         Integer crosshairHitIndex = null;
-        int centerRow = view.height() / 2;
-        int centerColumn = view.width() / 2;
-        for (int rayIndex = 0; rayIndex < geometry.directions().size(); rayIndex++) {
-            int row = rayIndex / view.width();
-            int column = rayIndex % view.width();
-            Vector3 direction = geometry.directions().get(rayIndex);
+        int centerRow = request.height() / 2;
+        int centerColumn = request.width() / 2;
+        for (int rayIndex = 0; rayIndex < projection.directions().size(); rayIndex++) {
+            int row = rayIndex / request.width();
+            int column = rayIndex % request.width();
+            Vector3 direction = projection.directions().get(rayIndex);
             RayTraceResult trace =
-                    camera.world()
-                            .rayTraceBlocks(
-                                    camera.location(),
-                                    new org.bukkit.util.Vector(
-                                            direction.x(), direction.y(), direction.z()),
-                                    view.maxDistance(),
-                                    fluidCollision(view.fluidCollision()),
-                                    view.ignorePassableBlocks());
+                    world.rayTraceBlocks(
+                            location,
+                            new org.bukkit.util.Vector(direction.x(), direction.y(), direction.z()),
+                            request.maxDistance(),
+                            fluidCollision(request.fluidCollision()),
+                            request.ignorePassableBlocks());
             if (trace == null || trace.getHitBlock() == null) {
                 continue;
             }
@@ -140,23 +129,23 @@ public final class BukkitPerspectiveViewAccess implements PerspectiveViewAccess 
         }
 
         return new GetPerspectiveView.Result(
-                capturedAt,
+                camera.capturedAt(),
                 camera.source(),
-                camera.world().getName(),
-                camera.world().getUID(),
+                camera.world(),
+                camera.worldId(),
                 camera.position(),
                 camera.rotation(),
                 camera.lookDirection(),
-                new ViewBasis(geometry.forward(), geometry.right(), geometry.up()),
+                projection.basis(),
                 new Viewport(
-                        view.width(),
-                        view.height(),
-                        view.verticalFieldOfViewDegrees(),
-                        geometry.horizontalFieldOfViewDegrees(),
-                        view.maxDistance(),
-                        view.fluidCollision().name().toLowerCase(Locale.ROOT),
-                        view.ignorePassableBlocks()),
-                checkedChunkCount,
+                        request.width(),
+                        request.height(),
+                        request.verticalFieldOfViewDegrees(),
+                        projection.horizontalFieldOfViewDegrees(),
+                        request.maxDistance(),
+                        request.fluidCollision().name().toLowerCase(Locale.ROOT),
+                        request.ignorePassableBlocks()),
+                projection.requiredChunks().size(),
                 List.copyOf(paletteIndexes.keySet()),
                 hits,
                 crosshairHitIndex);
@@ -184,7 +173,6 @@ public final class BukkitPerspectiveViewAccess implements PerspectiveViewAccess 
                     new ResolvedPlayerSource(
                             new PlayerIdentity(player.getName(), player.getUniqueId())),
                     player.getWorld(),
-                    eye,
                     position,
                     rotation,
                     vector(eye.getDirection()));
@@ -212,7 +200,6 @@ public final class BukkitPerspectiveViewAccess implements PerspectiveViewAccess 
             return new Camera(
                     new ResolvedLocationSource(),
                     world,
-                    location,
                     locationSource.cameraPosition(),
                     resolvedRotation,
                     vector(location.getDirection()));
@@ -220,20 +207,9 @@ public final class BukkitPerspectiveViewAccess implements PerspectiveViewAccess 
         throw new IllegalArgumentException("Unsupported perspective source");
     }
 
-    private int requireLoadedChunks(World world, Set<ChunkCoordinate> chunks)
+    private static void requireLoadedChunks(World world, Set<Chunk> chunks)
             throws OperationException {
-        int count = chunks.size();
-        if (count > this.maximumCheckedChunks) {
-            throw new OperationException(
-                    OperationFailure.REGION_TOO_LARGE,
-                    "Perspective view requires checking "
-                            + count
-                            + " chunks, exceeding the maximum of "
-                            + this.maximumCheckedChunks,
-                    new ErrorDetails.RegionTooLarge.PerspectiveChunks(
-                            count, this.maximumCheckedChunks));
-        }
-        for (ChunkCoordinate chunk : chunks) {
+        for (Chunk chunk : chunks) {
             if (!world.isChunkLoaded(chunk.x(), chunk.z())) {
                 throw new OperationException(
                         OperationFailure.WORLD_UNAVAILABLE,
@@ -245,7 +221,6 @@ public final class BukkitPerspectiveViewAccess implements PerspectiveViewAccess 
                                 world.getName(), new ErrorDetails.Chunk(chunk.x(), chunk.z())));
             }
         }
-        return count;
     }
 
     private static ExactPosition finitePlayerPosition(String player, String field, Location value)
@@ -292,21 +267,6 @@ public final class BukkitPerspectiveViewAccess implements PerspectiveViewAccess 
                 throw invalidCoordinate("source.cameraPosition." + coordinate.axis());
             }
         }
-    }
-
-    private static OperationException endpointOutOfRange(
-            GetPerspectiveView.Source source, String axis) {
-        if (source instanceof PlayerSource playerSource) {
-            return new OperationException(
-                    OperationFailure.PLAYER_UNAVAILABLE,
-                    "Player perspective endpoint is outside the signed block-coordinate range at "
-                            + axis
-                            + ": "
-                            + playerSource.player(),
-                    new ErrorDetails.PlayerUnavailable.PositionOutOfRange(
-                            playerSource.player(), "perspectiveEndpoint." + axis));
-        }
-        return invalidCoordinate("perspectiveEndpoint." + axis);
     }
 
     private static OperationException invalidCoordinate(String field) {
@@ -368,7 +328,6 @@ public final class BukkitPerspectiveViewAccess implements PerspectiveViewAccess 
     private record Camera(
             ResolvedSource source,
             World world,
-            Location location,
             ExactPosition position,
             Rotation rotation,
             Vector3 lookDirection) {}

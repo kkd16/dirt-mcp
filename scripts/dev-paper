@@ -116,13 +116,16 @@ send_console_command() {
 
 bridge_healthy() {
   local bridge_port="$1"
+  local call_id
   local token
+  call_id="$(node --input-type=module --eval 'process.stdout.write(crypto.randomUUID())')"
   token="$(<"${token_file}")"
   curl --fail --silent --output /dev/null \
     --connect-timeout 1 \
     --max-time 2 \
     --header "Authorization: Bearer ${token}" \
-    "http://127.0.0.1:${bridge_port}/v1/ping"
+    --header "X-Dirt-Call-Id: ${call_id}" \
+    "http://127.0.0.1:${bridge_port}/v1/capabilities"
 }
 
 recent_logs() {
@@ -273,12 +276,15 @@ status_server() {
 
 health_server() {
   read_state
+  local call_id
   local token
+  call_id="$(node --input-type=module --eval 'process.stdout.write(crypto.randomUUID())')"
   token="$(<"${token_file}")"
   curl --fail --silent --show-error \
     --connect-timeout 1 \
     --max-time 2 \
     --header "Authorization: Bearer ${token}" \
+    --header "X-Dirt-Call-Id: ${call_id}" \
     "http://127.0.0.1:${state_bridge_port}/v1/ping"
   printf '\n'
 }

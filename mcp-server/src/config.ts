@@ -1,12 +1,12 @@
 const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:8765';
-const MINIMUM_TOKEN_BYTES = 32;
+const BRIDGE_TOKEN_PATTERN = /^[0-9a-f]{64}$/u;
 
 export interface BridgeConfig {
   readonly origin: string;
   readonly token: string;
 }
 
-type BridgeConfigurationErrorCode = 'bridge_token_required' | 'bridge_token_too_short' | 'bridge_url_invalid';
+type BridgeConfigurationErrorCode = 'bridge_token_required' | 'bridge_token_invalid' | 'bridge_url_invalid';
 
 export class BridgeConfigurationError extends Error {
   readonly code: BridgeConfigurationErrorCode;
@@ -23,10 +23,10 @@ export function readBridgeConfig(environment: Readonly<Record<string, string | u
   if (token === undefined || token.trim().length === 0) {
     throw new BridgeConfigurationError('bridge_token_required', 'DIRT_MCP_BRIDGE_TOKEN is required');
   }
-  if (Buffer.byteLength(token, 'utf8') < MINIMUM_TOKEN_BYTES) {
+  if (!BRIDGE_TOKEN_PATTERN.test(token)) {
     throw new BridgeConfigurationError(
-      'bridge_token_too_short',
-      `DIRT_MCP_BRIDGE_TOKEN must contain at least ${MINIMUM_TOKEN_BYTES} UTF-8 bytes`,
+      'bridge_token_invalid',
+      'DIRT_MCP_BRIDGE_TOKEN must contain exactly 64 lowercase hexadecimal characters',
     );
   }
 

@@ -28,34 +28,23 @@ final class GetPlayerContextRequestDecoder {
     static GetPlayerContext.Request decode(BridgeExchange exchange)
             throws IOException, OperationException {
         JsonObject object = exchange.readJsonObject();
-        RequestJson.requireFields(object, Set.of("player"), REQUEST_FIELDS, "Request");
+        RequestJson.requireExactFields(object, REQUEST_FIELDS, "Request");
         String player = RequestJson.string(object.get("player"), "player");
-        if (player.length() > GetPlayerContext.MAX_PLAYER_SELECTOR_LENGTH) {
-            throw RequestJson.invalid(
-                    "player must contain at most "
-                            + GetPlayerContext.MAX_PLAYER_SELECTOR_LENGTH
-                            + " characters",
-                    new ErrorDetails.InvalidRequest.OutOfRange(
-                            "player.length",
-                            player.length(),
-                            1,
-                            GetPlayerContext.MAX_PLAYER_SELECTOR_LENGTH));
-        }
-        Includes include = object.has("include") ? include(object.get("include")) : defaults();
+        Includes include = include(object.get("include"));
         return new GetPlayerContext.Request(player, include);
     }
 
     private static Includes include(JsonElement element) throws OperationException {
         JsonObject object = object(element, "include");
-        RequestJson.requireFields(object, Set.of(), INCLUDE_FIELDS, "include");
+        RequestJson.requireExactFields(object, INCLUDE_FIELDS, "include");
         return new Includes(
-                optionalBoolean(object, "equipment", true, "include.equipment"),
-                optionalBoolean(object, "inventory", false, "include.inventory"),
-                optionalBoolean(object, "enderChest", false, "include.enderChest"),
-                optionalBoolean(object, "vitals", false, "include.vitals"),
-                optionalBoolean(object, "movement", false, "include.movement"),
-                optionalBoolean(object, "client", false, "include.client"),
-                optionalBoolean(object, "effects", false, "include.effects"));
+                RequestJson.bool(object.get("equipment"), "include.equipment"),
+                RequestJson.bool(object.get("inventory"), "include.inventory"),
+                RequestJson.bool(object.get("enderChest"), "include.enderChest"),
+                RequestJson.bool(object.get("vitals"), "include.vitals"),
+                RequestJson.bool(object.get("movement"), "include.movement"),
+                RequestJson.bool(object.get("client"), "include.client"),
+                RequestJson.bool(object.get("effects"), "include.effects"));
     }
 
     private static JsonObject object(JsonElement element, String name) throws OperationException {
@@ -65,15 +54,5 @@ final class GetPlayerContextRequestDecoder {
                     new ErrorDetails.InvalidRequest.InvalidValue(name));
         }
         return element.getAsJsonObject();
-    }
-
-    private static boolean optionalBoolean(
-            JsonObject object, String field, boolean defaultValue, String target)
-            throws OperationException {
-        return object.has(field) ? RequestJson.bool(object.get(field), target) : defaultValue;
-    }
-
-    private static Includes defaults() {
-        return new Includes(true, false, false, false, false, false, false);
     }
 }

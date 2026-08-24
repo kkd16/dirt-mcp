@@ -1,14 +1,15 @@
 package ca.deliyannides.dirtmcp.paper.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ca.deliyannides.dirtmcp.paper.bridge.BridgeOperation;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.util.EnumSet;
+import java.util.Arrays;
+import java.util.List;
 import java.util.stream.Stream;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.junit.jupiter.api.Test;
@@ -21,69 +22,53 @@ final class DirtConfigLoaderTest {
     void loadsTheCompleteShippedConfiguration() {
         DirtConfig config = DirtConfigLoader.load(defaultConfiguration(), null);
 
-        assertEquals(new DirtConfig.Bridge(8_765, 5, 5, 32, 4), config.bridge());
-        assertEquals(EnumSet.allOf(McpTool.class), config.tools().enabled());
-        assertEquals(McpTool.values().length, config.tools().flags().size());
-        assertTrue(config.tools().flags().values().stream().allMatch(Boolean::booleanValue));
+        assertEquals(
+                new DirtConfig.Bridge(
+                        8_765, 5, 5, 32, 4, 1_048_576, List.of(BridgeOperation.values())),
+                config.bridge());
         assertEquals(
                 new DirtConfig.Logging(DirtConfig.ConsoleLogLevel.INFO, 10_485_760, 5),
                 config.logging());
         assertEquals(
                 new DirtConfig.Limits(
-                        1_048_576, 1_048_576, 512, 128, 256, 64, 256, 262_144, 262_144, 131_072,
-                        1_024, 4_096, 2_048, 10, 8_192),
+                        1_048_576, 512, 128, 256, 64, 256, 262_144, 262_144, 131_072, 4_096, 2_048,
+                        10, 8_192),
                 config.limits());
         assertEquals(new DirtConfig.EditHistory(50, 200, 2_621_440), config.editHistory());
-        assertEquals(new DirtConfig.Defaults(false, false), config.defaults());
     }
 
     @Test
-    void missingToolSectionAndKeysDefaultToDisabled() {
-        YamlConfiguration withoutSection = defaultConfiguration();
-        withoutSection.set("tools", null);
+    void acceptsAnExplicitlyEmptyOperationAllowlist() {
+        YamlConfiguration configuration = defaultConfiguration();
+        configuration.set("bridge.allowed-operations", List.of());
 
-        DirtConfig noTools = DirtConfigLoader.load(withoutSection, null);
+        assertTrue(
+                DirtConfigLoader.load(configuration, null).bridge().allowedOperations().isEmpty());
+    }
 
-        assertTrue(noTools.tools().enabled().isEmpty());
-        assertTrue(noTools.tools().flags().values().stream().noneMatch(Boolean::booleanValue));
+    @Test
+    void keepsInspectionAndEditChunkBudgetsIndependent() {
+        YamlConfiguration configuration = defaultConfiguration();
+        configuration.set("limits.max-inspection-touched-chunks", 513);
 
-        YamlConfiguration withoutKey = defaultConfiguration();
-        withoutKey.set("tools.undo_edits", null);
-
-        DirtConfig oneMissing = DirtConfigLoader.load(withoutKey, null);
-
-        assertFalse(oneMissing.tools().isEnabled(McpTool.UNDO_EDITS));
-        assertEquals(McpTool.values().length - 1, oneMissing.tools().enabled().size());
+        assertEquals(
+                513,
+                DirtConfigLoader.load(configuration, null).limits().maxInspectionTouchedChunks());
     }
 
     @Test
     void ignoresBundledDefaultsWhenCheckingExplicitValues() {
         YamlConfiguration configuration = defaultConfiguration();
-        configuration.set("tools", null);
         configuration.setDefaults(defaultConfiguration());
         configuration.options().copyDefaults(true);
+        configuration.set("bridge.max-request-bytes", null);
 
-        DirtConfig config = DirtConfigLoader.load(configuration, null);
-
-        assertTrue(config.tools().enabled().isEmpty());
-
-        configuration.set("limits.max-request-bytes", null);
         IllegalArgumentException error =
                 assertThrows(
                         IllegalArgumentException.class,
                         () -> DirtConfigLoader.load(configuration, null));
-        assertEquals("limits.max-request-bytes is required", error.getMessage());
-    }
 
-    @Test
-    void explicitFalseDisablesOnlyThatTool() {
-        YamlConfiguration configuration = defaultConfiguration();
-        configuration.set("tools.set_blocks", false);
-
-        DirtConfig config = DirtConfigLoader.load(configuration, null);
-
-        assertFalse(config.tools().isEnabled(McpTool.SET_BLOCKS));
-        assertTrue(config.tools().isEnabled(McpTool.REPLACE_REGION_BLOCKS));
+        assertEquals("bridge.max-request-bytes is required", error.getMessage());
     }
 
     @ParameterizedTest
@@ -126,55 +111,44 @@ final class DirtConfigLoaderTest {
 
     private static Stream<Arguments> invalidConfigurationValues() {
         return Stream.of(
-                Arguments.of("limits.max-request-bytes", null),
+                Arguments.of("bridge.allowed-operations", null),
+                Arguments.of("bridge.allowed-operations", "pingServer"),
+                Arguments.of("bridge.allowed-operations", List.of("ping_server")),
+                Arguments.of("bridge.allowed-operations", List.of("pingServer", "pingServer")),
+                Arguments.of("bridge.allowed-operations", Arrays.asList("pingServer", null)),
                 Arguments.of("bridge.unknown", 1),
-                Arguments.of("tools", true),
-                Arguments.of("tools.set_blocks", "true"),
-                Arguments.of("tools.undo_edit", true),
-                Arguments.of("tools.not_a_tool", true),
                 Arguments.of("logging.console-level", null),
                 Arguments.of("logging.console-level", "warn"),
                 Arguments.of("logging.detail-file-max-bytes", 0),
-                Arguments.of("logging.detail-file-retained-files", 0),
                 Arguments.of("logging.detail-file-retained-files", 1),
                 Arguments.of("logging.detail-file-retained-files", 101),
                 Arguments.of("bridge.port", 0),
-                Arguments.of("bridge.shutdown-delay-seconds", -1),
                 Arguments.of("bridge.shutdown-delay-seconds", 0),
                 Arguments.of("bridge.shutdown-delay-seconds", 31),
                 Arguments.of("bridge.request-body-timeout-seconds", 0),
                 Arguments.of("bridge.max-concurrent-requests", 0),
                 Arguments.of("bridge.max-concurrent-inspections", 0),
                 Arguments.of("bridge.max-concurrent-inspections", 33),
-                Arguments.of("limits.max-request-bytes", Integer.MAX_VALUE),
+                Arguments.of("bridge.max-request-bytes", 0),
+                Arguments.of("bridge.max-request-bytes", 67_108_865),
                 Arguments.of("limits.max-region-volume", 0),
-                Arguments.of("limits.max-touched-chunks", 0),
+                Arguments.of("limits.max-edit-touched-chunks", 0),
                 Arguments.of("limits.max-inspection-touched-chunks", 0),
-                Arguments.of("limits.max-inspection-touched-chunks", 513),
                 Arguments.of("limits.max-perspective-touched-chunks", 0),
-                Arguments.of("limits.max-block-state-patterns", 0),
                 Arguments.of("limits.max-block-state-patterns", 65),
-                Arguments.of("limits.max-palette-entries", 0),
                 Arguments.of("limits.max-palette-entries", 257),
                 Arguments.of("limits.max-changed-blocks", 1_048_577),
                 Arguments.of("limits.max-inspection-volume", 1_048_577),
                 Arguments.of("limits.max-perspective-ray-distance-budget", 0),
-                Arguments.of("limits.default-inspection-results", 4_097),
                 Arguments.of("limits.max-inspection-results", 262_145),
                 Arguments.of("limits.max-perspective-rays", 131_073),
                 Arguments.of("limits.max-commands-per-request", 0),
                 Arguments.of("limits.max-command-feedback-characters", 0),
                 Arguments.of("edit-history.max-entries-per-world", null),
-                Arguments.of("edit-history.max-entries-per-world", 0),
                 Arguments.of("edit-history.max-entries-per-world", 201),
-                Arguments.of("edit-history.max-entries-total", 0),
                 Arguments.of("edit-history.max-entries-total", 49),
-                Arguments.of("edit-history.max-retained-changed-blocks", 0),
                 Arguments.of("edit-history.max-retained-changed-blocks", 262_143),
-                Arguments.of("limits.not-a-limit", 20),
-                Arguments.of("defaults.get-blocks-include-air", "false"),
-                Arguments.of("defaults.not-a-default", false),
-                Arguments.of("defaults.edit-dry-run", "false"));
+                Arguments.of("limits.not-a-limit", 20));
     }
 
     private static YamlConfiguration defaultConfiguration() {

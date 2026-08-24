@@ -35,6 +35,11 @@ public class OperationException extends Exception {
         this.details = details;
         if (editId != null) {
             UuidV4.require(editId, "editId");
+            if (failure != OperationFailure.INTERNAL_ERROR
+                    && failure != OperationFailure.WORLD_UNAVAILABLE) {
+                throw new IllegalArgumentException(
+                        "Only internal or world-unavailable failures may identify an edit");
+            }
         }
         this.editId = editId;
     }

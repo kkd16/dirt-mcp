@@ -15,8 +15,8 @@ public final class PingEndpoint implements BridgeEndpoint {
     }
 
     @Override
-    public String operation() {
-        return "ping_server";
+    public String operationId() {
+        return "pingServer";
     }
 
     @Override

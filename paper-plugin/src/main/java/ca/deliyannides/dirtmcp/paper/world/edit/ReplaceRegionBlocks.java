@@ -3,9 +3,8 @@ package ca.deliyannides.dirtmcp.paper.world.edit;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 @FunctionalInterface
@@ -23,25 +22,21 @@ public interface ReplaceRegionBlocks {
             String label,
             Integer maxChangedBlocks) {
         public Request {
-            sourceBlockStatePatterns = immutableCopy(sourceBlockStatePatterns);
-            destinationPalette = immutableCopy(destinationPalette);
+            Objects.requireNonNull(world, "world");
+            Objects.requireNonNull(min, "min");
+            Objects.requireNonNull(max, "max");
+            sourceBlockStatePatterns = List.copyOf(sourceBlockStatePatterns);
+            destinationPalette = List.copyOf(destinationPalette);
+            Objects.requireNonNull(label, "label");
         }
     }
 
     record Result(
             String world,
             BlockBounds bounds,
-            List<String> sourceBlockStatePatterns,
-            List<DestinationPaletteEntry> destinationPalette,
             int seed,
             EditOutcome outcome,
             long matchedBlockCount,
             long changedBlockCount,
             EditRecord edit) {}
-
-    private static <T> List<T> immutableCopy(List<T> values) {
-        // List.copyOf would reject null entries before operation-layer validation can describe
-        // them.
-        return values == null ? null : Collections.unmodifiableList(new ArrayList<>(values));
-    }
 }

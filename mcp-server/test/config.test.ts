@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BridgeConfigurationError, readBridgeConfig } from '../dist/config.js';
 
-const TOKEN = '0123456789abcdef0123456789abcdef';
+const TOKEN = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
 test('reads the default and normalized loopback bridge origins', () => {
   assert.deepEqual(readBridgeConfig({ DIRT_MCP_BRIDGE_TOKEN: TOKEN }), {
@@ -28,15 +28,20 @@ test('requires a nonempty bridge token', () => {
   );
 });
 
-test('requires at least 32 UTF-8 bytes in the bridge token', () => {
-  assert.throws(
-    () => readBridgeConfig({ DIRT_MCP_BRIDGE_TOKEN: 'a'.repeat(31) }),
-    (error) => error instanceof BridgeConfigurationError && error.code === 'bridge_token_too_short',
-  );
-  assert.deepEqual(readBridgeConfig({ DIRT_MCP_BRIDGE_TOKEN: '🔒'.repeat(8) }), {
-    origin: 'http://127.0.0.1:8765',
-    token: '🔒'.repeat(8),
-  });
+test('requires exactly 64 lowercase hexadecimal token characters', () => {
+  for (const token of [
+    'a'.repeat(63),
+    'a'.repeat(65),
+    'A'.repeat(64),
+    `${'a'.repeat(63)}g`,
+    '🔒'.repeat(16),
+    `${TOKEN}\n`,
+  ]) {
+    assert.throws(
+      () => readBridgeConfig({ DIRT_MCP_BRIDGE_TOKEN: token }),
+      (error) => error instanceof BridgeConfigurationError && error.code === 'bridge_token_invalid',
+    );
+  }
 });
 
 test('rejects bridge URLs that are not a bare HTTP IPv4 loopback origin', () => {

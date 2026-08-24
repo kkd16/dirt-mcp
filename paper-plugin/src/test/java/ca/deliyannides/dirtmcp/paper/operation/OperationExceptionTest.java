@@ -104,6 +104,35 @@ final class OperationExceptionTest {
     }
 
     @Test
+    void limitsReconciliationIdsToMutationFailureVariants() {
+        UUID editId = UUID.fromString("123e4567-e89b-42d3-a456-426614174000");
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        assertEquals(
+                                OperationFailure.INVALID_REQUEST,
+                                new OperationException(
+                                                OperationFailure.INVALID_REQUEST,
+                                                "invalid",
+                                                new ErrorDetails.InvalidRequest.InvalidValue(
+                                                        "field"),
+                                                null,
+                                                editId)
+                                        .failure()));
+        assertEquals(
+                editId,
+                new OperationException(
+                                OperationFailure.WORLD_UNAVAILABLE,
+                                "unavailable",
+                                new ErrorDetails.WorldUnavailable.OperationFailed(),
+                                null,
+                                editId)
+                        .editId()
+                        .orElseThrow());
+    }
+
+    @Test
     void requiresEditNotLatestIdsToIdentifyDifferentEdits() {
         UUID editId = UUID.fromString("123e4567-e89b-42d3-a456-426614174000");
 

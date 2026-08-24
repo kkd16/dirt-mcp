@@ -1,16 +1,21 @@
 package ca.deliyannides.dirtmcp.paper.bridge;
 
+import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
-import ca.deliyannides.dirtmcp.paper.world.edit.UndoEditsException;
 import java.io.IOException;
-import java.util.UUID;
 
 final class FailureMapper {
+    private static final String INTERNAL_ERROR_MESSAGE = "The operation failed unexpectedly";
+
     private FailureMapper() {}
 
     static void send(BridgeExchange exchange, OperationException exception) throws IOException {
         OperationFailure failure = exception.failure();
+        if (hasInvalidWorldUnavailableShape(exception)) {
+            exchange.sendInternalError(500, INTERNAL_ERROR_MESSAGE);
+            return;
+        }
         int status =
                 switch (failure) {
                     case INVALID_REQUEST -> 400;
@@ -24,21 +29,6 @@ final class FailureMapper {
                             WORLD_UNAVAILABLE ->
                             503;
                 };
-        if (exception instanceof UndoEditsException batch) {
-            UUID failedEditId = exception.editId().orElseThrow();
-            if (failure == OperationFailure.INTERNAL_ERROR) {
-                exchange.sendInternalUndoError(
-                        status, exception.getMessage(), failedEditId, batch.undoneEdits());
-            } else {
-                exchange.sendUndoError(
-                        status,
-                        exception.getMessage(),
-                        exception.details().orElseThrow(),
-                        failedEditId,
-                        batch.undoneEdits());
-            }
-            return;
-        }
         if (failure == OperationFailure.INTERNAL_ERROR) {
             if (exception.editId().isPresent()) {
                 exchange.sendInternalError(
@@ -55,5 +45,17 @@ final class FailureMapper {
         } else {
             exchange.sendError(status, exception.getMessage(), details);
         }
+    }
+
+    private static boolean hasInvalidWorldUnavailableShape(OperationException exception) {
+        if (exception.failure() != OperationFailure.WORLD_UNAVAILABLE) {
+            return false;
+        }
+        ErrorDetails details = exception.details().orElseThrow();
+        boolean mutationOnly =
+                details instanceof ErrorDetails.WorldUnavailable.OperationFailed
+                        || details instanceof ErrorDetails.WorldUnavailable.RolledBack
+                        || details instanceof ErrorDetails.WorldUnavailable.RollbackFailed;
+        return mutationOnly && exception.editId().isEmpty();
     }
 }

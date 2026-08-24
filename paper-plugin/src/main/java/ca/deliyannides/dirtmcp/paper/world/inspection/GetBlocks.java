@@ -2,9 +2,8 @@ package ca.deliyannides.dirtmcp.paper.world.inspection;
 
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 @FunctionalInterface
 public interface GetBlocks {
@@ -19,13 +18,11 @@ public interface GetBlocks {
             boolean includeAir,
             int maxResults) {
         public Request {
-            includeBlockStatePatterns = immutableCopy(includeBlockStatePatterns);
-            excludeBlockStatePatterns = immutableCopy(excludeBlockStatePatterns);
+            Objects.requireNonNull(world, "world");
+            Objects.requireNonNull(min, "min");
+            Objects.requireNonNull(max, "max");
+            includeBlockStatePatterns = List.copyOf(includeBlockStatePatterns);
+            excludeBlockStatePatterns = List.copyOf(excludeBlockStatePatterns);
         }
-    }
-
-    private static List<String> immutableCopy(List<String> values) {
-        // Preserve malformed null entries for operation-layer validation.
-        return values == null ? null : Collections.unmodifiableList(new ArrayList<>(values));
     }
 }

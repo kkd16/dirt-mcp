@@ -1,59 +1,56 @@
 package ca.deliyannides.dirtmcp.paper.bridge;
 
-import static ca.deliyannides.dirtmcp.paper.bridge.RequestJson.invalid;
-
-import ca.deliyannides.dirtmcp.paper.command.RunMinecraftCommands;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
-import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.validation.UuidV4;
-import ca.deliyannides.dirtmcp.paper.world.edit.EditRecord;
-import ca.deliyannides.dirtmcp.paper.world.edit.GetEditHistory;
-import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
-import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
-import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdits;
-import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
-import ca.deliyannides.dirtmcp.paper.world.inspection.ExactBlockStructure;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView;
-import ca.deliyannides.dirtmcp.paper.world.inspection.GetPlayerContext;
-import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
-import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
+import com.google.gson.Strictness;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
 import com.sun.net.httpserver.HttpExchange;
 import java.io.IOException;
+import java.io.Serial;
+import java.io.StringReader;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 public final class BridgeExchange {
+    private static final String CALL_ID_HEADER = "X-Dirt-Call-Id";
+    private static final int MAXIMUM_JSON_DEPTH = 64;
+
     private final HttpExchange exchange;
     private final int maximumRequestBytes;
     private final RequestBodyReader bodyReader;
+    private final Map<String, Object> auditFields = new LinkedHashMap<>();
     private Integer status;
-    private String world;
     private Long requestBytes;
     private Long responseBytes;
     private String errorCode;
-    private UUID editId;
-    private String outcome;
-    private Long changedBlockCount;
-    private Long resultCount;
-    private String bounds;
+    private UUID callId;
+    private Throwable auditFailure;
+    private AuditLevel auditLevel = AuditLevel.DEBUG;
+    private boolean responseDeliveryRisk;
+    private boolean suppressFailureDetails;
 
     BridgeExchange(HttpExchange exchange, int maximumRequestBytes, RequestBodyReader bodyReader) {
-        this.exchange = exchange;
+        this.exchange = Objects.requireNonNull(exchange, "exchange");
         this.maximumRequestBytes = maximumRequestBytes;
-        this.bodyReader = bodyReader;
+        this.bodyReader = Objects.requireNonNull(bodyReader, "bodyReader");
     }
 
-    public JsonObject readJsonObject() throws IOException, OperationException {
+    public JsonObject readJsonObject() throws IOException {
         String contentType = this.exchange.getRequestHeaders().getFirst("Content-Type");
         if (contentType == null
                 || !contentType
@@ -61,42 +58,109 @@ public final class BridgeExchange {
                         .trim()
                         .toLowerCase(Locale.ROOT)
                         .equals("application/json")) {
-            throw invalid(
-                    "Content-Type must be application/json",
-                    new ErrorDetails.InvalidRequest.UnsupportedMediaType("application/json"));
+            throw bridgeRequest(
+                    "Content-Type must be application/json", BridgeProblem.unsupportedMediaType());
         }
         validateContentLength();
         byte[] body =
                 this.bodyReader.read(this.exchange.getRequestBody(), this.maximumRequestBytes);
         this.requestBytes = (long) body.length;
         if (body.length > this.maximumRequestBytes) {
-            throw invalid(
+            throw bridgeRequest(
                     "Request body exceeds the maximum of " + this.maximumRequestBytes + " bytes",
-                    new ErrorDetails.InvalidRequest.BodyTooLarge(this.maximumRequestBytes));
+                    BridgeProblem.bodyTooLarge(this.maximumRequestBytes));
         }
+
+        String json = decodeUtf8(body);
+        validateStrictJson(json);
         try {
-            String json =
-                    StandardCharsets.UTF_8
-                            .newDecoder()
-                            .onMalformedInput(CodingErrorAction.REPORT)
-                            .onUnmappableCharacter(CodingErrorAction.REPORT)
-                            .decode(ByteBuffer.wrap(body))
-                            .toString();
             JsonElement document = JsonParser.parseString(json);
             if (!document.isJsonObject()) {
-                throw invalid(
-                        "Request body must be a JSON object",
-                        new ErrorDetails.InvalidRequest.InvalidValue("body"));
+                throw bridgeRequest(
+                        "Request body must be a JSON object", BridgeProblem.invalidValue("body"));
             }
             return document.getAsJsonObject();
-        } catch (CharacterCodingException | JsonParseException exception) {
-            throw invalid(
-                    "Request body must contain valid JSON values",
-                    new ErrorDetails.InvalidRequest.MalformedJson());
+        } catch (JsonParseException exception) {
+            throw malformedJson();
         }
     }
 
-    private void validateContentLength() throws OperationException {
+    private static String decodeUtf8(byte[] body) {
+        try {
+            return StandardCharsets.UTF_8
+                    .newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(body))
+                    .toString();
+        } catch (CharacterCodingException exception) {
+            throw malformedJson();
+        }
+    }
+
+    private static void validateStrictJson(String json) {
+        try (JsonReader reader = new JsonReader(new StringReader(json))) {
+            reader.setStrictness(Strictness.STRICT);
+            validateValue(reader, "", 0);
+            if (reader.peek() != JsonToken.END_DOCUMENT) {
+                throw malformedJson();
+            }
+        } catch (DuplicateMemberException exception) {
+            throw bridgeRequest(
+                    "Request body contains duplicate field " + exception.field(),
+                    BridgeProblem.duplicateJsonMember(exception.field()));
+        } catch (IOException | IllegalStateException exception) {
+            throw malformedJson();
+        }
+    }
+
+    private static void validateValue(JsonReader reader, String path, int depth)
+            throws IOException {
+        if (depth > MAXIMUM_JSON_DEPTH) {
+            throw new IllegalStateException("JSON nesting is too deep");
+        }
+        switch (reader.peek()) {
+            case BEGIN_ARRAY -> validateArray(reader, path, depth);
+            case BEGIN_OBJECT -> validateObject(reader, path, depth);
+            case BOOLEAN -> reader.nextBoolean();
+            case NULL -> reader.nextNull();
+            case NUMBER, STRING -> reader.nextString();
+            default -> throw new IllegalStateException("Expected a JSON value");
+        }
+    }
+
+    private static void validateArray(JsonReader reader, String path, int depth)
+            throws IOException {
+        reader.beginArray();
+        int index = 0;
+        while (reader.hasNext()) {
+            validateValue(reader, path + '[' + index + ']', depth + 1);
+            index++;
+        }
+        reader.endArray();
+    }
+
+    private static void validateObject(JsonReader reader, String path, int depth)
+            throws IOException {
+        reader.beginObject();
+        Set<String> fields = new HashSet<>();
+        while (reader.hasNext()) {
+            String field = reader.nextName();
+            String fieldPath = path.isEmpty() ? field : path + '.' + field;
+            if (!fields.add(field)) {
+                throw new DuplicateMemberException(fieldPath);
+            }
+            validateValue(reader, fieldPath, depth + 1);
+        }
+        reader.endObject();
+    }
+
+    private static BridgeRequestException malformedJson() {
+        return bridgeRequest(
+                "Request body must contain strict JSON", BridgeProblem.malformedJson());
+    }
+
+    private void validateContentLength() {
         String contentLength = this.exchange.getRequestHeaders().getFirst("Content-Length");
         if (contentLength == null) {
             return;
@@ -108,48 +172,57 @@ public final class BridgeExchange {
             }
             this.requestBytes = declared;
             if (declared > this.maximumRequestBytes) {
-                throw invalid(
+                throw bridgeRequest(
                         "Request body exceeds the maximum of "
                                 + this.maximumRequestBytes
                                 + " bytes",
-                        new ErrorDetails.InvalidRequest.BodyTooLarge(this.maximumRequestBytes));
+                        BridgeProblem.bodyTooLarge(this.maximumRequestBytes));
             }
         } catch (NumberFormatException exception) {
-            throw invalid(
+            throw bridgeRequest(
                     "Content-Length must be a non-negative integer",
-                    new ErrorDetails.InvalidRequest.InvalidValue("Content-Length"));
+                    BridgeProblem.invalidValue("Content-Length"));
         }
     }
 
-    public void world(String world) {
-        this.world = world;
-    }
-
-    public void bounds(BlockPosition first, BlockPosition second) {
-        Objects.requireNonNull(first, "first");
-        Objects.requireNonNull(second, "second");
-        BlockPosition minimum =
-                new BlockPosition(
-                        Math.min(first.x(), second.x()),
-                        Math.min(first.y(), second.y()),
-                        Math.min(first.z(), second.z()));
-        BlockPosition maximum =
-                new BlockPosition(
-                        Math.max(first.x(), second.x()),
-                        Math.max(first.y(), second.y()),
-                        Math.max(first.z(), second.z()));
-        this.bounds = bounds(new BlockBounds(minimum, maximum));
-    }
-
-    public UUID requiredCallId() throws OperationException {
-        String value = this.exchange.getRequestHeaders().getFirst("X-Dirt-Call-Id");
+    void parseCallId(List<String> values) {
+        if (values == null || values.size() != 1) {
+            throw bridgeRequest(
+                    CALL_ID_HEADER + " must occur exactly once",
+                    BridgeProblem.invalidValue(CALL_ID_HEADER));
+        }
         try {
-            return UuidV4.parseCanonical(value, "X-Dirt-Call-Id");
+            this.callId = UuidV4.parseCanonical(values.getFirst(), CALL_ID_HEADER);
         } catch (IllegalArgumentException exception) {
-            throw invalid(
-                    exception.getMessage(),
-                    new ErrorDetails.InvalidRequest.InvalidValue("X-Dirt-Call-Id"));
+            throw bridgeRequest(exception.getMessage(), BridgeProblem.invalidValue(CALL_ID_HEADER));
         }
+    }
+
+    public UUID callId() {
+        return Objects.requireNonNull(this.callId, "Call ID has not been admitted");
+    }
+
+    public void auditField(String key, Object value) {
+        if (key == null || key.isBlank()) {
+            throw new IllegalArgumentException("Audit field name must not be blank");
+        }
+        this.auditFields.put(key, Objects.requireNonNull(value, "value"));
+    }
+
+    public void auditCompletion(AuditLevel level, boolean deliveryRisk) {
+        this.auditLevel = Objects.requireNonNull(level, "level");
+        this.responseDeliveryRisk = deliveryRisk;
+    }
+
+    /**
+     * Attaches an endpoint-owned failure to the detailed audit log without changing the response.
+     */
+    public void auditFailure(Throwable failure) {
+        this.auditFailure = Objects.requireNonNull(failure, "failure");
+    }
+
+    public void suppressFailureDetails() {
+        this.suppressFailureDetails = true;
     }
 
     public void ok(Object body) throws IOException {
@@ -157,7 +230,12 @@ public final class BridgeExchange {
     }
 
     void sendError(int status, String message, ErrorDetails details) throws IOException {
-        sendErrorEnvelope(status, ErrorDetailsJson.code(details), message, details, null, null);
+        sendErrorEnvelope(
+                status,
+                ErrorDetailsJson.code(details),
+                message,
+                ErrorDetailsJson.serialize(details),
+                null);
     }
 
     void sendError(int status, String message, ErrorDetails details, UUID editId)
@@ -166,60 +244,26 @@ public final class BridgeExchange {
                 status,
                 ErrorDetailsJson.code(details),
                 message,
-                details,
-                Objects.requireNonNull(editId, "editId"),
-                null);
+                ErrorDetailsJson.serialize(details),
+                Objects.requireNonNull(editId, "editId"));
     }
 
-    void sendUndoError(
-            int status,
-            String message,
-            ErrorDetails details,
-            UUID editId,
-            List<EditRecord> undoneEdits)
-            throws IOException {
-        sendErrorEnvelope(
-                status,
-                ErrorDetailsJson.code(details),
-                message,
-                details,
-                Objects.requireNonNull(editId, "editId"),
-                Objects.requireNonNull(undoneEdits, "undoneEdits"));
+    void sendProblem(int status, String message, BridgeProblem problem) throws IOException {
+        JsonObject details = BridgeJson.GSON.toJsonTree(problem.details()).getAsJsonObject();
+        sendErrorEnvelope(status, problem.code(), message, details, null);
     }
 
     void sendInternalError(int status, String message) throws IOException {
-        sendErrorEnvelope(status, "internal_error", message, null, null, null);
+        sendErrorEnvelope(status, "internal_error", message, null, null);
     }
 
     void sendInternalError(int status, String message, UUID editId) throws IOException {
         sendErrorEnvelope(
-                status,
-                "internal_error",
-                message,
-                null,
-                Objects.requireNonNull(editId, "editId"),
-                null);
-    }
-
-    void sendInternalUndoError(
-            int status, String message, UUID editId, List<EditRecord> undoneEdits)
-            throws IOException {
-        sendErrorEnvelope(
-                status,
-                "internal_error",
-                message,
-                null,
-                Objects.requireNonNull(editId, "editId"),
-                Objects.requireNonNull(undoneEdits, "undoneEdits"));
+                status, "internal_error", message, null, Objects.requireNonNull(editId, "editId"));
     }
 
     private void sendErrorEnvelope(
-            int status,
-            String code,
-            String message,
-            ErrorDetails details,
-            UUID editId,
-            List<EditRecord> undoneEdits)
+            int status, String code, String message, JsonObject details, UUID editId)
             throws IOException {
         if (message == null || message.isEmpty()) {
             throw new IllegalArgumentException("Error message must not be empty");
@@ -230,21 +274,19 @@ public final class BridgeExchange {
         detail.addProperty("code", code);
         detail.addProperty("message", message);
         if (details != null) {
-            detail.add("details", ErrorDetailsJson.serialize(details));
+            detail.add("details", details);
         }
         if (checkedEditId != null) {
-            this.editId = checkedEditId;
             detail.addProperty("editId", checkedEditId.toString());
+            auditField("edit_id", checkedEditId);
         }
         JsonObject envelope = new JsonObject();
         envelope.add("error", detail);
-        if (undoneEdits != null) {
-            envelope.add("undoneEdits", BridgeJson.GSON.toJsonTree(undoneEdits));
-            this.resultCount = (long) undoneEdits.size();
-            this.changedBlockCount = changedBlockCount(undoneEdits);
-            this.outcome = "partial_failure";
-        }
         send(status, envelope);
+    }
+
+    private static BridgeRequestException bridgeRequest(String message, BridgeProblem problem) {
+        return new BridgeRequestException(message, problem);
     }
 
     void allow(String method) {
@@ -264,10 +306,6 @@ public final class BridgeExchange {
         return this.status;
     }
 
-    String world() {
-        return this.world;
-    }
-
     Long requestBytes() {
         return this.requestBytes;
     }
@@ -280,28 +318,31 @@ public final class BridgeExchange {
         return this.errorCode;
     }
 
-    UUID editId() {
-        return this.editId;
+    UUID admittedCallId() {
+        return this.callId;
     }
 
-    String outcome() {
-        return this.outcome;
+    Map<String, Object> auditFields() {
+        return Map.copyOf(this.auditFields);
     }
 
-    Long changedBlockCount() {
-        return this.changedBlockCount;
+    AuditLevel auditLevel() {
+        return this.auditLevel;
     }
 
-    Long resultCount() {
-        return this.resultCount;
+    boolean responseDeliveryRisk() {
+        return this.responseDeliveryRisk;
     }
 
-    String bounds() {
-        return this.bounds;
+    Throwable auditFailure() {
+        return this.auditFailure;
+    }
+
+    boolean suppressesFailureDetails() {
+        return this.suppressFailureDetails;
     }
 
     private void send(int status, Object body) throws IOException {
-        captureResultMetadata(body);
         byte[] bytes = BridgeJson.GSON.toJson(body).getBytes(StandardCharsets.UTF_8);
         this.status = status;
         this.responseBytes = (long) bytes.length;
@@ -314,88 +355,23 @@ public final class BridgeExchange {
         }
     }
 
-    private void captureResultMetadata(Object body) {
-        switch (body) {
-            case ReplaceRegionBlocks.Result result ->
-                    captureEdit(
-                            result.bounds(),
-                            result.outcome().wireName(),
-                            result.changedBlockCount(),
-                            result.edit() == null ? null : result.edit().editId(),
-                            result.matchedBlockCount());
-            case SetBlocks.Result result ->
-                    captureEdit(
-                            result.bounds(),
-                            result.outcome().wireName(),
-                            result.changedBlockCount(),
-                            result.edit() == null ? null : result.edit().editId(),
-                            null);
-            case UndoEdits.Result result -> {
-                this.outcome = "undone";
-                this.changedBlockCount = changedBlockCount(result.edits());
-                this.resultCount = (long) result.edits().size();
-            }
-            case GetEditHistory.Result result -> this.resultCount = (long) result.edits().size();
-            case CountRegionBlockStates.Result result -> {
-                this.bounds = bounds(result.bounds());
-                this.resultCount = (long) result.blockStateCounts().size();
-            }
-            case ExactBlockStructure result -> this.resultCount = result.blockCount();
-            case GetPlayerContext.Result ignored -> {
-                // Player context does not expose a result collection.
-            }
-            case GetPerspectiveView.Result result -> this.resultCount = (long) result.hits().size();
-            case RunMinecraftCommands.Result result -> {
-                this.resultCount = (long) result.results().size();
-                this.outcome =
-                        result.results().getLast().outcome()
-                                        == RunMinecraftCommands.Outcome.DISPATCHED
-                                ? "dispatched"
-                                : "partial_failure";
-            }
-            default -> {
-                // Ping, status, and error envelopes do not add result metadata.
-            }
-        }
+    public enum AuditLevel {
+        DEBUG,
+        INFO,
+        WARNING
     }
 
-    private void captureEdit(
-            BlockBounds editBounds,
-            String editOutcome,
-            long changedCount,
-            UUID retainedEditId,
-            Long count) {
-        UUID checkedEditId =
-                retainedEditId == null ? null : UuidV4.require(retainedEditId, "editId");
-        this.bounds = bounds(editBounds);
-        this.outcome = editOutcome;
-        this.changedBlockCount = changedCount;
-        this.editId = checkedEditId;
-        this.resultCount = count;
-    }
+    private static final class DuplicateMemberException extends RuntimeException {
+        @Serial private static final long serialVersionUID = 1L;
 
-    private static String bounds(BlockBounds value) {
-        if (value == null) {
-            return null;
-        }
-        return value.min().x()
-                + ","
-                + value.min().y()
-                + ","
-                + value.min().z()
-                + ".."
-                + value.max().x()
-                + ","
-                + value.max().y()
-                + ","
-                + value.max().z();
-    }
+        private final String field;
 
-    private static long changedBlockCount(List<EditRecord> edits) {
-        long total = 0;
-        for (EditRecord edit : edits) {
-            total = Math.addExact(total, edit.changedBlockCount());
+        private DuplicateMemberException(String field) {
+            this.field = field;
         }
-        return total;
+
+        private String field() {
+            return this.field;
+        }
     }
 }

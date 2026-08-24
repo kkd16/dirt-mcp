@@ -15,13 +15,13 @@ public final class ServerStatusEndpoint implements BridgeEndpoint {
     }
 
     @Override
-    public String operation() {
-        return "get_server_status";
+    public String operationId() {
+        return "getServerStatus";
     }
 
     @Override
     public String method() {
-        return "GET";
+        return "POST";
     }
 
     @Override
@@ -31,7 +31,7 @@ public final class ServerStatusEndpoint implements BridgeEndpoint {
 
     @Override
     public void handle(BridgeExchange exchange) throws IOException, OperationException {
-        exchange.ok(this.operation.getStatus());
+        exchange.ok(this.operation.getStatus(ServerStatusRequestDecoder.decode(exchange)));
     }
 
     @Override

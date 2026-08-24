@@ -1,13 +1,11 @@
 package ca.deliyannides.dirtmcp.paper.command;
 
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
-import ca.deliyannides.dirtmcp.paper.config.McpTool;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus;
 import com.mojang.brigadier.Command;
-import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
@@ -65,20 +63,7 @@ public final class DirtAdminCommand {
                 .then(
                         Commands.literal("config")
                                 .executes(context -> showConfig(context.getSource().getSender())))
-                .then(toolsCommand())
                 .build();
-    }
-
-    private LiteralArgumentBuilder<CommandSourceStack> toolsCommand() {
-        LiteralArgumentBuilder<CommandSourceStack> tools =
-                Commands.literal("tools")
-                        .executes(context -> showTools(context.getSource().getSender()));
-        for (McpTool tool : McpTool.values()) {
-            tools.then(
-                    Commands.literal(tool.id())
-                            .executes(context -> showTool(context.getSource().getSender(), tool)));
-        }
-        return tools;
     }
 
     private int showHelp(CommandSender sender) {
@@ -88,7 +73,6 @@ public final class DirtAdminCommand {
         message.append(Component.newline()).append(Component.newline());
         appendCommand(message, "/dirt status", "View live server and bridge status");
         appendCommand(message, "/dirt config", "Inspect the active configuration");
-        appendCommand(message, "/dirt tools", "Browse MCP tool inputs and results");
         appendCommand(message, "/dirt version", "Show plugin version information");
         sender.sendMessage(message.build());
         return Command.SINGLE_SUCCESS;
@@ -106,7 +90,7 @@ public final class DirtAdminCommand {
     private int showStatus(CommandSender sender) {
         final GetServerStatus.Result result;
         try {
-            result = this.status.getStatus();
+            result = this.status.getStatus(new GetServerStatus.Request(true, true, false));
         } catch (OperationException exception) {
             LogContext context = LogContext.of("error_code", exception.failure());
             this.log.debug(
@@ -132,7 +116,7 @@ public final class DirtAdminCommand {
         appendValue(message, "Bridge", "127.0.0.1:" + this.config.bridge().port());
         appendValue(message, "Minecraft", result.builds().minecraft());
         appendValue(message, "Paper", result.builds().paper());
-        appendValue(message, "Dirt MCP", result.builds().dirtMcp());
+        appendValue(message, "Dirt MCP", result.builds().dirtPlugin());
         appendValue(message, "FAWE", result.builds().fawe());
         appendValue(
                 message,
@@ -166,11 +150,13 @@ public final class DirtAdminCommand {
         appendValue(message, "request-body-timeout-seconds", bridge.requestBodyTimeoutSeconds());
         appendValue(message, "max-concurrent-requests", bridge.maxConcurrentRequests());
         appendValue(message, "max-concurrent-inspections", bridge.maxConcurrentInspections());
-
-        appendSection(message, "Tools");
-        for (McpTool tool : McpTool.values()) {
-            appendValue(message, tool.id(), this.config.tools().isEnabled(tool));
-        }
+        appendValue(message, "max-request-bytes", bridge.maxRequestBytes());
+        appendValue(
+                message,
+                "allowed-operations",
+                bridge.allowedOperations().stream()
+                        .map(operation -> operation.operationId())
+                        .toList());
 
         DirtConfig.Logging logging = this.config.logging();
         appendSection(message, "Logging");
@@ -181,9 +167,8 @@ public final class DirtAdminCommand {
 
         DirtConfig.Limits limits = this.config.limits();
         appendSection(message, "Limits");
-        appendValue(message, "max-request-bytes", limits.maxRequestBytes());
         appendValue(message, "max-region-volume", limits.maxRegionVolume());
-        appendValue(message, "max-touched-chunks", limits.maxTouchedChunks());
+        appendValue(message, "max-edit-touched-chunks", limits.maxEditTouchedChunks());
         appendValue(message, "max-inspection-touched-chunks", limits.maxInspectionTouchedChunks());
         appendValue(
                 message, "max-perspective-touched-chunks", limits.maxPerspectiveTouchedChunks());
@@ -195,7 +180,6 @@ public final class DirtAdminCommand {
                 message,
                 "max-perspective-ray-distance-budget",
                 limits.maxPerspectiveRayDistanceBudget());
-        appendValue(message, "default-inspection-results", limits.defaultInspectionResultLimit());
         appendValue(message, "max-inspection-results", limits.maxInspectionResultLimit());
         appendValue(message, "max-perspective-rays", limits.maxPerspectiveRays());
         appendValue(message, "max-commands-per-request", limits.maxCommandsPerRequest());
@@ -208,100 +192,6 @@ public final class DirtAdminCommand {
         appendValue(message, "max-entries-total", editHistory.maxEntriesTotal());
         appendValue(message, "max-retained-changed-blocks", editHistory.maxRetainedChangedBlocks());
 
-        DirtConfig.Defaults defaults = this.config.defaults();
-        appendSection(message, "Defaults");
-        appendValue(message, "get-blocks-include-air", defaults.getBlocksIncludeAir());
-        appendValue(message, "edit-dry-run", defaults.editDryRun());
-
-        sender.sendMessage(message.build());
-        return Command.SINGLE_SUCCESS;
-    }
-
-    private int showTools(CommandSender sender) {
-        int enabledCount = this.config.tools().enabled().size();
-
-        TextComponent.Builder message = panel("MCP Tools");
-        message.append(Component.newline());
-        message.append(
-                Component.text(
-                        "Paper startup snapshot  •  "
-                                + enabledCount
-                                + " of "
-                                + McpTool.values().length
-                                + " configured ON",
-                        NamedTextColor.DARK_GRAY));
-        message.append(Component.newline());
-        for (McpTool tool : McpTool.values()) {
-            McpToolHelp.ToolSpec spec = McpToolHelp.spec(tool);
-            boolean enabled = this.config.tools().isEnabled(tool);
-            String command = "/dirt tools " + tool.id();
-            Component toolName =
-                    Component.text(tool.id(), SECONDARY_ACCENT, TextDecoration.BOLD)
-                            .clickEvent(ClickEvent.runCommand(command))
-                            .hoverEvent(
-                                    HoverEvent.showText(
-                                            Component.text(
-                                                    "View " + spec.title(), NamedTextColor.GRAY)));
-            message.append(Component.newline());
-            message.append(
-                    Component.text(
-                            enabled ? "  ● ON   " : "  ○ OFF  ",
-                            enabled ? NamedTextColor.GREEN : NamedTextColor.RED,
-                            TextDecoration.BOLD));
-            message.append(toolName);
-            message.append(Component.text("  " + spec.purpose(), NamedTextColor.GRAY));
-        }
-        message.append(Component.newline()).append(Component.newline());
-        message.append(
-                Component.text(
-                        "Click a tool for details. OFF tools are absent from a newly started MCP "
-                                + "catalog; restart Paper, then the MCP host, after config changes.",
-                        NamedTextColor.DARK_GRAY));
-        sender.sendMessage(message.build());
-        return Command.SINGLE_SUCCESS;
-    }
-
-    private int showTool(CommandSender sender, McpTool tool) {
-        McpToolHelp.ToolSpec spec = McpToolHelp.spec(tool);
-        boolean enabled = this.config.tools().isEnabled(tool);
-        TextComponent.Builder message = panel("MCP Tool");
-        message.append(Component.newline());
-        message.append(Component.text(tool.id(), SECONDARY_ACCENT, TextDecoration.BOLD));
-        message.append(Component.text("  /  " + spec.title(), NamedTextColor.WHITE));
-        message.append(Component.newline());
-        message.append(
-                Component.text(
-                        enabled ? "● CONFIGURED ON" : "○ CONFIGURED OFF",
-                        enabled ? NamedTextColor.GREEN : NamedTextColor.RED,
-                        TextDecoration.BOLD));
-        message.append(Component.text("  •  Paper startup snapshot", NamedTextColor.DARK_GRAY));
-        appendValue(message, "Type", spec.kind().label());
-
-        appendSection(message, "Purpose");
-        appendParagraph(message, spec.purpose());
-        appendSection(message, "Arguments");
-        appendParagraph(message, spec.arguments());
-        appendSection(message, "Returns");
-        appendParagraph(message, spec.returns());
-        appendSection(message, "Behavior");
-        appendParagraph(message, spec.notes());
-        appendParagraph(
-                message,
-                "Canonical results are in structuredContent; text content is only a summary. "
-                        + "Dirt-mapped failures put callId in structuredContent.callId and a "
-                        + "strict error in structuredContent.error. The error contains code, "
-                        + "message, code-specific details, and may contain an editId. Internal "
-                        + "errors omit details.");
-
-        message.append(Component.newline()).append(Component.newline());
-        message.append(
-                Component.text("‹ Back to /dirt tools", SECONDARY_ACCENT)
-                        .clickEvent(ClickEvent.runCommand("/dirt tools"))
-                        .hoverEvent(
-                                HoverEvent.showText(
-                                        Component.text(
-                                                "Open the MCP tool catalog",
-                                                NamedTextColor.GRAY))));
         sender.sendMessage(message.build());
         return Command.SINGLE_SUCCESS;
     }
@@ -332,11 +222,6 @@ public final class DirtAdminCommand {
         message.append(Component.newline()).append(Component.newline());
         message.append(
                 Component.text(section.toUpperCase(Locale.ROOT), ACCENT, TextDecoration.BOLD));
-    }
-
-    private static void appendParagraph(TextComponent.Builder message, String text) {
-        message.append(Component.newline());
-        message.append(Component.text("  " + text, NamedTextColor.WHITE));
     }
 
     private static void appendValue(TextComponent.Builder message, String label, Object value) {

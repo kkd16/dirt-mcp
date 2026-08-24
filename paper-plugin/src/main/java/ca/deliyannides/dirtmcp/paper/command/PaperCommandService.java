@@ -50,15 +50,8 @@ public final class PaperCommandService implements RunMinecraftCommands {
 
     private static List<String> normalize(Request request, int maximumCommands)
             throws OperationException {
-        if (request == null) {
-            throw invalid(
-                    "commands are required", new ErrorDetails.InvalidRequest.Missing("request"));
-        }
+        Objects.requireNonNull(request, "request");
         List<String> requested = request.commands();
-        if (requested == null) {
-            throw invalid(
-                    "commands are required", new ErrorDetails.InvalidRequest.Missing("commands"));
-        }
         if (requested.isEmpty()) {
             throw invalid(
                     "commands must contain at least one command",
@@ -75,7 +68,7 @@ public final class PaperCommandService implements RunMinecraftCommands {
         for (int index = 0; index < requested.size(); index++) {
             String field = "commands[" + index + "]";
             String command = requested.get(index);
-            if (command == null || command.codePoints().anyMatch(Character::isISOControl)) {
+            if (command.codePoints().anyMatch(Character::isISOControl)) {
                 throw invalidCommand(field);
             }
             command = command.strip();

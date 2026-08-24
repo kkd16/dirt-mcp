@@ -10,16 +10,19 @@ import java.util.Objects;
 public final class PaperPlayerContextService implements GetPlayerContext {
     private final MainThread mainThread;
     private final PlayerContextAccess paperAccess;
+    private final InspectionAdmission admission;
 
-    public PaperPlayerContextService(MainThread mainThread, PlayerContextAccess paperAccess) {
+    public PaperPlayerContextService(
+            MainThread mainThread, PlayerContextAccess paperAccess, InspectionAdmission admission) {
         this.mainThread = Objects.requireNonNull(mainThread, "mainThread");
         this.paperAccess = Objects.requireNonNull(paperAccess, "paperAccess");
+        this.admission = Objects.requireNonNull(admission, "admission");
     }
 
     @Override
     public Result getPlayerContext(Request request) throws OperationException {
         validate(request);
-        return captureOnMainThread(request);
+        return this.admission.execute(() -> captureOnMainThread(request));
     }
 
     private Result captureOnMainThread(Request request) throws OperationException {

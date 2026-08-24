@@ -40,23 +40,20 @@ final class GetPerspectiveViewRequestDecoder {
     static GetPerspectiveView.Request decode(BridgeExchange exchange)
             throws IOException, OperationException {
         JsonObject object = exchange.readJsonObject();
-        RequestJson.requireFields(object, Set.of("source"), REQUEST_FIELDS, "Request");
+        RequestJson.requireExactFields(object, REQUEST_FIELDS, "Request");
         Source source = source(object.get("source"));
         ViewRequest view =
                 new ViewRequest(
-                        optionalInteger(object, "width", 21),
-                        optionalInteger(object, "height", 13),
-                        optionalInteger(object, "verticalFieldOfViewDegrees", 70),
-                        optionalInteger(object, "maxDistance", 32),
+                        RequestJson.integer(object.get("width"), "width"),
+                        RequestJson.integer(object.get("height"), "height"),
+                        RequestJson.integer(
+                                object.get("verticalFieldOfViewDegrees"),
+                                "verticalFieldOfViewDegrees"),
+                        RequestJson.integer(object.get("maxDistance"), "maxDistance"),
                         fluidCollision(
-                                object.has("fluidCollision")
-                                        ? RequestJson.string(
-                                                object.get("fluidCollision"), "fluidCollision")
-                                        : "never"),
-                        object.has("ignorePassableBlocks")
-                                ? RequestJson.bool(
-                                        object.get("ignorePassableBlocks"), "ignorePassableBlocks")
-                                : false);
+                                RequestJson.string(object.get("fluidCollision"), "fluidCollision")),
+                        RequestJson.bool(
+                                object.get("ignorePassableBlocks"), "ignorePassableBlocks"));
         return new GetPerspectiveView.Request(source, view);
     }
 
@@ -124,11 +121,6 @@ final class GetPerspectiveViewRequestDecoder {
         return RequestJson.invalid(
                 name + " must be a finite number",
                 new ErrorDetails.InvalidRequest.InvalidValue(name));
-    }
-
-    private static int optionalInteger(JsonObject object, String field, int defaultValue)
-            throws OperationException {
-        return object.has(field) ? RequestJson.integer(object.get(field), field) : defaultValue;
     }
 
     private static FluidCollision fluidCollision(String value) throws OperationException {

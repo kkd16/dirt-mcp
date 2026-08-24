@@ -50,7 +50,7 @@ interface EditPlatform extends AutoCloseable {
     @FunctionalInterface
     interface PreparedOperation extends AutoCloseable {
         @Override
-        void close() throws OperationException;
+        void close();
     }
 
     interface PreparedReplace extends PreparedOperation {

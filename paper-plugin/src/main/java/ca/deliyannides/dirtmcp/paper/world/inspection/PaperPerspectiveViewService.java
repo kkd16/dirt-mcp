@@ -5,31 +5,108 @@ import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.platform.MainThread;
 import ca.deliyannides.dirtmcp.paper.platform.PaperMainThreadException;
+import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.PlayerSource;
+import ca.deliyannides.dirtmcp.paper.world.inspection.PerspectiveViewAccess.CameraSnapshot;
+import ca.deliyannides.dirtmcp.paper.world.inspection.PerspectiveViewAccess.Chunk;
+import ca.deliyannides.dirtmcp.paper.world.inspection.PerspectiveViewAccess.Projection;
+import ca.deliyannides.dirtmcp.paper.world.inspection.PerspectiveViewAlgorithms.ChunkCoordinate;
+import ca.deliyannides.dirtmcp.paper.world.inspection.PerspectiveViewAlgorithms.Geometry;
+import java.util.LinkedHashSet;
 import java.util.Objects;
+import java.util.Set;
 
 public final class PaperPerspectiveViewService implements GetPerspectiveView {
     private final MainThread mainThread;
     private final PerspectiveViewAccess paperAccess;
     private final InspectionAdmission admission;
+    private final int maximumRays;
+    private final int maximumRayDistanceBudget;
+    private final int maximumCheckedChunks;
 
     public PaperPerspectiveViewService(
             MainThread mainThread,
             PerspectiveViewAccess paperAccess,
-            InspectionAdmission admission) {
+            InspectionAdmission admission,
+            int maximumRays,
+            int maximumRayDistanceBudget,
+            int maximumCheckedChunks) {
+        if (maximumRays < 1 || maximumRayDistanceBudget < 1 || maximumCheckedChunks < 1) {
+            throw new IllegalArgumentException("Perspective view limits must be positive");
+        }
         this.mainThread = Objects.requireNonNull(mainThread, "mainThread");
         this.paperAccess = Objects.requireNonNull(paperAccess, "paperAccess");
         this.admission = Objects.requireNonNull(admission, "admission");
+        this.maximumRays = maximumRays;
+        this.maximumRayDistanceBudget = maximumRayDistanceBudget;
+        this.maximumCheckedChunks = maximumCheckedChunks;
     }
 
     @Override
     public Result getPerspectiveView(Request request) throws OperationException {
         validate(request);
-        return this.admission.execute(() -> captureOnMainThread(request));
+        return this.admission.execute(() -> capture(request));
     }
 
-    private Result captureOnMainThread(Request request) throws OperationException {
+    private Result capture(Request request) throws OperationException {
+        CameraSnapshot camera =
+                callOnMainThread(() -> this.paperAccess.captureCamera(request.source()));
+        Projection projection = project(request, camera);
+        return callOnMainThread(
+                () -> this.paperAccess.trace(request.options(), camera, projection));
+    }
+
+    private Projection project(Request request, CameraSnapshot camera) throws OperationException {
+        Geometry geometry =
+                PerspectiveViewAlgorithms.geometry(
+                        request.options(),
+                        camera.lookDirection(),
+                        camera.rotation().yaw(),
+                        this.maximumRays,
+                        this.maximumRayDistanceBudget);
+        String outOfRangeAxis =
+                PerspectiveViewAlgorithms.firstOutOfRangeEndpointAxis(
+                        camera.position().x(),
+                        camera.position().y(),
+                        camera.position().z(),
+                        request.options().maxDistance(),
+                        geometry.directions());
+        if (outOfRangeAxis != null) {
+            throw endpointOutOfRange(request.source(), outOfRangeAxis);
+        }
+        Set<ChunkCoordinate> requiredChunks =
+                PerspectiveViewAlgorithms.requiredChunks(
+                        camera.position().x(),
+                        camera.position().y(),
+                        camera.position().z(),
+                        camera.minimumHeight(),
+                        camera.maximumHeight(),
+                        request.options().maxDistance(),
+                        geometry.directions());
+        if (requiredChunks.size() > this.maximumCheckedChunks) {
+            throw new OperationException(
+                    OperationFailure.REGION_TOO_LARGE,
+                    "Perspective view requires checking "
+                            + requiredChunks.size()
+                            + " chunks, exceeding the maximum of "
+                            + this.maximumCheckedChunks,
+                    new ErrorDetails.RegionTooLarge.PerspectiveChunks(
+                            requiredChunks.size(), this.maximumCheckedChunks));
+        }
+        Set<Chunk> chunks = new LinkedHashSet<>(requiredChunks.size());
+        for (ChunkCoordinate chunk : requiredChunks) {
+            chunks.add(new Chunk(chunk.x(), chunk.z()));
+        }
+        return new Projection(
+                new GetPerspectiveView.ViewBasis(
+                        geometry.forward(), geometry.right(), geometry.up()),
+                geometry.horizontalFieldOfViewDegrees(),
+                geometry.directions(),
+                chunks);
+    }
+
+    private <T> T callOnMainThread(MainThread.CheckedSupplier<T> action) throws OperationException {
         try {
-            return this.mainThread.call(() -> this.paperAccess.capture(request));
+            return this.mainThread.call(action);
         } catch (PaperMainThreadException exception) {
             if (exception.getCause() instanceof OperationException operationException) {
                 throw operationException;
@@ -47,6 +124,27 @@ public final class PaperPerspectiveViewService implements GetPerspectiveView {
                     new ErrorDetails.ServerUnavailable.PaperUnavailable(),
                     exception);
         }
+    }
+
+    private static OperationException endpointOutOfRange(Source source, String axis) {
+        if (source instanceof PlayerSource playerSource) {
+            return new OperationException(
+                    OperationFailure.PLAYER_UNAVAILABLE,
+                    "Player perspective endpoint is outside the signed block-coordinate range at "
+                            + axis
+                            + ": "
+                            + playerSource.player(),
+                    new ErrorDetails.PlayerUnavailable.PositionOutOfRange(
+                            playerSource.player(), "perspectiveEndpoint." + axis));
+        }
+        return invalidCoordinate("perspectiveEndpoint." + axis);
+    }
+
+    private static OperationException invalidCoordinate(String field) {
+        return new OperationException(
+                OperationFailure.INVALID_REQUEST,
+                field + " is outside the signed block-coordinate range",
+                new ErrorDetails.InvalidRequest.InvalidValue(field));
     }
 
     private static void validate(Request request) throws OperationException {
@@ -109,10 +207,5 @@ public final class PaperPerspectiveViewService implements GetPerspectiveView {
 
     private static OperationException invalid(String message, ErrorDetails.InvalidRequest details) {
         return new OperationException(OperationFailure.INVALID_REQUEST, message, details);
-    }
-
-    @FunctionalInterface
-    public interface PerspectiveViewAccess {
-        Result capture(Request request) throws OperationException;
     }
 }

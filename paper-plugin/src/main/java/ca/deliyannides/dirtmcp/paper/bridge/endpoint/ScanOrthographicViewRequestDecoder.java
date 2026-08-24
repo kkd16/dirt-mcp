@@ -2,7 +2,6 @@ package ca.deliyannides.dirtmcp.paper.bridge.endpoint;
 
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeExchange;
 import ca.deliyannides.dirtmcp.paper.bridge.RequestJson;
-import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView;
@@ -13,15 +12,7 @@ import java.util.List;
 import java.util.Set;
 
 final class ScanOrthographicViewRequestDecoder {
-    private static final Set<String> REQUIRED_FIELDS =
-            Set.of(
-                    "world",
-                    "origin",
-                    "direction",
-                    "horizontalRadius",
-                    "verticalRadius",
-                    "maxDistance");
-    private static final Set<String> ALLOWED_FIELDS =
+    private static final Set<String> FIELDS =
             Set.of(
                     "world",
                     "origin",
@@ -34,19 +25,15 @@ final class ScanOrthographicViewRequestDecoder {
 
     private ScanOrthographicViewRequestDecoder() {}
 
-    static ScanOrthographicView.Request decode(BridgeExchange exchange, DirtConfig config)
+    static ScanOrthographicView.Request decode(BridgeExchange exchange)
             throws IOException, OperationException {
         JsonObject object = exchange.readJsonObject();
-        RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS, "Request");
+        RequestJson.requireExactFields(object, FIELDS, "Request");
         int horizontalRadius =
                 RequestJson.integer(object.get("horizontalRadius"), "horizontalRadius");
         int verticalRadius = RequestJson.integer(object.get("verticalRadius"), "verticalRadius");
         int maxDistance = RequestJson.integer(object.get("maxDistance"), "maxDistance");
-        int depth = object.has("depth") ? RequestJson.integer(object.get("depth"), "depth") : 0;
-        int maxResults =
-                object.has("maxResults")
-                        ? RequestJson.integer(object.get("maxResults"), "maxResults")
-                        : config.limits().defaultInspectionResultLimit();
+        int depth = RequestJson.integer(object.get("depth"), "depth");
         return new ScanOrthographicView.Request(
                 RequestJson.string(object.get("world"), "world"),
                 RequestJson.position(object.get("origin"), "origin"),
@@ -55,7 +42,7 @@ final class ScanOrthographicViewRequestDecoder {
                 verticalRadius,
                 maxDistance,
                 depth,
-                maxResults);
+                RequestJson.integer(object.get("maxResults"), "maxResults"));
     }
 
     private static ScanOrthographicView.Direction direction(JsonElement element)

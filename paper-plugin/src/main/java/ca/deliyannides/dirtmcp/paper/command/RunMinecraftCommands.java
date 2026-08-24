@@ -1,8 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.command;
 
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -13,11 +11,7 @@ public interface RunMinecraftCommands {
 
     record Request(List<String> commands) {
         public Request {
-            // Preserve malformed null entries for operation-layer INVALID_REQUEST reporting.
-            commands =
-                    commands == null
-                            ? null
-                            : Collections.unmodifiableList(new ArrayList<>(commands));
+            commands = List.copyOf(commands);
         }
     }
 

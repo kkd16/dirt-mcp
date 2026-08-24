@@ -25,7 +25,7 @@ inspect -> preview -> edit -> verify -> undo if needed
 | Preview  | Preview edits with reproducible seeds before committing them.                   |
 | Undo     | Inspect labeled in-memory history and undo an exact newest-first edit prefix.   |
 | Commands | Run bounded command batches through an operator-level, non-player sender.       |
-| Access   | Paper administrators choose which MCP tools to expose.                          |
+| Access   | Paper administrators allow bridge operations; MCP owns the tool catalog.        |
 
 See the [tool reference](docs/tools.md) for the complete catalog and schemas.
 
@@ -38,7 +38,7 @@ Minecraft versions.
 | ------------------------------------------------------------------- | ------------------------------- |
 | [Paper](https://papermc.io/downloads/paper/)                        | 26.2, API build 116 stable      |
 | [Java](https://docs.papermc.io/paper/getting-started/#requirements) | 25                              |
-| [FAWE](https://modrinth.com/plugin/fastasyncworldedit)              | A Paper-compatible build        |
+| [FAWE](https://modrinth.com/plugin/fastasyncworldedit)              | 2.15.4                          |
 | Node.js                                                             | 26 or newer                     |
 | pnpm                                                                | 11.22.0 or a newer 11.x release |
 
@@ -67,12 +67,13 @@ mcp-server/dist/index.js
 
 ### 2. Install the Paper plugins
 
-Put the Dirt JAR and a compatible FAWE release in the Paper server's `plugins/`
-directory. Dirt will not load without FAWE.
+Put the Dirt JAR and FAWE 2.15.4 in the Paper server's `plugins/` directory.
+Dirt will not load without FAWE.
 
 ### 3. Create the bridge secret and start Paper
 
-Generate a secret of at least 32 bytes, then start Paper with it set:
+Generate the required 64-character lowercase hexadecimal secret, then start
+Paper with it set:
 
 ```bash
 export DIRT_MCP_BRIDGE_TOKEN="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
@@ -80,9 +81,13 @@ java -Xms2G -Xmx2G -jar paper.jar --nogui
 ```
 
 On first run, Dirt creates `plugins/DirtMCP/config.yml`. The shipped
-[configuration](paper-plugin/src/main/resources/config.yml) covers limits,
-defaults, logging, edit-history retention, the bridge port, and the MCP tool
-allowlist. Restart Paper after changing it.
+[configuration](paper-plugin/src/main/resources/config.yml) covers the bridge
+operation allowlist, operation limits, logging, edit-history retention, and the
+bridge port. Restart Paper after changing it.
+
+To hide tools, remove their OpenAPI operation IDs from
+`bridge.allowed-operations`, then restart Paper and the MCP host. An empty list
+exposes no tools; the mandatory `/v1/capabilities` endpoint remains available.
 
 ### 4. Connect the MCP host
 
@@ -104,9 +109,10 @@ For hosts with an `mcpServers` JSON configuration:
 }
 ```
 
-Restart the MCP host after rebuilding the TypeScript server or changing the
-Paper tool allowlist. Call `ping_server` to test the whole path through the MCP
-server, bridge, Paper, and FAWE.
+Restart the MCP host after rebuilding the TypeScript server or changing Paper's
+allowed bridge operations. On startup, MCP reads `/v1/capabilities` and enables
+the corresponding tools from its own catalog. Call `ping_server` to test the
+whole path through the MCP server, bridge, Paper, and FAWE.
 
 ### Local development with Codex
 
@@ -119,6 +125,8 @@ trusted checkout.
 - The bridge binds to `127.0.0.1`, and every endpoint requires bearer
   authentication. Never proxy it, expose it publicly, log its token, or commit
   credentials.
+- The MCP server sends a fresh `X-Dirt-Call-Id` UUIDv4 on every bridge request;
+  Paper retains it with mutation records for cross-process correlation.
 - Paper console logs show concise operator events. Bounded, rotating JSON Lines
   detail logs live under `plugins/DirtMCP/logs/`.
 - MCP stdout is for protocol messages only; diagnostics go to stderr.
@@ -135,8 +143,9 @@ Command batches are non-atomic and may cause effects outside Dirt's edit limits
 and history. Do not retry them blindly after an ambiguous timeout. Keep normal
 server backups.
 
-Paper operators can use `/dirt` for live status, configuration, and tool
-summaries. It requires `dirtmcp.command`, which operators receive by default.
+Paper operators can use `/dirt` for live status, configuration, and bridge
+operation summaries. It requires `dirtmcp.command`, which operators receive by
+default.
 
 ## Development
 

@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
+import ca.deliyannides.dirtmcp.paper.platform.MainThread;
+import ca.deliyannides.dirtmcp.paper.platform.PaperMainThreadException;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.FluidCollision;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.LocationSource;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.PlayerSource;
@@ -51,12 +53,16 @@ final class BukkitPerspectiveViewAccessTest {
                                 lookups.add((String) arguments[0]);
                                 return player;
                             }
+                            if ("getWorld".equals(method.getName())) {
+                                return world;
+                            }
                             return defaultValue(method);
                         });
-        BukkitPerspectiveViewAccess access = new BukkitPerspectiveViewAccess(server, 1, 1, 4);
+        PaperPerspectiveViewService service = service(server);
 
         GetPerspectiveView.Result result =
-                access.capture(new GetPerspectiveView.Request(new PlayerSource("builder"), VIEW));
+                service.getPerspectiveView(
+                        new GetPerspectiveView.Request(new PlayerSource("builder"), VIEW));
 
         var source = (GetPerspectiveView.ResolvedPlayerSource) result.source();
         assertEquals("Builder", source.player().name());
@@ -83,11 +89,11 @@ final class BukkitPerspectiveViewAccessTest {
                                                     "synthetic view resolved a player");
                                     default -> defaultValue(method);
                                 });
-        BukkitPerspectiveViewAccess access = new BukkitPerspectiveViewAccess(server, 1, 1, 4);
+        PaperPerspectiveViewService service = service(server);
         ExactPosition camera = new ExactPosition(8.25, 70, -4.5);
 
         GetPerspectiveView.Result result =
-                access.capture(
+                service.getPerspectiveView(
                         new GetPerspectiveView.Request(
                                 new LocationSource("world", camera, new Rotation(405, -20)), VIEW));
 
@@ -103,15 +109,14 @@ final class BukkitPerspectiveViewAccessTest {
         AtomicInteger playerRayCalls = new AtomicInteger();
         World loadedWorld = world(null, playerRayCalls, true);
         Entity target = proxy(Entity.class, BukkitPerspectiveViewAccessTest::defaultValue);
-        BukkitPerspectiveViewAccess playerAccess =
-                new BukkitPerspectiveViewAccess(
-                        server(player(loadedWorld, target), loadedWorld), 1, 1, 4);
+        PaperPerspectiveViewService playerService =
+                service(server(player(loadedWorld, target), loadedWorld));
 
         OperationException spectator =
                 assertThrows(
                         OperationException.class,
                         () ->
-                                playerAccess.capture(
+                                playerService.getPerspectiveView(
                                         new GetPerspectiveView.Request(
                                                 new PlayerSource("builder"), VIEW)));
         assertEquals(OperationFailure.PLAYER_UNAVAILABLE, spectator.failure());
@@ -122,13 +127,12 @@ final class BukkitPerspectiveViewAccessTest {
 
         AtomicInteger locationRayCalls = new AtomicInteger();
         World unloadedWorld = world(null, locationRayCalls, false);
-        BukkitPerspectiveViewAccess locationAccess =
-                new BukkitPerspectiveViewAccess(server(null, unloadedWorld), 1, 1, 4);
+        PaperPerspectiveViewService locationService = service(server(null, unloadedWorld));
         OperationException unloaded =
                 assertThrows(
                         OperationException.class,
                         () ->
-                                locationAccess.capture(
+                                locationService.getPerspectiveView(
                                         new GetPerspectiveView.Request(
                                                 new LocationSource(
                                                         "world",
@@ -141,6 +145,30 @@ final class BukkitPerspectiveViewAccessTest {
                         "world", new ErrorDetails.Chunk(0, 0)),
                 unloaded.details().orElseThrow());
         assertEquals(0, locationRayCalls.get());
+    }
+
+    private static PaperPerspectiveViewService service(Server server) {
+        return new PaperPerspectiveViewService(
+                new DirectMainThread(),
+                new BukkitPerspectiveViewAccess(server),
+                new InspectionAdmission(1),
+                1,
+                1,
+                4);
+    }
+
+    private static final class DirectMainThread implements MainThread {
+        @Override
+        public <T> T call(CheckedSupplier<T> action) throws PaperMainThreadException {
+            try {
+                return action.get();
+            } catch (Exception exception) {
+                throw new PaperMainThreadException("failed", exception);
+            }
+        }
+
+        @Override
+        public void close() {}
     }
 
     private static RayTraceResult hit() {

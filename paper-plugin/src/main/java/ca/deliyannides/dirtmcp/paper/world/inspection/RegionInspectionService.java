@@ -8,10 +8,11 @@ import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.Captu
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import ca.deliyannides.dirtmcp.paper.world.model.RegionGeometry;
-import java.util.LinkedHashSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 public final class RegionInspectionService
         implements CountRegionBlockStates, GetBlocks, ScanOrthographicView {
@@ -84,8 +85,6 @@ public final class RegionInspectionService
     public ExactBlockStructure getBlocks(GetBlocks.Request request) throws OperationException {
         validateGetBlocksRequest(request);
         validateMaxResults(request.maxResults());
-        List<String> includes = canonicalPatterns(request.includeBlockStatePatterns());
-        List<String> excludes = canonicalPatterns(request.excludeBlockStatePatterns());
         if ((long) request.includeBlockStatePatterns().size()
                         + request.excludeBlockStatePatterns().size()
                 > this.maxBlockStatePatterns) {
@@ -104,7 +103,11 @@ public final class RegionInspectionService
                                     request.min(), request.max(), this.maxInspectionVolume);
                     enforceChunkLimit(region);
                     CapturedRegion capture =
-                            this.snapshots.capture(request.world(), region, includes, excludes);
+                            this.snapshots.capture(
+                                    request.world(),
+                                    region,
+                                    request.includeBlockStatePatterns(),
+                                    request.excludeBlockStatePatterns());
                     List<InspectedBlock> blocks =
                             RegionBlockAlgorithms.collectBlocks(
                                     region, capture, request.includeAir());
@@ -168,24 +171,9 @@ public final class RegionInspectionService
     }
 
     private void validateGetBlocksRequest(GetBlocks.Request request) throws OperationException {
-        if (request == null
-                || request.min() == null
-                || request.max() == null
-                || request.includeBlockStatePatterns() == null
-                || request.excludeBlockStatePatterns() == null) {
-            String field =
-                    request == null
-                            ? "request"
-                            : request.min() == null
-                                    ? "min"
-                                    : request.max() == null
-                                            ? "max"
-                                            : request.includeBlockStatePatterns() == null
-                                                    ? "includeBlockStatePatterns"
-                                                    : "excludeBlockStatePatterns";
+        if (request == null) {
             throw invalid(
-                    "world, min, max, and pattern lists are required",
-                    new ErrorDetails.InvalidRequest.Missing(field));
+                    "request is required", new ErrorDetails.InvalidRequest.Missing("request"));
         }
         validateWorld(request.world());
         validatePatterns(request.includeBlockStatePatterns(), "includeBlockStatePatterns");
@@ -202,19 +190,22 @@ public final class RegionInspectionService
 
     private static void validatePatterns(List<String> patterns, String field)
             throws OperationException {
+        Set<String> distinct = new HashSet<>();
         for (int index = 0; index < patterns.size(); index++) {
             String pattern = patterns.get(index);
-            if (pattern == null || pattern.isBlank()) {
+            if (pattern.isBlank()) {
                 String item = field + "[" + index + "]";
                 throw invalid(
                         item + " must be a non-empty string",
                         new ErrorDetails.InvalidRequest.InvalidValue(item));
             }
+            if (!distinct.add(pattern)) {
+                String item = field + "[" + index + "]";
+                throw invalid(
+                        field + " must not contain duplicate patterns",
+                        new ErrorDetails.InvalidRequest.Duplicate(item));
+            }
         }
-    }
-
-    private static List<String> canonicalPatterns(List<String> patterns) {
-        return List.copyOf(new LinkedHashSet<>(patterns));
     }
 
     private static String missingRegionField(CountRegionBlockStates.Request request) {

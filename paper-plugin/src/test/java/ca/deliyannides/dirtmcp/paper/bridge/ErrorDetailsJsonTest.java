@@ -41,7 +41,7 @@ final class ErrorDetailsJsonTest {
                                 RequestJson.stringList(
                                         JsonParser.parseString("[\"valid\",null]"), "patterns"));
 
-        assertEquals("patterns[] must be a non-empty string", failure.getMessage());
+        assertEquals("patterns[] must be a string", failure.getMessage());
         assertEquals(
                 new ErrorDetails.InvalidRequest.InvalidValue("patterns[1]"),
                 failure.details().orElseThrow());
@@ -71,19 +71,6 @@ final class ErrorDetailsJsonTest {
 
     private static Stream<Arguments> details() {
         return Stream.of(
-                detail(new ErrorDetails.Unauthorized(), "{reason:'authentication_failed'}"),
-                detail(new ErrorDetails.NotFound(), "{reason:'route_not_found'}"),
-                detail(new ErrorDetails.MethodNotAllowed("POST"), "{allowedMethod:'POST'}"),
-                detail(new ErrorDetails.BridgeBusy(4), "{maximumConcurrentRequests:4}"),
-                detail(
-                        new ErrorDetails.InvalidRequest.UnsupportedMediaType("application/json"),
-                        "{reason:'unsupported_media_type',expected:'application/json'}"),
-                detail(
-                        new ErrorDetails.InvalidRequest.BodyTooLarge(262_144),
-                        "{reason:'body_too_large',maximumBytes:262144}"),
-                detail(
-                        new ErrorDetails.InvalidRequest.MalformedJson(),
-                        "{reason:'malformed_json'}"),
                 detail(
                         new ErrorDetails.InvalidRequest.Missing("world"),
                         "{reason:'missing',field:'world'}"),
@@ -231,11 +218,8 @@ final class ErrorDetailsJsonTest {
 
     private static Stream<Arguments> codes() {
         return Stream.of(
-                Arguments.of(new ErrorDetails.Unauthorized(), "unauthorized"),
-                Arguments.of(new ErrorDetails.NotFound(), "not_found"),
-                Arguments.of(new ErrorDetails.MethodNotAllowed("GET"), "method_not_allowed"),
-                Arguments.of(new ErrorDetails.BridgeBusy(1), "bridge_busy"),
-                Arguments.of(new ErrorDetails.InvalidRequest.MalformedJson(), "invalid_request"),
+                Arguments.of(
+                        new ErrorDetails.InvalidRequest.InvalidValue("field"), "invalid_request"),
                 Arguments.of(new ErrorDetails.ChangeLimitExceeded(1), "change_limit_exceeded"),
                 Arguments.of(
                         new ErrorDetails.EditNotFound("world", REQUESTED_EDIT_ID),

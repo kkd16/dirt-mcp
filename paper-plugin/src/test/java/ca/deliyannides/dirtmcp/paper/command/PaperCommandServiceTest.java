@@ -54,18 +54,12 @@ final class PaperCommandServiceTest {
     }
 
     @Test
-    void rejectsMissingEmptyOversizedNullAndSlashOnlyBatches() {
+    void rejectsInvalidBatchesAtTheirOwningBoundary() {
         PaperCommandService service =
                 new PaperCommandService(new DirectMainThread(), new RecordingAccess(), 2, 17);
 
-        assertDetails(
-                new ErrorDetails.InvalidRequest.Missing("request"),
-                assertThrows(OperationException.class, () -> service.runCommands(null)));
-        assertDetails(
-                new ErrorDetails.InvalidRequest.Missing("commands"),
-                assertThrows(
-                        OperationException.class,
-                        () -> service.runCommands(new RunMinecraftCommands.Request(null))));
+        assertThrows(NullPointerException.class, () -> service.runCommands(null));
+        assertThrows(NullPointerException.class, () -> new RunMinecraftCommands.Request(null));
         assertDetails(
                 new ErrorDetails.InvalidRequest.InvalidValue("commands"),
                 assertThrows(
@@ -79,14 +73,9 @@ final class PaperCommandServiceTest {
                                 service.runCommands(
                                         new RunMinecraftCommands.Request(
                                                 List.of("one", "two", "three")))));
-        assertDetails(
-                new ErrorDetails.InvalidRequest.InvalidValue("commands[1]"),
-                assertThrows(
-                        OperationException.class,
-                        () ->
-                                service.runCommands(
-                                        new RunMinecraftCommands.Request(
-                                                java.util.Arrays.asList("one", null)))));
+        assertThrows(
+                NullPointerException.class,
+                () -> new RunMinecraftCommands.Request(java.util.Arrays.asList("one", null)));
         assertDetails(
                 new ErrorDetails.InvalidRequest.InvalidValue("commands[0]"),
                 assertThrows(

@@ -3,17 +3,18 @@ package ca.deliyannides.dirtmcp.paper.bridge;
 import static ca.deliyannides.dirtmcp.paper.bridge.BridgeTestFixture.authorized;
 import static ca.deliyannides.dirtmcp.paper.bridge.BridgeTestFixture.availablePort;
 import static ca.deliyannides.dirtmcp.paper.bridge.BridgeTestFixture.config;
+import static ca.deliyannides.dirtmcp.paper.bridge.BridgeTestFixture.endpoints;
 import static ca.deliyannides.dirtmcp.paper.bridge.BridgeTestFixture.json;
 import static ca.deliyannides.dirtmcp.paper.bridge.BridgeTestFixture.post;
 import static ca.deliyannides.dirtmcp.paper.bridge.BridgeTestFixture.server;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.deliyannides.dirtmcp.paper.command.RunMinecraftCommands;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
-import ca.deliyannides.dirtmcp.paper.config.McpTool;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
+import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.edit.DestinationPaletteEntry;
@@ -24,7 +25,6 @@ import ca.deliyannides.dirtmcp.paper.world.edit.GetEditHistory;
 import ca.deliyannides.dirtmcp.paper.world.edit.ReplaceRegionBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.SetBlocks;
 import ca.deliyannides.dirtmcp.paper.world.edit.UndoEdits;
-import ca.deliyannides.dirtmcp.paper.world.edit.UndoEditsException;
 import ca.deliyannides.dirtmcp.paper.world.inspection.CountRegionBlockStates;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ExactBlockStructure;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ExactBlockStructure.ExactPaletteEntry;
@@ -45,8 +45,77 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.slf4j.helpers.NOPLogger;
 
 final class BridgeOperationEndpointsTest {
+    @Test
+    void requiresCapabilitiesAndEveryConfigurableOperationAtBridgeConstruction() throws Exception {
+        DirtConfig config = config(availablePort(), 4);
+        BridgeTestFixture.TestOperations operations = new BridgeTestFixture.TestOperations();
+        List<BridgeEndpoint> complete = endpoints(config, operations);
+
+        try (DirtLog log =
+                DirtLog.consoleOnly(NOPLogger.NOP_LOGGER, DirtConfig.ConsoleLogLevel.ERROR)) {
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () ->
+                            new BridgeServer(
+                                    config,
+                                    BridgeTestFixture.TOKEN,
+                                    complete.stream()
+                                            .filter(
+                                                    endpoint ->
+                                                            !endpoint.operationId()
+                                                                    .equals("getCapabilities"))
+                                            .toList(),
+                                    log));
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () ->
+                            new BridgeServer(
+                                    config,
+                                    BridgeTestFixture.TOKEN,
+                                    complete.stream()
+                                            .filter(
+                                                    endpoint ->
+                                                            !endpoint.operationId()
+                                                                    .equals("setBlocks"))
+                                            .toList(),
+                                    log));
+        }
+    }
+
+    @Test
+    void reportsConfiguredCapabilitiesInContractOrderEvenWhenNoOperationIsEnabled()
+            throws Exception {
+        DirtConfig standard = config(availablePort(), 4);
+        DirtConfig selected =
+                withAllowedOperations(
+                        standard, List.of(BridgeOperation.UNDO_EDITS, BridgeOperation.PING_SERVER));
+        try (BridgeServer bridge = server(selected, new BridgeTestFixture.TestOperations());
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+
+            HttpResponse<String> response =
+                    send(client, authorized(bridge, "/v1/capabilities").GET().build());
+
+            assertEquals(200, response.statusCode());
+            assertEquals(json("{operations:['pingServer','undoEdits']}"), json(response.body()));
+        }
+
+        DirtConfig empty = withAllowedOperations(config(availablePort(), 4), List.of());
+        try (BridgeServer bridge = server(empty, new BridgeTestFixture.TestOperations());
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+
+            HttpResponse<String> response =
+                    send(client, authorized(bridge, "/v1/capabilities").GET().build());
+
+            assertEquals(200, response.statusCode());
+            assertEquals(json("{operations:[]}"), json(response.body()));
+        }
+    }
+
     @Test
     void returnsOnlinePlayerFacingInServerStatus() throws Exception {
         try (BridgeServer bridge =
@@ -55,7 +124,15 @@ final class BridgeOperationEndpointsTest {
             bridge.start();
 
             HttpResponse<String> response =
-                    send(client, authorized(bridge, "/v1/server-status").GET().build());
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/server-status",
+                                    """
+                                    {"includePlayers":true,"includeWorlds":true,
+                                     "includeConfiguration":true}
+                                    """));
 
             assertEquals(200, response.statusCode());
             assertEquals(
@@ -68,18 +145,77 @@ final class BridgeOperationEndpointsTest {
                             .getAsJsonObject()
                             .get("facing")
                             .getAsString());
-            var tools = json(response.body()).getAsJsonObject().getAsJsonObject("tools");
-            assertEquals(McpTool.values().length, tools.size());
-            for (McpTool tool : McpTool.values()) {
-                assertTrue(tools.get(tool.id()).getAsBoolean());
-            }
-            var logging = json(response.body()).getAsJsonObject().getAsJsonObject("logging");
-            assertEquals("info", logging.get("consoleLevel").getAsString());
-            assertEquals(10_485_760, logging.get("detailFileMaxBytes").getAsInt());
-            assertEquals(5, logging.get("detailFileRetainedFiles").getAsInt());
-            var limits = json(response.body()).getAsJsonObject().getAsJsonObject("limits");
+            var body = json(response.body()).getAsJsonObject();
+            assertEquals(
+                    Set.of("builds", "performance", "players", "worlds", "configuration"),
+                    body.keySet());
+            assertEquals("test", body.getAsJsonObject("builds").get("dirtPlugin").getAsString());
+            var configuration = body.getAsJsonObject("configuration");
+            assertEquals(Set.of("limits", "editHistory"), configuration.keySet());
+            var limits = configuration.getAsJsonObject("limits");
             assertEquals(10, limits.get("maxCommandsPerRequest").getAsInt());
             assertEquals(8_192, limits.get("maxCommandFeedbackCharacters").getAsInt());
+
+            HttpResponse<String> omitted =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/server-status",
+                                    """
+                                    {"includePlayers":false,"includeWorlds":false,
+                                     "includeConfiguration":false}
+                                    """));
+            var omittedBody = json(omitted.body()).getAsJsonObject();
+            assertTrue(omittedBody.get("players").isJsonNull());
+            assertTrue(omittedBody.get("worlds").isJsonNull());
+            assertTrue(omittedBody.get("configuration").isJsonNull());
+        }
+    }
+
+    @Test
+    void rejectsNonStrictAndExcessivelyNestedJsonBeforeEndpointDecoding() throws Exception {
+        try (BridgeServer bridge =
+                        server(config(availablePort(), 4), new BridgeTestFixture.TestOperations());
+                HttpClient client = HttpClient.newHttpClient()) {
+            bridge.start();
+            List<String> malformedDocuments =
+                    List.of(
+                            "{\"world\":\"world\" // comment\n}",
+                            "{'world':'world'}",
+                            "{world:\"world\"}",
+                            "{\"world\":\"world\",\"extra\":"
+                                    + "[".repeat(65)
+                                    + "0"
+                                    + "]".repeat(65)
+                                    + "}");
+            for (String document : malformedDocuments) {
+                HttpResponse<String> response =
+                        send(client, post(bridge, "/v1/get-edit-history", document));
+                assertEquals(400, response.statusCode());
+                assertEquals("malformed_json", errorDetails(response).get("reason").getAsString());
+            }
+
+            HttpResponse<String> duplicate =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/get-edit-history",
+                                    "{\"world\":\"world\",\"world\":\"other\"}"));
+            assertEquals("duplicate", errorDetails(duplicate).get("reason").getAsString());
+            assertEquals("world", errorDetails(duplicate).get("field").getAsString());
+
+            HttpResponse<String> nestedDuplicate =
+                    send(
+                            client,
+                            post(
+                                    bridge,
+                                    "/v1/get-edit-history",
+                                    "{\"world\":\"world\",\"extra\":{\"x\":1,\"x\":2}}"));
+            assertEquals(400, nestedDuplicate.statusCode());
+            assertEquals("duplicate", errorDetails(nestedDuplicate).get("reason").getAsString());
+            assertEquals("extra.x", errorDetails(nestedDuplicate).get("field").getAsString());
         }
     }
 
@@ -266,7 +402,7 @@ final class BridgeOperationEndpointsTest {
     }
 
     @Test
-    void parsesPlayerContextDefaultsAndGranularIncludes() throws Exception {
+    void parsesExplicitPlayerContextIncludes() throws Exception {
         AtomicReference<GetPlayerContext.Request> playerRequest = new AtomicReference<>();
         BridgeTestFixture.TestOperations operations =
                 new BridgeTestFixture.TestOperations() {
@@ -281,20 +417,21 @@ final class BridgeOperationEndpointsTest {
                 HttpClient client = HttpClient.newHttpClient()) {
             bridge.start();
 
-            HttpResponse<String> defaults =
+            HttpResponse<String> equipmentOnly =
                     send(
                             client,
-                            post(bridge, "/v1/get-player-context", "{\"player\":\"Builder\"}"));
+                            post(
+                                    bridge,
+                                    "/v1/get-player-context",
+                                    playerContextRequest("Builder")));
 
-            assertEquals(200, defaults.statusCode());
+            assertEquals(200, equipmentOnly.statusCode());
             assertEquals(
                     new GetPlayerContext.Includes(true, false, false, false, false, false, false),
                     playerRequest.get().include());
-            var defaultBody = json(defaults.body()).getAsJsonObject();
-            assertFalse(defaultBody.has("included"));
-            assertFalse(defaultBody.has("view"));
-            assertTrue(defaultBody.has("equipment"));
-            assertTrue(defaultBody.get("inventory").isJsonNull());
+            var equipmentBody = json(equipmentOnly.body()).getAsJsonObject();
+            assertTrue(equipmentBody.has("equipment"));
+            assertTrue(equipmentBody.get("inventory").isJsonNull());
 
             HttpResponse<String> granular =
                     send(
@@ -313,7 +450,6 @@ final class BridgeOperationEndpointsTest {
                     new GetPlayerContext.Includes(false, true, true, true, true, true, true),
                     playerRequest.get().include());
             var granularBody = json(granular.body()).getAsJsonObject();
-            assertFalse(granularBody.has("view"));
             assertEquals(36, granularBody.getAsJsonObject("inventory").get("size").getAsInt());
             assertEquals(27, granularBody.getAsJsonObject("enderChest").get("size").getAsInt());
             assertEquals(
@@ -325,17 +461,10 @@ final class BridgeOperationEndpointsTest {
             assertEquals(
                     "en-US", granularBody.getAsJsonObject("client").get("locale").getAsString());
 
-            HttpResponse<String> malformedSelector =
-                    send(client, post(bridge, "/v1/get-player-context", "{\"player\":\" \"}"));
-            assertEquals(400, malformedSelector.statusCode());
-            assertEquals(
-                    "player",
-                    json(malformedSelector.body())
-                            .getAsJsonObject()
-                            .getAsJsonObject("error")
-                            .getAsJsonObject("details")
-                            .get("field")
-                            .getAsString());
+            HttpResponse<String> semanticSelector =
+                    send(client, post(bridge, "/v1/get-player-context", playerContextRequest(" ")));
+            assertEquals(200, semanticSelector.statusCode());
+            assertEquals(" ", playerRequest.get().player());
 
             HttpResponse<String> oversizedSelector =
                     send(
@@ -343,26 +472,9 @@ final class BridgeOperationEndpointsTest {
                             post(
                                     bridge,
                                     "/v1/get-player-context",
-                                    "{\"player\":\"" + "x".repeat(37) + "\"}"));
-            assertEquals(400, oversizedSelector.statusCode());
-            var oversizedDetails =
-                    json(oversizedSelector.body())
-                            .getAsJsonObject()
-                            .getAsJsonObject("error")
-                            .getAsJsonObject("details");
-            assertEquals("out_of_range", oversizedDetails.get("reason").getAsString());
-            assertEquals("player.length", oversizedDetails.get("target").getAsString());
-            assertEquals(37, oversizedDetails.get("value").getAsInt());
-            assertEquals(36, oversizedDetails.get("maximum").getAsInt());
-
-            HttpResponse<String> removedViewInput =
-                    send(
-                            client,
-                            post(
-                                    bridge,
-                                    "/v1/get-player-context",
-                                    "{\"player\":\"Builder\",\"include\":{\"view\":false},\"view\":{}}"));
-            assertEquals(400, removedViewInput.statusCode());
+                                    playerContextRequest("x".repeat(37))));
+            assertEquals(200, oversizedSelector.statusCode());
+            assertEquals("x".repeat(37), playerRequest.get().player());
         }
     }
 
@@ -388,7 +500,12 @@ final class BridgeOperationEndpointsTest {
                             post(
                                     bridge,
                                     "/v1/get-perspective-view",
-                                    "{\"source\":{\"type\":\"player\",\"player\":\"builder\"}}"));
+                                    """
+                                    {"source":{"type":"player","player":"builder"},
+                                     "width":21,"height":13,"verticalFieldOfViewDegrees":70,
+                                     "maxDistance":64,"fluidCollision":"never",
+                                     "ignorePassableBlocks":false}
+                                    """));
 
             assertEquals(200, player.statusCode());
             assertEquals(
@@ -420,7 +537,8 @@ final class BridgeOperationEndpointsTest {
                                     {"source":{"type":"location","world":"world",
                                      "cameraPosition":{"x":1.25,"y":72,"z":-8.5},
                                      "rotation":{"yaw":45,"pitch":-15}},
-                                     "width":5,"height":3,"maxDistance":12,
+                                     "width":5,"height":3,"verticalFieldOfViewDegrees":70,
+                                     "maxDistance":12,
                                      "fluidCollision":"always","ignorePassableBlocks":true}
                                     """));
 
@@ -522,15 +640,6 @@ final class BridgeOperationEndpointsTest {
                                     "{\"world\":\"world\",\"editIds\":[\""
                                             + BridgeTestFixture.EDIT_ID
                                             + "\"]}"));
-            HttpResponse<String> legacyUndo =
-                    send(
-                            client,
-                            post(
-                                    bridge,
-                                    "/v1/undo-edit",
-                                    "{\"world\":\"world\",\"editId\":\""
-                                            + BridgeTestFixture.EDIT_ID
-                                            + "\"}"));
             assertEquals(200, replace.statusCode());
             assertEquals(17, replaceRequest.get().seed());
             assertTrue(replaceRequest.get().dryRun());
@@ -556,7 +665,6 @@ final class BridgeOperationEndpointsTest {
                     new UndoEdits.Request("world", List.of(BridgeTestFixture.EDIT_ID)),
                     undoRequest.get());
             assertEquals(200, undo.statusCode());
-            assertEquals(404, legacyUndo.statusCode());
         }
     }
 
@@ -597,7 +705,7 @@ final class BridgeOperationEndpointsTest {
 
                     @Override
                     public UndoEdits.Result undoEdits(UndoEdits.Request request, UUID callId) {
-                        return new UndoEdits.Result(
+                        return new UndoEdits.Completed(
                                 request.world(),
                                 List.of(recovery),
                                 callId,
@@ -662,8 +770,9 @@ final class BridgeOperationEndpointsTest {
                     json(
                             """
                             {
+                              "outcome":"completed",
                               "world":"world",
-                              "edits":[{
+                              "undoneEdits":[{
                                 "editId":"423e4567-e89b-42d3-a456-426614174000",
                                 "callId":"523e4567-e89b-42d3-a456-426614174000",
                                 "operation":"set_blocks",
@@ -708,13 +817,16 @@ final class BridgeOperationEndpointsTest {
                         List<EditRecord> progress =
                                 request.editIds().size() == 1 ? List.of() : List.of(undone);
                         UUID failed = request.editIds().get(progress.size());
-                        throw new UndoEditsException(
-                                OperationFailure.WORLD_UNAVAILABLE,
-                                "Undo execution failed",
-                                new ErrorDetails.WorldUnavailable.OperationFailed(),
-                                new IllegalStateException("test failure"),
-                                failed,
-                                progress);
+                        return new UndoEdits.Partial(
+                                request.world(),
+                                callId,
+                                progress,
+                                new OperationException(
+                                        OperationFailure.WORLD_UNAVAILABLE,
+                                        "Undo execution failed",
+                                        new ErrorDetails.WorldUnavailable.OperationFailed(),
+                                        new IllegalStateException("test failure"),
+                                        failed));
                     }
                 };
         try (BridgeServer bridge = server(config(availablePort(), 4), operations);
@@ -740,12 +852,15 @@ final class BridgeOperationEndpointsTest {
                                     "/v1/undo-edits",
                                     "{\"world\":\"world\",\"editIds\":[\"" + failedId + "\"]}"));
 
-            assertEquals(503, partial.statusCode());
+            assertEquals(200, partial.statusCode());
             var partialBody = json(partial.body()).getAsJsonObject();
-            assertEquals(Set.of("error", "undoneEdits"), partialBody.keySet());
+            assertEquals(
+                    Set.of("outcome", "world", "undoCallId", "undoneEdits", "failure"),
+                    partialBody.keySet());
+            assertEquals("partial", partialBody.get("outcome").getAsString());
             assertEquals(
                     failedId.toString(),
-                    partialBody.getAsJsonObject("error").get("editId").getAsString());
+                    partialBody.getAsJsonObject("failure").get("editId").getAsString());
             assertEquals(1, partialBody.getAsJsonArray("undoneEdits").size());
             assertEquals(
                     "Undo completed prefix",
@@ -756,72 +871,9 @@ final class BridgeOperationEndpointsTest {
                             .get("label")
                             .getAsString());
 
-            assertEquals(503, firstFailure.statusCode());
+            assertEquals(200, firstFailure.statusCode());
             var firstFailureBody = json(firstFailure.body()).getAsJsonObject();
-            assertEquals(Set.of("error", "undoneEdits"), firstFailureBody.keySet());
             assertEquals(0, firstFailureBody.getAsJsonArray("undoneEdits").size());
-        }
-    }
-
-    @Test
-    void appliesConfiguredDefaultsAndGeneratesSeedsWhenOmitted() throws Exception {
-        int port = availablePort();
-        DirtConfig standard = config(port, 4);
-        DirtConfig configured =
-                new DirtConfig(
-                        standard.bridge(),
-                        standard.tools(),
-                        standard.logging(),
-                        standard.limits(),
-                        standard.editHistory(),
-                        new DirtConfig.Defaults(true, true));
-        AtomicReference<GetBlocks.Request> blocksRequest = new AtomicReference<>();
-        AtomicReference<SetBlocks.Request> setRequest = new AtomicReference<>();
-        BridgeTestFixture.TestOperations operations =
-                new BridgeTestFixture.TestOperations() {
-                    @Override
-                    public ExactBlockStructure getBlocks(GetBlocks.Request request)
-                            throws OperationException {
-                        blocksRequest.set(request);
-                        return new ExactBlockStructure(
-                                request.world(), request.min(), List.of(), List.of(), List.of());
-                    }
-
-                    @Override
-                    public SetBlocks.Result setBlocks(SetBlocks.Request request, UUID callId)
-                            throws OperationException {
-                        setRequest.set(request);
-                        return super.setBlocks(request, callId);
-                    }
-                };
-        try (BridgeServer bridge = server(configured, operations);
-                HttpClient client = HttpClient.newHttpClient()) {
-            bridge.start();
-            String bounds =
-                    "\"world\":\"world\",\"min\":{\"x\":0,\"y\":0,\"z\":0},"
-                            + "\"max\":{\"x\":0,\"y\":0,\"z\":0}";
-            assertEquals(
-                    200,
-                    send(client, post(bridge, "/v1/get-blocks", "{" + bounds + "}")).statusCode());
-            HttpResponse<String> set =
-                    send(
-                            client,
-                            post(
-                                    bridge,
-                                    "/v1/set-blocks",
-                                    """
-                                    {"world":"world","origin":{"x":0,"y":0,"z":0},
-                                     "palettes":[[{"blockState":"minecraft:stone"}]],
-                                     "placements":[[0,0,0,0]],"runs":[],
-                                     "label":"Place default block"}
-                                    """));
-
-            assertTrue(blocksRequest.get().includeAir());
-            assertEquals(321, blocksRequest.get().maxResults());
-            assertTrue(setRequest.get().dryRun());
-            assertEquals(
-                    setRequest.get().seed(),
-                    json(set.body()).getAsJsonObject().get("seed").getAsInt());
         }
     }
 
@@ -841,13 +893,18 @@ final class BridgeOperationEndpointsTest {
         DirtConfig.Limits limits = standard.limits();
         DirtConfig small =
                 new DirtConfig(
-                        standard.bridge(),
-                        standard.tools(),
+                        new DirtConfig.Bridge(
+                                standard.bridge().port(),
+                                standard.bridge().shutdownDelaySeconds(),
+                                standard.bridge().requestBodyTimeoutSeconds(),
+                                standard.bridge().maxConcurrentRequests(),
+                                standard.bridge().maxConcurrentInspections(),
+                                64,
+                                standard.bridge().allowedOperations()),
                         standard.logging(),
                         new DirtConfig.Limits(
-                                64,
                                 limits.maxRegionVolume(),
-                                limits.maxTouchedChunks(),
+                                limits.maxEditTouchedChunks(),
                                 limits.maxInspectionTouchedChunks(),
                                 limits.maxPerspectiveTouchedChunks(),
                                 limits.maxBlockStatePatterns(),
@@ -855,13 +912,11 @@ final class BridgeOperationEndpointsTest {
                                 limits.maxChangedBlocks(),
                                 limits.maxInspectionVolume(),
                                 limits.maxPerspectiveRayDistanceBudget(),
-                                limits.defaultInspectionResultLimit(),
                                 limits.maxInspectionResultLimit(),
                                 limits.maxPerspectiveRays(),
                                 limits.maxCommandsPerRequest(),
                                 limits.maxCommandFeedbackCharacters()),
-                        standard.editHistory(),
-                        standard.defaults());
+                        standard.editHistory());
         try (BridgeServer bridge = server(small, operations);
                 HttpClient client = HttpClient.newHttpClient()) {
             bridge.start();
@@ -904,7 +959,10 @@ final class BridgeOperationEndpointsTest {
                                     "/v1/get-blocks",
                                     """
                                     {"world":"world","min":{"x":0,"y":0,"z":0},
-                                     "max":{"x":0,"y":0,"z":0},"unexpected":true}
+                                     "max":{"x":0,"y":0,"z":0},
+                                     "includeBlockStatePatterns":[],
+                                     "excludeBlockStatePatterns":[],"includeAir":false,
+                                     "maxResults":1,"unexpected":true}
                                     """));
             HttpResponse<String> direction =
                     send(
@@ -915,7 +973,8 @@ final class BridgeOperationEndpointsTest {
                                     """
                                     {"world":"world","origin":{"x":0,"y":0,"z":0},
                                      "direction":"diagonal","horizontalRadius":0,
-                                     "verticalRadius":0,"maxDistance":1}
+                                     "verticalRadius":0,"maxDistance":1,"depth":0,
+                                     "maxResults":1}
                                     """));
 
             assertError(unknownField, "Request contains missing or unknown fields");
@@ -947,7 +1006,8 @@ final class BridgeOperationEndpointsTest {
                                     {"world":"world","origin":{"x":0,"y":0,"z":0},
                                      "palettes":[[{"blockState":"minecraft:stone"}]],
                                      "placements":[[0,1e2147483648,0,0]],"runs":[],
-                                     "label":"Reject invalid coordinate"}
+                                     "seed":1,"dryRun":false,
+                                     "label":"Reject invalid coordinate","maxChangedBlocks":null}
                                     """)),
                     "placements[0][1] must be a signed 32-bit integer");
             assertError(
@@ -960,7 +1020,9 @@ final class BridgeOperationEndpointsTest {
                                     {"world":"world","origin":{"x":0,"y":0,"z":0},
                                      "palettes":[[{"blockState":"minecraft:stone"}]],
                                      "placements":[[0,0,0,0]],"runs":[],
-                                     "label":"Reject unknown field","unexpected":true}
+                                     "seed":1,"dryRun":false,
+                                     "label":"Reject unknown field","maxChangedBlocks":null,
+                                     "unexpected":true}
                                     """)),
                     "Request contains missing or unknown fields");
         }
@@ -976,12 +1038,14 @@ final class BridgeOperationEndpointsTest {
                     """
                     {"world":"world","origin":{"x":0,"y":0,"z":0},
                      "palettes":[[{"blockState":"minecraft:stone"}]],
-                     "placements":[[0,0,0,0]],"runs":[],"label":"Place one block"}
+                     "placements":[[0,0,0,0]],"runs":[],"seed":1,"dryRun":false,
+                     "label":"Place one block","maxChangedBlocks":null}
                     """;
             HttpResponse<String> missingCallId =
                     send(
                             client,
-                            authorized(bridge, "/v1/set-blocks")
+                            HttpRequest.newBuilder(BridgeTestFixture.uri(bridge, "/v1/set-blocks"))
+                                    .header("Authorization", "Bearer " + BridgeTestFixture.TOKEN)
                                     .header("Content-Type", "application/json")
                                     .POST(HttpRequest.BodyPublishers.ofString(setBlocks))
                                     .build());
@@ -990,13 +1054,16 @@ final class BridgeOperationEndpointsTest {
                             client,
                             authorized(bridge, "/v1/set-blocks")
                                     .header("Content-Type", "application/json")
-                                    .header("X-Dirt-Call-Id", "not-a-uuid")
+                                    .setHeader("X-Dirt-Call-Id", "not-a-uuid")
                                     .POST(HttpRequest.BodyPublishers.ofString(setBlocks))
                                     .build());
             HttpResponse<String> missingCommandCallId =
                     send(
                             client,
-                            authorized(bridge, "/v1/run-minecraft-commands")
+                            HttpRequest.newBuilder(
+                                            BridgeTestFixture.uri(
+                                                    bridge, "/v1/run-minecraft-commands"))
+                                    .header("Authorization", "Bearer " + BridgeTestFixture.TOKEN)
                                     .header("Content-Type", "application/json")
                                     .POST(
                                             HttpRequest.BodyPublishers.ofString(
@@ -1007,7 +1074,7 @@ final class BridgeOperationEndpointsTest {
                             client,
                             authorized(bridge, "/v1/set-blocks")
                                     .header("Content-Type", "application/json")
-                                    .header("X-Dirt-Call-Id", "1-1-4000-8000-1")
+                                    .setHeader("X-Dirt-Call-Id", "1-1-4000-8000-1")
                                     .POST(HttpRequest.BodyPublishers.ofString(setBlocks))
                                     .build());
             HttpResponse<String> wrongVersionCallId =
@@ -1015,7 +1082,7 @@ final class BridgeOperationEndpointsTest {
                             client,
                             authorized(bridge, "/v1/set-blocks")
                                     .header("Content-Type", "application/json")
-                                    .header(
+                                    .setHeader(
                                             "X-Dirt-Call-Id",
                                             "123e4567-e89b-12d3-a456-426614174000")
                                     .POST(HttpRequest.BodyPublishers.ofString(setBlocks))
@@ -1043,8 +1110,8 @@ final class BridgeOperationEndpointsTest {
                                     "{\"world\":\"world\",\"editIds\":[\"123e4567-e89b-12d3-a456-426614174000\"]}"));
             HttpResponse<String> valid = send(client, post(bridge, "/v1/set-blocks", setBlocks));
 
-            assertError(missingCallId, "X-Dirt-Call-Id must be a UUID version 4");
-            assertError(missingCommandCallId, "X-Dirt-Call-Id must be a UUID version 4");
+            assertError(missingCallId, "X-Dirt-Call-Id must occur exactly once");
+            assertError(missingCommandCallId, "X-Dirt-Call-Id must occur exactly once");
             assertError(invalidCallId, "X-Dirt-Call-Id must be a UUID version 4");
             assertError(nonCanonicalCallId, "X-Dirt-Call-Id must be a UUID version 4");
             assertError(wrongVersionCallId, "X-Dirt-Call-Id must be a UUID version 4");
@@ -1065,6 +1132,31 @@ final class BridgeOperationEndpointsTest {
     private static HttpResponse<String> send(HttpClient client, HttpRequest request)
             throws Exception {
         return client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static String playerContextRequest(String player) {
+        return "{\"player\":\""
+                + player
+                + "\",\"include\":{\"equipment\":true,\"inventory\":false,"
+                + "\"enderChest\":false,\"vitals\":false,\"movement\":false,"
+                + "\"client\":false,\"effects\":false}}";
+    }
+
+    private static DirtConfig withAllowedOperations(
+            DirtConfig config, List<BridgeOperation> allowedOperations) {
+        DirtConfig.Bridge bridge = config.bridge();
+        return new DirtConfig(
+                new DirtConfig.Bridge(
+                        bridge.port(),
+                        bridge.shutdownDelaySeconds(),
+                        bridge.requestBodyTimeoutSeconds(),
+                        bridge.maxConcurrentRequests(),
+                        bridge.maxConcurrentInspections(),
+                        bridge.maxRequestBytes(),
+                        allowedOperations),
+                config.logging(),
+                config.limits(),
+                config.editHistory());
     }
 
     private static void assertError(HttpResponse<String> response, String message) {

@@ -27,7 +27,8 @@ final class PaperPlayerContextServiceTest {
         GetPlayerContext.Result expected = result();
         DirectMainThread mainThread = new DirectMainThread();
         PaperPlayerContextService service =
-                new PaperPlayerContextService(mainThread, ignored -> expected);
+                new PaperPlayerContextService(
+                        mainThread, ignored -> expected, new InspectionAdmission(1));
 
         assertEquals(expected, service.getPlayerContext(request("Builder", BASE_ONLY)));
         assertEquals(1, mainThread.calls);
@@ -42,7 +43,8 @@ final class PaperPlayerContextServiceTest {
                         ignored -> {
                             captured.set(true);
                             return result();
-                        });
+                        },
+                        new InspectionAdmission(1));
 
         OperationException selector =
                 assertThrows(
@@ -79,7 +81,8 @@ final class PaperPlayerContextServiceTest {
                         new DirectMainThread(),
                         ignored -> {
                             throw expected;
-                        });
+                        },
+                        new InspectionAdmission(1));
 
         assertEquals(
                 expected,
@@ -91,7 +94,8 @@ final class PaperPlayerContextServiceTest {
     @Test
     void mapsSchedulerFailureWithoutLeakingItsCause() {
         PaperPlayerContextService service =
-                new PaperPlayerContextService(new FailingMainThread(), ignored -> result());
+                new PaperPlayerContextService(
+                        new FailingMainThread(), ignored -> result(), new InspectionAdmission(1));
 
         OperationException failure =
                 assertThrows(
@@ -107,7 +111,10 @@ final class PaperPlayerContextServiceTest {
     @Test
     void distinguishesAnInterruptedSchedulerWait() {
         PaperPlayerContextService service =
-                new PaperPlayerContextService(new InterruptedMainThread(), ignored -> result());
+                new PaperPlayerContextService(
+                        new InterruptedMainThread(),
+                        ignored -> result(),
+                        new InspectionAdmission(1));
 
         try {
             OperationException failure =
@@ -121,6 +128,52 @@ final class PaperPlayerContextServiceTest {
         } finally {
             Thread.interrupted();
         }
+    }
+
+    @Test
+    void sharesInspectionAdmissionWithoutCallingPaperWhenSaturated() throws Exception {
+        InspectionAdmission admission = new InspectionAdmission(1);
+        AtomicBoolean captured = new AtomicBoolean();
+        PaperPlayerContextService service =
+                new PaperPlayerContextService(
+                        new DirectMainThread(),
+                        ignored -> {
+                            captured.set(true);
+                            return result();
+                        },
+                        admission);
+
+        OperationException failure =
+                admission.execute(
+                        () ->
+                                assertThrows(
+                                        OperationException.class,
+                                        () ->
+                                                service.getPlayerContext(
+                                                        request("Builder", BASE_ONLY))));
+
+        assertEquals(OperationFailure.SERVER_UNAVAILABLE, failure.failure());
+        assertEquals(
+                new ErrorDetails.ServerUnavailable.InspectionBusy(1),
+                failure.details().orElseThrow());
+        assertEquals(false, captured.get());
+    }
+
+    @Test
+    void requiresAllCollaborators() {
+        InspectionAdmission admission = new InspectionAdmission(1);
+
+        assertThrows(
+                NullPointerException.class,
+                () -> new PaperPlayerContextService(null, ignored -> result(), admission));
+        assertThrows(
+                NullPointerException.class,
+                () -> new PaperPlayerContextService(new DirectMainThread(), null, admission));
+        assertThrows(
+                NullPointerException.class,
+                () ->
+                        new PaperPlayerContextService(
+                                new DirectMainThread(), ignored -> result(), null));
     }
 
     private static GetPlayerContext.Request request(String player, Includes includes) {

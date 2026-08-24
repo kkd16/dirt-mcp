@@ -18,12 +18,9 @@ public final class RequestJson {
     private RequestJson() {}
 
     public static String string(JsonElement element, String name) throws OperationException {
-        if (!(element instanceof JsonPrimitive primitive)
-                || !primitive.isString()
-                || primitive.getAsString().isBlank()) {
+        if (!(element instanceof JsonPrimitive primitive) || !primitive.isString()) {
             throw invalid(
-                    name + " must be a non-empty string",
-                    new ErrorDetails.InvalidRequest.InvalidValue(name));
+                    name + " must be a string", new ErrorDetails.InvalidRequest.InvalidValue(name));
         }
         return primitive.getAsString();
     }
@@ -52,6 +49,14 @@ public final class RequestJson {
         }
     }
 
+    public static Integer nullableInteger(JsonElement element, String name)
+            throws OperationException {
+        if (element == null) {
+            throw invalid(name + " is required", new ErrorDetails.InvalidRequest.Missing(name));
+        }
+        return element.isJsonNull() ? null : integer(element, name);
+    }
+
     public static BlockPosition position(JsonElement element, String name)
             throws OperationException {
         if (element == null || !element.isJsonObject()) {
@@ -71,33 +76,20 @@ public final class RequestJson {
             throws OperationException {
         if (element == null || !element.isJsonArray()) {
             throw invalid(
-                    name + " must be an array of non-empty strings",
+                    name + " must be an array of strings",
                     new ErrorDetails.InvalidRequest.InvalidValue(name));
         }
         List<String> values = new ArrayList<>(element.getAsJsonArray().size());
         for (int index = 0; index < element.getAsJsonArray().size(); index++) {
             JsonElement value = element.getAsJsonArray().get(index);
-            if (!(value instanceof JsonPrimitive primitive)
-                    || !primitive.isString()
-                    || primitive.getAsString().isBlank()) {
+            if (!(value instanceof JsonPrimitive primitive) || !primitive.isString()) {
                 throw invalid(
-                        name + "[] must be a non-empty string",
+                        name + "[] must be a string",
                         new ErrorDetails.InvalidRequest.InvalidValue(name + "[" + index + "]"));
             }
             values.add(primitive.getAsString());
         }
         return List.copyOf(values);
-    }
-
-    public static List<String> nonEmptyStringList(JsonElement element, String name)
-            throws OperationException {
-        List<String> values = stringList(element, name);
-        if (values.isEmpty()) {
-            throw invalid(
-                    name + " must contain at least one entry",
-                    new ErrorDetails.InvalidRequest.InvalidValue(name));
-        }
-        return values;
     }
 
     public static void requireExactFields(JsonObject object, Set<String> expected, String name)

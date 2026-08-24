@@ -2,22 +2,21 @@ package ca.deliyannides.dirtmcp.paper.bridge;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.regex.Pattern;
 
 final class BearerAuthenticator {
     private static final String SCHEME = "Bearer";
-    private static final int MINIMUM_TOKEN_BYTES = 32;
+    private static final Pattern TOKEN_PATTERN = Pattern.compile("[0-9a-f]{64}");
 
     private final byte[] expectedToken;
 
     BearerAuthenticator(String token) {
-        byte[] tokenBytes = token.getBytes(StandardCharsets.UTF_8);
-        if (tokenBytes.length < MINIMUM_TOKEN_BYTES) {
+        if (token == null || !TOKEN_PATTERN.matcher(token).matches()) {
             throw new IllegalArgumentException(
-                    "DIRT_MCP_BRIDGE_TOKEN must contain at least "
-                            + MINIMUM_TOKEN_BYTES
-                            + " bytes");
+                    "DIRT_MCP_BRIDGE_TOKEN must contain exactly 64 lowercase hexadecimal "
+                            + "characters");
         }
-        this.expectedToken = tokenBytes.clone();
+        this.expectedToken = token.getBytes(StandardCharsets.UTF_8);
     }
 
     boolean accepts(String authorizationHeader) {

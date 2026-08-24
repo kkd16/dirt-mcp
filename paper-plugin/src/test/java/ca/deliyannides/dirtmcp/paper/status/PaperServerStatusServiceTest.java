@@ -3,27 +3,27 @@ package ca.deliyannides.dirtmcp.paper.status;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
-import ca.deliyannides.dirtmcp.paper.config.McpTool;
 import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.platform.MainThread;
 import ca.deliyannides.dirtmcp.paper.platform.PaperMainThreadException;
-import java.util.EnumSet;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 final class PaperServerStatusServiceTest {
+    private static final GetServerStatus.Request REQUEST =
+            new GetServerStatus.Request(true, false, true);
+
     @Test
-    void capturesStatusThroughTheMainThreadBoundary() throws Exception {
+    void capturesStatusThroughTheMainThreadBoundaryAndForwardsSelection() throws Exception {
         GetServerStatus.Result expected = status();
         var mainThread = new DirectMainThread();
-        var service = new PaperServerStatusService(mainThread, new FixedAccess(expected));
+        var access = new FixedAccess(expected);
+        var service = new PaperServerStatusService(mainThread, access);
 
-        assertEquals(expected, service.getStatus());
+        assertEquals(expected, service.getStatus(REQUEST));
+        assertEquals(REQUEST, access.request);
         assertEquals(1, mainThread.calls);
     }
 
@@ -44,13 +44,15 @@ final class PaperServerStatusServiceTest {
                             }
 
                             @Override
-                            public GetServerStatus.Result captureStatus()
+                            public GetServerStatus.Result captureStatus(
+                                    GetServerStatus.Request ignoredRequest)
                                     throws OperationException {
                                 throw expected;
                             }
                         });
 
-        assertEquals(expected, assertThrows(OperationException.class, service::getStatus));
+        assertEquals(
+                expected, assertThrows(OperationException.class, () -> service.getStatus(REQUEST)));
     }
 
     @Test
@@ -79,47 +81,37 @@ final class PaperServerStatusServiceTest {
 
         assertEquals(
                 OperationFailure.SERVER_UNAVAILABLE,
-                assertThrows(OperationException.class, service::getStatus).failure());
+                assertThrows(OperationException.class, () -> service.getStatus(REQUEST)).failure());
         assertEquals(
                 OperationFailure.UNHEALTHY,
                 assertThrows(OperationException.class, service::ping).failure());
     }
 
     @Test
-    void rejectsIncompleteUnknownAndNullToolFlags() {
-        Map<String, Boolean> incomplete = new HashMap<>(allTools());
-        incomplete.remove(McpTool.UNDO_EDITS.id());
-        assertThrows(IllegalArgumentException.class, () -> status(incomplete));
+    void permitsExplicitlyExcludedStatusSections() {
+        GetServerStatus.Result result =
+                new GetServerStatus.Result(
+                        new GetServerStatus.Builds("26.2", "Paper", "Dirt", "FAWE"),
+                        new GetServerStatus.Performance(20, 1),
+                        null,
+                        null,
+                        null);
 
-        Map<String, Boolean> unknown = new HashMap<>(allTools());
-        unknown.put("not_a_tool", true);
-        assertThrows(IllegalArgumentException.class, () -> status(unknown));
-
-        Map<String, Boolean> nullValue = new HashMap<>(allTools());
-        nullValue.put(McpTool.UNDO_EDITS.id(), null);
-        assertThrows(IllegalArgumentException.class, () -> status(nullValue));
+        assertEquals(null, result.players());
+        assertEquals(null, result.worlds());
+        assertEquals(null, result.configuration());
     }
 
     private static GetServerStatus.Result status() {
-        return status(allTools());
-    }
-
-    private static GetServerStatus.Result status(Map<String, Boolean> tools) {
         return new GetServerStatus.Result(
                 new GetServerStatus.Builds("26.2", "Paper", "Dirt", "FAWE"),
                 new GetServerStatus.Performance(20, 1),
                 new GetServerStatus.PlayerSummary(0, 20, List.of()),
-                List.of(),
-                tools,
-                new GetServerStatus.EffectiveLogging("info", 10_485_760, 5),
-                new GetServerStatus.EffectiveLimits(
-                        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
-                new GetServerStatus.EffectiveEditHistory(2, 3, 4),
-                new GetServerStatus.EffectiveDefaults(false, false));
-    }
-
-    private static Map<String, Boolean> allTools() {
-        return new DirtConfig.Tools(EnumSet.allOf(McpTool.class)).flags();
+                null,
+                new GetServerStatus.EffectiveConfiguration(
+                        new GetServerStatus.EffectiveLimits(
+                                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13),
+                        new GetServerStatus.EffectiveEditHistory(2, 3, 4)));
     }
 
     private static final class DirectMainThread implements MainThread {
@@ -151,6 +143,7 @@ final class PaperServerStatusServiceTest {
 
     private static class FixedAccess implements PaperServerStatusService.PaperStatusAccess {
         private final GetServerStatus.Result status;
+        private GetServerStatus.Request request;
 
         private FixedAccess(GetServerStatus.Result status) {
             this.status = status;
@@ -162,7 +155,8 @@ final class PaperServerStatusServiceTest {
         }
 
         @Override
-        public GetServerStatus.Result captureStatus() {
+        public GetServerStatus.Result captureStatus(GetServerStatus.Request request) {
+            this.request = request;
             return this.status;
         }
     }

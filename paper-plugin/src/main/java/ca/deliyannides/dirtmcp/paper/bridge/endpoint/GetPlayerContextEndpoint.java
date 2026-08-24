@@ -15,8 +15,8 @@ public final class GetPlayerContextEndpoint implements BridgeEndpoint {
     }
 
     @Override
-    public String operation() {
-        return "get_player_context";
+    public String operationId() {
+        return "getPlayerContext";
     }
 
     @Override
@@ -33,7 +33,7 @@ public final class GetPlayerContextEndpoint implements BridgeEndpoint {
     public void handle(BridgeExchange exchange) throws IOException, OperationException {
         GetPlayerContext.Result result =
                 this.operation.getPlayerContext(GetPlayerContextRequestDecoder.decode(exchange));
-        exchange.world(result.world());
+        exchange.auditField("world", result.world());
         exchange.ok(result);
     }
 

@@ -15,8 +15,8 @@ public final class RunMinecraftCommandsEndpoint implements BridgeEndpoint {
     }
 
     @Override
-    public String operation() {
-        return "run_minecraft_commands";
+    public String operationId() {
+        return "runMinecraftCommands";
     }
 
     @Override
@@ -31,9 +31,17 @@ public final class RunMinecraftCommandsEndpoint implements BridgeEndpoint {
 
     @Override
     public void handle(BridgeExchange exchange) throws IOException, OperationException {
+        exchange.suppressFailureDetails();
         RunMinecraftCommands.Request request = RunMinecraftCommandsRequestDecoder.decode(exchange);
-        exchange.requiredCallId();
-        exchange.ok(this.operation.runCommands(request));
+        RunMinecraftCommands.Result result = this.operation.runCommands(request);
+        boolean allDispatched =
+                result.results().getLast().outcome() == RunMinecraftCommands.Outcome.DISPATCHED;
+        exchange.auditField("outcome", allDispatched ? "dispatched" : "partial_failure");
+        exchange.auditField("result_count", result.results().size());
+        exchange.auditCompletion(
+                allDispatched ? BridgeExchange.AuditLevel.INFO : BridgeExchange.AuditLevel.WARNING,
+                true);
+        exchange.ok(result);
     }
 
     @Override

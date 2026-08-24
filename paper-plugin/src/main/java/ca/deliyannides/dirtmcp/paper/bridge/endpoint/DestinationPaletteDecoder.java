@@ -18,9 +18,9 @@ final class DestinationPaletteDecoder {
 
     static List<DestinationPaletteEntry> decode(JsonElement element, String field)
             throws OperationException {
-        if (element == null || !element.isJsonArray() || element.getAsJsonArray().isEmpty()) {
+        if (element == null || !element.isJsonArray()) {
             throw RequestJson.invalid(
-                    field + " must be a non-empty array",
+                    field + " must be an array",
                     new ErrorDetails.InvalidRequest.InvalidValue(field));
         }
         List<DestinationPaletteEntry> entries = new ArrayList<>(element.getAsJsonArray().size());

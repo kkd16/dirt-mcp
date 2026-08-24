@@ -50,6 +50,61 @@ const inspectionPaths = new Set([
   '/v1/get-blocks',
   '/v1/scan-orthographic-view',
 ]);
+const bridgeOperations = [
+  'pingServer',
+  'getServerStatus',
+  'countRegionBlockStates',
+  'getBlocks',
+  'scanOrthographicView',
+  'getPlayerContext',
+  'getPerspectiveView',
+  'replaceRegionBlocks',
+  'setBlocks',
+  'getEditHistory',
+  'undoEdits',
+  'runMinecraftCommands',
+];
+const playerContextInclude = {
+  equipment: true,
+  inventory: false,
+  enderChest: false,
+  vitals: false,
+  movement: false,
+  client: false,
+  effects: false,
+};
+
+function materializeBridgeRequest(path, body) {
+  switch (path) {
+    case '/v1/get-blocks':
+      return {
+        includeBlockStatePatterns: [],
+        excludeBlockStatePatterns: [],
+        includeAir: false,
+        maxResults: 1_024,
+        ...body,
+      };
+    case '/v1/scan-orthographic-view':
+      return { depth: 0, maxResults: 1_024, ...body };
+    case '/v1/get-player-context':
+      return { ...body, include: { ...playerContextInclude, ...body.include } };
+    case '/v1/get-perspective-view':
+      return {
+        width: 21,
+        height: 13,
+        verticalFieldOfViewDegrees: 70,
+        maxDistance: 32,
+        fluidCollision: 'never',
+        ignorePassableBlocks: false,
+        ...body,
+      };
+    case '/v1/replace-region-blocks':
+    case '/v1/set-blocks':
+      return { seed: 0, dryRun: false, maxChangedBlocks: null, ...body };
+    default:
+      return body;
+  }
+}
 
 function bridgeTimeoutMilliseconds(path) {
   if (editMutationPaths.has(path) || path === '/v1/undo-edits') return 300_000;
@@ -67,9 +122,8 @@ function trackEditId(editId) {
   if (!editIdsToUndo.some((retained) => sameUuid(retained, editId))) editIdsToUndo.push(editId);
 }
 
-async function bridgeGet(path, callId) {
-  const headers = { Authorization: `Bearer ${token}` };
-  if (callId !== undefined) headers['X-Dirt-Call-Id'] = callId;
+async function bridgeGet(path, callId = randomUUID()) {
+  const headers = { Authorization: `Bearer ${token}`, 'X-Dirt-Call-Id': callId };
   const response = await fetch(`${baseUrl}${path}`, {
     headers,
     signal: AbortSignal.timeout(bridgeTimeoutMilliseconds(path)),
@@ -80,6 +134,7 @@ async function bridgeGet(path, callId) {
 
 async function bridgeResponse(path, body) {
   const callId = randomUUID();
+  const requestBody = materializeBridgeRequest(path, body);
   if (editMutationPaths.has(path)) mutationCallIds.add(callId);
   const response = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
@@ -88,7 +143,7 @@ async function bridgeResponse(path, body) {
       'Content-Type': 'application/json',
       'X-Dirt-Call-Id': callId,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(requestBody),
     signal: AbortSignal.timeout(bridgeTimeoutMilliseconds(path)),
   });
   const text = await response.text();
@@ -96,10 +151,10 @@ async function bridgeResponse(path, body) {
   if (editMutationPaths.has(path)) {
     const committed = response.ok && document.outcome === 'committed';
     trackEditId(committed ? document.edit?.editId : document.error?.editId);
-    if (committed) assert.equal(document.edit?.label, body.label);
+    if (committed) assert.equal(document.edit?.label, requestBody.label);
   }
-  if (response.ok && path === '/v1/undo-edits' && Array.isArray(document.edits)) {
-    for (const edit of document.edits) {
+  if (response.ok && path === '/v1/undo-edits' && Array.isArray(document.undoneEdits)) {
+    for (const edit of document.undoneEdits) {
       if (!sameUuid(editIdsToUndo.at(-1), edit?.editId)) break;
       editIdsToUndo.pop();
     }
@@ -186,11 +241,11 @@ async function assertDetailedPingLog(callId) {
   assertDetailedLogEnvelope(record);
   assert.equal(record.level, 'debug');
   assert.equal(record.call_id, callId);
-  assert.equal(record.operation, 'ping_server');
+  assert.equal(record.operation_id, 'pingServer');
   assert.equal(record.http_status, 200);
 }
 
-async function assertDetailedMutationLog(result) {
+async function assertDetailedMutationLog(result, operationId) {
   const record = await waitForDetailedLogRecord(
     (candidate) => sameUuid(candidate.call_id, result.edit.callId) && sameUuid(candidate.edit_id, result.edit.editId),
     `Paper detail log did not record committed edit ${result.edit.editId}`,
@@ -198,7 +253,7 @@ async function assertDetailedMutationLog(result) {
   assertDetailedLogEnvelope(record);
   assert.equal(record.level, 'info');
   assert.equal(record.call_id, result.edit.callId);
-  assert.equal(record.operation, result.edit.operation);
+  assert.equal(record.operation_id, operationId);
   assert.equal(record.edit_id, result.edit.editId);
   assert.equal(record.outcome, 'committed');
   assert.equal(record.changed_block_count, result.changedBlockCount);
@@ -211,7 +266,7 @@ async function assertDetailedCommandLog(callId, commandMarker, expectedResultCou
   );
   assertDetailedLogEnvelope(record);
   assert.equal(record.call_id, callId);
-  assert.equal(record.operation, 'run_minecraft_commands');
+  assert.equal(record.operation_id, 'runMinecraftCommands');
   assert.equal(record.http_status, 200);
   assert.equal(record.result_count, expectedResultCount);
   const records = await readDetailedLogRecords();
@@ -290,6 +345,11 @@ async function waitForRegion(region) {
 
 function sortedBlockKeys(blocks) {
   return blocks.map(({ position, blockState }) => `${position.x},${position.y},${position.z}:${blockState}`).toSorted();
+}
+
+function blockStateType(blockState) {
+  const propertiesStart = blockState.indexOf('[');
+  return propertiesStart === -1 ? blockState : blockState.slice(0, propertiesStart);
 }
 
 function relativeBlockKeys(structure) {
@@ -372,8 +432,9 @@ async function undoRetainedBatch(results) {
     editIds.map((editId) => editId.toLowerCase()),
   );
   const undone = await bridgeRequest('/v1/undo-edits', { world, editIds });
+  assert.equal(undone.outcome, 'completed');
   assert.equal(undone.world, world);
-  assert.deepEqual(undone.edits, edits);
+  assert.deepEqual(undone.undoneEdits, edits);
   assert.match(undone.undoCallId, uuidV4Pattern);
   assert.ok(!Number.isNaN(Date.parse(undone.undoneAt)));
 }
@@ -478,7 +539,10 @@ let originalCopyFixture;
 let cleanupFailed = false;
 let smokeCompleted = false;
 try {
-  const unauthenticated = await fetch(`${baseUrl}/v1/ping`, { signal: AbortSignal.timeout(3_000) });
+  const unauthenticated = await fetch(`${baseUrl}/v1/ping`, {
+    headers: { 'X-Dirt-Call-Id': randomUUID() },
+    signal: AbortSignal.timeout(3_000),
+  });
   assert.equal(unauthenticated.status, 401);
   assert.deepEqual((await unauthenticated.json()).error, {
     code: 'unauthorized',
@@ -487,12 +551,12 @@ try {
   });
 
   const unknownRoute = await fetch(`${baseUrl}/v1/ping/extra`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, 'X-Dirt-Call-Id': randomUUID() },
     signal: AbortSignal.timeout(3_000),
   });
   assert.equal(unknownRoute.status, 404);
   assert.deepEqual((await unknownRoute.json()).error, {
-    code: 'not_found',
+    code: 'route_not_found',
     message: 'No bridge operation matches this path',
     details: { reason: 'route_not_found' },
   });
@@ -500,19 +564,29 @@ try {
   const pingCallId = randomUUID();
   assert.deepEqual(await bridgeGet('/v1/ping', pingCallId), { status: 'ok' });
   await assertDetailedPingLog(pingCallId);
-  const serverStatus = await bridgeGet('/v1/server-status');
+  assert.deepEqual(await bridgeGet('/v1/capabilities'), { operations: bridgeOperations });
+  const serverStatus = await bridgeRequest('/v1/server-status', {
+    includePlayers: true,
+    includeWorlds: true,
+    includeConfiguration: true,
+  });
+  assert.deepEqual(Object.keys(serverStatus).toSorted(), [
+    'builds',
+    'configuration',
+    'performance',
+    'players',
+    'worlds',
+  ]);
   assert.ok(serverStatus.builds.minecraft.length > 0);
   assert.ok(serverStatus.builds.paper.length > 0);
-  assert.ok(serverStatus.builds.dirtMcp.length > 0);
+  assert.ok(serverStatus.builds.dirtPlugin.length > 0);
   assert.ok(serverStatus.builds.fawe.length > 0);
   assert.ok(serverStatus.performance.tpsOneMinute >= 0);
+  assert.equal(serverStatus.players.online, serverStatus.players.entries.length);
   assert.ok(serverStatus.worlds.some((entry) => entry.name === world));
-  assert.deepEqual(serverStatus.limits, {
-    maxConcurrentRequests: 32,
-    maxConcurrentInspections: 4,
-    maxRequestBytes: 1_048_576,
+  assert.deepEqual(serverStatus.configuration.limits, {
     maxRegionVolume: 1_048_576,
-    maxTouchedChunks: 512,
+    maxEditTouchedChunks: 512,
     maxInspectionTouchedChunks: 128,
     maxPerspectiveTouchedChunks: 256,
     maxBlockStatePatterns: 64,
@@ -520,36 +594,15 @@ try {
     maxChangedBlocks: 262_144,
     maxInspectionVolume: 262_144,
     maxPerspectiveRayDistanceBudget: 131_072,
-    defaultInspectionResultLimit: 1_024,
     maxInspectionResultLimit: 4_096,
     maxPerspectiveRays: 2_048,
     maxCommandsPerRequest: 10,
     maxCommandFeedbackCharacters: 8_192,
   });
-  assert.deepEqual(serverStatus.editHistory, {
+  assert.deepEqual(serverStatus.configuration.editHistory, {
     maxEntriesPerWorld: 50,
     maxEntriesTotal: 200,
     maxRetainedChangedBlocks: 2_621_440,
-  });
-  assert.deepEqual(serverStatus.logging, {
-    consoleLevel: 'info',
-    detailFileMaxBytes: 10_485_760,
-    detailFileRetainedFiles: 5,
-  });
-  assert.deepEqual(serverStatus.defaults, { getBlocksIncludeAir: false, editDryRun: false });
-  assert.deepEqual(serverStatus.tools, {
-    ping_server: true,
-    get_server_status: true,
-    get_player_context: true,
-    get_perspective_view: true,
-    count_region_block_states: true,
-    get_blocks: true,
-    scan_orthographic_view: true,
-    replace_region_blocks: true,
-    set_blocks: true,
-    get_edit_history: true,
-    undo_edits: true,
-    run_minecraft_commands: true,
   });
   await assertEditHistory([]);
 
@@ -582,8 +635,8 @@ try {
   assert.equal(chunkHeavyRegion.body.error.code, 'region_too_large');
   assert.deepEqual(chunkHeavyRegion.body.error.details, {
     reason: 'touched_chunks',
-    minimumRequired: serverStatus.limits.maxInspectionTouchedChunks + 1,
-    maximum: serverStatus.limits.maxInspectionTouchedChunks,
+    minimumRequired: serverStatus.configuration.limits.maxInspectionTouchedChunks + 1,
+    maximum: serverStatus.configuration.limits.maxInspectionTouchedChunks,
   });
 
   await paperCommand('forceload add 0 0');
@@ -624,7 +677,7 @@ try {
   assert.ok(firstCopyState);
   assert.ok(secondCopyState);
   const commandStates = ['minecraft:stone', 'minecraft:gold_block', 'minecraft:diamond_block'].filter(
-    (state) => state !== firstOriginalState,
+    (state) => state !== blockStateType(firstOriginalState),
   );
   const commandFirstState = commandStates[0];
   const commandSecondState = commandStates[1];
@@ -634,14 +687,14 @@ try {
   const oversizedCommandBatch = await bridgeResponse('/v1/run-minecraft-commands', {
     commands: [
       `setblock ${setMin.x} ${setMin.y} ${setMin.z} ${commandFirstState} replace`,
-      ...Array.from({ length: serverStatus.limits.maxCommandsPerRequest }, () => 'time query gametime'),
+      ...Array.from({ length: serverStatus.configuration.limits.maxCommandsPerRequest }, () => 'time query gametime'),
     ],
   });
   assert.equal(oversizedCommandBatch.status, 400);
   assert.deepEqual(oversizedCommandBatch.body.error.details, {
     reason: 'too_many_items',
     fields: ['commands'],
-    maximum: serverStatus.limits.maxCommandsPerRequest,
+    maximum: serverStatus.configuration.limits.maxCommandsPerRequest,
   });
   const afterOversizedCommandBatch = await bridgeRequest('/v1/get-blocks', {
     world,
@@ -682,7 +735,7 @@ try {
     ],
   );
   const [versionFeedback, , , timeFeedback] = commandRun.results.map(({ feedback }) => feedback.join('\n'));
-  assert.ok(versionFeedback.includes(serverStatus.builds.dirtMcp));
+  assert.ok(versionFeedback.includes(serverStatus.builds.dirtPlugin));
   assert.ok(timeFeedback.length > 0);
   assert.ok(commandRun.results.every(({ message, rawMessage }) => message === null && rawMessage === null));
   const afterOrderedCommands = await bridgeRequest('/v1/get-blocks', {
@@ -690,7 +743,8 @@ try {
     min: setMin,
     max: setMin,
   });
-  assert.equal(expandStructure(afterOrderedCommands)[0].blockState, commandSecondState);
+  const canonicalCommandSecondState = expandStructure(afterOrderedCommands)[0].blockState;
+  assert.equal(blockStateType(canonicalCommandSecondState), commandSecondState);
 
   const commandMarker = `dirt_smoke_missing_${randomUUID().replaceAll('-', '')}`;
   const missingCommandRun = await bridgeResponse('/v1/run-minecraft-commands', {
@@ -709,7 +763,7 @@ try {
     min: setMin,
     max: setMin,
   });
-  assert.equal(expandStructure(afterMissingCommand)[0].blockState, commandSecondState);
+  assert.equal(expandStructure(afterMissingCommand)[0].blockState, canonicalCommandSecondState);
 
   const invalidTimeQuery = `time query dirt_smoke_invalid_${randomUUID().replaceAll('-', '')}`;
   const failedCommandRun = await bridgeRequest('/v1/run-minecraft-commands', {
@@ -727,7 +781,7 @@ try {
     max: setMin,
     includeAir: true,
   });
-  assert.equal(expandStructure(afterFailedCommand)[0].blockState, commandSecondState);
+  assert.equal(expandStructure(afterFailedCommand)[0].blockState, canonicalCommandSecondState);
 
   const restoredCommandRun = await bridgeRequest('/v1/run-minecraft-commands', {
     commands: [`setblock ${setMin.x} ${setMin.y} ${setMin.z} ${firstOriginalState} replace`],
@@ -755,9 +809,10 @@ try {
     'minecraft:copper_block',
     'minecraft:coal_block',
   ];
-  const setStates = distinctStates.filter(
-    (state) => ![firstOriginalState, secondOriginalState, firstCopyState, secondCopyState].includes(state),
+  const occupiedFixtureTypes = new Set(
+    [firstOriginalState, secondOriginalState, firstCopyState, secondCopyState].map(blockStateType),
   );
+  const setStates = distinctStates.filter((state) => !occupiedFixtureTypes.has(state));
   assert.ok(setStates.length >= 2);
   const firstSetState = setStates[0];
   const secondSetState = setStates[1];
@@ -782,9 +837,8 @@ try {
   assert.deepEqual(emptySet, {
     world,
     bounds: null,
-    palettes: [],
     seed: setSeed,
-    outcome: 'no_change',
+    outcome: 'preview',
     edit: null,
     blockCount: 0,
     changedBlockCount: 0,
@@ -803,7 +857,6 @@ try {
     dryRun: true,
   });
   assert.equal(setPreview.world, world);
-  assert.deepEqual(setPreview.palettes, setPalettes);
   assert.equal(setPreview.seed, setSeed);
   assert.equal(setPreview.outcome, 'preview');
   assert.equal(setPreview.edit, null);
@@ -885,7 +938,6 @@ try {
   assert.equal(setResult.edit.callId, setResponse.callId);
   assert.equal(setResult.world, world);
   assert.deepEqual(setResult.bounds, { min: setMin, max: setMax });
-  assert.deepEqual(setResult.palettes, setPalettes);
   assert.equal(setResult.seed, setSeed);
   assert.equal(setResult.blockCount, 2);
   assert.equal(setResult.changedBlockCount, setPreview.changedBlockCount);
@@ -903,8 +955,12 @@ try {
       block.blockState,
     ]),
   );
-  assert.ok(setStates.includes(afterSetStates.get('5,0,0')));
-  assert.ok(setStates.includes(afterSetStates.get('6,0,0')));
+  const firstCanonicalSetState = afterSetStates.get('5,0,0');
+  const secondCanonicalSetState = afterSetStates.get('6,0,0');
+  assert.ok(firstCanonicalSetState);
+  assert.ok(secondCanonicalSetState);
+  assert.ok(setStates.includes(blockStateType(firstCanonicalSetState)));
+  assert.ok(setStates.includes(blockStateType(secondCanonicalSetState)));
 
   const copyResponse = await bridgeResponse('/v1/set-blocks', {
     ...afterSet,
@@ -964,7 +1020,7 @@ try {
 
   const originalStates = Object.keys(original.blockStateCounts);
   const regionBlockState =
-    originalStates.length === 1 && originalStates[0].startsWith('minecraft:barrier')
+    originalStates.length === 1 && blockStateType(originalStates[0]) === 'minecraft:barrier'
       ? 'minecraft:amethyst_block'
       : 'minecraft:barrier';
   const regionSetInput = {
@@ -977,12 +1033,9 @@ try {
   };
 
   const regionPreview = await bridgeRequest('/v1/set-blocks', { ...regionSetInput, dryRun: true });
-  const previewState = regionPreview.palettes[0][0].blockState;
-  const alreadyMatching = original.blockStateCounts[previewState] ?? 0;
   assert.equal(regionPreview.outcome, 'preview');
   assert.equal(regionPreview.edit, null);
   assert.equal(regionPreview.blockCount, original.volume);
-  assert.equal(regionPreview.changedBlockCount, original.volume - alreadyMatching);
   assert.ok(regionPreview.changedBlockCount > 0, 'Smoke destination must change at least one block');
   await assertEditHistory([]);
 
@@ -991,13 +1044,18 @@ try {
     seed: regionPreview.seed,
   });
   assertCommittedEdit(regionSet, 'set_blocks');
-  const regionState = regionSet.palettes[0][0].blockState;
   assert.equal(regionSet.seed, regionPreview.seed);
-  assert.deepEqual(regionSet.palettes, regionPreview.palettes);
   assert.equal(regionSet.changedBlockCount, regionPreview.changedBlockCount);
   await assertEditHistory([regionSet.edit]);
 
   const afterRegionSet = await bridgeRequest('/v1/count-region-block-states', region);
+  const regionStateEntries = Object.entries(afterRegionSet.blockStateCounts);
+  assert.equal(regionStateEntries.length, 1);
+  const [[regionState, regionBlockCount]] = regionStateEntries;
+  assert.equal(blockStateType(regionState), regionBlockState);
+  assert.equal(regionBlockCount, regionSet.blockCount);
+  const alreadyMatching = original.blockStateCounts[regionState] ?? 0;
+  assert.equal(regionPreview.changedBlockCount, original.volume - alreadyMatching);
   assert.deepEqual(afterRegionSet.blockStateCounts, { [regionState]: regionSet.blockCount });
 
   const exactBlocks = await bridgeRequest('/v1/get-blocks', region);
@@ -1145,7 +1203,12 @@ try {
   assert.equal(replaced.matchedBlockCount, replacePreview.matchedBlockCount);
   assert.equal(replaced.changedBlockCount, replacePreview.changedBlockCount);
   await assertEditHistory([replaced.edit, regionSet.edit]);
-  assertExactBlocks(await bridgeRequest('/v1/get-blocks', region), replaced.destinationPalette[0].blockState);
+  const replacedBlocks = await bridgeRequest('/v1/get-blocks', region);
+  const replacementStates = new Set(expandStructure(replacedBlocks).map(({ blockState }) => blockState));
+  assert.equal(replacementStates.size, 1);
+  const [replacementState] = replacementStates;
+  assert.equal(blockStateType(replacementState), replacementDestination);
+  assertExactBlocks(replacedBlocks, replacementState);
 
   const nonLatestUndo = await bridgeResponse('/v1/undo-edits', {
     world,
@@ -1189,15 +1252,16 @@ try {
   wideFixtureIsForceLoaded = true;
   const originalLargeRegion = await waitForRegion(largeRegion);
   assert.equal(originalLargeRegion.volume, 262_144);
+  const originalLargeTypes = new Set(Object.keys(originalLargeRegion.blockStateCounts).map(blockStateType));
   const largeDestination = [
     'minecraft:barrier',
     'minecraft:structure_void',
     'minecraft:light[level=15]',
     'minecraft:jigsaw[orientation=down_east]',
     'minecraft:command_block[conditional=false,facing=down]',
-  ].find((blockState) => !Object.hasOwn(originalLargeRegion.blockStateCounts, blockState));
+  ].find((blockState) => !originalLargeTypes.has(blockStateType(blockState)));
   assert.ok(largeDestination);
-  assert.equal(Object.hasOwn(originalLargeRegion.blockStateCounts, largeDestination), false);
+  assert.equal(originalLargeTypes.has(blockStateType(largeDestination)), false);
 
   const largeEdit = await bridgeRequest('/v1/set-blocks', {
     world,
@@ -1210,8 +1274,14 @@ try {
   assertCommittedEdit(largeEdit, 'set_blocks');
   assert.equal(largeEdit.blockCount, 262_144);
   assert.equal(largeEdit.changedBlockCount, 262_144);
-  const canonicalLargeDestination = largeEdit.palettes[0][0].blockState;
   await assertEditHistory([largeEdit.edit]);
+
+  const afterLargeEdit = await bridgeRequest('/v1/count-region-block-states', largeRegion);
+  const largeStateEntries = Object.entries(afterLargeEdit.blockStateCounts);
+  assert.equal(largeStateEntries.length, 1);
+  const [[canonicalLargeDestination, canonicalLargeCount]] = largeStateEntries;
+  assert.equal(blockStateType(canonicalLargeDestination), blockStateType(largeDestination));
+  assert.equal(canonicalLargeCount, 262_144);
 
   const concurrentInspections = await Promise.all(
     Array.from({ length: 4 }, () => bridgeRequest('/v1/count-region-block-states', largeRegion)),
@@ -1233,7 +1303,7 @@ try {
     maxDistance: 96,
   });
   assert.ok(widePerspective.checkedChunkCount > 32);
-  assert.ok(widePerspective.checkedChunkCount <= serverStatus.limits.maxPerspectiveTouchedChunks);
+  assert.ok(widePerspective.checkedChunkCount <= serverStatus.configuration.limits.maxPerspectiveTouchedChunks);
 
   await undoRetained(largeEdit);
   await assertEditHistory([]);
@@ -1250,14 +1320,16 @@ try {
     { position: stairMax, blockState: southStairs },
   ]);
 
+  const exactStateDestinations = [
+    { blockState: 'minecraft:gold_block', weight: 50 },
+    { blockState: 'minecraft:diamond_block', weight: 50 },
+  ];
+  const exactStateDestinationTypes = new Set(exactStateDestinations.map(({ blockState }) => blockState));
   const exactStatePreview = await bridgeRequest('/v1/replace-region-blocks', {
     ...stairRegion,
     label: 'Preview exact-state stair replacement',
     sourceBlockStatePatterns: ['minecraft:dark_oak_stairs', 'minecraft:air'],
-    destinationPalette: [
-      { blockState: 'minecraft:gold_block', weight: 50 },
-      { blockState: 'minecraft:diamond_block', weight: 50 },
-    ],
+    destinationPalette: exactStateDestinations,
     dryRun: true,
   });
   assert.equal(exactStatePreview.matchedBlockCount, 3);
@@ -1267,10 +1339,7 @@ try {
     ...stairRegion,
     label: 'Replace exact stair states',
     sourceBlockStatePatterns: ['minecraft:dark_oak_stairs', 'minecraft:air'],
-    destinationPalette: [
-      { blockState: 'minecraft:gold_block', weight: 50 },
-      { blockState: 'minecraft:diamond_block', weight: 50 },
-    ],
+    destinationPalette: exactStateDestinations,
     seed: exactStatePreview.seed,
   });
   assertCommittedEdit(exactStateReplacement, 'replace_region_blocks');
@@ -1282,8 +1351,8 @@ try {
   });
   assert.equal(expandStructure(exactStateBlocks).length, 3);
   assert.ok(
-    expandStructure(exactStateBlocks).every(
-      ({ blockState }) => blockState === 'minecraft:gold_block' || blockState === 'minecraft:diamond_block',
+    expandStructure(exactStateBlocks).every(({ blockState }) =>
+      exactStateDestinationTypes.has(blockStateType(blockState)),
     ),
   );
   const firstSeededLayout = sortedBlockKeys(expandStructure(exactStateBlocks));
@@ -1294,10 +1363,7 @@ try {
     ...stairRegion,
     label: 'Replay exact stair replacement',
     sourceBlockStatePatterns: ['minecraft:dark_oak_stairs', 'minecraft:air'],
-    destinationPalette: [
-      { blockState: 'minecraft:gold_block', weight: 50 },
-      { blockState: 'minecraft:diamond_block', weight: 50 },
-    ],
+    destinationPalette: exactStateDestinations,
     seed: exactStatePreview.seed,
   });
   assertCommittedEdit(replayedReplacement, 'replace_region_blocks');
@@ -1326,7 +1392,7 @@ try {
   });
   assertCommittedEdit(propertySet, 'set_blocks');
   assert.equal(propertySet.changedBlockCount, 1);
-  await assertDetailedMutationLog(propertySet);
+  await assertDetailedMutationLog(propertySet, 'setBlocks');
   const propertySetBlocks = await bridgeRequest('/v1/get-blocks', {
     world,
     min: stairMin,

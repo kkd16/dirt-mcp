@@ -13,6 +13,8 @@ import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.FluidCo
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.LocationSource;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.PlayerSource;
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.ViewRequest;
+import ca.deliyannides.dirtmcp.paper.world.inspection.PerspectiveViewAccess.CameraSnapshot;
+import ca.deliyannides.dirtmcp.paper.world.inspection.PerspectiveViewAccess.Projection;
 import ca.deliyannides.dirtmcp.paper.world.model.ExactPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Rotation;
 import ca.deliyannides.dirtmcp.paper.world.model.Vector3;
@@ -30,9 +32,8 @@ final class PaperPerspectiveViewServiceTest {
     void capturesPlayerAndLocationSourcesThroughTheMainThreadBoundary() throws Exception {
         GetPerspectiveView.Result expected = result();
         DirectMainThread mainThread = new DirectMainThread();
-        PaperPerspectiveViewService service =
-                new PaperPerspectiveViewService(
-                        mainThread, ignored -> expected, new InspectionAdmission(1));
+        TrackingAccess access = new TrackingAccess(mainThread, expected);
+        PaperPerspectiveViewService service = service(mainThread, access);
 
         assertEquals(
                 expected,
@@ -47,20 +48,32 @@ final class PaperPerspectiveViewServiceTest {
                                         new ExactPosition(1.25, 65.62, -2.5),
                                         new Rotation(90, -10)),
                                 VIEW)));
-        assertEquals(2, mainThread.calls);
+        assertEquals(4, mainThread.calls);
+        assertEquals(2, access.cameraCaptures);
+        assertEquals(2, access.traces);
     }
 
     @Test
     void validatesBothSourceShapesBeforeCallingPaper() {
         AtomicBoolean captured = new AtomicBoolean();
         PaperPerspectiveViewService service =
-                new PaperPerspectiveViewService(
+                service(
                         new DirectMainThread(),
-                        ignored -> {
-                            captured.set(true);
-                            return result();
-                        },
-                        new InspectionAdmission(1));
+                        new PerspectiveViewAccess() {
+                            @Override
+                            public CameraSnapshot captureCamera(GetPerspectiveView.Source source) {
+                                captured.set(true);
+                                return camera();
+                            }
+
+                            @Override
+                            public GetPerspectiveView.Result trace(
+                                    ViewRequest request,
+                                    CameraSnapshot camera,
+                                    Projection projection) {
+                                return result();
+                            }
+                        });
 
         OperationException blankPlayer =
                 assertThrows(
@@ -114,12 +127,23 @@ final class PaperPerspectiveViewServiceTest {
                         "Player is not online: builder",
                         new ErrorDetails.PlayerNotFound("builder"));
         PaperPerspectiveViewService accessFailure =
-                new PaperPerspectiveViewService(
+                service(
                         new DirectMainThread(),
-                        ignored -> {
-                            throw expected;
-                        },
-                        new InspectionAdmission(1));
+                        new PerspectiveViewAccess() {
+                            @Override
+                            public CameraSnapshot captureCamera(GetPerspectiveView.Source source)
+                                    throws OperationException {
+                                throw expected;
+                            }
+
+                            @Override
+                            public GetPerspectiveView.Result trace(
+                                    ViewRequest request,
+                                    CameraSnapshot camera,
+                                    Projection projection) {
+                                throw new AssertionError("trace must not run");
+                            }
+                        });
         assertEquals(
                 expected,
                 assertThrows(
@@ -130,8 +154,9 @@ final class PaperPerspectiveViewServiceTest {
                                                 new PlayerSource("builder"), VIEW))));
 
         PaperPerspectiveViewService schedulerFailure =
-                new PaperPerspectiveViewService(
-                        new FailingMainThread(), ignored -> result(), new InspectionAdmission(1));
+                service(
+                        new FailingMainThread(),
+                        new TrackingAccess(new DirectMainThread(), result()));
         OperationException failure =
                 assertThrows(
                         OperationException.class,
@@ -164,16 +189,71 @@ final class PaperPerspectiveViewServiceTest {
                 null);
     }
 
+    private static CameraSnapshot camera() {
+        return new CameraSnapshot(
+                Instant.parse("2026-08-20T12:00:00Z"),
+                new GetPerspectiveView.ResolvedLocationSource(),
+                "world",
+                UUID.fromString("223e4567-e89b-42d3-a456-426614174000"),
+                -64,
+                320,
+                new ExactPosition(1.25, 65.62, -2.5),
+                new Rotation(90, -10),
+                new Vector3(-1, 0, 0));
+    }
+
+    private static PaperPerspectiveViewService service(
+            MainThread mainThread, PerspectiveViewAccess access) {
+        return new PaperPerspectiveViewService(
+                mainThread, access, new InspectionAdmission(1), 9, 288, 64);
+    }
+
+    private static final class TrackingAccess implements PerspectiveViewAccess {
+        private final DirectMainThread mainThread;
+        private final GetPerspectiveView.Result result;
+        private int cameraCaptures;
+        private int traces;
+
+        private TrackingAccess(DirectMainThread mainThread, GetPerspectiveView.Result result) {
+            this.mainThread = mainThread;
+            this.result = result;
+        }
+
+        @Override
+        public CameraSnapshot captureCamera(GetPerspectiveView.Source source) {
+            if (!this.mainThread.insideCall) {
+                throw new AssertionError("camera capture ran off the main-thread boundary");
+            }
+            this.cameraCaptures++;
+            return camera();
+        }
+
+        @Override
+        public GetPerspectiveView.Result trace(
+                ViewRequest request, CameraSnapshot camera, Projection projection) {
+            if (!this.mainThread.insideCall) {
+                throw new AssertionError("ray tracing ran off the main-thread boundary");
+            }
+            this.traces++;
+            assertEquals(9, projection.directions().size());
+            return this.result;
+        }
+    }
+
     private static final class DirectMainThread implements MainThread {
         private int calls;
+        private boolean insideCall;
 
         @Override
         public <T> T call(CheckedSupplier<T> action) throws PaperMainThreadException {
             this.calls++;
+            this.insideCall = true;
             try {
                 return action.get();
             } catch (Exception exception) {
                 throw new PaperMainThreadException("failed", exception);
+            } finally {
+                this.insideCall = false;
             }
         }
 

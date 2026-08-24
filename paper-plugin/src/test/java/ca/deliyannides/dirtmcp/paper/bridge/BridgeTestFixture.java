@@ -1,5 +1,6 @@
 package ca.deliyannides.dirtmcp.paper.bridge;
 
+import ca.deliyannides.dirtmcp.paper.bridge.endpoint.CapabilitiesEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.CountRegionBlockStatesEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.GetEditHistoryEndpoint;
@@ -14,7 +15,6 @@ import ca.deliyannides.dirtmcp.paper.bridge.endpoint.SetBlocksEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.UndoEditsEndpoint;
 import ca.deliyannides.dirtmcp.paper.command.RunMinecraftCommands;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
-import ca.deliyannides.dirtmcp.paper.config.McpTool;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus;
@@ -48,7 +48,6 @@ import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.time.Instant;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -56,7 +55,7 @@ import java.util.UUID;
 import org.slf4j.helpers.NOPLogger;
 
 final class BridgeTestFixture {
-    static final String TOKEN = "test-token-with-at-least-thirty-two-bytes";
+    static final String TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     static final String CALL_ID = "123e4567-e89b-42d3-a456-426614174000";
     static final UUID EDIT_ID = UUID.fromString("223e4567-e89b-42d3-a456-426614174000");
     static final UUID WORLD_ID = UUID.fromString("323e4567-e89b-42d3-a456-426614174000");
@@ -65,14 +64,19 @@ final class BridgeTestFixture {
 
     static DirtConfig config(int port, int maximumConcurrentRequests) {
         return new DirtConfig(
-                new DirtConfig.Bridge(port, 1, 1, maximumConcurrentRequests, 1),
-                allTools(),
+                new DirtConfig.Bridge(
+                        port,
+                        1,
+                        1,
+                        maximumConcurrentRequests,
+                        1,
+                        262_144,
+                        List.of(BridgeOperation.values())),
                 new DirtConfig.Logging(DirtConfig.ConsoleLogLevel.INFO, 10_485_760, 5),
                 new DirtConfig.Limits(
-                        262_144, 1_000_000, 256, 32, 64, 64, 256, 250_000, 32_768, 65_536, 321, 654,
-                        512, 10, 8_192),
-                new DirtConfig.EditHistory(20, 100, 1_000_000),
-                new DirtConfig.Defaults(false, false));
+                        1_000_000, 256, 32, 64, 64, 256, 250_000, 32_768, 65_536, 654, 512, 10,
+                        8_192),
+                new DirtConfig.EditHistory(20, 100, 1_000_000));
     }
 
     static BridgeServer server(DirtConfig config, TestOperations operations) {
@@ -83,23 +87,24 @@ final class BridgeTestFixture {
     }
 
     static BridgeServer server(DirtConfig config, TestOperations operations, DirtLog log) {
-        return new BridgeServer(
-                config,
-                TOKEN,
-                List.of(
-                        new PingEndpoint(operations),
-                        new ServerStatusEndpoint(operations),
-                        new CountRegionBlockStatesEndpoint(operations),
-                        new GetBlocksEndpoint(operations, config),
-                        new ScanOrthographicViewEndpoint(operations, config),
-                        new GetPlayerContextEndpoint(operations),
-                        new GetPerspectiveViewEndpoint(operations),
-                        new ReplaceRegionBlocksEndpoint(operations, config),
-                        new SetBlocksEndpoint(operations, config),
-                        new GetEditHistoryEndpoint(operations),
-                        new UndoEditsEndpoint(operations),
-                        new RunMinecraftCommandsEndpoint(operations)),
-                log);
+        return new BridgeServer(config, TOKEN, endpoints(config, operations), log);
+    }
+
+    static List<BridgeEndpoint> endpoints(DirtConfig config, TestOperations operations) {
+        return List.of(
+                new CapabilitiesEndpoint(config.bridge().allowedOperations()),
+                new PingEndpoint(operations),
+                new ServerStatusEndpoint(operations),
+                new CountRegionBlockStatesEndpoint(operations),
+                new GetBlocksEndpoint(operations),
+                new ScanOrthographicViewEndpoint(operations),
+                new GetPlayerContextEndpoint(operations),
+                new GetPerspectiveViewEndpoint(operations),
+                new ReplaceRegionBlocksEndpoint(operations),
+                new SetBlocksEndpoint(operations),
+                new GetEditHistoryEndpoint(operations),
+                new UndoEditsEndpoint(operations),
+                new RunMinecraftCommandsEndpoint(operations));
     }
 
     static int availablePort() throws IOException {
@@ -113,12 +118,13 @@ final class BridgeTestFixture {
     }
 
     static HttpRequest.Builder authorized(BridgeServer server, String path) {
-        return HttpRequest.newBuilder(uri(server, path)).header("Authorization", "Bearer " + TOKEN);
+        return HttpRequest.newBuilder(uri(server, path))
+                .header("Authorization", "Bearer " + TOKEN)
+                .header("X-Dirt-Call-Id", CALL_ID);
     }
 
     static HttpRequest post(BridgeServer server, String path, String body) {
         return authorized(server, path)
-                .header("X-Dirt-Call-Id", CALL_ID)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
@@ -147,28 +153,31 @@ final class BridgeTestFixture {
         }
 
         @Override
-        public GetServerStatus.Result getStatus() throws OperationException {
+        public GetServerStatus.Result getStatus(GetServerStatus.Request request)
+                throws OperationException {
             return new GetServerStatus.Result(
                     new GetServerStatus.Builds("26.2", "paper", "test", "fawe"),
                     new GetServerStatus.Performance(20.0, 1.25),
-                    new GetServerStatus.PlayerSummary(
-                            1,
-                            20,
-                            List.of(
-                                    new GetServerStatus.OnlinePlayer(
-                                            "Builder",
-                                            "world",
-                                            "creative",
-                                            "north",
-                                            new BlockPosition(12, 70, -4)))),
-                    List.of(),
-                    allTools().flags(),
-                    new GetServerStatus.EffectiveLogging("info", 10_485_760, 5),
-                    new GetServerStatus.EffectiveLimits(
-                            32, 1, 262_144, 1_000_000, 256, 32, 64, 64, 256, 250_000, 32_768,
-                            65_536, 321, 654, 512, 10, 8_192),
-                    new GetServerStatus.EffectiveEditHistory(20, 100, 1_000_000),
-                    new GetServerStatus.EffectiveDefaults(false, false));
+                    request.includePlayers()
+                            ? new GetServerStatus.PlayerSummary(
+                                    1,
+                                    20,
+                                    List.of(
+                                            new GetServerStatus.OnlinePlayer(
+                                                    "Builder",
+                                                    "world",
+                                                    "creative",
+                                                    "north",
+                                                    new BlockPosition(12, 70, -4))))
+                            : null,
+                    request.includeWorlds() ? List.of() : null,
+                    request.includeConfiguration()
+                            ? new GetServerStatus.EffectiveConfiguration(
+                                    new GetServerStatus.EffectiveLimits(
+                                            1_000_000, 256, 32, 64, 64, 256, 250_000, 32_768,
+                                            65_536, 654, 512, 10, 8_192),
+                                    new GetServerStatus.EffectiveEditHistory(20, 100, 1_000_000))
+                            : null);
         }
 
         @Override
@@ -333,8 +342,6 @@ final class BridgeTestFixture {
             return new ReplaceRegionBlocks.Result(
                     request.world(),
                     bounds,
-                    request.sourceBlockStatePatterns(),
-                    request.destinationPalette(),
                     request.seed(),
                     outcome(request.dryRun()),
                     1,
@@ -356,7 +363,6 @@ final class BridgeTestFixture {
             return new SetBlocks.Result(
                     request.world(),
                     bounds,
-                    request.palettes(),
                     request.seed(),
                     outcome(request.dryRun()),
                     blockCount,
@@ -392,7 +398,7 @@ final class BridgeTestFixture {
                 throws OperationException {
             BlockBounds bounds =
                     new BlockBounds(new BlockPosition(0, 0, 0), new BlockPosition(0, 0, 0));
-            return new UndoEdits.Result(
+            return new UndoEdits.Completed(
                     request.world(),
                     request.editIds().stream()
                             .map(
@@ -442,9 +448,5 @@ final class BridgeTestFixture {
                     Instant.parse("2026-08-19T12:00:00Z"),
                     EditStatus.COMMITTED);
         }
-    }
-
-    private static DirtConfig.Tools allTools() {
-        return new DirtConfig.Tools(EnumSet.allOf(McpTool.class));
     }
 }

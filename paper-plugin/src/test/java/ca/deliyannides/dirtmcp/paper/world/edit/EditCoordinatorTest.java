@@ -103,6 +103,41 @@ final class EditCoordinatorTest {
     }
 
     @Test
+    void cancelledReservationPreservesClaimedHistory() throws OperationException {
+        EditCoordinator coordinator = new EditCoordinator(1, 1, 1);
+        TestUndo retainedUndo = new TestUndo(1);
+        RetainedEdit retained = edit(WORLD_ID, "world", retainedUndo, EditStatus.COMMITTED);
+        remember(coordinator, retained);
+
+        try (EditCoordinator.Lease replacement =
+                coordinator.enterMutation(OTHER_WORLD_ID, "other")) {
+            replacement.reserveHistory(1);
+
+            assertFalse(retainedUndo.closed);
+            assertEquals(1, coordinator.retainedEditCount());
+            assertEquals(1, coordinator.retainedChangedBlockCount());
+            assertEquals(
+                    OperationFailure.WORLD_BUSY,
+                    assertThrows(
+                                    OperationException.class,
+                                    () -> coordinator.enterUndo(WORLD_ID, "world"))
+                            .failure());
+        }
+
+        assertFalse(retainedUndo.closed);
+        try (EditCoordinator.Lease history = coordinator.enterHistory(WORLD_ID, "world")) {
+            assertEquals(java.util.List.of(retained.record()), history.history());
+        }
+        try (EditCoordinator.Lease undo = coordinator.enterUndo(WORLD_ID, "world")) {
+            assertEquals(
+                    java.util.List.of(retained),
+                    undo.requireUndoPrefix(java.util.List.of(retained.record().editId())));
+        }
+        coordinator.close();
+        assertTrue(retainedUndo.closed);
+    }
+
+    @Test
     void globalAdmissionProtectsTheUndoWorldsEntireHistory() throws OperationException {
         EditCoordinator coordinator = new EditCoordinator(2, 2, 2);
         TestUndo olderUndo = new TestUndo(1);
@@ -166,8 +201,8 @@ final class EditCoordinatorTest {
                         otherWorldAdmission.get(2, TimeUnit.SECONDS));
                 assertFalse(replacementTask.isDone());
                 assertEquals(1, coordinator.trackedWorldCount());
-                assertEquals(0, coordinator.retainedEditCount());
-                assertEquals(0, coordinator.retainedChangedBlockCount());
+                assertEquals(1, coordinator.retainedEditCount());
+                assertEquals(1, coordinator.retainedChangedBlockCount());
             } finally {
                 evictedUndo.allowClose.countDown();
             }

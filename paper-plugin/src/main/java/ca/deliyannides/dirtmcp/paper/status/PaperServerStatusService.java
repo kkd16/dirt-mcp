@@ -32,8 +32,10 @@ public final class PaperServerStatusService implements PingServer, GetServerStat
     }
 
     @Override
-    public GetServerStatus.Result getStatus() throws OperationException {
-        return callOnMain(this.paperAccess::captureStatus, false);
+    public GetServerStatus.Result getStatus(GetServerStatus.Request request)
+            throws OperationException {
+        Objects.requireNonNull(request, "request");
+        return callOnMain(() -> this.paperAccess.captureStatus(request), false);
     }
 
     private <T> T callOnMain(MainThread.CheckedSupplier<T> action, boolean health)
@@ -62,6 +64,7 @@ public final class PaperServerStatusService implements PingServer, GetServerStat
     public interface PaperStatusAccess {
         Runnable prepareHealthCheck() throws OperationException;
 
-        GetServerStatus.Result captureStatus() throws OperationException;
+        GetServerStatus.Result captureStatus(GetServerStatus.Request request)
+                throws OperationException;
     }
 }

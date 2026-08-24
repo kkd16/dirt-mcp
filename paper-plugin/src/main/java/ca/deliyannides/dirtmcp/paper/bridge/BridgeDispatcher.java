@@ -1,21 +1,21 @@
 package ca.deliyannides.dirtmcp.paper.bridge;
 
-import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
-import ca.deliyannides.dirtmcp.paper.validation.UuidV4;
 import com.sun.net.httpserver.HttpExchange;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Semaphore;
 
 final class BridgeDispatcher implements AutoCloseable {
     private static final String CALL_ID_HEADER = "X-Dirt-Call-Id";
 
     private final Map<String, BridgeEndpoint> routes;
+    private final Set<BridgeOperation> allowedOperations;
     private final BearerAuthenticator authenticator;
     private final Semaphore admissions;
     private final int maximumConcurrentRequests;
@@ -25,12 +25,14 @@ final class BridgeDispatcher implements AutoCloseable {
 
     BridgeDispatcher(
             List<BridgeEndpoint> endpoints,
+            List<BridgeOperation> allowedOperations,
             BearerAuthenticator authenticator,
             int maximumConcurrentRequests,
             int maximumRequestBytes,
             int requestBodyTimeoutSeconds,
             DirtLog log) {
         this.routes = routes(endpoints);
+        this.allowedOperations = Set.copyOf(allowedOperations);
         this.authenticator = authenticator;
         this.admissions = new Semaphore(maximumConcurrentRequests);
         this.maximumConcurrentRequests = maximumConcurrentRequests;
@@ -43,7 +45,7 @@ final class BridgeDispatcher implements AutoCloseable {
         long started = System.nanoTime();
         BridgeExchange exchange =
                 new BridgeExchange(rawExchange, this.maximumRequestBytes, this.bodyReader);
-        String operation = "unknown";
+        String operationId = "unknown";
         Throwable requestFailure = null;
         boolean unexpectedFailure = false;
         boolean recoveryRisk = false;
@@ -52,39 +54,59 @@ final class BridgeDispatcher implements AutoCloseable {
             if (!this.authenticator.accepts(
                     rawExchange.getRequestHeaders().getFirst("Authorization"))) {
                 exchange.challenge();
-                exchange.sendError(
-                        401, "A valid bearer token is required", new ErrorDetails.Unauthorized());
+                exchange.sendProblem(
+                        401, "A valid bearer token is required", BridgeProblem.unauthorized());
                 return;
             }
 
             if (rawExchange.getRequestURI().getRawQuery() != null) {
-                exchange.sendError(
-                        404, "No bridge operation matches this path", new ErrorDetails.NotFound());
+                exchange.sendProblem(
+                        404,
+                        "No bridge operation matches this path",
+                        BridgeProblem.routeNotFound());
                 return;
             }
 
             BridgeEndpoint endpoint = this.routes.get(rawExchange.getRequestURI().getRawPath());
             if (endpoint == null) {
-                exchange.sendError(
-                        404, "No bridge operation matches this path", new ErrorDetails.NotFound());
+                exchange.sendProblem(
+                        404,
+                        "No bridge operation matches this path",
+                        BridgeProblem.routeNotFound());
                 return;
             }
+            operationId = endpoint.operationId();
 
             if (!endpoint.method().equals(rawExchange.getRequestMethod())) {
                 exchange.allow(endpoint.method());
-                exchange.sendError(
+                exchange.sendProblem(
                         405,
                         "Method must be " + endpoint.method(),
-                        new ErrorDetails.MethodNotAllowed(endpoint.method()));
+                        BridgeProblem.methodNotAllowed(endpoint.method()));
                 return;
             }
-            operation = endpoint.operation();
+
+            if (!endpoint.isEnabled(this.allowedOperations)) {
+                exchange.sendProblem(
+                        403,
+                        "Bridge operation is disabled",
+                        BridgeProblem.operationDisabled(operationId));
+                return;
+            }
+
+            try {
+                exchange.parseCallId(rawExchange.getRequestHeaders().get(CALL_ID_HEADER));
+            } catch (BridgeRequestException exception) {
+                requestFailure = exception;
+                exchange.sendProblem(400, exception.getMessage(), exception.problem());
+                return;
+            }
 
             if (!this.admissions.tryAcquire()) {
-                exchange.sendError(
+                exchange.sendProblem(
                         503,
                         "The bridge is handling too many requests",
-                        new ErrorDetails.BridgeBusy(this.maximumConcurrentRequests));
+                        BridgeProblem.bridgeBusy(this.maximumConcurrentRequests));
                 return;
             }
             try {
@@ -92,6 +114,9 @@ final class BridgeDispatcher implements AutoCloseable {
             } catch (RequestBodyReader.BodyTimeoutException exception) {
                 requestFailure = exception;
                 exchange.abort("request_body_timeout");
+            } catch (BridgeRequestException exception) {
+                requestFailure = exception;
+                exchange.sendProblem(400, exception.getMessage(), exception.problem());
             } catch (OperationException exception) {
                 requestFailure = exception;
                 recoveryRisk = exception.editId().isPresent();
@@ -99,13 +124,7 @@ final class BridgeDispatcher implements AutoCloseable {
             } catch (RuntimeException exception) {
                 requestFailure = exception;
                 unexpectedFailure = true;
-                if (exchange.editId() == null) {
-                    exchange.sendInternalError(500, endpoint.internalErrorMessage());
-                } else {
-                    recoveryRisk = true;
-                    exchange.sendInternalError(
-                            500, endpoint.internalErrorMessage(), exchange.editId());
-                }
+                exchange.sendInternalError(500, endpoint.internalErrorMessage());
             } finally {
                 this.admissions.release();
             }
@@ -122,9 +141,9 @@ final class BridgeDispatcher implements AutoCloseable {
                 audit(
                         rawExchange,
                         exchange,
-                        operation,
+                        operationId,
                         started,
-                        requestFailure,
+                        preserveFirstFailure(requestFailure, exchange.auditFailure()),
                         unexpectedFailure,
                         recoveryRisk,
                         responseTransportFailure);
@@ -142,7 +161,7 @@ final class BridgeDispatcher implements AutoCloseable {
     private void audit(
             HttpExchange rawExchange,
             BridgeExchange exchange,
-            String operation,
+            String operationId,
             long started,
             Throwable failure,
             boolean unexpectedFailure,
@@ -150,31 +169,11 @@ final class BridgeDispatcher implements AutoCloseable {
             boolean responseTransportFailure) {
         Integer status = exchange.status();
         boolean transportFailure = responseTransportFailure || failure instanceof IOException;
-        boolean internalFailure =
-                status != null && status == 500 && "internal_error".equals(exchange.errorCode());
-        boolean commandOperation = "run_minecraft_commands".equals(operation);
-        boolean undoOperation = "undo_edits".equals(operation);
-        boolean commandResultCaptured = commandResultCaptured(exchange);
-        boolean commandResponseAmbiguity =
-                commandOperation
-                        && (internalFailure
-                                || unexpectedFailure
-                                || commandResultCaptured && transportFailure);
-        boolean undoResponseAmbiguity =
-                undoOperation
-                        && transportFailure
-                        && exchange.resultCount() != null
-                        && ("undone".equals(exchange.outcome())
-                                || "partial_failure".equals(exchange.outcome()));
-        boolean recoveryAmbiguity =
-                recoveryRisk
-                        || transportFailure && exchange.editId() != null
-                        || undoResponseAmbiguity
-                        || commandResponseAmbiguity;
-        String callId = rawExchange.getRequestHeaders().getFirst(CALL_ID_HEADER);
-        String canonicalCallId = canonicalCallId(callId);
+        boolean internalFailure = status != null && status == 500;
+        boolean uncertainCompletion =
+                recoveryRisk || transportFailure && exchange.responseDeliveryRisk();
         LogContext context =
-                LogContext.of("operation", operation)
+                LogContext.of("operation_id", operationId)
                         .with("method", rawExchange.getRequestMethod())
                         .with("path", rawExchange.getRequestURI().getRawPath())
                         .with(
@@ -184,51 +183,46 @@ final class BridgeDispatcher implements AutoCloseable {
         if (status == null || transportFailure) {
             context = context.with("aborted", true);
         }
-        context = optional(context, "world", exchange.world());
-        context = optional(context, "call_id", canonicalCallId);
+        context = optional(context, "call_id", exchange.admittedCallId());
         context = optional(context, "request_bytes", exchange.requestBytes());
         context = optional(context, "response_bytes", exchange.responseBytes());
         context = optional(context, "error_code", exchange.errorCode());
         if (!unexpectedFailure && failure != null) {
             context = optional(context, "failure_reason", failure.getMessage());
         }
-        context = optional(context, "edit_id", exchange.editId());
-        context = optional(context, "outcome", exchange.outcome());
-        context = optional(context, "changed_block_count", exchange.changedBlockCount());
-        context = optional(context, "result_count", exchange.resultCount());
-        context = optional(context, "bounds", exchange.bounds());
+        for (Map.Entry<String, Object> field : exchange.auditFields().entrySet()) {
+            context = context.with(field.getKey(), field.getValue());
+        }
 
-        String message =
-                summary(
-                        operation,
-                        exchange,
-                        canonicalCallId,
-                        unexpectedFailure || internalFailure,
-                        recoveryAmbiguity,
-                        commandResponseAmbiguity,
-                        undoResponseAmbiguity,
-                        transportFailure);
-        Throwable loggedFailure = commandOperation && unexpectedFailure ? null : failure;
-        if (unexpectedFailure) {
+        String callSuffix =
+                exchange.admittedCallId() == null
+                        ? ""
+                        : " (call " + exchange.admittedCallId() + ')';
+        String message;
+        if (uncertainCompletion) {
+            message =
+                    "Dirt MCP "
+                            + operationId
+                            + " may have completed without a response; inspect server state before retrying"
+                            + callSuffix;
+        } else if (unexpectedFailure || internalFailure || status != null && status >= 500) {
+            message = "Dirt MCP " + operationId + " failed" + callSuffix;
+        } else {
+            message = "Dirt MCP bridge request completed";
+        }
+
+        Throwable loggedFailure = exchange.suppressesFailureDetails() ? null : failure;
+        if (unexpectedFailure || internalFailure) {
             this.log.error("bridge", "bridge.request_completed", message, context, loggedFailure);
-        } else if (recoveryAmbiguity) {
+        } else if (uncertainCompletion
+                || exchange.auditLevel() == BridgeExchange.AuditLevel.WARNING) {
             this.log.warning("bridge", "bridge.request_completed", message, context, loggedFailure);
-        } else if (internalFailure) {
-            this.log.error("bridge", "bridge.request_completed", message, context, failure);
-        } else if (status != null
-                && status == 200
-                && ("committed".equals(exchange.outcome())
-                        || "undone".equals(exchange.outcome())
-                        || "dispatched".equals(exchange.outcome()))) {
+        } else if (exchange.auditLevel() == BridgeExchange.AuditLevel.INFO) {
             this.log.info("bridge", "bridge.request_completed", message, context);
-        } else if (status != null
-                && status == 200
-                && "partial_failure".equals(exchange.outcome())) {
-            this.log.warning("bridge", "bridge.request_completed", message, context);
         } else {
             Throwable detailFailure =
                     transportFailure || failure != null && failure.getCause() != null
-                            ? failure
+                            ? loggedFailure
                             : null;
             this.log.debug("bridge", "bridge.request_completed", message, context, detailFailure);
         }
@@ -238,126 +232,12 @@ final class BridgeDispatcher implements AutoCloseable {
         return value == null ? context : context.with(key, value);
     }
 
-    private static String canonicalCallId(String value) {
-        try {
-            return UuidV4.parseCanonical(value, CALL_ID_HEADER).toString();
-        } catch (IllegalArgumentException exception) {
-            return null;
-        }
-    }
-
-    private static boolean commandResultCaptured(BridgeExchange exchange) {
-        return exchange.resultCount() != null
-                && exchange.resultCount() > 0
-                && ("dispatched".equals(exchange.outcome())
-                        || "partial_failure".equals(exchange.outcome()));
-    }
-
-    private static String summary(
-            String operation,
-            BridgeExchange exchange,
-            String canonicalCallId,
-            boolean internalFailure,
-            boolean recoveryAmbiguity,
-            boolean commandResponseAmbiguity,
-            boolean undoResponseAmbiguity,
-            boolean transportFailure) {
-        if (commandResponseAmbiguity) {
-            if (exchange.resultCount() == null) {
-                return "Dirt MCP encountered an internal error while running a Minecraft command batch"
-                        + (canonicalCallId == null ? "" : " for call " + canonicalCallId)
-                        + "; commands may have taken effect; inspect server state before retrying";
-            }
-            return "Dirt MCP ran a Minecraft command batch ("
-                    + commandCount(exchange.resultCount())
-                    + ')'
-                    + (canonicalCallId == null ? "" : " for call " + canonicalCallId)
-                    + ", but its response could not be finalized; inspect server state before retrying";
-        }
-        if (undoResponseAmbiguity) {
-            return "Dirt MCP undo_edits restored "
-                    + editCount(exchange.resultCount())
-                    + " in world "
-                    + exchange.world()
-                    + ", but its response could not be delivered; reconcile edit history"
-                    + (exchange.editId() == null ? "" : " at failed edit " + exchange.editId())
-                    + (canonicalCallId == null ? "" : " for call " + canonicalCallId)
-                    + " before retrying";
-        }
-        if (recoveryAmbiguity) {
-            boolean knownCompletion =
-                    "committed".equals(exchange.outcome()) || "undone".equals(exchange.outcome());
-            String completion;
-            if (!transportFailure) {
-                completion = "requires edit-history reconciliation";
-            } else if (knownCompletion) {
-                completion = "completed, but its response could not be delivered";
-            } else {
-                completion = "response delivery failed and edit history must be reconciled";
-            }
-            String editReference =
-                    exchange.editId() == null ? "edit history" : "edit " + exchange.editId();
-            return "Dirt MCP "
-                    + operation
-                    + ' '
-                    + completion
-                    + "; reconcile "
-                    + editReference
-                    + (canonicalCallId == null ? "" : " from call " + canonicalCallId)
-                    + " before retrying";
-        }
-        if (!internalFailure && "committed".equals(exchange.outcome())) {
-            return "Dirt MCP committed "
-                    + operation
-                    + " in world "
-                    + exchange.world()
-                    + " ("
-                    + exchange.changedBlockCount()
-                    + " blocks, edit "
-                    + exchange.editId()
-                    + ')';
-        }
-        if (!internalFailure && "undone".equals(exchange.outcome())) {
-            return "Dirt MCP undid "
-                    + editCount(exchange.resultCount())
-                    + " in world "
-                    + exchange.world()
-                    + " ("
-                    + exchange.changedBlockCount()
-                    + " changed-block entries)";
-        }
-        if (!internalFailure && "dispatched".equals(exchange.outcome())) {
-            return "Dirt MCP ran a Minecraft command batch ("
-                    + commandCount(exchange.resultCount())
-                    + "; all dispatched)";
-        }
-        if (!internalFailure
-                && "run_minecraft_commands".equals(operation)
-                && "partial_failure".equals(exchange.outcome())) {
-            return "Dirt MCP ran a Minecraft command batch ("
-                    + exchange.resultCount()
-                    + " attempted; stopped at first failure)";
-        }
-        if (internalFailure || exchange.status() != null && exchange.status() >= 500) {
-            return "Dirt MCP "
-                    + operation
-                    + " failed"
-                    + (canonicalCallId == null ? "" : " (call " + canonicalCallId + ')');
-        }
-        return "Dirt MCP bridge request completed";
-    }
-
-    private static String commandCount(long count) {
-        return count + (count == 1 ? " command" : " commands");
-    }
-
-    private static String editCount(long count) {
-        return count + (count == 1 ? " edit" : " edits");
-    }
-
     private static Throwable preserveFirstFailure(Throwable first, Throwable next) {
         if (first == null) {
             return next;
+        }
+        if (next == null) {
+            return first;
         }
         if (first != next) {
             first.addSuppressed(next);
@@ -367,6 +247,7 @@ final class BridgeDispatcher implements AutoCloseable {
 
     private static Map<String, BridgeEndpoint> routes(List<BridgeEndpoint> endpoints) {
         Map<String, BridgeEndpoint> byPath = new HashMap<>();
+        Set<String> operationIds = new java.util.HashSet<>();
         for (BridgeEndpoint endpoint : endpoints) {
             if (!endpoint.path().startsWith("/v1/")) {
                 throw new IllegalArgumentException(
@@ -374,6 +255,10 @@ final class BridgeDispatcher implements AutoCloseable {
             }
             if (byPath.putIfAbsent(endpoint.path(), endpoint) != null) {
                 throw new IllegalArgumentException("Duplicate bridge path: " + endpoint.path());
+            }
+            if (!operationIds.add(endpoint.operationId())) {
+                throw new IllegalArgumentException(
+                        "Duplicate bridge operationId: " + endpoint.operationId());
             }
         }
         return Map.copyOf(byPath);

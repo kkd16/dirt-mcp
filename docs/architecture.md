@@ -24,20 +24,23 @@ FAWE and Paper-owned live worlds
 `mcp-server` owns the agent-facing interface:
 
 - MCP stdio transport and tool registration;
+- the public tool catalog, descriptions, annotations, and fixed input defaults;
 - Zod input, success-output, and structured failure schemas;
 - environment validation and the authenticated bridge client;
 - structured diagnostics on stderr while stdout remains protocol-only.
 
-At startup it reads the Paper configuration snapshot and advertises only enabled
-tools. It forwards a generated call UUID with each request so MCP and Paper logs
-can be correlated. It does not read world files or duplicate Minecraft editing
-logic.
+At startup it reads Paper's authenticated capabilities endpoint, maps allowed
+bridge operation IDs to its own tool catalog, and registers only tools whose
+operation is admitted. It forwards a generated UUID with every bridge request so MCP
+and Paper logs can be correlated. It does not read world files, implement
+Minecraft parsing, or delegate MCP policy to Paper.
 
 ### Paper plugin
 
 `paper-plugin` owns everything that touches the Minecraft server:
 
 - plugin lifecycle, configuration, authentication, and request admission;
+- the bridge operation allowlist and capabilities response;
 - world, player, chunk, block-state, and command access;
 - explicit transitions onto and off Paper's main thread;
 - FAWE edit execution and bounded in-memory undo history; and
@@ -52,13 +55,28 @@ wire schemas.
 [`protocol/openapi.yaml`](../protocol/openapi.yaml) is the authoritative HTTP
 contract between Java and TypeScript. It contains implemented routes, request
 and response bodies, required headers, and structured error variants. The
-[tool reference](tools.md) documents the composed MCP interface.
+[generated immutable TypeScript declarations](../mcp-server/src/generated/openapi.ts)
+are freshness-checked against it. The [tool reference](tools.md) documents the
+separate composed MCP interface.
 
 ## Execution model
 
 The bridge listens only on `127.0.0.1`, requires bearer authentication, and
 admits a bounded number of concurrent requests. MCP calls remain synchronous;
 there is no job service, database, or remote transport.
+
+Every authenticated bridge request carries `X-Dirt-Call-Id`. The mandatory
+`getCapabilities` control-plane operation reports the configurable operation
+IDs currently admitted by Paper. Disabled configurable operations fail with
+`operation_disabled`; Paper does not know MCP tool names or schemas.
+
+Bridge requests are fully materialized. MCP applies fixed tool defaults and
+generates omitted edit seeds before HTTP dispatch; Paper receives explicit
+values and independently validates them. The status operation is a focused POST
+with explicit section booleans and required nullable player, world, and
+configuration sections in its response. Within edit requests, only an omitted
+mutation caller ceiling is represented by null so Paper can apply its configured
+safety cap.
 
 Inspections share a smaller non-queueing admission pool within the bridge
 request pool. Region snapshots and perspective traces use separate chunk and
@@ -111,17 +129,20 @@ execution need them.
 Dirt retains the model-supplied label, edit metadata, touched chunk coordinates,
 and the FAWE change set, not an open session or full world snapshot. History is
 bounded per world and globally, ordered newest first, and keyed by Paper world
-UUID. A batch undo must name an exact newest-first history prefix, which Dirt
-validates completely before restoration starts. It then restores sequentially,
-loading only remembered existing chunks without generation and consuming each
-record after that restoration succeeds.
+UUID. Capacity evictions become final only when the replacement edit is
+retained, so a failed edit leaves prior undo history intact. A batch undo must
+name an exact newest-first history prefix, which Dirt validates completely
+before restoration starts. It then restores sequentially, loading only
+remembered existing chunks without generation and consuming each record after
+that restoration succeeds.
 
 If a runtime batch failure follows successful undos, those newer records remain
 consumed, the failed current record remains retained, and older requested edits
-are not attempted. Records in an undo-active world are protected from global
-eviction until the batch stops. History is a flat stack with no redo entries. It
-is cleared on world unload, plugin shutdown, or process restart and does not
-replace backups.
+are not attempted. The bridge returns this partial progress as a discriminated
+HTTP 200 result; MCP presents it as an actionable tool failure. Records in an
+undo-active world are protected from global eviction until the batch stops.
+History is a flat stack with no redo entries. It is cleared on world unload,
+plugin shutdown, or process restart and does not replace backups.
 
 If an edit and its automatic rollback both fail, or an undo fails, the retained
 record enters `recovery_required`. It remains retryable and blocks new Dirt

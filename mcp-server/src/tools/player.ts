@@ -1,14 +1,12 @@
-import { isDeepStrictEqual } from 'node:util';
 import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import type { BridgeClient } from '../bridge/client.ts';
-import { BRIDGE_ROUTES, PlayerSelectorSchema as BridgePlayerSelectorSchema } from '../bridge/contract.ts';
-import { toolOutputSchema } from '../bridge/errors.ts';
+import { BRIDGE_ROUTES } from '../bridge/contract.ts';
+import type { components } from '../generated/openapi.ts';
 import type { DirtLogger } from '../logging.ts';
 import {
   BlockPositionSchema,
   ExactPositionSchema,
-  isCanonicalUuid,
   NonBlankStringSchema,
   PlayerIdentitySchema,
   READ_WORLD_ANNOTATIONS,
@@ -18,7 +16,6 @@ import {
 } from './common.ts';
 import type { McpToolConfiguration } from './configuration.ts';
 import { executeToolCall, successResult } from './execution.ts';
-import { invalidBridgeResponse } from './response-validation.ts';
 
 const DEFAULT_INCLUDE = {
   equipment: true,
@@ -32,7 +29,7 @@ const DEFAULT_INCLUDE = {
 
 const NonnegativeInt32Schema = SignedInt32Schema.nonnegative();
 const PositiveInt32Schema = SignedInt32Schema.positive();
-const PlayerSelectorSchema = BridgePlayerSelectorSchema.describe(
+const PlayerSelectorSchema = NonBlankStringSchema.max(36).describe(
   'Case-insensitive exact online player name (available from get_server_status with include.players=true when enabled) or canonical UUID.',
 );
 
@@ -90,17 +87,6 @@ const PlayerItemStackSchema = z
       .describe('Enchantments sorted by type.'),
   })
   .strict()
-  .superRefine((item, context) => {
-    for (let index = 1; index < item.enchantments.length; index++) {
-      if (item.enchantments[index]!.type <= item.enchantments[index - 1]!.type) {
-        context.addIssue({
-          code: 'custom',
-          path: ['enchantments', index, 'type'],
-          message: 'Enchantments must have distinct types in strictly increasing order.',
-        });
-      }
-    }
-  })
   .meta({ id: 'PlayerItemStack' });
 
 const PlayerEquipmentSchema = z
@@ -121,22 +107,6 @@ const PlayerInventorySchema = z
     slots: z.array(z.object({ slot: NonnegativeInt32Schema, item: PlayerItemStackSchema }).strict()),
   })
   .strict()
-  .superRefine((inventory, context) => {
-    let previousSlot = -1;
-    for (const [index, entry] of inventory.slots.entries()) {
-      if (entry.slot >= inventory.size) {
-        context.addIssue({ code: 'custom', path: ['slots', index, 'slot'], message: 'Slot must be below size.' });
-      }
-      if (entry.slot <= previousSlot) {
-        context.addIssue({
-          code: 'custom',
-          path: ['slots', index, 'slot'],
-          message: 'Occupied slots must be distinct and strictly increasing.',
-        });
-      }
-      previousSlot = entry.slot;
-    }
-  })
   .meta({ id: 'PlayerInventory' });
 
 const PlayerVitalsSchema = z
@@ -198,17 +168,7 @@ const PlayerEffectSchema = z
   })
   .strict();
 
-const PlayerEffectsSchema = z.array(PlayerEffectSchema).superRefine((effects, context) => {
-  for (let index = 1; index < effects.length; index++) {
-    if (effects[index]!.type <= effects[index - 1]!.type) {
-      context.addIssue({
-        code: 'custom',
-        path: [index, 'type'],
-        message: 'Effects must have distinct types in strictly increasing order.',
-      });
-    }
-  }
-});
+const PlayerEffectsSchema = z.array(PlayerEffectSchema);
 
 const PLAYER_POSES = [
   'standing',
@@ -254,66 +214,9 @@ export const PlayerContextOutputSchema = z
     effects: PlayerEffectsSchema.nullable(),
   })
   .strict()
-  .describe('One coherent Paper main-thread capture; requested sections are non-null and excluded sections are null.');
-
-type GetPlayerContextInput = z.infer<typeof GetPlayerContextInputSchema>;
-type PlayerContextOutput = z.infer<typeof PlayerContextOutputSchema>;
-
-function close(left: number, right: number, tolerance = 1e-9): boolean {
-  return Math.abs(left - right) <= tolerance;
-}
-
-function closeVector(
-  left: { readonly x: number; readonly y: number; readonly z: number },
-  right: { readonly x: number; readonly y: number; readonly z: number },
-  tolerance = 1e-9,
-): boolean {
-  return close(left.x, right.x, tolerance) && close(left.y, right.y, tolerance) && close(left.z, right.z, tolerance);
-}
-
-export function requireMatchingPlayerContextResponse(
-  expected: GetPlayerContextInput,
-  actual: PlayerContextOutput,
-): void {
-  const selectedByUuid = isCanonicalUuid(expected.player);
-  if (
-    (selectedByUuid && actual.player.uuid.toLowerCase() !== expected.player.toLowerCase()) ||
-    (!selectedByUuid && actual.player.name.toLowerCase() !== expected.player.toLowerCase())
-  ) {
-    invalidBridgeResponse('Paper bridge player identity did not match the requested selector.');
-  }
-  if (
-    actual.blockPosition.x !== Math.floor(actual.feetPosition.x) ||
-    actual.blockPosition.y !== Math.floor(actual.feetPosition.y) ||
-    actual.blockPosition.z !== Math.floor(actual.feetPosition.z)
-  ) {
-    invalidBridgeResponse('Paper bridge player block position did not match the exact feet position.');
-  }
-  const yawRadians = (actual.rotation.yaw / 180) * Math.PI;
-  const pitchRadians = (actual.rotation.pitch / 180) * Math.PI;
-  const expectedLookDirection = {
-    x: -Math.cos(pitchRadians) * Math.sin(yawRadians),
-    y: -Math.sin(pitchRadians),
-    z: Math.cos(pitchRadians) * Math.cos(yawRadians),
-  };
-  if (!closeVector(expectedLookDirection, actual.lookDirection)) {
-    invalidBridgeResponse('Paper bridge player look direction did not match the captured rotation.');
-  }
-
-  for (const section of ['equipment', 'inventory', 'enderChest', 'vitals', 'movement', 'client', 'effects'] as const) {
-    if ((actual[section] !== null) !== expected.include[section]) {
-      invalidBridgeResponse('Paper bridge player sections did not match the requested include flags.');
-    }
-  }
-  if (actual.equipment !== null && actual.inventory !== null) {
-    const equipment = actual.equipment;
-    const selectedSlotItem =
-      actual.inventory.slots.find((entry) => entry.slot === equipment.selectedHotbarSlot)?.item ?? null;
-    if (!isDeepStrictEqual(equipment.mainHand, selectedSlotItem)) {
-      invalidBridgeResponse('Paper bridge main-hand equipment did not match the selected inventory slot.');
-    }
-  }
-}
+  .describe(
+    'One coherent Paper main-thread capture; requested sections are non-null and excluded sections are null.',
+  ) satisfies z.ZodType<components['schemas']['GetPlayerContextResponse']>;
 
 export function registerPlayerTools(
   server: McpServer,
@@ -321,33 +224,40 @@ export function registerPlayerTools(
   toolConfiguration: McpToolConfiguration,
   logger: DirtLogger,
 ): void {
-  const getPlayerContext = server.registerTool(
-    'get_player_context',
-    {
-      title: 'Get player context',
-      description:
-        "Capture an online player's exact feet and eye positions, orientation, pose, and optional equipment, inventories, vitals, movement, client settings, and effects. Player names are matched exactly but case-insensitively; UUID selectors are also accepted.",
-      inputSchema: GetPlayerContextInputSchema,
-      outputSchema: toolOutputSchema(PlayerContextOutputSchema),
-      annotations: READ_WORLD_ANNOTATIONS,
-    },
-    async (input, context) =>
-      executeToolCall(
-        logger,
-        {
-          operation: 'get_player_context',
-          context,
-          failureContext: `Could not get context for player ${input.player}`,
-        },
-        async (callId) => {
-          const result = await bridge.request(BRIDGE_ROUTES.getPlayerContext, callId, PlayerContextOutputSchema, input);
-          requireMatchingPlayerContextResponse(input, result);
-          return successResult(
-            result,
-            `${result.player.name} in ${result.world} at ${result.feetPosition.x}, ${result.feetPosition.y}, ${result.feetPosition.z}.`,
-          );
-        },
-      ),
-  );
-  if (!toolConfiguration.get_player_context) getPlayerContext.disable();
+  if (toolConfiguration.get_player_context) {
+    server.registerTool(
+      'get_player_context',
+      {
+        title: 'Get player context',
+        description:
+          "Capture an online player's position, orientation, pose, and selected optional state. Player names are matched exactly but case-insensitively; UUID selectors are also accepted.",
+        inputSchema: GetPlayerContextInputSchema,
+        outputSchema: PlayerContextOutputSchema,
+        annotations: READ_WORLD_ANNOTATIONS,
+      },
+      async (input, context) =>
+        executeToolCall(
+          logger,
+          {
+            operation: 'get_player_context',
+            context,
+            failureContext: `Could not get context for player ${input.player}`,
+          },
+          async (callId) => {
+            const request: components['schemas']['GetPlayerContextRequest'] = input;
+            const result = await bridge.request(
+              BRIDGE_ROUTES.getPlayerContext,
+              callId,
+              PlayerContextOutputSchema,
+              request,
+              context.mcpReq.signal,
+            );
+            return successResult(
+              result,
+              `${result.player.name} in ${result.world} at ${result.feetPosition.x}, ${result.feetPosition.y}, ${result.feetPosition.z}.`,
+            );
+          },
+        ),
+    );
+  }
 }

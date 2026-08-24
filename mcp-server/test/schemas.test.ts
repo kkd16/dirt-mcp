@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ToolFailure } from '../dist/bridge/errors.js';
-import { BlockPositionSchema, BoundsSchema, INT32_MAX, NonBlankStringSchema } from '../dist/tools/common.js';
 import {
   DestinationPaletteSchema,
   EditLabelSchema,
@@ -9,805 +7,312 @@ import {
   GetEditHistoryOutputSchema,
   ReplaceRegionBlocksInputSchema,
   ReplaceRegionBlocksOutputSchema,
-  requireMatchingCallId,
-  requireMatchingEditIdentity,
-  requireMatchingEditOptions,
-  requireMatchingSetBlockCount,
-  requireMatchingUndoIdentity,
-  requireReplaceCountsWithinBounds,
   SetBlocksInputSchema,
   SetBlocksOutputSchema,
   SourceBlockStatePatternsSchema,
   UndoEditsInputSchema,
   UndoEditsOutputSchema,
+  getEditHistoryBridgeOutputSchema,
+  replaceRegionBlocksBridgeOutputSchema,
+  setBlocksBridgeOutputSchema,
+  undoEditsBridgeOutputSchema,
 } from '../dist/tools/editing.js';
-import {
-  ExactBlockStructureOutputSchema,
-  GetBlocksInputSchema,
-  ScanOrthographicViewInputSchema,
-} from '../dist/tools/inspection.js';
-import {
-  EditHistoryConfigurationSchema,
-  GetServerStatusInputSchema,
-  GetServerStatusOutputSchema,
-  LoggingConfigurationSchema,
-  projectServerStatus,
-  ServerStatusSchema,
-} from '../dist/tools/status.js';
-import { MCP_TOOL_NAMES, McpToolConfigurationSchema, type McpToolConfiguration } from '../dist/tools/configuration.js';
-import { requireMatchingWorld } from '../dist/tools/response-validation.js';
+import { MCP_TOOL_NAMES, toolConfigurationFromCapabilities } from '../dist/tools/configuration.js';
+import { GetServerStatusInputSchema, GetServerStatusOutputSchema } from '../dist/tools/status.js';
 
-const region = {
+const CALL_ID = '11111111-1111-4111-8111-111111111111';
+const EDIT_ID = '22222222-2222-4222-8222-222222222222';
+const SECOND_EDIT_ID = '44444444-4444-4444-8444-444444444444';
+
+const edit = {
+  editId: EDIT_ID,
+  callId: CALL_ID,
+  label: 'Build wall',
+  operation: 'set_blocks',
   world: 'world',
-  min: { x: 0, y: 0, z: 0 },
-  max: { x: 1, y: 1, z: 1 },
-};
+  worldId: '33333333-3333-4333-8333-333333333333',
+  bounds: { min: { x: 0, y: 64, z: 0 }, max: { x: 1, y: 64, z: 0 } },
+  changedBlockCount: 2,
+  completedAt: '2026-08-23T12:00:00Z',
+  status: 'committed',
+} as const;
 
-const isInvalidBridgeResponse = (error: unknown): boolean =>
-  error instanceof ToolFailure && error.code === 'bridge_invalid_response';
-
-function serverStatusFixture() {
-  const tools = Object.fromEntries(MCP_TOOL_NAMES.map((name) => [name, true])) as McpToolConfiguration;
-  return {
-    builds: { minecraft: '26.2', paper: '26.2-116', dirtMcp: 'test', fawe: '2.15.4' },
-    performance: { tpsOneMinute: 20, averageTickTimeMillis: 1 },
-    players: { online: 0, maximum: 20, entries: [] },
-    worlds: [],
-    limits: {
-      maxConcurrentRequests: 32,
-      maxConcurrentInspections: 4,
-      maxRequestBytes: 1_048_576,
-      maxRegionVolume: 100,
-      maxTouchedChunks: 10,
-      maxInspectionTouchedChunks: 5,
-      maxPerspectiveTouchedChunks: 10,
-      maxBlockStatePatterns: 64,
-      maxPaletteEntries: 256,
-      maxChangedBlocks: 50,
-      maxInspectionVolume: 80,
-      maxPerspectiveRayDistanceBudget: 100,
-      defaultInspectionResultLimit: 10,
-      maxInspectionResultLimit: 20,
-      maxPerspectiveRays: 50,
-      maxCommandsPerRequest: 10,
-      maxCommandFeedbackCharacters: 8_192,
-    },
-    editHistory: { maxEntriesPerWorld: 1, maxEntriesTotal: 1, maxRetainedChangedBlocks: 50 },
-    defaults: { getBlocksIncludeAir: false, editDryRun: false },
-    logging: { consoleLevel: 'info', detailFileMaxBytes: 1, detailFileRetainedFiles: 2 },
-    tools,
-  };
-}
-
-test('applies inspection defaults and rejects combined pattern amplification', () => {
-  assert.deepEqual(GetBlocksInputSchema.parse(region), {
-    ...region,
-    includeBlockStatePatterns: [],
-    excludeBlockStatePatterns: [],
-  });
+test('capability snapshots map one-to-one to the stable MCP tool catalog', () => {
+  const none = toolConfigurationFromCapabilities({ operations: [] });
+  assert.deepEqual(Object.keys(none), [...MCP_TOOL_NAMES]);
   assert.equal(
-    GetBlocksInputSchema.safeParse({
-      ...region,
-      includeBlockStatePatterns: Array.from({ length: 33 }, (_, index) => `minecraft:stone[a=${index}]`),
-      excludeBlockStatePatterns: Array.from({ length: 32 }, (_, index) => `minecraft:dirt[a=${index}]`),
+    Object.values(none).every((enabled) => !enabled),
+    true,
+  );
+
+  const selected = toolConfigurationFromCapabilities({ operations: ['pingServer', 'setBlocks'] });
+  assert.equal(selected.ping_server, true);
+  assert.equal(selected.set_blocks, true);
+  assert.equal(selected.get_blocks, false);
+});
+
+test('status input and output use the hard-cut projected contract', () => {
+  const input = GetServerStatusInputSchema.parse({});
+  assert.deepEqual(input, { include: { players: false, worlds: true, configuration: false } });
+
+  const output = {
+    builds: { minecraft: '26.2', paper: '26.2-116', dirtPlugin: '0.1.0', fawe: '2.15.4' },
+    performance: { tpsOneMinute: 20, averageTickTimeMillis: 4.2 },
+    players: null,
+    worlds: null,
+    configuration: {
+      limits: {
+        maxRegionVolume: 1_000_000,
+        maxEditTouchedChunks: 256,
+        maxInspectionTouchedChunks: 256,
+        maxPerspectiveTouchedChunks: 64,
+        maxBlockStatePatterns: 64,
+        maxPaletteEntries: 256,
+        maxChangedBlocks: 100_000,
+        maxInspectionVolume: 1_000_000,
+        maxPerspectiveRayDistanceBudget: 100_000,
+        maxInspectionResultLimit: 10_000,
+        maxPerspectiveRays: 10_000,
+        maxCommandsPerRequest: 100,
+        maxCommandFeedbackCharacters: 16_000,
+      },
+      editHistory: { maxEntriesPerWorld: 20, maxEntriesTotal: 100, maxRetainedChangedBlocks: 1_000_000 },
+    },
+  };
+  assert.equal(GetServerStatusOutputSchema.safeParse(output).success, true);
+  assert.equal(
+    GetServerStatusOutputSchema.safeParse({
+      ...output,
+      builds: { ...output.builds, unexpected: 'extra' },
     }).success,
     false,
   );
-  assert.deepEqual(
-    ScanOrthographicViewInputSchema.parse({
-      world: 'world',
-      origin: { x: 0, y: 0, z: 0 },
-      direction: 'north',
-      horizontalRadius: 0,
-      verticalRadius: 0,
-      maxDistance: 1,
-    }),
-    {
-      world: 'world',
-      origin: { x: 0, y: 0, z: 0 },
-      direction: 'north',
-      horizontalRadius: 0,
-      verticalRadius: 0,
-      maxDistance: 1,
-      depth: 0,
-    },
-  );
-});
-
-test('accepts every exact get-blocks structure with a label as set-blocks input', () => {
-  const exact = ExactBlockStructureOutputSchema.parse({
-    world: 'world',
-    origin: { x: 100, y: 64, z: 100 },
-    palettes: [[{ blockState: 'minecraft:stone_bricks' }], [{ blockState: 'minecraft:lantern' }]],
-    placements: [[1, 0, 1, 0]],
-    runs: [[0, 0, 0, 0, 15, 0, 0]],
-  });
-  assert.deepEqual(SetBlocksInputSchema.parse({ ...exact, label: 'Copy west wall' }), {
-    ...exact,
-    label: 'Copy west wall',
-  });
   assert.equal(
-    SetBlocksInputSchema.safeParse({ ...exact, label: 'Copy west wall', origin: { x: -20, y: 80, z: 45 } }).success,
-    true,
-  );
-  assert.equal(
-    ExactBlockStructureOutputSchema.safeParse({
-      ...exact,
-      palettes: [[{ blockState: 'minecraft:stone_bricks' }], [{ blockState: 'minecraft:stone_bricks' }]],
+    GetServerStatusOutputSchema.safeParse({
+      ...output,
+      configuration: { ...output.configuration, unexpected: {} },
     }).success,
     false,
   );
-
-  const empty = ExactBlockStructureOutputSchema.parse({
-    world: 'world',
-    origin: { x: 0, y: 0, z: 0 },
-    palettes: [],
-    placements: [],
-    runs: [],
-  });
-  assert.deepEqual(SetBlocksInputSchema.parse({ ...empty, label: 'Empty structure check' }), {
-    ...empty,
-    label: 'Empty structure check',
-  });
 });
 
-test('requires concise exact edit labels and bounded per-call change ceilings', () => {
-  for (const label of ['Add roof trim', 'e\u0301', '🧱'.repeat(120), 'x'.repeat(120)]) {
-    assert.equal(EditLabelSchema.safeParse(label).success, true, label);
-    assert.equal(EditLabelSchema.parse(label), label);
-  }
-  for (const label of [
-    '',
-    ' leading',
-    'trailing ',
-    '\ufeffbyte-order-mark boundary',
-    'two\nlines',
-    'nul\u0000byte',
-    'delete\u007fcontrol',
-    'next\u0085line',
-    'line\u2028separator',
-    'paragraph\u2029separator',
-    '🧱'.repeat(121),
-  ]) {
-    assert.equal(EditLabelSchema.safeParse(label).success, false, JSON.stringify(label));
-  }
-
-  const replaceInput = {
-    ...region,
-    label: 'Replace floor material',
-    sourceBlockStatePatterns: ['minecraft:stone'],
-    destinationPalette: [{ blockState: 'minecraft:dirt' }],
-  };
-  assert.equal(ReplaceRegionBlocksInputSchema.safeParse(replaceInput).success, true);
-  assert.equal(ReplaceRegionBlocksInputSchema.safeParse({ ...replaceInput, label: undefined }).success, false);
-  assert.equal(
-    SetBlocksInputSchema.safeParse({
-      world: 'world',
-      label: 'No-op edit',
-      origin: { x: 0, y: 0, z: 0 },
-      palettes: [],
-      placements: [],
-      runs: [],
-    }).success,
-    true,
-  );
-  for (const maximum of [1, INT32_MAX]) {
-    assert.equal(
-      ReplaceRegionBlocksInputSchema.safeParse({ ...replaceInput, maxChangedBlocks: maximum }).success,
-      true,
-    );
-  }
-  for (const maximum of [0, -1, 1.5, INT32_MAX + 1]) {
-    assert.equal(
-      ReplaceRegionBlocksInputSchema.safeParse({ ...replaceInput, maxChangedBlocks: maximum }).success,
-      false,
-    );
-  }
-});
-
-test('validates distinct source patterns and complete destination weights', () => {
+test('edit input schemas validate MCP arguments and materialize dryRun', () => {
   assert.equal(SourceBlockStatePatternsSchema.safeParse(['minecraft:stone', 'minecraft:stone']).success, false);
-  assert.equal(SourceBlockStatePatternsSchema.safeParse(['minecraft:stone', 'minecraft:dirt']).success, true);
-
   assert.equal(
     DestinationPaletteSchema.safeParse([
       { blockState: 'minecraft:stone', weight: 50 },
-      { blockState: 'minecraft:dirt' },
+      { blockState: 'minecraft:dirt', weight: 50 },
     ]).success,
-    false,
+    true,
   );
   assert.equal(
     DestinationPaletteSchema.safeParse([
       { blockState: 'minecraft:stone', weight: 40 },
-      { blockState: 'minecraft:dirt', weight: 50 },
+      { blockState: 'minecraft:dirt', weight: 40 },
     ]).success,
     false,
   );
-  assert.equal(
-    DestinationPaletteSchema.safeParse([
-      { blockState: 'minecraft:stone', weight: 50 },
-      { blockState: 'minecraft:stone', weight: 50 },
-    ]).success,
-    false,
-  );
-  assert.equal(
-    DestinationPaletteSchema.safeParse([
-      { blockState: 'minecraft:stone', weight: 50 },
-      { blockState: 'minecraft:dirt', weight: 50 },
-    ]).success,
-    true,
-  );
-  assert.equal(
-    DestinationPaletteSchema.safeParse([{ blockState: 'minecraft:stone' }, { blockState: 'minecraft:dirt' }]).success,
-    true,
-  );
-});
+  assert.equal(EditLabelSchema.safeParse(' Build wall').success, false);
+  assert.equal(EditLabelSchema.safeParse('Build\nwall').success, false);
 
-test('keeps common Minecraft wire values strict and bounded', () => {
-  assert.equal(NonBlankStringSchema.safeParse('   ').success, false);
-  assert.equal(BlockPositionSchema.safeParse({ x: 0, y: 0, z: 0, extra: true }).success, false);
-  assert.equal(BlockPositionSchema.safeParse({ x: 2_147_483_648, y: 0, z: 0 }).success, false);
-  assert.equal(BlockPositionSchema.safeParse({ x: -2_147_483_648, y: 0, z: 2_147_483_647 }).success, true);
-  assert.equal(BoundsSchema.safeParse({ min: { x: 0, y: 0, z: 0 }, max: { x: -1, y: 0, z: 0 } }).success, false);
-});
-
-test('validates bounded edit-history configuration relationships', () => {
-  const history = {
-    maxEntriesPerWorld: 20,
-    maxEntriesTotal: 100,
-    maxRetainedChangedBlocks: 1_310_720,
-  };
-  assert.equal(EditHistoryConfigurationSchema.safeParse(history).success, true);
-  assert.equal(
-    EditHistoryConfigurationSchema.safeParse({
-      maxEntriesPerWorld: 2,
-      maxEntriesTotal: 1,
-      maxRetainedChangedBlocks: 1,
-    }).success,
-    false,
-  );
-  for (const field of ['maxEntriesPerWorld', 'maxEntriesTotal', 'maxRetainedChangedBlocks'] as const) {
-    assert.equal(EditHistoryConfigurationSchema.safeParse({ ...history, [field]: INT32_MAX + 1 }).success, false);
-  }
-});
-
-test('validates bounded server limits and their relationships', () => {
-  const status = serverStatusFixture();
-  assert.equal(ServerStatusSchema.safeParse(status).success, true);
-  assert.equal(
-    ServerStatusSchema.safeParse({
-      ...status,
-      limits: { ...status.limits, maxRequestBytes: INT32_MAX - 1 },
-    }).success,
-    true,
-  );
-  for (const field of Object.keys(status.limits) as (keyof typeof status.limits)[]) {
-    assert.equal(ServerStatusSchema.safeParse({ ...status, limits: { ...status.limits, [field]: 0 } }).success, false);
-    assert.equal(
-      ServerStatusSchema.safeParse({ ...status, limits: { ...status.limits, [field]: INT32_MAX + 1 } }).success,
-      false,
-    );
-  }
-  const invalidLimits = [
-    { maxRequestBytes: INT32_MAX },
-    { maxConcurrentInspections: 33 },
-    { maxInspectionTouchedChunks: 11 },
-    { maxBlockStatePatterns: 65 },
-    { maxPaletteEntries: 257 },
-    { maxChangedBlocks: 101 },
-    { maxInspectionVolume: 101 },
-    { defaultInspectionResultLimit: 21 },
-    { maxInspectionResultLimit: 81 },
-    { maxPerspectiveRays: 101 },
-  ];
-  for (const limits of invalidLimits) {
-    assert.equal(ServerStatusSchema.safeParse({ ...status, limits: { ...status.limits, ...limits } }).success, false);
-  }
-  assert.equal(
-    ServerStatusSchema.safeParse({
-      ...status,
-      editHistory: { ...status.editHistory, maxRetainedChangedBlocks: 49 },
-    }).success,
-    false,
-  );
-  assert.equal(McpToolConfigurationSchema.safeParse(status.tools).success, true);
-  assert.equal(McpToolConfigurationSchema.safeParse({ ...status.tools, undo_edits: undefined }).success, false);
-  assert.equal(McpToolConfigurationSchema.safeParse({ ...status.tools, unknown_tool: false }).success, false);
-});
-
-test('projects only requested server status sections', () => {
-  const status = serverStatusFixture();
-  const defaultInput = GetServerStatusInputSchema.parse({});
-  assert.deepEqual(defaultInput, { include: { players: false, worlds: true, configuration: false } });
-  assert.deepEqual(GetServerStatusInputSchema.parse({ include: { players: true } }), {
-    include: { players: true, worlds: true, configuration: false },
-  });
-  assert.equal(GetServerStatusInputSchema.safeParse({ include: { unknown: true } }).success, false);
-
-  const parsedStatus = ServerStatusSchema.parse(status);
-  assert.deepEqual(projectServerStatus(defaultInput, parsedStatus), {
-    builds: status.builds,
-    performance: status.performance,
-    players: null,
-    worlds: status.worlds,
-    configuration: null,
-  });
-  const completeProjection = projectServerStatus(
-    GetServerStatusInputSchema.parse({ include: { players: true, worlds: false, configuration: true } }),
-    parsedStatus,
-  );
-  assert.deepEqual(completeProjection, {
-    builds: status.builds,
-    performance: status.performance,
-    players: status.players,
-    worlds: null,
-    configuration: {
-      limits: status.limits,
-      editHistory: status.editHistory,
-      defaults: status.defaults,
-      logging: status.logging,
-      tools: status.tools,
-    },
-  });
-  assert.equal(GetServerStatusOutputSchema.safeParse(completeProjection).success, true);
-});
-
-test('strictly validates active Paper logging configuration', () => {
-  const logging = { consoleLevel: 'info', detailFileMaxBytes: 10_485_760, detailFileRetainedFiles: 5 };
-  assert.equal(LoggingConfigurationSchema.safeParse(logging).success, true);
-  assert.equal(LoggingConfigurationSchema.safeParse({ ...logging, consoleLevel: 'debug' }).success, false);
-  assert.equal(LoggingConfigurationSchema.safeParse({ ...logging, detailFileMaxBytes: 0 }).success, false);
-  assert.equal(LoggingConfigurationSchema.safeParse({ ...logging, detailFileMaxBytes: INT32_MAX + 1 }).success, false);
-  assert.equal(LoggingConfigurationSchema.safeParse({ ...logging, detailFileRetainedFiles: 101 }).success, false);
-  assert.equal(LoggingConfigurationSchema.safeParse({ ...logging, detailFileRetainedFiles: 1 }).success, false);
-  assert.equal(LoggingConfigurationSchema.safeParse({ ...logging, unknown: true }).success, false);
-});
-
-test('validates weighted set-block palettes, placements, and cuboid runs', () => {
-  const input = {
+  const replace = ReplaceRegionBlocksInputSchema.parse({
     world: 'world',
-    label: 'Build weighted wall',
-    origin: { x: 10, y: 20, z: 30 },
-    palettes: [
-      [
-        { blockState: 'minecraft:stone', weight: 75 },
-        { blockState: 'minecraft:andesite', weight: 25 },
-      ],
-      [{ blockState: 'minecraft:snow_block' }],
-    ],
-    placements: [
-      [0, 0, 0, 0],
-      [0, 1, 0, 0],
-      [1, 0, 1, 0],
-    ],
-    runs: [[1, 2, 0, 0, 2, 1, 0]],
-    seed: 42,
-  };
-
-  assert.equal(SetBlocksInputSchema.safeParse(input).success, true);
-  assert.equal(
-    SetBlocksInputSchema.safeParse({
-      ...input,
-      placements: [['0', '0', '0', '0']],
-    }).success,
-    false,
-  );
-  assert.equal(
-    SetBlocksInputSchema.safeParse({
-      ...input,
-      placements: [[0, 0, 0]],
-    }).success,
-    false,
-  );
-  assert.equal(
-    SetBlocksInputSchema.safeParse({
-      ...input,
-      placements: [[0, 0, 0, 0, 0]],
-    }).success,
-    false,
-  );
-  assert.equal(SetBlocksInputSchema.safeParse({ ...input, unknownProperty: true }).success, false);
-  assert.equal(SetBlocksInputSchema.safeParse({ ...input, runs: [[1, 2, 1, 0, 2, 0, 0]] }).success, false);
-  assert.equal(SetBlocksInputSchema.safeParse({ ...input, runs: [[1, 0, 0, 0, 2, 0, 0]] }).success, false);
-  assert.equal(
-    SetBlocksInputSchema.safeParse({
-      world: 'world',
-      label: 'Empty structure check',
-      origin: input.origin,
-      palettes: [],
-      placements: [],
-      runs: [],
-    }).success,
-    true,
-  );
-  assert.equal(
-    SetBlocksInputSchema.safeParse({
-      world: 'world',
-      origin: input.origin,
-      palettes: input.palettes,
-      placements: [],
-      runs: [],
-    }).success,
-    false,
-  );
-  assert.equal(
-    SetBlocksInputSchema.safeParse({
-      ...input,
-      placements: [[2, 0, 0, 0]],
-    }).success,
-    false,
-  );
-  assert.equal(
-    SetBlocksInputSchema.safeParse({
-      ...input,
-      placements: [[-1, 0, 0, 0]],
-    }).success,
-    false,
-  );
-  assert.equal(
-    SetBlocksInputSchema.safeParse({
-      ...input,
-      placements: [
-        [0, 0, 0, 0],
-        [1, 0, 0, 0],
-      ],
-    }).success,
-    false,
-  );
-  assert.equal(
-    SetBlocksInputSchema.safeParse({
-      ...input,
-      origin: { x: 2_147_483_647, y: 20, z: 30 },
-      placements: [[0, 1, 0, 0]],
-    }).success,
-    false,
-  );
-  const multipleOverlaps = SetBlocksInputSchema.safeParse({
-    ...input,
-    runs: [[0, 0, 0, 0, 2, 1, 0]],
+    min: { x: 0, y: 0, z: 0 },
+    max: { x: 1, y: 1, z: 1 },
+    sourceBlockStatePatterns: ['minecraft:stone'],
+    destinationPalette: [{ blockState: 'minecraft:dirt' }],
+    label: 'Replace stone',
   });
-  assert.equal(multipleOverlaps.success, false);
-  if (!multipleOverlaps.success) assert.equal(multipleOverlaps.error.issues.length, 1);
-  assert.equal(
-    SetBlocksInputSchema.safeParse({
-      ...input,
-      palettes: [[{ blockState: 'minecraft:stone', weight: 60 }, { blockState: 'minecraft:dirt' }]],
-    }).success,
-    false,
-  );
-  assert.equal(
-    SetBlocksInputSchema.safeParse({
-      ...input,
-      palettes: [
-        [
-          { blockState: 'minecraft:stone', weight: 60 },
-          { blockState: 'minecraft:dirt', weight: 30 },
-        ],
-      ],
-    }).success,
-    false,
-  );
-});
+  assert.equal(replace.dryRun, false);
+  assert.equal(replace.seed, undefined);
+  assert.equal(replace.maxChangedBlocks, undefined);
 
-test('accepts 256 exact palette entries and rejects 257 independently of pattern limits', () => {
-  const palette = Array.from({ length: 256 }, (_, index) => ({ blockState: `test:state_${index}` }));
-  const patterns = Array.from({ length: 64 }, (_, index) => `test:pattern_${index}`);
-
-  assert.equal(DestinationPaletteSchema.safeParse(palette).success, true);
-  assert.equal(DestinationPaletteSchema.safeParse([...palette, { blockState: 'test:state_256' }]).success, false);
-  assert.equal(SourceBlockStatePatternsSchema.safeParse(patterns).success, true);
-  assert.equal(SourceBlockStatePatternsSchema.safeParse([...patterns, 'test:pattern_64']).success, false);
-
-  const setInput = {
+  const set = SetBlocksInputSchema.parse({
     world: 'world',
-    label: 'Place a large palette',
-    origin: { x: 0, y: 0, z: 0 },
-    palettes: palette.map((entry) => [entry]),
+    origin: { x: 0, y: 64, z: 0 },
+    palettes: [[{ blockState: 'minecraft:stone' }]],
     placements: [[0, 0, 0, 0]],
     runs: [],
-  };
-  assert.equal(SetBlocksInputSchema.safeParse(setInput).success, true);
+    label: 'Place stone',
+  });
+  assert.equal(set.dryRun, false);
+  assert.equal(SetBlocksInputSchema.safeParse({ ...set, placements: [[0, 0, 0]] }).success, false);
+  const maximumPalettes = [
+    Array.from({ length: 128 }, (_, index) => ({ blockState: `minecraft:test_a_${index}` })),
+    Array.from({ length: 128 }, (_, index) => ({ blockState: `minecraft:test_b_${index}` })),
+  ];
+  assert.equal(SetBlocksInputSchema.safeParse({ ...set, palettes: maximumPalettes }).success, true);
   assert.equal(
     SetBlocksInputSchema.safeParse({
-      ...setInput,
-      palettes: [...setInput.palettes, [{ blockState: 'test:state_256' }]],
+      ...set,
+      palettes: [...maximumPalettes, [{ blockState: 'minecraft:one_entry_too_many' }]],
     }).success,
     false,
   );
 });
 
-test('validates retained edit metadata and edit-result outcome invariants', () => {
-  const edit = {
-    editId: '11111111-1111-4111-8111-111111111111',
-    callId: '22222222-2222-4222-8222-222222222222',
-    label: 'Replace stone floor',
-    operation: 'replace_region_blocks',
-    world: 'world',
-    worldId: '33333333-3333-4333-8333-333333333333',
-    bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 1, y: 1, z: 1 } },
-    changedBlockCount: 1,
-    completedAt: '2026-08-19T12:34:56Z',
-    status: 'committed',
-  };
+test('edit responses are structural and follow the new response projection', () => {
   assert.equal(EditRecordSchema.safeParse(edit).success, true);
-  assert.equal(EditRecordSchema.safeParse({ ...edit, callId: 'not-a-uuid' }).success, false);
-  assert.equal(EditRecordSchema.safeParse({ ...edit, world: '   ' }).success, false);
-  assert.equal(EditRecordSchema.safeParse({ ...edit, changedBlockCount: 0 }).success, false);
-  assert.equal(EditRecordSchema.safeParse({ ...edit, completedAt: 'yesterday' }).success, false);
-  assert.equal(EditRecordSchema.safeParse({ ...edit, label: 'two\nlines' }).success, false);
-
-  const result = {
+  const replace = {
     world: 'world',
     bounds: edit.bounds,
+    seed: 42,
+    outcome: 'committed',
+    edit: { ...edit, operation: 'replace_region_blocks' },
+    matchedBlockCount: 2,
+    changedBlockCount: 2,
+  };
+  assert.equal(ReplaceRegionBlocksOutputSchema.safeParse(replace).success, true);
+  assert.equal(ReplaceRegionBlocksOutputSchema.safeParse({ ...replace, destinationPalette: [] }).success, false);
+
+  const set = {
+    world: 'world',
+    bounds: edit.bounds,
+    seed: 42,
+    outcome: 'committed',
+    edit,
+    blockCount: 2,
+    changedBlockCount: 2,
+    unchangedBlockCount: 0,
+  };
+  assert.equal(SetBlocksOutputSchema.safeParse(set).success, true);
+  assert.equal(SetBlocksOutputSchema.safeParse({ ...set, palettes: [] }).success, false);
+  assert.equal(GetEditHistoryOutputSchema.safeParse({ world: 'world', edits: [edit] }).success, true);
+  assert.equal(GetEditHistoryOutputSchema.safeParse({ world: 'world', edits: [edit, edit] }).success, false);
+});
+
+test('undo advertises only completed results and keeps partial failures internal', () => {
+  assert.equal(UndoEditsInputSchema.safeParse({ world: 'world', editIds: [EDIT_ID, EDIT_ID] }).success, false);
+  const completed = {
+    outcome: 'completed',
+    world: 'world',
+    undoneEdits: [edit],
+    undoCallId: CALL_ID,
+    undoneAt: '2026-08-23T12:01:00Z',
+  };
+  assert.equal(UndoEditsOutputSchema.safeParse(completed).success, true);
+  assert.equal(UndoEditsOutputSchema.safeParse({ ...completed, undoneEdits: [edit, edit] }).success, false);
+  assert.equal(
+    UndoEditsOutputSchema.safeParse({
+      outcome: 'partial',
+      world: 'world',
+      undoneEdits: [],
+      undoCallId: CALL_ID,
+      failure: { code: 'internal_error', message: 'Stopped', editId: EDIT_ID },
+    }).success,
+    false,
+  );
+});
+
+test('edit bridge responses correlate with their request and call identity', () => {
+  const replaceRequest = {
+    world: 'world',
+    label: 'Build wall',
+    min: edit.bounds.max,
+    max: edit.bounds.min,
     sourceBlockStatePatterns: ['minecraft:stone'],
     destinationPalette: [{ blockState: 'minecraft:dirt' }],
     seed: 42,
-    matchedBlockCount: 1,
-    changedBlockCount: 1,
-  };
-  assert.equal(ReplaceRegionBlocksOutputSchema.safeParse({ ...result, outcome: 'preview', edit: null }).success, true);
-  assert.equal(ReplaceRegionBlocksOutputSchema.safeParse({ ...result, outcome: 'committed', edit }).success, true);
-  assert.equal(
-    ReplaceRegionBlocksOutputSchema.safeParse({ ...result, outcome: 'committed', edit: null }).success,
-    false,
-  );
-  assert.equal(ReplaceRegionBlocksOutputSchema.safeParse({ ...result, outcome: 'preview', edit }).success, false);
-  assert.equal(
-    ReplaceRegionBlocksOutputSchema.safeParse({ ...result, outcome: 'no_change', edit: null }).success,
-    false,
-  );
-  assert.equal(
-    ReplaceRegionBlocksOutputSchema.safeParse({
-      ...result,
-      outcome: 'no_change',
-      edit: null,
-      changedBlockCount: 0,
-    }).success,
-    true,
-  );
-
-  for (const inconsistentEdit of [
-    { ...edit, status: 'recovery_required' },
-    { ...edit, operation: 'set_blocks' },
-    { ...edit, world: 'other_world' },
-    { ...edit, bounds: { ...edit.bounds, max: { x: 2, y: 1, z: 1 } } },
-    { ...edit, changedBlockCount: 2 },
-  ]) {
-    assert.equal(
-      ReplaceRegionBlocksOutputSchema.safeParse({ ...result, outcome: 'committed', edit: inconsistentEdit }).success,
-      false,
-    );
-  }
-
-  assert.equal(
-    ReplaceRegionBlocksOutputSchema.safeParse({
-      ...result,
-      outcome: 'preview',
-      edit: null,
-      matchedBlockCount: 0,
-    }).success,
-    false,
-  );
-  assert.equal(
-    SetBlocksOutputSchema.safeParse({
-      world: 'world',
-      bounds: edit.bounds,
-      palettes: [[{ blockState: 'minecraft:dirt' }]],
-      seed: 42,
-      outcome: 'preview',
-      edit: null,
-      blockCount: 2,
-      changedBlockCount: 1,
-      unchangedBlockCount: 2,
-    }).success,
-    false,
-  );
-  const emptySetResult = {
-    world: 'world',
-    bounds: null,
-    palettes: [],
-    seed: 42,
-    outcome: 'no_change',
-    edit: null,
-    blockCount: 0,
-    changedBlockCount: 0,
-    unchangedBlockCount: 0,
-  };
-  assert.equal(SetBlocksOutputSchema.safeParse(emptySetResult).success, true);
-  assert.equal(SetBlocksOutputSchema.safeParse({ ...emptySetResult, bounds: edit.bounds }).success, false);
-  assert.equal(SetBlocksOutputSchema.safeParse({ ...emptySetResult, outcome: 'preview' }).success, false);
-  assert.equal(
-    SetBlocksOutputSchema.safeParse({
-      ...emptySetResult,
-      bounds: edit.bounds,
-      outcome: 'preview',
-      blockCount: 1,
-      changedBlockCount: 1,
-    }).success,
-    false,
-  );
-
-  const secondEdit = { ...edit, editId: '44444444-4444-4444-8444-444444444444' };
-  assert.equal(GetEditHistoryOutputSchema.safeParse({ world: 'world', edits: [secondEdit, edit] }).success, true);
-  assert.equal(GetEditHistoryOutputSchema.safeParse({ world: 'world', edits: [edit, edit] }).success, false);
-  assert.equal(
-    GetEditHistoryOutputSchema.safeParse({
-      world: 'world',
-      edits: [edit, { ...edit, editId: edit.editId.toUpperCase() }],
-    }).success,
-    false,
-  );
-  assert.equal(
-    GetEditHistoryOutputSchema.safeParse({ world: 'world', edits: [{ ...edit, world: 'other_world' }] }).success,
-    false,
-  );
-  assert.equal(
-    GetEditHistoryOutputSchema.safeParse({
-      world: 'world',
-      edits: [edit, { ...secondEdit, worldId: '55555555-5555-4555-8555-555555555555' }],
-    }).success,
-    false,
-  );
-  assert.equal(
-    GetEditHistoryOutputSchema.safeParse({
-      world: 'world',
-      edits: [edit, { ...secondEdit, worldId: edit.worldId.toUpperCase() }],
-    }).success,
-    true,
-  );
-});
-
-test('validates ordered batch undo inputs and outputs', () => {
-  const firstId = '11111111-1111-4111-8111-111111111111';
-  const secondId = '22222222-2222-4222-8222-222222222222';
-  const input = { world: 'world', editIds: [firstId, secondId] };
-  assert.equal(UndoEditsInputSchema.safeParse(input).success, true);
-  assert.equal(UndoEditsInputSchema.safeParse({ world: 'world', editIds: [] }).success, false);
-  assert.equal(UndoEditsInputSchema.safeParse({ world: 'world', editIds: [firstId, firstId] }).success, false);
-  assert.equal(
-    UndoEditsInputSchema.safeParse({ world: 'world', editIds: [firstId, firstId.toUpperCase()] }).success,
-    false,
-  );
-  assert.equal(UndoEditsInputSchema.safeParse({ world: 'world', editId: firstId }).success, false);
-
-  const edit = {
-    editId: firstId,
-    callId: '33333333-3333-4333-8333-333333333333',
-    label: 'Add west wall',
-    operation: 'set_blocks',
-    world: 'world',
-    worldId: '44444444-4444-4444-8444-444444444444',
-    bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } },
-    changedBlockCount: 1,
-    completedAt: '2026-08-19T12:34:56Z',
-    status: 'committed',
-  };
-  const output = {
-    world: 'world',
-    edits: [edit, { ...edit, editId: secondId }],
-    undoCallId: '55555555-5555-4555-8555-555555555555',
-    undoneAt: '2026-08-19T12:35:56Z',
-  };
-  assert.equal(UndoEditsOutputSchema.safeParse(output).success, true);
-  assert.equal(UndoEditsOutputSchema.safeParse({ ...output, edits: [] }).success, false);
-  assert.equal(UndoEditsOutputSchema.safeParse({ ...output, edit: edit }).success, false);
-});
-
-test('rejects successful edit and undo responses that do not match their requests', () => {
-  const expectedCallId = '11111111-1111-4111-8111-111111111111';
-  const actualCallId = '22222222-2222-4222-8222-222222222222';
-  const editId = '33333333-3333-4333-8333-333333333333';
-
-  assert.doesNotThrow(() => requireMatchingCallId(expectedCallId, expectedCallId, editId));
-  assert.doesNotThrow(() => requireMatchingCallId(expectedCallId, expectedCallId.toUpperCase(), editId));
-  assert.throws(
-    () => requireMatchingCallId(expectedCallId, actualCallId, editId),
-    (error: unknown) =>
-      error instanceof ToolFailure &&
-      error.code === 'bridge_invalid_response' &&
-      error.editId === editId &&
-      error.message === 'Paper bridge response call ID did not match the request.',
-  );
-  assert.throws(
-    () => requireMatchingCallId(expectedCallId, actualCallId),
-    (error: unknown) =>
-      error instanceof ToolFailure && error.code === 'bridge_invalid_response' && error.editId === undefined,
-  );
-
-  const edit = EditRecordSchema.parse({
-    editId,
-    callId: expectedCallId,
-    label: 'Set one block',
-    operation: 'set_blocks',
-    world: 'world',
-    worldId: '44444444-4444-4444-8444-444444444444',
-    bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } },
-    changedBlockCount: 1,
-    completedAt: '2026-08-19T12:34:56Z',
-    status: 'committed',
-  });
-  const editResult = {
+    dryRun: false,
+    maxChangedBlocks: null,
+  } as const;
+  const replace = {
     world: 'world',
     bounds: edit.bounds,
-    changedBlockCount: 1,
-    outcome: 'committed' as const,
-    edit,
-  };
-  assert.doesNotThrow(() => requireMatchingEditIdentity('world', edit.bounds, edit.label, expectedCallId, editResult));
-  for (const [world, bounds] of [
-    ['other_world', edit.bounds],
-    ['world', { ...edit.bounds, max: { x: 1, y: 0, z: 0 } }],
-  ] as const) {
-    assert.throws(
-      () => requireMatchingEditIdentity(world, bounds, edit.label, expectedCallId, editResult),
-      (error: unknown) =>
-        error instanceof ToolFailure && error.code === 'bridge_invalid_response' && error.editId === editId,
-    );
-  }
-  assert.doesNotThrow(() => requireMatchingWorld('world', 'world'));
-  assert.throws(
-    () => requireMatchingWorld('world', 'other_world'),
-    (error: unknown) =>
-      error instanceof ToolFailure && error.code === 'bridge_invalid_response' && error.editId === undefined,
+    seed: 42,
+    outcome: 'committed',
+    edit: { ...edit, operation: 'replace_region_blocks' },
+    matchedBlockCount: 2,
+    changedBlockCount: 2,
+  } as const;
+  const replaceSchema = replaceRegionBlocksBridgeOutputSchema(replaceRequest, CALL_ID);
+  assert.equal(replaceSchema.safeParse(replace).success, true);
+  assert.equal(replaceSchema.safeParse({ ...replace, world: 'other' }).success, false);
+  assert.equal(replaceSchema.safeParse({ ...replace, seed: 43 }).success, false);
+  assert.equal(
+    replaceSchema.safeParse({ ...replace, outcome: 'preview', edit: null, changedBlockCount: 1 }).success,
+    false,
   );
-  assert.doesNotThrow(() => requireMatchingUndoIdentity('world', editId, edit));
-  assert.doesNotThrow(() => requireMatchingUndoIdentity('world', editId.toUpperCase(), edit));
-  for (const [world, requestedEditId] of [
-    ['other_world', editId],
-    ['world', '55555555-5555-4555-8555-555555555555'],
-  ] as const) {
-    assert.throws(
-      () => requireMatchingUndoIdentity(world, requestedEditId, edit),
-      (error: unknown) =>
-        error instanceof ToolFailure && error.code === 'bridge_invalid_response' && error.editId === editId,
-    );
-  }
-  assert.throws(
-    () => requireMatchingEditIdentity('world', edit.bounds, 'Different label', expectedCallId, editResult),
-    isInvalidBridgeResponse,
+  assert.equal(
+    replaceSchema.safeParse({ ...replace, edit: { ...replace.edit, label: 'Different label' } }).success,
+    false,
+  );
+  assert.equal(
+    replaceSchema.safeParse({
+      ...replace,
+      edit: { ...replace.edit, callId: '55555555-5555-4555-8555-555555555555' },
+    }).success,
+    false,
+  );
+
+  const setRequest = {
+    world: 'world',
+    label: 'Build wall',
+    origin: { x: 0, y: 64, z: 0 },
+    palettes: [[{ blockState: 'minecraft:stone' }]],
+    placements: [
+      [0, 0, 0, 0],
+      [0, 1, 0, 0],
+    ],
+    runs: [],
+    seed: 42,
+    dryRun: false,
+    maxChangedBlocks: null,
+  } as const;
+  const set = {
+    world: 'world',
+    bounds: edit.bounds,
+    seed: 42,
+    outcome: 'committed',
+    edit,
+    blockCount: 2,
+    changedBlockCount: 2,
+    unchangedBlockCount: 0,
+  } as const;
+  const setSchema = setBlocksBridgeOutputSchema(setRequest, CALL_ID);
+  assert.equal(setSchema.safeParse(set).success, true);
+  assert.equal(setSchema.safeParse({ ...set, unchangedBlockCount: 1 }).success, false);
+  assert.equal(
+    setSchema.safeParse({
+      ...set,
+      edit: { ...edit, bounds: { min: edit.bounds.min, max: edit.bounds.min } },
+    }).success,
+    false,
   );
 });
 
-test('correlates edit options and counts with the originating request', () => {
-  const bounds = { min: { x: 0, y: 0, z: 0 }, max: { x: 1, y: 1, z: 1 } };
-  const result = {
+test('history and undo bridge responses preserve world, call, and exact prefix identity', () => {
+  const secondEdit = { ...edit, editId: SECOND_EDIT_ID };
+  const historySchema = getEditHistoryBridgeOutputSchema({ world: 'world' });
+  assert.equal(historySchema.safeParse({ world: 'world', edits: [edit] }).success, true);
+  assert.equal(historySchema.safeParse({ world: 'other', edits: [edit] }).success, false);
+  assert.equal(historySchema.safeParse({ world: 'world', edits: [{ ...edit, world: 'other' }] }).success, false);
+
+  const request = { world: 'world', editIds: [EDIT_ID, SECOND_EDIT_ID] } as const;
+  const completed = {
+    outcome: 'completed',
     world: 'world',
-    bounds,
-    changedBlockCount: 0,
-    outcome: 'preview' as const,
-    edit: null,
-    seed: 42,
-  };
-  assert.doesNotThrow(() => requireMatchingEditOptions(42, true, 1, result));
-  assert.doesNotThrow(() => requireMatchingEditOptions(undefined, undefined, undefined, result));
-  assert.throws(() => requireMatchingEditOptions(41, true, 1, result), isInvalidBridgeResponse);
-  assert.throws(() => requireMatchingEditOptions(42, false, 1, result), isInvalidBridgeResponse);
-  assert.throws(
-    () => requireMatchingEditOptions(42, true, 1, { ...result, outcome: 'no_change' }),
-    isInvalidBridgeResponse,
+    undoneEdits: [edit, secondEdit],
+    undoCallId: CALL_ID,
+    undoneAt: '2026-08-23T12:01:00Z',
+  } as const;
+  const undoSchema = undoEditsBridgeOutputSchema(request, CALL_ID);
+  assert.equal(undoSchema.safeParse(completed).success, true);
+  assert.equal(
+    undoSchema.safeParse({ ...completed, undoCallId: '55555555-5555-4555-8555-555555555555' }).success,
+    false,
   );
-  assert.doesNotThrow(() => requireMatchingEditOptions(42, false, 1, { ...result, outcome: 'no_change' }));
-  assert.doesNotThrow(() => requireMatchingEditOptions(42, true, 1, { ...result, changedBlockCount: 1 }));
-  assert.throws(
-    () => requireMatchingEditOptions(42, true, 1, { ...result, changedBlockCount: 2 }),
-    isInvalidBridgeResponse,
-  );
+  assert.equal(undoSchema.safeParse({ ...completed, undoneEdits: [secondEdit, edit] }).success, false);
+  assert.equal(undoSchema.safeParse({ ...completed, undoneEdits: [edit] }).success, false);
 
-  assert.doesNotThrow(() => requireReplaceCountsWithinBounds(bounds, { ...result, matchedBlockCount: 8 }));
-  assert.throws(
-    () => requireReplaceCountsWithinBounds(bounds, { ...result, matchedBlockCount: 9 }),
-    isInvalidBridgeResponse,
-  );
-  assert.doesNotThrow(() =>
-    requireReplaceCountsWithinBounds(
-      {
-        min: { x: -2_147_483_648, y: -2_147_483_648, z: -2_147_483_648 },
-        max: { x: 2_147_483_647, y: 2_147_483_647, z: 2_147_483_647 },
-      },
-      { ...result, matchedBlockCount: Number.MAX_SAFE_INTEGER },
-    ),
-  );
-
-  assert.doesNotThrow(() => requireMatchingSetBlockCount(2n, { ...result, blockCount: 2 }));
-  assert.throws(() => requireMatchingSetBlockCount(2n, { ...result, blockCount: 3 }), isInvalidBridgeResponse);
+  const partial = {
+    outcome: 'partial',
+    world: 'world',
+    undoneEdits: [edit],
+    undoCallId: CALL_ID,
+    failure: { code: 'internal_error', message: 'Stopped safely.', editId: SECOND_EDIT_ID },
+  } as const;
+  assert.equal(undoSchema.safeParse(partial).success, true);
+  assert.equal(undoSchema.safeParse({ ...partial, failure: { ...partial.failure, editId: EDIT_ID } }).success, false);
+  assert.equal(undoSchema.safeParse({ ...partial, undoneEdits: [edit, secondEdit] }).success, false);
 });

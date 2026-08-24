@@ -8,44 +8,9 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
-/** Strict, implementation-neutral context for a correctable bridge failure. */
+/** Strict, implementation-neutral context for a correctable application failure. */
 public sealed interface ErrorDetails extends Serializable {
-    record Unauthorized() implements ErrorDetails {}
-
-    record NotFound() implements ErrorDetails {}
-
-    record MethodNotAllowed(String allowedMethod) implements ErrorDetails {
-        public MethodNotAllowed {
-            if (!"GET".equals(allowedMethod) && !"POST".equals(allowedMethod)) {
-                throw new IllegalArgumentException("Allowed method must be GET or POST");
-            }
-        }
-    }
-
-    record BridgeBusy(int maximumConcurrentRequests) implements ErrorDetails {
-        public BridgeBusy {
-            requirePositive(maximumConcurrentRequests, "maximumConcurrentRequests");
-        }
-    }
-
     sealed interface InvalidRequest extends ErrorDetails {
-        record UnsupportedMediaType(String expected) implements InvalidRequest {
-            public UnsupportedMediaType {
-                if (!"application/json".equals(expected)) {
-                    throw new IllegalArgumentException(
-                            "Expected media type must be application/json");
-                }
-            }
-        }
-
-        record BodyTooLarge(int maximumBytes) implements InvalidRequest {
-            public BodyTooLarge {
-                requirePositive(maximumBytes, "maximumBytes");
-            }
-        }
-
-        record MalformedJson() implements InvalidRequest {}
-
         record Missing(String field) implements InvalidRequest {
             public Missing {
                 field = requireNonBlank(field, "field");

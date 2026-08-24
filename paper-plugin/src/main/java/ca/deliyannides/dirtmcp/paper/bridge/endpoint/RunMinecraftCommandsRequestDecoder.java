@@ -18,6 +18,6 @@ final class RunMinecraftCommandsRequestDecoder {
         JsonObject object = exchange.readJsonObject();
         RequestJson.requireExactFields(object, FIELDS, "Request");
         return new RunMinecraftCommands.Request(
-                RequestJson.nonEmptyStringList(object.get("commands"), "commands"));
+                RequestJson.stringList(object.get("commands"), "commands"));
     }
 }

@@ -1,14 +1,15 @@
 package ca.deliyannides.dirtmcp.paper.config;
 
-import java.util.Arrays;
-import java.util.EnumSet;
+import ca.deliyannides.dirtmcp.paper.bridge.BridgeOperation;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 import org.bukkit.configuration.file.FileConfiguration;
 
 public final class DirtConfigLoader {
     private static final Set<String> SECTIONS =
-            Set.of("bridge", "tools", "logging", "limits", "edit-history", "defaults");
+            Set.of("bridge", "logging", "limits", "edit-history");
     private static final Set<String> REQUIRED_PATHS =
             Set.of(
                     "bridge.port",
@@ -16,12 +17,13 @@ public final class DirtConfigLoader {
                     "bridge.request-body-timeout-seconds",
                     "bridge.max-concurrent-requests",
                     "bridge.max-concurrent-inspections",
+                    "bridge.max-request-bytes",
+                    "bridge.allowed-operations",
                     "logging.console-level",
                     "logging.detail-file-max-bytes",
                     "logging.detail-file-retained-files",
-                    "limits.max-request-bytes",
                     "limits.max-region-volume",
-                    "limits.max-touched-chunks",
+                    "limits.max-edit-touched-chunks",
                     "limits.max-inspection-touched-chunks",
                     "limits.max-perspective-touched-chunks",
                     "limits.max-block-state-patterns",
@@ -29,20 +31,13 @@ public final class DirtConfigLoader {
                     "limits.max-changed-blocks",
                     "limits.max-inspection-volume",
                     "limits.max-perspective-ray-distance-budget",
-                    "limits.default-inspection-results",
                     "limits.max-inspection-results",
                     "limits.max-perspective-rays",
                     "limits.max-commands-per-request",
                     "limits.max-command-feedback-characters",
                     "edit-history.max-entries-per-world",
                     "edit-history.max-entries-total",
-                    "edit-history.max-retained-changed-blocks",
-                    "defaults.get-blocks-include-air",
-                    "defaults.edit-dry-run");
-    private static final Set<String> TOOL_PATHS =
-            Arrays.stream(McpTool.values())
-                    .map(tool -> "tools." + tool.id())
-                    .collect(Collectors.toUnmodifiableSet());
+                    "edit-history.max-retained-changed-blocks");
 
     private DirtConfigLoader() {}
 
@@ -57,8 +52,9 @@ public final class DirtConfigLoader {
                         requiredInteger(config, "bridge.shutdown-delay-seconds"),
                         requiredInteger(config, "bridge.request-body-timeout-seconds"),
                         requiredInteger(config, "bridge.max-concurrent-requests"),
-                        requiredInteger(config, "bridge.max-concurrent-inspections")),
-                loadTools(config),
+                        requiredInteger(config, "bridge.max-concurrent-inspections"),
+                        requiredInteger(config, "bridge.max-request-bytes"),
+                        requiredOperations(config, "bridge.allowed-operations")),
                 new DirtConfig.Logging(
                         DirtConfig.ConsoleLogLevel.parse(
                                 requiredString(config, "logging.console-level")
@@ -66,9 +62,8 @@ public final class DirtConfigLoader {
                         requiredInteger(config, "logging.detail-file-max-bytes"),
                         requiredInteger(config, "logging.detail-file-retained-files")),
                 new DirtConfig.Limits(
-                        requiredInteger(config, "limits.max-request-bytes"),
                         requiredInteger(config, "limits.max-region-volume"),
-                        requiredInteger(config, "limits.max-touched-chunks"),
+                        requiredInteger(config, "limits.max-edit-touched-chunks"),
                         requiredInteger(config, "limits.max-inspection-touched-chunks"),
                         requiredInteger(config, "limits.max-perspective-touched-chunks"),
                         requiredInteger(config, "limits.max-block-state-patterns"),
@@ -76,7 +71,6 @@ public final class DirtConfigLoader {
                         requiredInteger(config, "limits.max-changed-blocks"),
                         requiredInteger(config, "limits.max-inspection-volume"),
                         requiredInteger(config, "limits.max-perspective-ray-distance-budget"),
-                        requiredInteger(config, "limits.default-inspection-results"),
                         requiredInteger(config, "limits.max-inspection-results"),
                         requiredInteger(config, "limits.max-perspective-rays"),
                         requiredInteger(config, "limits.max-commands-per-request"),
@@ -84,10 +78,7 @@ public final class DirtConfigLoader {
                 new DirtConfig.EditHistory(
                         requiredInteger(config, "edit-history.max-entries-per-world"),
                         requiredInteger(config, "edit-history.max-entries-total"),
-                        requiredInteger(config, "edit-history.max-retained-changed-blocks")),
-                new DirtConfig.Defaults(
-                        requiredBoolean(config, "defaults.get-blocks-include-air"),
-                        requiredBoolean(config, "defaults.edit-dry-run")));
+                        requiredInteger(config, "edit-history.max-retained-changed-blocks")));
     }
 
     private static void validateKeys(FileConfiguration config) {
@@ -97,25 +88,33 @@ public final class DirtConfigLoader {
             }
         }
         for (String key : config.getKeys(true)) {
-            if (!SECTIONS.contains(key)
-                    && !REQUIRED_PATHS.contains(key)
-                    && !TOOL_PATHS.contains(key)) {
+            if (!SECTIONS.contains(key) && !REQUIRED_PATHS.contains(key)) {
                 throw new IllegalArgumentException("Unknown configuration key: " + key);
             }
         }
     }
 
-    private static DirtConfig.Tools loadTools(FileConfiguration config) {
-        if (isExplicitlySet(config, "tools") && !config.isConfigurationSection("tools")) {
-            throw new IllegalArgumentException("tools must be a configuration section");
+    private static List<BridgeOperation> requiredOperations(FileConfiguration config, String path) {
+        Object configured = config.get(path);
+        if (!(configured instanceof List<?> values)) {
+            throw new IllegalArgumentException(path + " must be a list of operationIds");
         }
-        EnumSet<McpTool> enabled = EnumSet.noneOf(McpTool.class);
-        for (McpTool tool : McpTool.values()) {
-            if (optionalBoolean(config, "tools." + tool.id())) {
-                enabled.add(tool);
+        List<BridgeOperation> operations = new ArrayList<>(values.size());
+        Set<BridgeOperation> unique = new HashSet<>();
+        for (int index = 0; index < values.size(); index++) {
+            Object value = values.get(index);
+            if (!(value instanceof String operationId) || operationId.isBlank()) {
+                throw new IllegalArgumentException(
+                        path + "[" + index + "] must be a non-empty operationId");
             }
+            BridgeOperation operation = BridgeOperation.parse(operationId);
+            if (!unique.add(operation)) {
+                throw new IllegalArgumentException(
+                        path + " contains duplicate operationId: " + operationId);
+            }
+            operations.add(operation);
         }
-        return new DirtConfig.Tools(enabled);
+        return List.copyOf(operations);
     }
 
     private static int parsePortOverride(String override, int configuredPort) {
@@ -140,20 +139,6 @@ public final class DirtConfigLoader {
             throw new IllegalArgumentException(path + " must be a signed 32-bit integer");
         }
         return config.getInt(path);
-    }
-
-    private static boolean requiredBoolean(FileConfiguration config, String path) {
-        if (!config.isBoolean(path)) {
-            throw new IllegalArgumentException(path + " must be true or false");
-        }
-        return config.getBoolean(path);
-    }
-
-    private static boolean optionalBoolean(FileConfiguration config, String path) {
-        if (!isExplicitlySet(config, path)) {
-            return false;
-        }
-        return requiredBoolean(config, path);
     }
 
     private static boolean isExplicitlySet(FileConfiguration config, String path) {

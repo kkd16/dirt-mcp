@@ -31,12 +31,10 @@ export async function executeToolCall(
     ...(details.world === undefined ? {} : { world: details.world }),
   });
   let failure: ToolFailure | undefined;
-  let resultFields: LogFields = {};
   let success = false;
   try {
     const result = await call(callId);
     success = result.isError !== true;
-    resultFields = resultLogFields(result);
     return result;
   } catch (error: unknown) {
     failure = toolFailure(error);
@@ -47,13 +45,11 @@ export async function executeToolCall(
       callId,
       error: failure.data,
     });
-    const structuredContent = { ...failure.progress, ...baseStructuredContent };
     const result: CallToolResult = {
       content: [{ type: 'text', text: `${details.failureContext}: ${failure.message}` }],
-      structuredContent,
+      structuredContent: baseStructuredContent,
       isError: true,
     };
-    resultFields = resultLogFields(result);
     return result;
   } finally {
     const failureFields: LogFields =
@@ -66,7 +62,6 @@ export async function executeToolCall(
     const completionFields: LogFields = {
       success,
       duration_ms: Math.max(0, Math.round(performance.now() - started)),
-      ...resultFields,
       ...failureFields,
     };
     const level = failure === undefined ? (success ? 'info' : 'warning') : toolFailureLogLevel(failure);
@@ -88,80 +83,6 @@ function toolFailure(error: unknown): ToolFailure {
   return error instanceof ToolFailure
     ? error
     : new ToolFailure({ code: 'dirt_internal_error', message: INTERNAL_ERROR_MESSAGE });
-}
-
-function resultLogFields(result: CallToolResult): LogFields {
-  const content = objectValue(result.structuredContent);
-  if (content === undefined) return {};
-
-  const edit = objectValue(propertyValue(content, 'edit'));
-  const editId = stringValue(propertyValue(edit, 'editId'));
-  let outcome = stringValue(propertyValue(content, 'outcome'));
-  let changedBlockCount = integerValue(propertyValue(content, 'changedBlockCount'));
-
-  let resultCount: number | undefined;
-  const edits = propertyValue(content, 'edits');
-  const undoneEdits = propertyValue(content, 'undoneEdits');
-  const commandResults = propertyValue(content, 'results');
-  if (Array.isArray(commandResults)) {
-    resultCount = commandResults.length;
-    const finalCommandResult = objectValue(commandResults.at(-1));
-    const finalCommandOutcome = stringValue(propertyValue(finalCommandResult, 'outcome'));
-    if (finalCommandOutcome === 'dispatched') outcome = 'dispatched';
-    else if (finalCommandOutcome === 'not_found' || finalCommandOutcome === 'dispatch_failed') {
-      outcome = 'partial_failure';
-    }
-  } else if (Array.isArray(edits)) {
-    resultCount = edits.length;
-    if (stringValue(propertyValue(content, 'undoCallId')) !== undefined) {
-      outcome = 'undone';
-      changedBlockCount = sumChangedBlockCounts(edits);
-    }
-  } else if (Array.isArray(undoneEdits)) {
-    resultCount = undoneEdits.length;
-    outcome = 'partial_failure';
-    changedBlockCount = sumChangedBlockCounts(undoneEdits);
-  } else {
-    const blockStateCounts = objectValue(propertyValue(content, 'blockStateCounts'));
-    resultCount =
-      blockStateCounts === undefined
-        ? integerValue(propertyValue(content, 'matchedBlockCount'))
-        : Object.keys(blockStateCounts).length;
-  }
-
-  return {
-    ...(editId === undefined ? {} : { edit_id: editId }),
-    ...(outcome === undefined ? {} : { outcome }),
-    ...(changedBlockCount === undefined ? {} : { changed_block_count: changedBlockCount }),
-    ...(resultCount === undefined ? {} : { result_count: resultCount }),
-  };
-}
-
-function sumChangedBlockCounts(values: readonly unknown[]): number | undefined {
-  let sum = 0;
-  for (const value of values) {
-    const record = objectValue(value);
-    const count = integerValue(propertyValue(record, 'changedBlockCount'));
-    if (count === undefined || count < 0 || !Number.isSafeInteger(sum + count)) return undefined;
-    sum += count;
-  }
-  return sum;
-}
-
-function objectValue(value: unknown): object | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value : undefined;
-}
-
-function propertyValue(value: object | undefined, property: string): unknown {
-  return value === undefined ? undefined : Reflect.get(value, property);
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
-}
-
-function integerValue(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) ? value : undefined;
 }
 
 function clientLabel(context: ServerContext): string {
