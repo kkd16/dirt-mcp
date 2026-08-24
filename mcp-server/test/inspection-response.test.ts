@@ -162,7 +162,6 @@ function scanOutput(): ScanOutput {
     world: 'world',
     origin: { x: 1, y: 2, z: 4 },
     direction: 'north',
-    format: 'blocks',
     basis: {
       forward: { x: 0, y: 0, z: -1 },
       horizontal: { x: 1, y: 0, z: 0 },
@@ -172,27 +171,21 @@ function scanOutput(): ScanOutput {
     bounds: { min: { x: 0, y: 1, z: 1 }, max: { x: 2, y: 3, z: 3 } },
     scannedVolume: 27,
     visibleBlockCount: 3,
-    blocks: [
-      {
-        position: { x: 0, y: 3, z: 2 },
-        offset: { horizontal: -1, vertical: 1, distance: 2 },
-        blockState: 'minecraft:stone',
-      },
-      {
-        position: { x: 2, y: 3, z: 3 },
-        offset: { horizontal: 1, vertical: 1, distance: 1 },
-        blockState: 'minecraft:dirt',
-      },
-      {
-        position: { x: 1, y: 2, z: 1 },
-        offset: { horizontal: 0, vertical: 0, distance: 3 },
-        blockState: 'minecraft:gold_block',
-      },
+    blockStatePalette: ['minecraft:stone', 'minecraft:dirt', 'minecraft:gold_block'],
+    blockStateIndexRows: [
+      [1, 0, 2],
+      [0, 3, 0],
+      [0, 0, 0],
+    ],
+    distanceRows: [
+      [2, 0, 1],
+      [0, 3, 0],
+      [0, 0, 0],
     ],
   };
 }
 
-test('correlates orthographic metadata, geometry, counts, offsets, and positions', () => {
+test('correlates orthographic metadata, geometry, counts, palette, and grid cells', () => {
   assert.doesNotThrow(() => requireMatchingScanResponse(scanInput, scanOutput()));
   assert.doesNotThrow(() => requireMatchingScanResponse({ ...scanInput, maxResults: undefined }, scanOutput()));
 
@@ -232,22 +225,36 @@ test('correlates orthographic metadata, geometry, counts, offsets, and positions
 
   assertInvalid(() => requireMatchingScanResponse({ ...scanInput, maxResults: 2 }, scanOutput()));
 
-  for (const offset of [{ horizontal: 2 }, { vertical: 2 }, { distance: 4 }]) {
-    const outside = scanOutput();
-    outside.blocks[0]!.offset = { ...outside.blocks[0]!.offset, ...offset };
-    assertInvalid(() => requireMatchingScanResponse(scanInput, outside));
-  }
+  const wrongHeight = scanOutput();
+  wrongHeight.blockStateIndexRows.pop();
+  assertInvalid(() => requireMatchingScanResponse(scanInput, wrongHeight));
 
-  const wrongPosition = scanOutput();
-  wrongPosition.blocks[0]!.position.z = 3;
-  assertInvalid(() => requireMatchingScanResponse(scanInput, wrongPosition));
+  const wrongWidth = scanOutput();
+  wrongWidth.distanceRows[0]!.pop();
+  assertInvalid(() => requireMatchingScanResponse(scanInput, wrongWidth));
 
-  const duplicateCell = scanOutput();
-  duplicateCell.blocks[1]!.offset = { ...duplicateCell.blocks[0]!.offset };
-  duplicateCell.blocks[1]!.position = { ...duplicateCell.blocks[0]!.position };
-  assertInvalid(() => requireMatchingScanResponse(scanInput, duplicateCell));
+  const misaligned = scanOutput();
+  misaligned.distanceRows[0]![0] = 0;
+  assertInvalid(() => requireMatchingScanResponse(scanInput, misaligned));
 
-  const wrongOrder = scanOutput();
-  [wrongOrder.blocks[0], wrongOrder.blocks[1]] = [wrongOrder.blocks[1]!, wrongOrder.blocks[0]!];
-  assertInvalid(() => requireMatchingScanResponse(scanInput, wrongOrder));
+  const outsidePalette = scanOutput();
+  outsidePalette.blockStateIndexRows[0]![0] = 4;
+  assertInvalid(() => requireMatchingScanResponse(scanInput, outsidePalette));
+
+  const outsideDistance = scanOutput();
+  outsideDistance.distanceRows[0]![0] = 4;
+  assertInvalid(() => requireMatchingScanResponse(scanInput, outsideDistance));
+
+  const wrongPaletteOrder = scanOutput();
+  wrongPaletteOrder.blockStateIndexRows[0]![0] = 2;
+  wrongPaletteOrder.blockStateIndexRows[0]![2] = 1;
+  assertInvalid(() => requireMatchingScanResponse(scanInput, wrongPaletteOrder));
+
+  const unusedPaletteEntry = scanOutput();
+  unusedPaletteEntry.blockStatePalette.push('minecraft:diamond_block');
+  assertInvalid(() => requireMatchingScanResponse(scanInput, unusedPaletteEntry));
+
+  const duplicatePaletteEntry = scanOutput();
+  duplicatePaletteEntry.blockStatePalette[1] = 'minecraft:stone';
+  assertInvalid(() => requireMatchingScanResponse(scanInput, duplicatePaletteEntry));
 });

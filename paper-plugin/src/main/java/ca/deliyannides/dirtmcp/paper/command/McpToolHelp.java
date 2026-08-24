@@ -79,11 +79,11 @@ final class McpToolHelp {
                             "Selects a non-air depth along bounded, axis-aligned sightlines.",
                             "world, origin, direction = north|east|south|west|up|down, "
                                     + "horizontalRadius, verticalRadius, maxDistance; optional depth, "
-                                    + "maxResults, and format = blocks|grid. depth defaults to 0, "
-                                    + "format to blocks, and maxResults to the active Paper default.",
+                                    + "and maxResults. depth defaults to 0 and maxResults to the "
+                                    + "active Paper default.",
                             "world, origin, direction, basis, viewport, bounds, scannedVolume, "
-                                    + "visibleBlockCount, format, and either blocks or "
-                                    + "blockStatePalette/blockStateIndexRows/distanceRows.",
+                                    + "visibleBlockCount, blockStatePalette, blockStateIndexRows, "
+                                    + "and distanceRows.",
                             "Read-only; depth is zero-based and the origin itself is not scanned. "
                                     + "Active result ceilings fail the call rather than truncate.");
             case REPLACE_REGION_BLOCKS ->

@@ -14,8 +14,6 @@ import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.AxisV
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.Direction;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.Request;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.ViewBasis;
-import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.ViewBlock;
-import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.ViewOffset;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import java.util.List;
 import java.util.Map;
@@ -84,7 +82,7 @@ final class OrthographicViewAlgorithmsTest {
     }
 
     @Test
-    void returnsFirstNonAirBlockPerSightlineInViewOrder() throws Exception {
+    void returnsFirstNonAirCellPerSightlineInViewOrder() throws Exception {
         Request request = request(new BlockPosition(0, 0, 0), Direction.NORTH, 1, 1, 3, 10);
         ViewGeometry geometry = OrthographicViewAlgorithms.geometry(request, 1_000);
         Map<BlockPosition, BlockSample> states =
@@ -92,21 +90,32 @@ final class OrthographicViewAlgorithmsTest {
                         new BlockPosition(-1, 1, -2), solid("glass"),
                         new BlockPosition(-1, 1, -3), solid("stone"),
                         new BlockPosition(1, 1, -1), solid("stairs"),
-                        new BlockPosition(0, 0, -3), solid("gold"));
+                        new BlockPosition(0, 0, -3), solid("glass"));
 
-        List<ViewBlock> blocks =
-                OrthographicViewAlgorithms.collectVisibleBlocks(
-                        request, geometry, viewCapture(states));
+        OrthographicViewAlgorithms.ViewGrid grid =
+                OrthographicViewAlgorithms.collectGrid(request, geometry, viewCapture(states));
 
+        assertEquals(3, grid.visibleCellCount());
+        assertEquals(List.of("glass", "stairs"), grid.blockStatePalette());
         assertEquals(
-                List.of(
-                        new ViewBlock(
-                                new BlockPosition(-1, 1, -2), new ViewOffset(-1, 1, 2), "glass"),
-                        new ViewBlock(
-                                new BlockPosition(1, 1, -1), new ViewOffset(1, 1, 1), "stairs"),
-                        new ViewBlock(
-                                new BlockPosition(0, 0, -3), new ViewOffset(0, 0, 3), "gold")),
-                blocks);
+                List.of(List.of(1, 0, 2), List.of(0, 1, 0), List.of(0, 0, 0)),
+                grid.blockStateIndexRows());
+        assertEquals(
+                List.of(List.of(2, 0, 1), List.of(0, 3, 0), List.of(0, 0, 0)), grid.distanceRows());
+    }
+
+    @Test
+    void returnsAnEmptyPaletteAndZeroCellsWhenNoSightlineHits() throws Exception {
+        Request request = request(new BlockPosition(0, 0, 0), Direction.NORTH, 1, 0, 2, 10);
+        ViewGeometry geometry = OrthographicViewAlgorithms.geometry(request, 100);
+
+        OrthographicViewAlgorithms.ViewGrid grid =
+                OrthographicViewAlgorithms.collectGrid(request, geometry, viewCapture(Map.of()));
+
+        assertEquals(0, grid.visibleCellCount());
+        assertEquals(List.of(), grid.blockStatePalette());
+        assertEquals(List.of(List.of(0, 0, 0)), grid.blockStateIndexRows());
+        assertEquals(List.of(List.of(0, 0, 0)), grid.distanceRows());
     }
 
     @Test
@@ -120,15 +129,13 @@ final class OrthographicViewAlgorithmsTest {
                         new BlockPosition(0, -3, 0), solid("dirt"),
                         new BlockPosition(0, -4, 0), solid("stone"));
 
-        List<ViewBlock> blocks =
-                OrthographicViewAlgorithms.collectVisibleBlocks(
-                        request, geometry, viewCapture(states));
+        OrthographicViewAlgorithms.ViewGrid grid =
+                OrthographicViewAlgorithms.collectGrid(request, geometry, viewCapture(states));
 
-        assertEquals(
-                List.of(
-                        new ViewBlock(
-                                new BlockPosition(0, -3, 0), new ViewOffset(0, 0, 3), "dirt")),
-                blocks);
+        assertEquals(1, grid.visibleCellCount());
+        assertEquals(List.of("dirt"), grid.blockStatePalette());
+        assertEquals(List.of(List.of(1)), grid.blockStateIndexRows());
+        assertEquals(List.of(List.of(3)), grid.distanceRows());
     }
 
     @Test
@@ -233,7 +240,7 @@ final class OrthographicViewAlgorithmsTest {
                 assertThrows(
                         OperationException.class,
                         () ->
-                                OrthographicViewAlgorithms.collectVisibleBlocks(
+                                OrthographicViewAlgorithms.collectGrid(
                                         request,
                                         geometry,
                                         new CapturedRegion() {

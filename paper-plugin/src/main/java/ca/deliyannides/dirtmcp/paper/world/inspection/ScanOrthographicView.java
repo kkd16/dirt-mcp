@@ -41,32 +41,22 @@ public interface ScanOrthographicView {
 
     record Viewport(int horizontalRadius, int verticalRadius, int maxDistance, int depth) {}
 
-    record ViewOffset(int horizontal, int vertical, int distance) {}
-
-    record ViewBlock(BlockPosition position, ViewOffset offset, String blockState) {
-        public ViewBlock {
-            Objects.requireNonNull(position, "position");
-            Objects.requireNonNull(offset, "offset");
-            Objects.requireNonNull(blockState, "blockState");
-        }
-    }
-
     record Result(
             String world,
             BlockPosition origin,
             String direction,
-            String format,
             ViewBasis basis,
             Viewport viewport,
             BlockBounds bounds,
             long scannedVolume,
             long visibleBlockCount,
-            List<ViewBlock> blocks) {
+            List<String> blockStatePalette,
+            List<List<Integer>> blockStateIndexRows,
+            List<List<Integer>> distanceRows) {
         public Result {
             Objects.requireNonNull(world, "world");
             Objects.requireNonNull(origin, "origin");
             Objects.requireNonNull(direction, "direction");
-            Objects.requireNonNull(format, "format");
             Objects.requireNonNull(basis, "basis");
             Objects.requireNonNull(viewport, "viewport");
             Objects.requireNonNull(bounds, "bounds");
@@ -76,7 +66,14 @@ public interface ScanOrthographicView {
             if (visibleBlockCount < 0) {
                 throw new IllegalArgumentException("Visible block count must be non-negative");
             }
-            blocks = List.copyOf(Objects.requireNonNull(blocks, "blocks"));
+            blockStatePalette =
+                    List.copyOf(Objects.requireNonNull(blockStatePalette, "blockStatePalette"));
+            blockStateIndexRows = copyRows(blockStateIndexRows, "blockStateIndexRows");
+            distanceRows = copyRows(distanceRows, "distanceRows");
+        }
+
+        private static List<List<Integer>> copyRows(List<List<Integer>> rows, String field) {
+            return Objects.requireNonNull(rows, field).stream().map(List::copyOf).toList();
         }
     }
 }

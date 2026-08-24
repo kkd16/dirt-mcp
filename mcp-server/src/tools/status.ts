@@ -83,7 +83,7 @@ const LimitConfigurationSchema = z
       'Maximum perspective ray count multiplied by maximum ray distance.',
     ),
     defaultInspectionResultLimit: PositiveInt32Schema.describe(
-      'Default exact-block, run, or visible-block result limit when maxResults is omitted.',
+      'Default exact-block, run, or non-empty orthographic cell limit when maxResults is omitted.',
     ),
     maxInspectionResultLimit: PositiveInt32Schema.describe(
       'Maximum caller-selected exact or orthographic inspection result limit.',

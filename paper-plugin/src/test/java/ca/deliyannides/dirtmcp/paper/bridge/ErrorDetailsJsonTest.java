@@ -101,9 +101,9 @@ final class ErrorDetailsJsonTest {
                         "{reason:'out_of_range',target:'maxResults',value:101,minimum:1,maximum:100}"),
                 detail(
                         new ErrorDetails.InvalidRequest.UnsupportedValue(
-                                "format", List.of("blocks", "runs")),
-                        "{reason:'unsupported_value',target:'format',"
-                                + "allowedValues:['blocks','runs']}"),
+                                "strategy", List.of("first", "nearest")),
+                        "{reason:'unsupported_value',target:'strategy',"
+                                + "allowedValues:['first','nearest']}"),
                 detail(
                         new ErrorDetails.InvalidRequest.PaletteWeightsMixed("destinationPalette"),
                         "{reason:'palette_weights_mixed',field:'destinationPalette'}"),
@@ -158,8 +158,8 @@ final class ErrorDetailsJsonTest {
                         new ErrorDetails.ResultTooLarge.Palettes(9, 8),
                         "{reason:'palettes',minimumRequired:9,maximum:8}"),
                 detail(
-                        new ErrorDetails.ResultTooLarge.VisibleBlocks(9, 8),
-                        "{reason:'visible_blocks',minimumRequired:9,maximum:8}"),
+                        new ErrorDetails.ResultTooLarge.VisibleCells(9, 8),
+                        "{reason:'visible_cells',minimumRequired:9,maximum:8}"),
                 detail(
                         new ErrorDetails.ResultTooLarge.PerspectiveRays(9, 8),
                         "{reason:'perspective_rays',minimumRequired:9,maximum:8}"),

@@ -201,7 +201,6 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     world: 'world',
     origin: { x: 1, y: 2, z: 4 },
     direction: 'north',
-    format: 'blocks',
     basis: {
       forward: { x: 0, y: 0, z: -1 },
       horizontal: { x: 1, y: 0, z: 0 },
@@ -211,34 +210,6 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     bounds: { min: { x: 0, y: 1, z: 1 }, max: { x: 2, y: 3, z: 3 } },
     scannedVolume: 27,
     visibleBlockCount: 3,
-    blocks: [
-      {
-        position: { x: 0, y: 3, z: 2 },
-        offset: { horizontal: -1, vertical: 1, distance: 2 },
-        blockState: 'minecraft:stone',
-      },
-      {
-        position: { x: 2, y: 3, z: 3 },
-        offset: { horizontal: 1, vertical: 1, distance: 1 },
-        blockState: 'minecraft:oak_stairs[facing=north]',
-      },
-      {
-        position: { x: 1, y: 2, z: 1 },
-        offset: { horizontal: 0, vertical: 0, distance: 3 },
-        blockState: 'minecraft:gold_block',
-      },
-    ],
-  };
-  const gridView = {
-    world: view.world,
-    origin: view.origin,
-    direction: view.direction,
-    basis: view.basis,
-    viewport: view.viewport,
-    bounds: view.bounds,
-    scannedVolume: view.scannedVolume,
-    visibleBlockCount: view.visibleBlockCount,
-    format: 'grid',
     blockStatePalette: ['minecraft:stone', 'minecraft:oak_stairs[facing=north]', 'minecraft:gold_block'],
     blockStateIndexRows: [
       [1, 0, 2],
@@ -651,7 +622,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.deepEqual(
     viewed.result,
     completeResult({
-      content: [{ type: 'text', text: 'Scanned view in world: 3 visible blocks returned explicitly.' }],
+      content: [{ type: 'text', text: 'Scanned 3x3 view: 3 visible cells using 3 block states.' }],
       structuredContent: view,
     }),
   );
@@ -662,20 +633,20 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
     method: 'tools/call',
     params: requestParams({
       name: 'scan_orthographic_view',
-      arguments: { ...viewInput, format: 'grid' },
+      arguments: { ...viewInput, maxResults: 3 },
     }),
   });
-  const gridViewed = await waitFor(messages, 5);
+  const boundedView = await waitFor(messages, 5);
   assert.deepEqual(
-    gridViewed.result,
+    boundedView.result,
     completeResult({
       content: [
         {
           type: 'text',
-          text: 'Scanned 3x3 view: 3 visible blocks using 3 block states.',
+          text: 'Scanned 3x3 view: 3 visible cells using 3 block states.',
         },
       ],
-      structuredContent: gridView,
+      structuredContent: view,
     }),
   );
 
@@ -976,7 +947,7 @@ test('forwards MCP tools to the authenticated bridge and preserves contract erro
   assert.equal(requestAt(requests, 2).headers['content-type'], 'application/json');
   assert.deepEqual(requestAt(requests, 3).body, viewInput);
   assert.equal(requestAt(requests, 3).headers['content-type'], 'application/json');
-  assert.deepEqual(requestAt(requests, 4).body, viewInput);
+  assert.deepEqual(requestAt(requests, 4).body, { ...viewInput, maxResults: 3 });
   assert.equal(requestAt(requests, 4).headers['content-type'], 'application/json');
   assert.deepEqual(requestAt(requests, 5).body, {
     ...region,

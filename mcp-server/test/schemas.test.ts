@@ -110,7 +110,6 @@ test('applies inspection defaults and rejects combined pattern amplification', (
       verticalRadius: 0,
       maxDistance: 1,
       depth: 0,
-      format: 'blocks',
     },
   );
 });

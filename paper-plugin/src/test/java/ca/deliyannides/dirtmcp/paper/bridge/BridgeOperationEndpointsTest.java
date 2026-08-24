@@ -882,13 +882,13 @@ final class BridgeOperationEndpointsTest {
     }
 
     @Test
-    void rejectsRemovedInspectionFormatAndUnsupportedViewDirection() throws Exception {
+    void rejectsUnknownInspectionFieldAndUnsupportedViewDirection() throws Exception {
         try (BridgeServer bridge =
                         server(config(availablePort(), 4), new BridgeTestFixture.TestOperations());
                 HttpClient client = HttpClient.newHttpClient()) {
             bridge.start();
 
-            HttpResponse<String> format =
+            HttpResponse<String> unknownField =
                     send(
                             client,
                             post(
@@ -896,7 +896,7 @@ final class BridgeOperationEndpointsTest {
                                     "/v1/get-blocks",
                                     """
                                     {"world":"world","min":{"x":0,"y":0,"z":0},
-                                     "max":{"x":0,"y":0,"z":0},"format":"columns"}
+                                     "max":{"x":0,"y":0,"z":0},"unexpected":true}
                                     """));
             HttpResponse<String> direction =
                     send(
@@ -910,8 +910,10 @@ final class BridgeOperationEndpointsTest {
                                      "verticalRadius":0,"maxDistance":1}
                                     """));
 
-            assertError(format, "Request contains missing or unknown fields");
-            assertEquals(json("{reason:'unknown_fields',field:'format'}"), errorDetails(format));
+            assertError(unknownField, "Request contains missing or unknown fields");
+            assertEquals(
+                    json("{reason:'unknown_fields',field:'unexpected'}"),
+                    errorDetails(unknownField));
             assertError(direction, "direction must be north, east, south, west, up, or down");
             assertEquals(
                     json(

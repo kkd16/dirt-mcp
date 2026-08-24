@@ -367,7 +367,7 @@ test('accepts every reason-discriminated bridge detail variant', () => {
     result_too_large: [
       { reason: 'structure_entries', minimumRequired: 101, maximum: 100 },
       { reason: 'palettes', minimumRequired: 101, maximum: 100 },
-      { reason: 'visible_blocks', minimumRequired: 101, maximum: 100 },
+      { reason: 'visible_cells', minimumRequired: 101, maximum: 100 },
       { reason: 'perspective_rays', minimumRequired: 101, maximum: 100 },
       { reason: 'perspective_ray_distance', minimumRequired: 101, maximum: 100 },
     ],

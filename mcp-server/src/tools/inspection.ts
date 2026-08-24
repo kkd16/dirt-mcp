@@ -15,7 +15,6 @@ import {
   PalettePlacementSchema,
   PaletteRunSchema,
   READ_WORLD_ANNOTATIONS,
-  SignedInt32Schema,
 } from './common.ts';
 import { isForwardRun, resolveOffset, runContains, runsOverlap, structureBlockCount } from './block-structure.ts';
 import { executeToolCall, successResult } from './execution.ts';
@@ -29,7 +28,6 @@ import {
   sameBounds,
   sameCoordinates,
 } from './response-validation.ts';
-import { compactView } from './view-grid.ts';
 
 const CountRegionBlockStatesInputSchema = z
   .object({
@@ -171,12 +169,8 @@ export const ScanOrthographicViewInputSchema = z
       .max(INT32_MAX)
       .optional()
       .describe(
-        'Maximum visible blocks, bounded by the active inspection-result limit. Results fail instead of truncating.',
+        'Maximum non-empty cells, bounded by the active inspection-result limit. Results fail instead of truncating.',
       ),
-    format: z
-      .enum(['blocks', 'grid'])
-      .default('blocks')
-      .describe('blocks returns explicit positions; grid returns compact lossless palette and distance matrices.'),
   })
   .strict()
   .describe('Bounded orthographic sightlines scanned for a selected non-air depth.');
@@ -190,87 +184,45 @@ const AxisVectorSchema = z
   .strict()
   .describe('A world-axis unit vector.');
 
-const ViewMetadata = {
-  world: z.string().min(1).describe('Scanned world name.'),
-  origin: BlockPositionSchema,
-  direction: OrthographicViewDirectionSchema,
-  basis: z
-    .object({
-      forward: AxisVectorSchema.describe('Direction of increasing sightline distance.'),
-      horizontal: AxisVectorSchema.describe('Direction of increasing horizontal offset.'),
-      vertical: AxisVectorSchema.describe('Direction of increasing vertical offset.'),
-    })
-    .strict()
-    .describe('Basis for converting view-relative offsets to world positions.'),
-  viewport: z
-    .object({
-      horizontalRadius: z.number().int().nonnegative().describe('Horizontal radius used.'),
-      verticalRadius: z.number().int().nonnegative().describe('Vertical radius used.'),
-      maxDistance: z.number().int().positive().describe('Forward distance used.'),
-      depth: z.number().int().nonnegative().describe('Zero-based non-air depth returned.'),
-    })
-    .strict()
-    .describe('Resolved scan dimensions.'),
-  bounds: BoundsSchema.describe('Inclusive world-space bounds scanned.'),
-  scannedVolume: z.number().int().positive().describe('Total blocks checked across all sightlines.'),
-  visibleBlockCount: z.number().int().nonnegative().describe('Sightlines whose requested non-air block was found.'),
-};
-
-const ScanOrthographicViewBlocksOutputSchema = z
+const ScanOrthographicViewOutputSchema = z
   .object({
-    ...ViewMetadata,
-    format: z.literal('blocks').describe('Response contains explicit visible-block entries.'),
-    blocks: z
-      .array(
-        z
-          .object({
-            position: BlockPositionSchema.describe('Absolute position of the requested non-air block.'),
-            offset: z
-              .object({
-                horizontal: SignedInt32Schema.describe('Signed displacement along basis.horizontal.'),
-                vertical: SignedInt32Schema.describe('Signed displacement along basis.vertical.'),
-                distance: z
-                  .number()
-                  .int()
-                  .min(1)
-                  .max(INT32_MAX)
-                  .describe('Positive displacement along basis.forward; 1 is adjacent to origin.'),
-              })
-              .strict()
-              .describe('View-relative location of the visible block.'),
-            blockState: z.string().min(1).describe('Canonical state of the visible block.'),
-          })
-          .strict()
-          .describe('Requested non-air block on one sightline.'),
-      )
-      .describe('Visible blocks in deterministic viewport order.'),
-  })
-  .strict()
-  .describe('Orthographic scan with explicit block positions.');
-
-const ScanOrthographicViewGridOutputSchema = z
-  .object({
-    ...ViewMetadata,
-    format: z.literal('grid').describe('Response contains compact palette and distance matrices.'),
+    world: z.string().min(1).describe('Scanned world name.'),
+    origin: BlockPositionSchema,
+    direction: OrthographicViewDirectionSchema,
+    basis: z
+      .object({
+        forward: AxisVectorSchema.describe('Direction of increasing sightline distance.'),
+        horizontal: AxisVectorSchema.describe('Direction of increasing horizontal offset.'),
+        vertical: AxisVectorSchema.describe('Direction of increasing vertical offset.'),
+      })
+      .strict()
+      .describe('Basis for converting view-relative offsets to world positions.'),
+    viewport: z
+      .object({
+        horizontalRadius: z.number().int().nonnegative().describe('Horizontal radius used.'),
+        verticalRadius: z.number().int().nonnegative().describe('Vertical radius used.'),
+        maxDistance: z.number().int().positive().describe('Forward distance used.'),
+        depth: z.number().int().nonnegative().describe('Zero-based non-air depth returned.'),
+      })
+      .strict()
+      .describe('Resolved scan dimensions.'),
+    bounds: BoundsSchema.describe('Inclusive world-space bounds scanned.'),
+    scannedVolume: z.number().int().positive().describe('Total blocks checked across all sightlines.'),
+    visibleBlockCount: z.number().int().nonnegative().describe('Sightlines whose requested non-air block was found.'),
     blockStatePalette: z
       .array(z.string().min(1))
       .describe('Canonical states indexed from 1 by blockStateIndexRows; index 0 means no visible block.'),
     blockStateIndexRows: z
-      .array(z.array(z.number().int().nonnegative()))
+      .array(z.array(z.number().int().min(0).max(INT32_MAX)))
       .describe('Top-to-bottom rows and left-to-right cells containing palette indices; 0 means empty sightline.'),
     distanceRows: z
-      .array(z.array(z.number().int().nonnegative()))
+      .array(z.array(z.number().int().min(0).max(INT32_MAX)))
       .describe('Distances aligned with blockStateIndexRows; 0 means empty sightline.'),
   })
   .strict()
   .describe('Lossless compact orthographic scan.');
 
-const ScanOrthographicViewOutputSchema = z
-  .discriminatedUnion('format', [ScanOrthographicViewBlocksOutputSchema, ScanOrthographicViewGridOutputSchema])
-  .describe('Orthographic scan result; inspect format before reading blocks or grid fields.');
-
-export type ScanOrthographicViewBlocksOutput = z.infer<typeof ScanOrthographicViewBlocksOutputSchema>;
-export type ScanOrthographicViewGridOutput = z.infer<typeof ScanOrthographicViewGridOutputSchema>;
+type ScanOrthographicViewOutput = z.infer<typeof ScanOrthographicViewOutputSchema>;
 
 type CountRegionBlockStatesInput = z.infer<typeof CountRegionBlockStatesInputSchema>;
 type CountRegionBlockStatesOutput = z.infer<typeof CountRegionBlockStatesOutputSchema>;
@@ -402,7 +354,7 @@ export function requireMatchingGetBlocksResponse(expected: GetBlocksInput, actua
 
 export function requireMatchingScanResponse(
   expected: ScanOrthographicViewInput,
-  actual: ScanOrthographicViewBlocksOutput,
+  actual: ScanOrthographicViewOutput,
 ): void {
   requireMatchingWorld(expected.world, actual.world);
   const basis = VIEW_BASIS[expected.direction];
@@ -431,32 +383,47 @@ export function requireMatchingScanResponse(
   if (BigInt(actual.scannedVolume) !== scannedVolume || !sameBounds(bounds, actual.bounds)) {
     invalidBridgeResponse('Paper bridge returned invalid orthographic scan bounds or volume.');
   }
-  if (actual.visibleBlockCount !== actual.blocks.length) {
-    invalidBridgeResponse('Paper bridge returned an inconsistent visible block count.');
+  const rowCount = Number(height);
+  const columnCount = Number(width);
+  if (actual.blockStateIndexRows.length !== rowCount || actual.distanceRows.length !== rowCount) {
+    invalidBridgeResponse('Paper bridge returned orthographic grid rows with the wrong height.');
   }
-  if (expected.maxResults !== undefined && actual.blocks.length > expected.maxResults) {
-    invalidBridgeResponse('Paper bridge view result exceeded the requested maxResults.');
+  if (new Set(actual.blockStatePalette).size !== actual.blockStatePalette.length) {
+    invalidBridgeResponse('Paper bridge returned duplicate orthographic palette entries.');
   }
 
-  let previousCell = -1n;
-  for (const block of actual.blocks) {
-    const { horizontal, vertical, distance } = block.offset;
-    if (
-      Math.abs(horizontal) > expected.horizontalRadius ||
-      Math.abs(vertical) > expected.verticalRadius ||
-      distance > expected.maxDistance
-    ) {
-      invalidBridgeResponse('Paper bridge returned a view block outside its viewport.');
+  const seenPaletteIndexes = new Set<number>();
+  let visibleCellCount = 0;
+  for (let row = 0; row < rowCount; row++) {
+    const blockStateIndexes = actual.blockStateIndexRows[row]!;
+    const distances = actual.distanceRows[row]!;
+    if (blockStateIndexes.length !== columnCount || distances.length !== columnCount) {
+      invalidBridgeResponse('Paper bridge returned orthographic grid rows with the wrong width.');
     }
-    const position = viewPosition(expected.origin, basis, horizontal, vertical, distance);
-    if (!sameCoordinates(position, block.position)) {
-      invalidBridgeResponse('Paper bridge view block position did not match its offset and basis.');
+    for (let column = 0; column < columnCount; column++) {
+      const blockStateIndex = blockStateIndexes[column]!;
+      const distance = distances[column]!;
+      if ((blockStateIndex === 0) !== (distance === 0)) {
+        invalidBridgeResponse('Paper bridge returned misaligned orthographic state and distance cells.');
+      }
+      if (blockStateIndex > actual.blockStatePalette.length || distance > expected.maxDistance) {
+        invalidBridgeResponse('Paper bridge returned an orthographic cell outside its palette or viewport.');
+      }
+      if (blockStateIndex === 0) continue;
+      visibleCellCount++;
+      if (!seenPaletteIndexes.has(blockStateIndex)) {
+        if (blockStateIndex !== seenPaletteIndexes.size + 1) {
+          invalidBridgeResponse('Paper bridge orthographic palette was not in first-seen cell order.');
+        }
+        seenPaletteIndexes.add(blockStateIndex);
+      }
     }
-    const cell = BigInt(expected.verticalRadius - vertical) * width + BigInt(horizontal + expected.horizontalRadius);
-    if (cell <= previousCell) {
-      invalidBridgeResponse('Paper bridge view blocks were not in distinct deterministic viewport order.');
-    }
-    previousCell = cell;
+  }
+  if (actual.visibleBlockCount !== visibleCellCount || actual.blockStatePalette.length !== seenPaletteIndexes.size) {
+    invalidBridgeResponse('Paper bridge returned inconsistent orthographic grid counts.');
+  }
+  if (expected.maxResults !== undefined && visibleCellCount > expected.maxResults) {
+    invalidBridgeResponse('Paper bridge view result exceeded the requested maxResults.');
   }
 }
 
@@ -567,7 +534,7 @@ export function registerInspectionTools(
     {
       title: 'Scan an orthographic view',
       description:
-        'Return a selected zero-based non-air depth on each bounded world-axis sightline. Depth 0 is the first non-air block, 1 is the second, and so on. Prefer grid for larger views.' +
+        'Return a compact lossless grid for a selected zero-based non-air depth on each bounded world-axis sightline. Depth 0 is the first non-air block, 1 is the second, and so on.' +
         (toolConfiguration.get_server_status
           ? ' Active scan and result ceilings are reported by get_server_status with include.configuration=true.'
           : ''),
@@ -585,26 +552,18 @@ export function registerInspectionTools(
           failureContext: 'Could not scan the orthographic view',
         },
         async (callId) => {
-          const { format, ...bridgeInput } = input;
-          const sparseView = await bridge.request(
+          const result = await bridge.request(
             BRIDGE_ROUTES.scanOrthographicView,
             callId,
-            ScanOrthographicViewBlocksOutputSchema,
-            bridgeInput,
+            ScanOrthographicViewOutputSchema,
+            input,
           );
-          requireMatchingScanResponse(input, sparseView);
-          if (format === 'grid') {
-            const result = compactView(sparseView);
-            const width = result.viewport.horizontalRadius * 2 + 1;
-            const height = result.viewport.verticalRadius * 2 + 1;
-            return successResult(
-              result,
-              `Scanned ${width}x${height} view: ${result.visibleBlockCount} visible blocks using ${result.blockStatePalette.length} block states.`,
-            );
-          }
+          requireMatchingScanResponse(input, result);
+          const width = result.viewport.horizontalRadius * 2 + 1;
+          const height = result.viewport.verticalRadius * 2 + 1;
           return successResult(
-            sparseView,
-            `Scanned view in ${sparseView.world}: ${sparseView.visibleBlockCount} visible blocks returned explicitly.`,
+            result,
+            `Scanned ${width}x${height} view: ${result.visibleBlockCount} visible cells using ${result.blockStatePalette.length} block states.`,
           );
         },
       ),

@@ -172,7 +172,7 @@ paths:
               $ref: '#/components/schemas/ScanOrthographicViewRequest'
       responses:
         '200':
-          description: Exact sparse visible block layer and its world-aligned view basis
+          description: Lossless visible-cell grid and its world-aligned view basis
           content:
             application/json:
               schema:
@@ -993,7 +993,7 @@ components:
                   enum:
                     - structure_entries
                     - palettes
-                    - visible_blocks
+                    - visible_cells
                     - perspective_rays
                     - perspective_ray_distance
                 minimumRequired:
@@ -1729,7 +1729,7 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Requested visible-block cap; omission and maximum use plugin configuration.
+          description: Requested non-empty-cell cap; omission and maximum use plugin configuration.
     AxisVector:
       type: object
       additionalProperties: false
@@ -1794,42 +1794,6 @@ components:
           format: int32
           minimum: 0
           description: Zero-based non-air depth returned for each sightline.
-    ViewOffset:
-      type: object
-      additionalProperties: false
-      required:
-        - horizontal
-        - vertical
-        - distance
-      properties:
-        horizontal:
-          type: integer
-          format: int32
-          description: Signed displacement along the view's horizontal basis.
-        vertical:
-          type: integer
-          format: int32
-          description: Signed displacement along the view's vertical basis.
-        distance:
-          type: integer
-          format: int32
-          minimum: 1
-          description: Positive displacement along the forward basis; 1 is adjacent to the origin.
-    OrthographicViewBlock:
-      type: object
-      additionalProperties: false
-      required:
-        - position
-        - offset
-        - blockState
-      properties:
-        position:
-          $ref: '#/components/schemas/BlockPosition'
-        offset:
-          $ref: '#/components/schemas/ViewOffset'
-        blockState:
-          type: string
-          minLength: 1
     ScanOrthographicViewResponse:
       type: object
       additionalProperties: false
@@ -1842,8 +1806,9 @@ components:
         - bounds
         - scannedVolume
         - visibleBlockCount
-        - format
-        - blocks
+        - blockStatePalette
+        - blockStateIndexRows
+        - distanceRows
       properties:
         world:
           type: string
@@ -1873,12 +1838,30 @@ components:
           type: integer
           format: int64
           minimum: 0
-        format:
-          const: blocks
-        blocks:
+        blockStatePalette:
           type: array
+          description: Canonical states indexed from one by blockStateIndexRows; zero means an empty sightline.
           items:
-            $ref: '#/components/schemas/OrthographicViewBlock'
+            type: string
+            minLength: 1
+        blockStateIndexRows:
+          type: array
+          description: Top-to-bottom rows and left-to-right cells containing palette indices; zero means an empty sightline.
+          items:
+            type: array
+            items:
+              type: integer
+              format: int32
+              minimum: 0
+        distanceRows:
+          type: array
+          description: Distances aligned with blockStateIndexRows; zero means an empty sightline.
+          items:
+            type: array
+            items:
+              type: integer
+              format: int32
+              minimum: 0
     PlayerSelector:
       type: string
       minLength: 1
@@ -3343,12 +3326,12 @@ components:
           type: integer
           format: int32
           minimum: 1
-          description: Default exact-block, run, or visible-block result limit; cannot exceed maxInspectionResultLimit.
+          description: Default exact-block, run, or non-empty orthographic cell limit; cannot exceed maxInspectionResultLimit.
         maxInspectionResultLimit:
           type: integer
           format: int32
           minimum: 1
-          description: Maximum caller-selectable exact-block, run, or orthographic visible-block result limit; cannot exceed maxInspectionVolume.
+          description: Maximum caller-selectable exact-block, run, or non-empty orthographic cell limit; cannot exceed maxInspectionVolume.
         maxPerspectiveRays:
           type: integer
           format: int32

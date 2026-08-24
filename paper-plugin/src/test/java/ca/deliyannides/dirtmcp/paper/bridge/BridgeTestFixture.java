@@ -195,7 +195,6 @@ final class BridgeTestFixture {
                     request.world(),
                     request.origin(),
                     "north",
-                    "orthographic",
                     new ScanOrthographicView.ViewBasis(
                             forward,
                             new ScanOrthographicView.AxisVector(1, 0, 0),
@@ -208,7 +207,9 @@ final class BridgeTestFixture {
                     new BlockBounds(request.origin(), request.origin()),
                     1,
                     0,
-                    List.of());
+                    List.of(),
+                    List.of(List.of(0)),
+                    List.of(List.of(0)));
         }
 
         @Override

@@ -13,7 +13,6 @@ import ca.deliyannides.dirtmcp.paper.world.inspection.GetBlocks.ExactPaletteEntr
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.BlockSample;
 import ca.deliyannides.dirtmcp.paper.world.inspection.RegionSnapshotSource.CapturedRegion;
 import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.Direction;
-import ca.deliyannides.dirtmcp.paper.world.inspection.ScanOrthographicView.ViewBlock;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockBounds;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockDimensions;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
@@ -119,16 +118,11 @@ final class RegionInspectionServiceTest {
         ScanOrthographicView.Result result = service.scanOrthographicView(request);
 
         assertEquals("north", result.direction());
-        assertEquals("blocks", result.format());
         assertEquals(3, result.scannedVolume());
         assertEquals(1, result.visibleBlockCount());
-        assertEquals(
-                List.of(
-                        new ViewBlock(
-                                position(0, 0, -2),
-                                new ScanOrthographicView.ViewOffset(0, 0, 2),
-                                "stone")),
-                result.blocks());
+        assertEquals(List.of("stone"), result.blockStatePalette());
+        assertEquals(List.of(List.of(1)), result.blockStateIndexRows());
+        assertEquals(List.of(List.of(2)), result.distanceRows());
     }
 
     @Test

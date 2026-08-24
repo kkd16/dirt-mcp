@@ -158,12 +158,12 @@ final class OperationExceptionTest {
     void requiresUnsupportedValuesToOfferDistinctChoices() {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new ErrorDetails.InvalidRequest.UnsupportedValue("format", List.of()));
+                () -> new ErrorDetails.InvalidRequest.UnsupportedValue("strategy", List.of()));
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
                         new ErrorDetails.InvalidRequest.UnsupportedValue(
-                                "format", List.of("blocks", "blocks")));
+                                "strategy", List.of("first", "first")));
     }
 
     @Test

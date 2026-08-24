@@ -297,7 +297,8 @@ first non-air block on each line, `depth=1` the second, and so on; air gaps do
 not increase depth. Scanning starts at distance one and excludes the origin.
 
 Horizontal views use world-up vertically. Up and down views use east
-horizontally and north vertically. Prefer `grid` for larger results.
+horizontally and north vertically. Results use compact, lossless palette and
+distance matrices.
 
 ```ts
 type Direction = 'north' | 'east' | 'south' | 'west' | 'up' | 'down';
@@ -311,8 +312,7 @@ type Input = {
   verticalRadius: nonnegativeInt;
   maxDistance: positiveInt;
   depth?: nonnegativeInt; // default 0
-  maxResults?: positiveInt; // fails rather than truncates
-  format?: 'blocks' | 'grid'; // default "blocks"
+  maxResults?: positiveInt; // non-empty-cell cap; fails rather than truncates
 };
 
 type ViewMetadata = {
@@ -335,28 +335,14 @@ type ViewMetadata = {
   visibleBlockCount: nonnegativeInt;
 };
 
-type Success =
-  | (ViewMetadata & {
-      format: 'blocks';
-      blocks: Array<{
-        position: BlockPosition;
-        offset: {
-          horizontal: int32;
-          vertical: int32;
-          distance: positiveInt;
-        };
-        blockState: string;
-      }>;
-    })
-  | (ViewMetadata & {
-      format: 'grid';
-      blockStatePalette: string[];
-      blockStateIndexRows: nonnegativeInt[][];
-      distanceRows: nonnegativeInt[][];
-    });
+type Success = ViewMetadata & {
+  blockStatePalette: string[];
+  blockStateIndexRows: nonnegativeInt[][];
+  distanceRows: nonnegativeInt[][];
+};
 ```
 
-Grid palette indices start at one; zero in either aligned matrix means the
+Palette indices start at one; zero in either aligned matrix means the
 sightline was empty.
 
 ### `get_player_context`

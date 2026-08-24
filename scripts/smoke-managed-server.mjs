@@ -1046,7 +1046,6 @@ try {
   };
   const view = await bridgeRequest('/v1/scan-orthographic-view', viewRequest);
   assert.equal(view.direction, 'north');
-  assert.equal(view.format, 'blocks');
   assert.deepEqual(view.basis, {
     forward: { x: 0, y: 0, z: -1 },
     horizontal: { x: 1, y: 0, z: 0 },
@@ -1064,13 +1063,9 @@ try {
   });
   assert.equal(view.scannedVolume, 2);
   assert.equal(view.visibleBlockCount, 1);
-  assert.deepEqual(view.blocks, [
-    {
-      position: { x: 0, y: 0, z: 1 },
-      offset: { horizontal: 0, vertical: 0, distance: 1 },
-      blockState: regionState,
-    },
-  ]);
+  assert.deepEqual(view.blockStatePalette, [regionState]);
+  assert.deepEqual(view.blockStateIndexRows, [[1]]);
+  assert.deepEqual(view.distanceRows, [[1]]);
 
   const deeperView = await bridgeRequest('/v1/scan-orthographic-view', {
     ...viewRequest,
@@ -1083,13 +1078,9 @@ try {
     depth: 1,
   });
   assert.equal(deeperView.visibleBlockCount, 1);
-  assert.deepEqual(deeperView.blocks, [
-    {
-      position: { x: 0, y: 0, z: 0 },
-      offset: { horizontal: 0, vertical: 0, distance: 2 },
-      blockState: regionState,
-    },
-  ]);
+  assert.deepEqual(deeperView.blockStatePalette, [regionState]);
+  assert.deepEqual(deeperView.blockStateIndexRows, [[1]]);
+  assert.deepEqual(deeperView.distanceRows, [[2]]);
 
   const limitedView = await bridgeResponse('/v1/scan-orthographic-view', {
     ...viewRequest,
@@ -1100,8 +1091,8 @@ try {
   assert.deepEqual(limitedView.body, {
     error: {
       code: 'result_too_large',
-      message: 'View result exceeds maxResults of 1 visible blocks',
-      details: { reason: 'visible_blocks', minimumRequired: 2, maximum: 1 },
+      message: 'View result exceeds maxResults of 1 visible cells',
+      details: { reason: 'visible_cells', minimumRequired: 2, maximum: 1 },
     },
   });
 

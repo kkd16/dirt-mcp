@@ -144,14 +144,12 @@ public final class RegionInspectionService
                     CapturedRegion capture =
                             this.snapshots.capture(
                                     request.world(), geometry.region(), List.of(), List.of());
-                    List<ScanOrthographicView.ViewBlock> blocks =
-                            OrthographicViewAlgorithms.collectVisibleBlocks(
-                                    request, geometry, capture);
+                    OrthographicViewAlgorithms.ViewGrid grid =
+                            OrthographicViewAlgorithms.collectGrid(request, geometry, capture);
                     return new ScanOrthographicView.Result(
                             capture.worldName(),
                             request.origin(),
                             request.direction().name().toLowerCase(Locale.ROOT),
-                            "blocks",
                             geometry.basis(),
                             new Viewport(
                                     request.horizontalRadius(),
@@ -160,8 +158,10 @@ public final class RegionInspectionService
                                     request.depth()),
                             geometry.region().bounds(),
                             geometry.region().volume(),
-                            blocks.size(),
-                            blocks);
+                            grid.visibleCellCount(),
+                            grid.blockStatePalette(),
+                            grid.blockStateIndexRows(),
+                            grid.distanceRows());
                 });
     }
 

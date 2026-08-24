@@ -26,7 +26,6 @@ FAWE and Paper-owned live worlds
 - MCP stdio transport and tool registration;
 - Zod input, success-output, and structured failure schemas;
 - environment validation and the authenticated bridge client;
-- MCP-only response projections such as compact orthographic grids; and
 - structured diagnostics on stderr while stdout remains protocol-only.
 
 At startup it reads the Paper configuration snapshot and advertises only enabled
@@ -53,8 +52,7 @@ wire schemas.
 [`protocol/openapi.yaml`](../protocol/openapi.yaml) is the authoritative HTTP
 contract between Java and TypeScript. It contains implemented routes, request
 and response bodies, required headers, and structured error variants. The
-[tool reference](tools.md) documents the composed MCP interface and its MCP-only
-schemas.
+[tool reference](tools.md) documents the composed MCP interface.
 
 ## Execution model
 

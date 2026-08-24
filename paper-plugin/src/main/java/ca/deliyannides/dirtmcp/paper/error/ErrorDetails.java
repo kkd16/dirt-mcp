@@ -292,8 +292,8 @@ public sealed interface ErrorDetails extends Serializable {
             }
         }
 
-        record VisibleBlocks(long minimumRequired, int maximum) implements ResultTooLarge {
-            public VisibleBlocks {
+        record VisibleCells(long minimumRequired, int maximum) implements ResultTooLarge {
+            public VisibleCells {
                 validateResultLimit(minimumRequired, maximum);
             }
         }
