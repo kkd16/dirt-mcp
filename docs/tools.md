@@ -1,730 +1,769 @@
 # MCP tool reference
 
-Dirt MCP exposes synchronous tools for a live Paper server. Tool availability
-comes from the Paper plugin's `tools` allowlist and is snapshotted when Paper and
-the MCP process start. A disabled tool is absent from MCP discovery.
+Dirt exposes synchronous tools for inspecting and editing a live Paper world.
+The usual workflow is:
 
-The schemas below describe each tool's `structuredContent`. They use compact
-TypeScript notation: `?` marks an optional field, `|` marks a union, and comments
-show defaults. All objects are strict and reject unknown fields. The TypeScript
-Zod schemas are authoritative for the MCP surface; the
-[OpenAPI contract](../protocol/openapi.yaml) is authoritative for the internal
-HTTP bridge.
+```text
+inspect -> preview -> edit -> verify -> undo if needed
+```
 
-## Common conventions
+Tool availability comes from Paper's `tools` allowlist and is fixed when Paper
+and the MCP server start. Disabled tools do not appear in discovery.
 
-- Coordinates are signed 32-bit integers. Region corners are inclusive and may
-  be supplied in either order; returned bounds are normalized.
-- World tools accept the exact name of an already-loaded Paper world.
-  Inspection and normal edits do not load or generate chunks.
-- A canonical block state is a namespaced string such as
+## What is sent over MCP?
+
+Yes: MCP stdio messages are JSON-RPC, and each tool's arguments and structured
+result are JSON objects. During discovery, `tools/list` advertises an
+`inputSchema` and `outputSchema` in JSON Schema. Those live schemas, generated
+from Dirt's Zod schemas, are the exact machine-readable contract. Every input
+object is strict, so unknown fields are rejected.
+
+The agent chooses `name` and `arguments`. The MCP host adds the JSON-RPC
+envelope and protocol metadata. A complete call looks like this:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "ping_server",
+    "arguments": {},
+    "_meta": {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientInfo": {
+        "name": "example-host",
+        "version": "1.0.0"
+      },
+      "io.modelcontextprotocol/clientCapabilities": {}
+    }
+  }
+}
+```
+
+The response contains a short text summary and the canonical result in
+`structuredContent`:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "content": [{ "type": "text", "text": "ok" }],
+    "structuredContent": { "status": "ok" },
+    "resultType": "complete",
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "dirt-mcp",
+        "version": "0.1.0"
+      }
+    }
+  }
+}
+```
+
+Most hosts hide this envelope from the agent. The examples below therefore show
+only the exact `arguments` it supplies and the `structuredContent` it uses.
+Example values are concrete JSON payloads, not a replacement for the exhaustive
+schemas returned by `tools/list`. The
+[OpenAPI contract](../protocol/openapi.yaml) describes the separate, internal
+HTTP bridge between the MCP server and Paper.
+
+## Tools at a glance
+
+| Tool                        | Use it to                                             | Changes state |
+| --------------------------- | ----------------------------------------------------- | ------------- |
+| `ping_server`               | Check Dirt, Paper, the bridge, and FAWE end to end    | No            |
+| `get_server_status`         | Read builds, performance, worlds, players, and limits | No            |
+| `count_region_block_states` | Count block states without returning positions        | No            |
+| `get_blocks`                | Read exact, replay-ready block geometry               | No            |
+| `scan_orthographic_view`    | Inspect a flat world-axis view at a chosen depth      | No            |
+| `get_player_context`        | Capture a player's pose, location, and optional state | No            |
+| `get_perspective_view`      | Trace block-collision hits from a player or camera    | No            |
+| `replace_region_blocks`     | Replace matching states throughout a cuboid           | Yes           |
+| `set_blocks`                | Place singleton blocks and inclusive cuboids          | Yes           |
+| `get_edit_history`          | Read retained, undoable Dirt edits                    | No            |
+| `undo_edits`                | Restore an exact newest-first history prefix          | Yes           |
+| `run_minecraft_commands`    | Dispatch an ordered operator-level command batch      | Yes           |
+
+## Rules shared by tools
+
+- World names must identify an already-loaded Paper world. Inspection and new
+  edits do not load or generate chunks. Undo may reload existing chunks without
+  generating terrain.
+- Block coordinates are signed 32-bit integers. Region corners are inclusive,
+  may be supplied in either order, and are normalized in results.
+- A canonical state includes its namespace and resolved properties, for example
   `minecraft:oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]`.
-- A block-state pattern may omit properties. For example,
-  `minecraft:oak_stairs` matches every oak-stair state. Destination states must
-  be exact states accepted by Paper.
-- Configured request, region, chunk, result, change, command, concurrency, and
-  history limits apply in addition to the schema constraints. Use
-  `get_server_status` with `include.configuration=true` to read active values.
-- Inspection and edit results fail rather than truncate when a hard result or
-  operation limit would be exceeded.
-
-### Shared types
-
-```ts
-type int32 = number; // integer from -2,147,483,648 to 2,147,483,647
-type nonnegativeInt32 = number; // integer from 0 to 2,147,483,647
-type positiveInt = number; // positive safe integer
-type nonnegativeInt = number; // safe integer >= 0
-type uuid = string; // canonical UUID
-type uuidV4 = string; // canonical version 4 UUID
-type timestamp = string; // ISO-8601 datetime with an offset
-
-type BlockPosition = { x: int32; y: int32; z: int32 };
-type ExactPosition = { x: number; y: number; z: number }; // finite values
-type UnitVector = ExactPosition; // length 1 within numeric tolerance
-type Bounds = { min: BlockPosition; max: BlockPosition };
-type Dimensions = { x: positiveInt; y: positiveInt; z: positiveInt };
-
-type PaletteEntry = {
-  blockState: string;
-  weight?: number; // integer 1-100
-};
-type DestinationPalette = PaletteEntry[]; // 1-256 distinct exact states
-
-type EditOperation = 'replace_region_blocks' | 'set_blocks';
-type EditLabel = string; // 1-120 Unicode code points; trimmed, single-line, and control-free
-
-type EditRecord = {
-  editId: uuidV4;
-  callId: uuidV4;
-  label: EditLabel;
-  operation: EditOperation;
-  world: string;
-  worldId: uuid;
-  bounds: Bounds;
-  changedBlockCount: positiveInt;
-  completedAt: timestamp;
-  status: 'committed' | 'recovery_required';
-};
-```
-
-Palette entries must be distinct. Omit every `weight` for equal probability, or
-provide a whole-number weight for every entry with a total of 100. Palette
-selection is probabilistic per coordinate, not an exact quota.
-
-Every tool output is the documented success object or this common failure
-envelope:
-
-```ts
-type ToolFailure = {
-  callId: uuidV4;
-  error: {
-    code:
-      | 'bridge_busy'
-      | 'bridge_http_error'
-      | 'bridge_invalid_response'
-      | 'bridge_unauthorized'
-      | 'bridge_unavailable'
-      | 'change_limit_exceeded'
-      | 'dirt_internal_error'
-      | 'edit_not_found'
-      | 'edit_not_latest'
-      | 'history_capacity_exceeded'
-      | 'internal_error'
-      | 'invalid_request'
-      | 'method_not_allowed'
-      | 'not_found'
-      | 'player_not_found'
-      | 'player_unavailable'
-      | 'region_too_large'
-      | 'result_too_large'
-      | 'server_unavailable'
-      | 'unauthorized'
-      | 'unhealthy'
-      | 'world_busy'
-      | 'world_not_found'
-      | 'world_unavailable';
-    message: string;
-    details?: object;
-    editId?: uuidV4;
-  };
-};
-
-type UndoEditsRuntimeFailure = ToolFailure & {
-  error: ToolFailure['error'] & { editId: uuidV4 };
-  undoneEdits: EditRecord[]; // successfully consumed newest-first prefix; may be empty
-};
-```
-
-Correctable failures have code-specific `details`; internal failures deliberately
-do not. The OpenAPI contract defines every bridge detail variant. Local transport
-failures use a reason or HTTP status in `details`. An `editId` means the caller
-may need to reconcile the failure with `get_edit_history` before retrying.
-Only a runtime `undo_edits` failure adds the required top-level `undoneEdits`
-array; its `error.editId` identifies the retained edit whose undo failed.
+  A match pattern may omit properties; a destination state may not.
+- Configured request, region, chunk, result, palette, change, command,
+  concurrency, and history limits still apply. Read active values with
+  `get_server_status` and `include.configuration=true`. Inspections and edits
+  fail rather than truncate when a hard limit is exceeded.
+- Inspection structures use zero-based palette indices and origin-relative
+  tuples. A placement is `[paletteIndex, x, y, z]`; a run is
+  `[paletteIndex, x, y, z, toX, toY, toZ]` with forward, inclusive corners.
+- Every edit needs a concise label. `dryRun=true` previews exact counts without
+  mutation. Reusing the returned seed with the same input and unchanged world
+  reproduces palette choices.
 
 ## Status
 
 ### `ping_server`
 
-Runs a read-only health check across the MCP server, authenticated bridge, Paper
-plugin, and a Paper-backed FAWE session.
+Use this to verify the complete authenticated path through Dirt, Paper, and a
+Paper-backed FAWE session.
 
-```ts
-type Input = {};
+Arguments:
 
-type Success = {
-  status: 'ok';
-};
+```json
+{}
+```
+
+Structured result:
+
+```json
+{
+  "status": "ok"
+}
 ```
 
 ### `get_server_status`
 
-Returns runtime builds and performance plus selected player, world, and active
-configuration sections. Worlds default on; players and configuration default
-off. Excluded sections are `null`.
+Use this to inspect runtime versions and health, discover loaded worlds and
+players, or read the active limits that constrain other tools.
 
-```ts
-type Input = {
-  include?: {
-    players?: boolean; // default false
-    worlds?: boolean; // default true
-    configuration?: boolean; // default false
-  };
-};
+Arguments:
 
-type Success = {
-  builds: {
-    minecraft: string;
-    paper: string;
-    dirtMcp: string;
-    fawe: string;
-  };
-  performance: {
-    tpsOneMinute: number;
-    averageTickTimeMillis: number;
-  };
-  players: {
-    online: nonnegativeInt;
-    maximum: nonnegativeInt;
-    entries: Array<{
-      name: string;
-      world: string;
-      gameMode: 'survival' | 'creative' | 'adventure' | 'spectator';
-      facing: 'north' | 'east' | 'south' | 'west';
-      blockPosition: BlockPosition;
-    }>;
-  } | null;
-  worlds: Array<{
-    name: string;
-    environment: string;
-    minY: int32;
-    maxY: int32;
-    spawn: BlockPosition;
-    timeOfDay: number; // integer from 0 to 23,999
-    storm: boolean;
-    thundering: boolean;
-    playerCount: nonnegativeInt;
-  }> | null;
-  configuration: {
-    limits: {
-      maxConcurrentRequests: positiveInt;
-      maxConcurrentInspections: positiveInt;
-      maxRequestBytes: positiveInt;
-      maxRegionVolume: positiveInt;
-      maxTouchedChunks: positiveInt;
-      maxInspectionTouchedChunks: positiveInt;
-      maxPerspectiveTouchedChunks: positiveInt;
-      maxBlockStatePatterns: positiveInt;
-      maxPaletteEntries: positiveInt;
-      maxChangedBlocks: positiveInt;
-      maxInspectionVolume: positiveInt;
-      maxPerspectiveRayDistanceBudget: positiveInt;
-      defaultInspectionResultLimit: positiveInt;
-      maxInspectionResultLimit: positiveInt;
-      maxPerspectiveRays: positiveInt;
-      maxCommandsPerRequest: positiveInt;
-      maxCommandFeedbackCharacters: positiveInt;
-    };
-    editHistory: {
-      maxEntriesPerWorld: positiveInt;
-      maxEntriesTotal: positiveInt;
-      maxRetainedChangedBlocks: positiveInt;
-    };
-    defaults: {
-      getBlocksIncludeAir: boolean;
-      editDryRun: boolean;
-    };
-    logging: {
-      consoleLevel: 'info' | 'warning' | 'error';
-      detailFileMaxBytes: positiveInt;
-      detailFileRetainedFiles: positiveInt; // 2-100
-    };
-    tools: Record<ToolName, boolean>;
-  } | null;
-};
+```json
+{
+  "include": {
+    "players": false,
+    "worlds": true,
+    "configuration": false
+  }
+}
 ```
 
-`ToolName` is the set of tool headings in this document.
+Structured result:
+
+```json
+{
+  "builds": {
+    "minecraft": "26.2",
+    "paper": "26.2-116-main",
+    "dirtMcp": "0.1.0",
+    "fawe": "2.15.4"
+  },
+  "performance": {
+    "tpsOneMinute": 19.98,
+    "averageTickTimeMillis": 4.25
+  },
+  "players": null,
+  "worlds": [
+    {
+      "name": "world",
+      "environment": "normal",
+      "minY": -64,
+      "maxY": 319,
+      "spawn": { "x": 0, "y": 64, "z": 0 },
+      "timeOfDay": 6000,
+      "storm": false,
+      "thundering": false,
+      "playerCount": 1
+    }
+  ],
+  "configuration": null
+}
+```
+
+`worlds` defaults to included; `players` and `configuration` default to
+excluded. Excluded sections are always `null`. Configuration includes every
+active limit, edit-history setting, default, logging setting, and tool toggle.
 
 ## Inspection
 
 ### `count_region_block_states`
 
-Counts every canonical block state, including air, in an inclusive region. Use
-this when totals are sufficient and exact positions are unnecessary.
+Use this when totals are enough and exact block positions are unnecessary. Air
+is included in the histogram.
 
-```ts
-type Input = {
-  world: string;
-  min: BlockPosition;
-  max: BlockPosition;
-};
+Arguments:
 
-type Success = {
-  world: string;
-  bounds: Bounds;
-  dimensions: Dimensions;
-  volume: positiveInt;
-  blockStateCounts: Record<string, nonnegativeInt>;
-};
+```json
+{
+  "world": "world",
+  "min": { "x": 1, "y": 2, "z": 3 },
+  "max": { "x": 2, "y": 2, "z": 3 }
+}
+```
+
+Structured result:
+
+```json
+{
+  "world": "world",
+  "bounds": {
+    "min": { "x": 1, "y": 2, "z": 3 },
+    "max": { "x": 2, "y": 2, "z": 3 }
+  },
+  "dimensions": { "x": 2, "y": 1, "z": 1 },
+  "volume": 2,
+  "blockStateCounts": {
+    "minecraft:stone": 1,
+    "minecraft:air": 1
+  }
+}
 ```
 
 ### `get_blocks`
 
-Returns a replay-ready exact structure using singleton palettes, individual
-placements, and inclusive cuboids. Include patterns are applied first, followed
-by exclude patterns. The two pattern lists may contain at most 64 entries
-combined. Exact output block states use the separate configured palette cap.
+Use this to retrieve filtered, exact block geometry that can be copied or
+replayed by `set_blocks`.
 
-```ts
-type Input = {
-  world: string;
-  min: BlockPosition;
-  max: BlockPosition;
-  includeBlockStatePatterns?: string[]; // default [], allowing all states
-  excludeBlockStatePatterns?: string[]; // default []
-  includeAir?: boolean; // plugin default when omitted
-  maxResults?: positiveInt; // maximum placements plus runs; fails rather than truncates
-};
+Arguments:
 
-type PalettePlacement = [paletteIndex: nonnegativeInt32, x: int32, y: int32, z: int32];
-type PaletteRun = [paletteIndex: nonnegativeInt32, x: int32, y: int32, z: int32, toX: int32, toY: int32, toZ: int32];
-
-type ExactBlockStructure = {
-  world: string;
-  origin: BlockPosition;
-  palettes: Array<[{ blockState: string }]>;
-  placements: PalettePlacement[];
-  runs: PaletteRun[];
-};
-
-type Success = ExactBlockStructure;
+```json
+{
+  "world": "world",
+  "min": { "x": 1, "y": 2, "z": 3 },
+  "max": { "x": 2, "y": 2, "z": 3 },
+  "includeBlockStatePatterns": ["minecraft:stone"],
+  "excludeBlockStatePatterns": [],
+  "includeAir": false,
+  "maxResults": 100
+}
 ```
 
-Every tuple coordinate is a signed offset from `origin`; run endpoints are
-component-wise forward and inclusive. Geometry never overlaps. Palettes are
-ordered by first appearance and contain exactly one unweighted state because
-inspection is exact. Blocks are scanned in Y/Z/X order and greedily packed
-along +X, then +Z, then +Y; singletons remain placements. Both geometry arrays
-are always present and may be empty.
+Structured result:
 
-Add the required `label` to the success object before using it as `set_blocks`
-input. Changing `origin` as well copies the exact structure to another location.
+```json
+{
+  "world": "world",
+  "origin": { "x": 1, "y": 2, "z": 3 },
+  "palettes": [[{ "blockState": "minecraft:stone" }]],
+  "placements": [[0, 0, 0, 0]],
+  "runs": []
+}
+```
+
+Include patterns are applied first, then exclusions. The two pattern arrays may
+contain at most 64 entries combined. Omitted `includeAir` uses the Paper default.
+Omitted `maxResults` uses the configured default; exceeding it fails rather than
+truncates. Add `label` to the result before sending it to `set_blocks`; changing
+`origin` copies the structure elsewhere.
 
 ### `scan_orthographic_view`
 
-Scans away from an origin along world-axis sightlines. `depth=0` selects the
-first non-air block on each line, `depth=1` the second, and so on; air gaps do
-not increase depth. Scanning starts at distance one and excludes the origin.
+Use this for a flat view along a world axis. `depth=0` selects the first non-air
+block on each sightline, `depth=1` the second, and so on.
 
-Horizontal views use world-up vertically. Up and down views use east
-horizontally and north vertically. Results use the same replay-ready exact
-structure as `get_blocks` and can be passed to `set_blocks` after adding its
-required `label`.
+Arguments:
 
-```ts
-type Direction = 'north' | 'east' | 'south' | 'west' | 'up' | 'down';
-
-type Input = {
-  world: string;
-  origin: BlockPosition;
-  direction: Direction;
-  horizontalRadius: nonnegativeInt;
-  verticalRadius: nonnegativeInt;
-  maxDistance: positiveInt;
-  depth?: nonnegativeInt; // default 0
-  maxResults?: positiveInt; // maximum placements plus runs; fails rather than truncates
-};
-
-type Success = ExactBlockStructure;
+```json
+{
+  "world": "world",
+  "origin": { "x": 1, "y": 2, "z": 4 },
+  "direction": "north",
+  "horizontalRadius": 1,
+  "verticalRadius": 1,
+  "maxDistance": 3,
+  "depth": 1,
+  "maxResults": 100
+}
 ```
 
-`origin` is the normalized minimum of the scanned bounds. The exact selected
-blocks are packed in Y/Z/X order using the same zero-based palettes and greedy
-+X, +Z, then +Y cuboids as `get_blocks`. Empty views return empty palettes and
-geometry arrays.
+Structured result:
+
+```json
+{
+  "world": "world",
+  "origin": { "x": 0, "y": 1, "z": 1 },
+  "palettes": [
+    [{ "blockState": "minecraft:gold_block" }],
+    [{ "blockState": "minecraft:stone" }],
+    [{ "blockState": "minecraft:oak_stairs[facing=north]" }]
+  ],
+  "placements": [
+    [0, 1, 1, 0],
+    [1, 0, 2, 1],
+    [2, 2, 2, 2]
+  ],
+  "runs": []
+}
+```
+
+Scanning starts one block away and excludes the requested origin. Directions
+are `north`, `east`, `south`, `west`, `up`, or `down`. The result has the same
+copy-ready structure as `get_blocks`.
 
 ### `get_player_context`
 
-Captures one online player by exact case-insensitive name or canonical UUID.
-Identity, pose, and positioning are always returned. Optional sections come from
-the same main-thread capture and are `null` when excluded.
+Use this to capture one online player's identity, pose, exact position, and any
+optional state needed for a later inspection or edit.
 
-```ts
-type Input = {
-  player: string; // exact case-insensitive online name or canonical UUID, at most 36 characters
-  include?: {
-    equipment?: boolean; // default true
-    inventory?: boolean; // default false
-    enderChest?: boolean; // default false
-    vitals?: boolean; // default false
-    movement?: boolean; // default false
-    client?: boolean; // default false
-    effects?: boolean; // default false
-  };
-};
+Arguments:
 
-type PlayerItem = {
-  type: string;
-  amount: positiveInt;
-  maxStackSize: positiveInt;
-  damage: nonnegativeInt | null;
-  maxDamage: positiveInt | null;
-  unbreakable: boolean;
-  enchantments: Array<{ type: string; level: int32 }>;
-};
-
-type Inventory = {
-  size: positiveInt;
-  slots: Array<{ slot: nonnegativeInt; item: PlayerItem }>;
-};
-
-type Success = {
-  capturedAt: timestamp;
-  player: { name: string; uuid: uuid };
-  world: string;
-  worldId: uuid;
-  gameMode: 'survival' | 'creative' | 'adventure' | 'spectator';
-  feetPosition: ExactPosition;
-  blockPosition: BlockPosition;
-  eyePosition: ExactPosition;
-  rotation: { yaw: number; pitch: number };
-  lookDirection: UnitVector;
-  pose:
-    | 'standing'
-    | 'fall_flying'
-    | 'sleeping'
-    | 'swimming'
-    | 'spin_attack'
-    | 'sneaking'
-    | 'long_jumping'
-    | 'dying'
-    | 'croaking'
-    | 'using_tongue'
-    | 'sitting'
-    | 'roaring'
-    | 'sniffing'
-    | 'emerging'
-    | 'digging'
-    | 'sliding'
-    | 'shooting'
-    | 'inhaling';
-  onGround: boolean;
-  equipment: {
-    selectedHotbarSlot: number; // integer 0-8
-    mainHand: PlayerItem | null;
-    offHand: PlayerItem | null;
-    helmet: PlayerItem | null;
-    chestplate: PlayerItem | null;
-    leggings: PlayerItem | null;
-    boots: PlayerItem | null;
-  } | null;
-  inventory: Inventory | null;
-  enderChest: Inventory | null;
-  vitals: {
-    health: number;
-    maxHealth: number;
-    absorptionAmount: number;
-    foodLevel: int32;
-    saturation: number;
-    exhaustion: number;
-    remainingAir: int32;
-    maximumAir: int32;
-    experienceLevel: nonnegativeInt;
-    experienceProgress: number; // 0-1
-    calculatedExperiencePoints: int32;
-    fireTicks: int32;
-    freezeTicks: nonnegativeInt;
-  } | null;
-  movement: {
-    velocity: ExactPosition;
-    fallDistance: number;
-    allowFlight: boolean;
-    flying: boolean;
-    sneaking: boolean;
-    sprinting: boolean;
-    swimming: boolean;
-    gliding: boolean;
-    sleeping: boolean;
-    blocking: boolean;
-    riptiding: boolean;
-  } | null;
-  client: {
-    pingMillis: int32;
-    locale: string;
-    clientViewDistance: nonnegativeInt;
-    viewDistance: int32;
-    sendViewDistance: int32;
-  } | null;
-  effects: Array<{
-    type: string;
-    amplifier: int32;
-    durationTicks: int32;
-    ambient: boolean;
-    particles: boolean;
-    icon: boolean;
-  }> | null;
-};
+```json
+{
+  "player": "Builder"
+}
 ```
+
+Structured result:
+
+```json
+{
+  "capturedAt": "2026-08-20T20:15:30Z",
+  "player": {
+    "name": "Builder",
+    "uuid": "55555555-5555-4555-8555-555555555555"
+  },
+  "world": "world",
+  "worldId": "22222222-2222-4222-8222-222222222222",
+  "gameMode": "creative",
+  "feetPosition": { "x": 12.25, "y": 70, "z": -3.5 },
+  "blockPosition": { "x": 12, "y": 70, "z": -4 },
+  "eyePosition": { "x": 12.25, "y": 71.62, "z": -3.5 },
+  "rotation": { "yaw": 0, "pitch": 0 },
+  "lookDirection": { "x": 0, "y": 0, "z": 1 },
+  "pose": "standing",
+  "onGround": true,
+  "equipment": {
+    "selectedHotbarSlot": 0,
+    "mainHand": {
+      "type": "minecraft:diamond_pickaxe",
+      "amount": 1,
+      "maxStackSize": 1,
+      "damage": 12,
+      "maxDamage": 1561,
+      "unbreakable": false,
+      "enchantments": [{ "type": "minecraft:efficiency", "level": 5 }]
+    },
+    "offHand": null,
+    "helmet": null,
+    "chestplate": null,
+    "leggings": null,
+    "boots": null
+  },
+  "inventory": null,
+  "enderChest": null,
+  "vitals": null,
+  "movement": null,
+  "client": null,
+  "effects": null
+}
+```
+
+The selector is an exact case-insensitive online name or canonical UUID.
+Equipment defaults on; inventory, ender chest, vitals, movement, client data,
+and effects default off. Every excluded optional section is `null`. The capture
+is point-in-time, so recapture it before relying on player state that may have
+changed.
 
 ### `get_perspective_view`
 
-Traces an odd-sized grid of first Paper block-collision hits from either an
-online player's current eye pose or a synthetic camera. Synthetic coordinates
-are the exact camera and ray origin; no player eye-height offset is added.
+Use this to trace a sparse grid of first Paper block-collision hits from a
+player's current eye pose or from a synthetic camera.
 
-```ts
-type Input = {
-  source:
-    | {
-        type: 'player';
-        player: string; // exact case-insensitive online name or canonical UUID
-      }
-    | {
-        type: 'location';
-        world: string; // exact loaded-world name
-        cameraPosition: ExactPosition;
-        rotation: {
-          yaw: number; // any finite angle; resolved output is normalized to [-180, 180)
-          pitch: number; // -90 through 90
-        };
-      };
-  width?: number; // odd integer 1-255, default 21
-  height?: number; // odd integer 1-255, default 13
-  verticalFieldOfViewDegrees?: number; // integer 1-170, default 70
-  maxDistance?: number; // integer 1-128, default 32
-  fluidCollision?: 'never' | 'source_only' | 'always'; // default "never"
-  ignorePassableBlocks?: boolean; // default false
-};
+Arguments:
 
-type Success = {
-  capturedAt: timestamp;
-  source: { type: 'player'; player: { name: string; uuid: uuid } } | { type: 'location' };
-  world: string;
-  worldId: uuid;
-  cameraPosition: ExactPosition;
-  rotation: { yaw: number; pitch: number };
-  lookDirection: UnitVector;
-  basis: {
-    forward: UnitVector;
-    right: UnitVector;
-    up: UnitVector;
-  };
-  viewport: {
-    width: number;
-    height: number;
-    verticalFieldOfViewDegrees: number;
-    horizontalFieldOfViewDegrees: number;
-    maxDistance: number;
-    fluidCollision: 'never' | 'source_only' | 'always';
-    ignorePassableBlocks: boolean;
-  };
-  checkedChunkCount: nonnegativeInt;
-  blockStatePalette: string[];
-  hits: Array<{
-    row: nonnegativeInt;
-    column: nonnegativeInt;
-    blockStateIndex: positiveInt; // one-based palette index
-    blockPosition: BlockPosition;
-    hitPosition: ExactPosition;
-    face: 'up' | 'down' | 'north' | 'east' | 'south' | 'west' | null;
-    distance: number;
-  }>;
-  crosshairHitIndex: nonnegativeInt | null;
-};
+```json
+{
+  "source": {
+    "type": "player",
+    "player": "Builder"
+  }
+}
 ```
 
-Hits are sparse and row-major. `crosshairHitIndex` addresses the `hits` array
-and is `null` when the center ray misses. The tool preflights loaded chunks and
-never loads terrain. Ray count, ray-count-times-distance work, and checked
-chunks have separate active limits. A player source fails while that player is
-spectating another entity. Results describe server collision geometry, not
-entities, lighting, particles, resource packs, third-person state, or a client
-framebuffer.
+Structured result:
+
+```json
+{
+  "capturedAt": "2026-08-20T20:15:30Z",
+  "source": {
+    "type": "player",
+    "player": {
+      "name": "Builder",
+      "uuid": "55555555-5555-4555-8555-555555555555"
+    }
+  },
+  "world": "world",
+  "worldId": "22222222-2222-4222-8222-222222222222",
+  "cameraPosition": { "x": 12.25, "y": 71.62, "z": -3.5 },
+  "rotation": { "yaw": 0, "pitch": 0 },
+  "lookDirection": { "x": 0, "y": 0, "z": 1 },
+  "basis": {
+    "forward": { "x": 0, "y": 0, "z": 1 },
+    "right": { "x": -1, "y": 0, "z": 0 },
+    "up": { "x": 0, "y": 1, "z": 0 }
+  },
+  "viewport": {
+    "width": 21,
+    "height": 13,
+    "verticalFieldOfViewDegrees": 70,
+    "horizontalFieldOfViewDegrees": 97.04074224762336,
+    "maxDistance": 32,
+    "fluidCollision": "never",
+    "ignorePassableBlocks": false
+  },
+  "checkedChunkCount": 4,
+  "blockStatePalette": ["minecraft:stone"],
+  "hits": [
+    {
+      "row": 6,
+      "column": 10,
+      "blockStateIndex": 1,
+      "blockPosition": { "x": 12, "y": 71, "z": 5 },
+      "hitPosition": { "x": 12.25, "y": 71.62, "z": 5 },
+      "face": "north",
+      "distance": 8.5
+    }
+  ],
+  "crosshairHitIndex": 0
+}
+```
+
+The viewport defaults to 21 by 13 rays, 70-degree vertical FOV, and 32-block
+distance. Width and height must be odd. Palette indices in hits are one-based;
+`crosshairHitIndex` is a zero-based index into `hits`, or `null` on a miss. This
+is collision geometry, not entities, lighting, particles, resource packs, or a
+client framebuffer. No terrain is loaded.
 
 ## Editing and undo
 
-Both block-edit tools accept an optional signed 32-bit `seed`. Omission
-generates a seed returned in the result. Reusing it with the same ordered
-palettes and unchanged world reproduces per-coordinate choices, allowing an
-exact preview to be replayed.
+Both edit tools return `outcome` as `preview`, `no_change`, or `committed`.
+Only a positive committed edit has a non-null `edit` record. Committed success
+means FAWE finished and Dirt retained the undo data.
 
-Every edit request requires a concise `label` describing one reversible intent.
-Labels are retained on committed and recovery records so history remains useful
-to the model; previews and no-ops create no record. Use one `set_blocks` call for
-related placements and runs, and separate unrelated refinements into separately
-labeled edits.
-
-An optional `maxChangedBlocks` sets a request-specific positive int32 ceiling.
-Dirt enforces the lower of this value and the configured maximum during exact
-preflight and in FAWE execution. A request whose preflight count exceeds the
-ceiling fails before mutation; changes after preflight remain protected by
-FAWE's limit and normal rollback or recovery handling.
-
-`dryRun=true` returns `outcome="preview"` without mutation. An executed no-op
-returns `outcome="no_change"`; a positive completed edit returns
-`outcome="committed"` and an `EditRecord`. Committed success is returned only
-after FAWE undo data has been retained.
+A palette contains one or more exact destination states. Omit every `weight`
+for equal probability, or give every entry a whole-number weight whose total is 100. Selection happens independently at every coordinate.
 
 ### `replace_region_blocks`
 
-Replaces blocks matching the union of one or more source patterns throughout an
-inclusive region.
+Use this to replace every block matching any source pattern inside one inclusive
+cuboid.
 
-```ts
-type Input = {
-  world: string;
-  label: EditLabel;
-  min: BlockPosition;
-  max: BlockPosition;
-  sourceBlockStatePatterns: string[]; // 1-64 distinct patterns
-  destinationPalette: DestinationPalette;
-  seed?: int32;
-  dryRun?: boolean; // plugin default when omitted
-  maxChangedBlocks?: positiveInt; // at most 2,147,483,647
-};
+Arguments:
 
-type Success = {
-  world: string;
-  bounds: Bounds;
-  sourceBlockStatePatterns: string[];
-  destinationPalette: DestinationPalette;
-  seed: int32;
-  outcome: 'preview' | 'no_change' | 'committed';
-  edit: EditRecord | null;
-  matchedBlockCount: nonnegativeInt;
-  changedBlockCount: nonnegativeInt;
-};
+```json
+{
+  "world": "world",
+  "label": "Preview floor replacement",
+  "min": { "x": 1, "y": 2, "z": 3 },
+  "max": { "x": 2, "y": 2, "z": 3 },
+  "sourceBlockStatePatterns": ["minecraft:stone"],
+  "destinationPalette": [{ "blockState": "minecraft:dirt", "weight": 100 }],
+  "seed": 123,
+  "dryRun": true,
+  "maxChangedBlocks": 1000
+}
 ```
+
+Structured result:
+
+```json
+{
+  "world": "world",
+  "bounds": {
+    "min": { "x": 1, "y": 2, "z": 3 },
+    "max": { "x": 2, "y": 2, "z": 3 }
+  },
+  "sourceBlockStatePatterns": ["minecraft:stone"],
+  "destinationPalette": [{ "blockState": "minecraft:dirt", "weight": 100 }],
+  "seed": 123,
+  "outcome": "preview",
+  "edit": null,
+  "matchedBlockCount": 1,
+  "changedBlockCount": 1
+}
+```
+
+Source patterns may omit state properties and are unioned. `maxChangedBlocks`
+adds a stricter per-call ceiling. Omitted `dryRun` uses the Paper default.
 
 ### `set_blocks`
 
-Places blocks from palettes using origin-relative singleton placements and
-inclusive cuboids as one edit. Palette indices are zero-based. Every coordinate
-in both tuple forms is a signed offset added to `origin`.
+Use this to apply related singleton placements and inclusive cuboid runs as one
+labeled, undoable edit.
 
-```ts
-type Input = {
-  world: string;
-  label: EditLabel;
-  origin: BlockPosition;
-  palettes: DestinationPalette[]; // at most 256 entries total
-  placements: PalettePlacement[];
-  runs: PaletteRun[];
-  seed?: int32;
-  dryRun?: boolean; // plugin default when omitted
-  maxChangedBlocks?: positiveInt; // at most 2,147,483,647
-};
+Arguments:
 
-type Success = {
-  world: string;
-  bounds: Bounds | null;
-  palettes: DestinationPalette[];
-  seed: int32;
-  outcome: 'preview' | 'no_change' | 'committed';
-  edit: EditRecord | null;
-  blockCount: nonnegativeInt;
-  changedBlockCount: nonnegativeInt;
-  unchangedBlockCount: nonnegativeInt;
-};
+```json
+{
+  "world": "world",
+  "label": "Build west accent",
+  "origin": { "x": 1, "y": 2, "z": 3 },
+  "palettes": [
+    [
+      { "blockState": "minecraft:stone", "weight": 75 },
+      { "blockState": "minecraft:glass", "weight": 25 }
+    ]
+  ],
+  "placements": [[0, 0, 0, 0]],
+  "runs": [[0, 4, 0, 0, 4, 0, 0]],
+  "seed": 123,
+  "dryRun": false,
+  "maxChangedBlocks": 2
+}
 ```
 
-Every run uses component-wise forward inclusive corners. Every palette index
-must exist, resolved positions must fit signed 32-bit coordinates, and no block
-represented by a placement or run may overlap another. Limits apply to the
-expanded block count. Palette selection, including weighted selection, happens
-independently at every represented coordinate using the returned seed.
+Structured result:
 
-When both geometry arrays are empty, `palettes` must also be empty. This is a
-valid no-op returning null bounds, zero counts, `outcome: 'no_change'`, and no
-edit record. Non-empty geometry requires at least one palette. Placement does
-not request Minecraft neighbor physics.
+```json
+{
+  "world": "world",
+  "bounds": {
+    "min": { "x": 1, "y": 2, "z": 3 },
+    "max": { "x": 5, "y": 2, "z": 3 }
+  },
+  "palettes": [
+    [
+      { "blockState": "minecraft:stone", "weight": 75 },
+      { "blockState": "minecraft:glass", "weight": 25 }
+    ]
+  ],
+  "seed": 123,
+  "outcome": "committed",
+  "edit": {
+    "editId": "11111111-1111-4111-8111-111111111111",
+    "callId": "33333333-3333-4333-8333-333333333333",
+    "label": "Build west accent",
+    "operation": "set_blocks",
+    "world": "world",
+    "worldId": "22222222-2222-4222-8222-222222222222",
+    "bounds": {
+      "min": { "x": 1, "y": 2, "z": 3 },
+      "max": { "x": 5, "y": 2, "z": 3 }
+    },
+    "changedBlockCount": 1,
+    "completedAt": "2026-08-19T12:34:56Z",
+    "status": "committed"
+  },
+  "blockCount": 2,
+  "changedBlockCount": 1,
+  "unchangedBlockCount": 1
+}
+```
+
+Palette indices must exist, geometry may not overlap, and expanded coordinates
+must fit signed 32-bit values. Empty `palettes`, `placements`, and `runs` form a
+valid no-op with null bounds and zero counts. Placement does not trigger
+Minecraft neighbor physics.
 
 ### `get_edit_history`
 
-Returns every currently retained and undoable Dirt edit in one loaded world,
-newest first. Dry runs, no-ops, consumed edits, evicted edits, command effects,
-and edits made outside Dirt are absent.
+Use this immediately before undo to read every currently retained edit in one
+loaded world, newest first.
 
-```ts
-type Input = {
-  world: string;
-};
+Arguments:
 
-type Success = {
-  world: string;
-  edits: EditRecord[];
-};
+```json
+{
+  "world": "world"
+}
 ```
+
+Structured result:
+
+```json
+{
+  "world": "world",
+  "edits": [
+    {
+      "editId": "11111111-1111-4111-8111-111111111111",
+      "callId": "33333333-3333-4333-8333-333333333333",
+      "label": "Build west accent",
+      "operation": "set_blocks",
+      "world": "world",
+      "worldId": "22222222-2222-4222-8222-222222222222",
+      "bounds": {
+        "min": { "x": 1, "y": 2, "z": 3 },
+        "max": { "x": 5, "y": 2, "z": 3 }
+      },
+      "changedBlockCount": 1,
+      "completedAt": "2026-08-19T12:34:56Z",
+      "status": "committed"
+    }
+  ]
+}
+```
+
+Dry runs, no-ops, consumed or evicted edits, commands, and changes made outside
+Dirt are absent. History is bounded, in memory, flat, and has no redo or
+branching. It is cleared when its world unloads or the server stops.
 
 ### `undo_edits`
 
-Restores and consumes one or more retained edits. `editIds` must be a non-empty,
-case-insensitively distinct array equal to the exact newest-first prefix of
-current history, with at most the configured per-world history capacity. Dirt
-validates the complete array before restoration, so a missing, reordered,
-skipped, or intervening edit fails without changing the world.
+Use this to restore and consume one or more retained edits. IDs must be the
+exact newest-first prefix returned by `get_edit_history`; edits cannot be
+reordered, skipped, or bypassed.
 
-```ts
-type Input = {
-  world: string;
-  editIds: uuidV4[];
-};
+Arguments:
 
-type Success = {
-  world: string;
-  edits: EditRecord[]; // requested newest-first order
-  undoCallId: uuidV4;
-  undoneAt: timestamp;
-};
+```json
+{
+  "world": "world",
+  "editIds": ["11111111-1111-4111-8111-111111111111"]
+}
 ```
 
-Execution is sequential and is not all-or-nothing. If an edit fails at runtime,
-newer edits already restored by the call remain consumed, `undoneEdits` returns
-that successful prefix (including an empty array when the first edit fails),
-and `error.editId` identifies the failed current record. The failed record stays
-retained for recovery and older requested edits are not attempted. Re-read
-`get_edit_history` before retrying.
+Structured result:
 
-History is a flat, volatile undo stack. Undo does not create redo entries, and
-Dirt provides no grouping, branching, or persistent history.
+```json
+{
+  "world": "world",
+  "edits": [
+    {
+      "editId": "11111111-1111-4111-8111-111111111111",
+      "callId": "33333333-3333-4333-8333-333333333333",
+      "label": "Build west accent",
+      "operation": "set_blocks",
+      "world": "world",
+      "worldId": "22222222-2222-4222-8222-222222222222",
+      "bounds": {
+        "min": { "x": 1, "y": 2, "z": 3 },
+        "max": { "x": 5, "y": 2, "z": 3 }
+      },
+      "changedBlockCount": 1,
+      "completedAt": "2026-08-19T12:34:56Z",
+      "status": "committed"
+    }
+  ],
+  "undoCallId": "44444444-4444-4444-8444-444444444444",
+  "undoneAt": "2026-08-19T12:35:30Z"
+}
+```
+
+Undo validates the complete array before restoration, then runs sequentially.
+If execution stops, newer edits already restored remain consumed and the
+failure's `undoneEdits` contains that successful prefix. The failed edit remains
+retained. Read history again before retrying.
 
 ## Commands
 
 ### `run_minecraft_commands`
 
-Validates and attempts a non-empty ordered command batch once through an
-operator-level sender that is not a player or the literal console. Dirt removes
-outer Java whitespace and at most one leading slash. ISO control characters and
-commands empty after normalization are rejected.
+Use this for a bounded ordered batch of registered Minecraft commands when a
+Dirt block-edit tool is not appropriate.
 
-```ts
-type Input = {
-  commands: string[]; // non-empty; active limits apply
-};
+Arguments:
 
-type CommandResult =
-  | {
-      command: string;
-      feedback: string[];
-      outcome: 'dispatched';
-      message: null;
-      rawMessage: null;
-    }
-  | {
-      command: string;
-      feedback: string[];
-      outcome: 'not_found';
-      message: string;
-      rawMessage: null;
-    }
-  | {
-      command: string;
-      feedback: string[];
-      outcome: 'dispatch_failed';
-      message: string;
-      rawMessage: string;
-    };
-
-type Success = {
-  sender: {
-    name: string;
-    isOperator: true;
-    isPlayer: false;
-  };
-  feedbackTruncated: boolean;
-  results: CommandResult[];
-};
+```json
+{
+  "commands": ["say ready", "time set day"]
+}
 ```
 
-Results contain the attempted prefix. Execution stops after the first
-`not_found` or `dispatch_failed` result, which is included as the final entry;
-later commands are not attempted. A `dispatched` outcome means Paper found and
-invoked a target, not that the command reported semantic success.
+Structured result:
 
-Command effects are non-atomic, are not retained in Dirt history, and may
-outlive synchronous dispatch. Player-only commands, `@s`, relative positions,
-and plugins requiring a concrete console sender can behave differently. Inspect
-server state before retrying after a timeout, disconnect, or unexpected internal
-failure.
+```json
+{
+  "sender": {
+    "name": "FeedbackForwardingSender",
+    "isOperator": true,
+    "isPlayer": false
+  },
+  "feedbackTruncated": false,
+  "results": [
+    {
+      "command": "say ready",
+      "feedback": [],
+      "outcome": "dispatched",
+      "message": null,
+      "rawMessage": null
+    },
+    {
+      "command": "time set day",
+      "feedback": ["Set the time to 1000"],
+      "outcome": "dispatched",
+      "message": null,
+      "rawMessage": null
+    }
+  ]
+}
+```
+
+Dirt strips outer Java whitespace and one optional leading slash. Commands run
+once, in order, through an operator-level sender that is not a player or the
+literal console. A `dispatched` outcome means Paper invoked a target, not that
+the command reported semantic success.
+
+The first `not_found` or `dispatch_failed` result is included and stops the
+batch; later commands are absent. That outcome sets the MCP result's
+`isError=true` while preserving this command-specific `structuredContent`
+instead of replacing it with the common Dirt error envelope. Command effects
+are non-atomic, may outlive dispatch, and are outside Dirt history and undo.
+Inspect state before retrying after an ambiguous timeout or disconnect.
+
+## Failures
+
+A Dirt execution failure sets `isError=true`. Its text content is only a
+summary; use the structured error. Correctable failures include code-specific
+`details`. Internal failures deliberately do not. `editId`, when present, means
+history may need reconciliation before retrying.
+
+```json
+{
+  "isError": true,
+  "content": [
+    {
+      "type": "text",
+      "text": "Could not replace region blocks: Too many changes"
+    }
+  ],
+  "structuredContent": {
+    "callId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "error": {
+      "code": "change_limit_exceeded",
+      "message": "Too many changes",
+      "details": { "maximum": 100000 }
+    }
+  },
+  "resultType": "complete",
+  "_meta": {
+    "io.modelcontextprotocol/serverInfo": {
+      "name": "dirt-mcp",
+      "version": "0.1.0"
+    }
+  }
+}
+```
+
+An `undo_edits` runtime failure additionally reports the successfully restored
+prefix. This example means the first edit was consumed, the second remains
+retained, and older requested edits were not attempted:
+
+```json
+{
+  "callId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "error": {
+    "code": "world_unavailable",
+    "message": "Undo stopped",
+    "details": { "reason": "operation_failed" },
+    "editId": "22222222-2222-4222-8222-222222222222"
+  },
+  "undoneEdits": [
+    {
+      "editId": "11111111-1111-4111-8111-111111111111",
+      "callId": "44444444-4444-4444-8444-444444444444",
+      "label": "Build west accent",
+      "operation": "set_blocks",
+      "world": "world",
+      "worldId": "55555555-5555-4555-8555-555555555555",
+      "bounds": {
+        "min": { "x": 0, "y": 0, "z": 0 },
+        "max": { "x": 0, "y": 0, "z": 0 }
+      },
+      "changedBlockCount": 7,
+      "completedAt": "2026-08-19T12:34:56Z",
+      "status": "committed"
+    }
+  ]
+}
+```
+
+Input-schema failures happen before Dirt calls Paper. The MCP SDK returns
+`isError=true` with validation text and may omit `structuredContent`; correct
+the arguments instead of treating that as a Dirt runtime failure.
