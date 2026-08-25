@@ -30,7 +30,7 @@ final class EditCoordinator implements AutoCloseable {
     private final Set<UUID> evictionClaims = new HashSet<>();
     private final int maxEntriesPerWorld;
     private final int maxEntriesTotal;
-    private final long maxRetainedChangedBlocks;
+    private final int maxRetainedChangedBlocks;
     private final AtomicBoolean closed = new AtomicBoolean();
     private long retainedChangedBlocks;
     private long claimedEvictionChangedBlocks;
@@ -38,7 +38,7 @@ final class EditCoordinator implements AutoCloseable {
     private long reservedHistoryChangedBlocks;
     private int pendingDisposals;
 
-    EditCoordinator(int maxEntriesPerWorld, int maxEntriesTotal, long maxRetainedChangedBlocks) {
+    EditCoordinator(int maxEntriesPerWorld, int maxEntriesTotal, int maxRetainedChangedBlocks) {
         if (maxEntriesPerWorld < 1
                 || maxEntriesTotal < maxEntriesPerWorld
                 || maxRetainedChangedBlocks < 1) {

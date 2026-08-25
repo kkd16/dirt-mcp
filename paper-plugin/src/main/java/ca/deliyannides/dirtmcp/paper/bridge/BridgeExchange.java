@@ -51,7 +51,9 @@ public final class BridgeExchange {
     }
 
     public JsonObject readJsonObject() throws IOException {
-        String contentType = this.exchange.getRequestHeaders().getFirst("Content-Type");
+        List<String> contentTypes = this.exchange.getRequestHeaders().get("Content-Type");
+        String contentType =
+                contentTypes == null || contentTypes.size() != 1 ? null : contentTypes.getFirst();
         if (contentType == null
                 || !contentType
                         .split(";", 2)[0]
@@ -82,6 +84,14 @@ public final class BridgeExchange {
             return document.getAsJsonObject();
         } catch (JsonParseException exception) {
             throw malformedJson();
+        }
+    }
+
+    void requireEmptyBody() throws IOException {
+        byte[] body = this.bodyReader.read(this.exchange.getRequestBody(), 0);
+        this.requestBytes = (long) body.length;
+        if (body.length != 0) {
+            throw bridgeRequest("Request body must be empty", BridgeProblem.invalidValue("body"));
         }
     }
 

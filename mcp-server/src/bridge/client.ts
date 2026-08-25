@@ -1,6 +1,6 @@
 import type { BridgeConfig } from '../config.ts';
 import * as z from 'zod/v4';
-import { BridgeErrorResponseSchema, type BridgeRoute } from './contract.ts';
+import { BridgeErrorResponseSchema, bridgeErrorMatchesHttpStatus, type BridgeRoute } from './contract.ts';
 import { ToolFailure } from './errors.ts';
 
 export class BridgeClient {
@@ -45,27 +45,31 @@ export class BridgeClient {
       throw bridgeUnavailable(error, cancellationSignal, timeoutSignal);
     }
 
-    if (!response.ok) {
-      const parsedBody = await readResponseJson(response, cancellationSignal, timeoutSignal);
-      const body: unknown = parsedBody.valid ? parsedBody.value : undefined;
-      if (response.status === 401) {
-        throw new ToolFailure({
-          code: 'bridge_unauthorized',
-          message: 'Paper bridge authentication failed.',
-          details: { reason: 'authentication_failed' },
-        });
-      }
-      const detail = BridgeErrorResponseSchema.safeParse(body);
-      if (detail.success) {
-        throw new ToolFailure(detail.data.error);
-      }
+    if (response.status === 401) {
       throw new ToolFailure({
-        code: 'bridge_http_error',
-        message: `Paper bridge returned unstructured HTTP ${response.status}.`,
-        details: { status: response.status },
+        code: 'bridge_unauthorized',
+        message: 'Paper bridge authentication failed.',
+        details: { reason: 'authentication_failed' },
       });
     }
 
+    if (response.status !== 200) {
+      if (!hasJsonContentType(response)) throw bridgeHttpError(response.status);
+      const parsedBody = await readResponseJson(response, cancellationSignal, timeoutSignal);
+      const body: unknown = parsedBody.valid ? parsedBody.value : undefined;
+      const detail = BridgeErrorResponseSchema.safeParse(body);
+      if (detail.success && bridgeErrorMatchesHttpStatus(detail.data.error, response.status)) {
+        throw new ToolFailure(detail.data.error);
+      }
+      throw bridgeHttpError(response.status);
+    }
+
+    if (!hasJsonContentType(response)) {
+      throw new ToolFailure({
+        code: 'bridge_invalid_response',
+        message: 'Paper bridge response was not application/json.',
+      });
+    }
     const parsedBody = await readResponseJson(response, cancellationSignal, timeoutSignal);
     if (!parsedBody.valid) {
       throw new ToolFailure({ code: 'bridge_invalid_response', message: 'Paper bridge returned invalid JSON.' });
@@ -80,6 +84,18 @@ export class BridgeClient {
     }
     return parsed.data;
   }
+}
+
+function hasJsonContentType(response: Response): boolean {
+  return response.headers.get('Content-Type')?.split(';', 1)[0]?.trim().toLowerCase() === 'application/json';
+}
+
+function bridgeHttpError(status: number): ToolFailure {
+  return new ToolFailure({
+    code: 'bridge_http_error',
+    message: `Paper bridge returned unexpected HTTP ${status}.`,
+    details: { status },
+  });
 }
 
 type ResponseJson = { readonly valid: true; readonly value: unknown } | { readonly valid: false };

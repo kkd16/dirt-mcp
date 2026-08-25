@@ -64,9 +64,15 @@ final class ErrorDetailsJsonTest {
     @Test
     void boundsPlayerSelectorsInOutboundErrorDetails() {
         assertEquals("x".repeat(36), new ErrorDetails.PlayerNotFound("x".repeat(36)).player());
+        assertEquals(
+                "\ud83d\udee0".repeat(36),
+                new ErrorDetails.PlayerNotFound("\ud83d\udee0".repeat(36)).player());
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new ErrorDetails.PlayerNotFound("x".repeat(37)));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new ErrorDetails.PlayerNotFound("\ud83d\udee0".repeat(37)));
     }
 
     private static Stream<Arguments> details() {

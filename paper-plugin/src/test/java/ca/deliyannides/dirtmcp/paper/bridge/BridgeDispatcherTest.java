@@ -78,6 +78,23 @@ final class BridgeDispatcherTest {
     }
 
     @Test
+    void rejectsAmbiguousAuthorizationHeaders() throws Exception {
+        TestExchange exchange = new TestExchange("GET", "/v1/ping");
+        exchange.requestHeaders.add("Authorization", "Bearer invalid");
+        BridgeDispatcher dispatcher =
+                dispatcher(
+                        List.of(endpoint("pingServer", "GET", "/v1/ping", ignored -> {})),
+                        allOperations(),
+                        log());
+
+        try (dispatcher) {
+            dispatcher.handle(exchange);
+        }
+
+        assertEquals(401, exchange.getResponseCode());
+    }
+
+    @Test
     void rejectsDisabledOperationsBeforeCallIdAndHandlerAdmission() throws Exception {
         AtomicBoolean handled = new AtomicBoolean();
         TestExchange exchange = new TestExchange("POST", "/v1/get-blocks");
@@ -153,6 +170,65 @@ final class BridgeDispatcherTest {
 
         assertEquals(UUID.fromString(BridgeTestFixture.CALL_ID), callId.get());
         assertEquals(200, exchange.getResponseCode());
+    }
+
+    @Test
+    void rejectsBodiesOnGetOperations() throws Exception {
+        AtomicBoolean handled = new AtomicBoolean();
+        BridgeEndpoint endpoint =
+                endpoint("pingServer", "GET", "/v1/ping", ignored -> handled.set(true));
+        TestExchange exchange = new TestExchange("GET", "/v1/ping");
+        exchange.setStreams(
+                new ByteArrayInputStream("{}".getBytes(StandardCharsets.UTF_8)),
+                new ByteArrayOutputStream());
+
+        try (BridgeDispatcher dispatcher = dispatcher(List.of(endpoint), allOperations(), log())) {
+            dispatcher.handle(exchange);
+        }
+
+        assertEquals(400, exchange.getResponseCode());
+        assertFalse(handled.get());
+        var details =
+                BridgeTestFixture.json(exchange.responseBody())
+                        .getAsJsonObject()
+                        .getAsJsonObject("error")
+                        .getAsJsonObject("details");
+        assertEquals("invalid_value", details.get("reason").getAsString());
+        assertEquals("body", details.get("field").getAsString());
+    }
+
+    @Test
+    void rejectsAmbiguousContentTypeHeaders() throws Exception {
+        AtomicBoolean handled = new AtomicBoolean();
+        BridgeEndpoint endpoint =
+                endpoint(
+                        "getBlocks",
+                        "POST",
+                        "/v1/get-blocks",
+                        exchange -> {
+                            exchange.readJsonObject();
+                            handled.set(true);
+                        });
+        TestExchange exchange = new TestExchange("POST", "/v1/get-blocks");
+        exchange.requestHeaders.add("Content-Type", "application/json");
+        exchange.requestHeaders.add("Content-Type", "text/plain");
+        exchange.setStreams(
+                new ByteArrayInputStream("{}".getBytes(StandardCharsets.UTF_8)),
+                new ByteArrayOutputStream());
+
+        try (BridgeDispatcher dispatcher = dispatcher(List.of(endpoint), allOperations(), log())) {
+            dispatcher.handle(exchange);
+        }
+
+        assertEquals(400, exchange.getResponseCode());
+        assertFalse(handled.get());
+        var details =
+                BridgeTestFixture.json(exchange.responseBody())
+                        .getAsJsonObject()
+                        .getAsJsonObject("error")
+                        .getAsJsonObject("details");
+        assertEquals("unsupported_media_type", details.get("reason").getAsString());
+        assertEquals("application/json", details.get("expected").getAsString());
     }
 
     @Test

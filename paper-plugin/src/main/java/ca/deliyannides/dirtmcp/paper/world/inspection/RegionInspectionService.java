@@ -84,7 +84,7 @@ public final class RegionInspectionService
     @Override
     public ExactBlockStructure getBlocks(GetBlocks.Request request) throws OperationException {
         validateGetBlocksRequest(request);
-        validateMaxResults(request.maxResults());
+        int effectiveMaxResults = effectiveMaxResults(request.maxResults());
         if ((long) request.includeBlockStatePatterns().size()
                         + request.excludeBlockStatePatterns().size()
                 > this.maxBlockStatePatterns) {
@@ -112,7 +112,7 @@ public final class RegionInspectionService
                             RegionBlockAlgorithms.collectBlocks(
                                     region, capture, request.includeAir());
                     return packStructure(
-                            capture.worldName(), region.min(), blocks, request.maxResults());
+                            capture.worldName(), region.min(), blocks, effectiveMaxResults);
                 });
     }
 
@@ -127,7 +127,7 @@ public final class RegionInspectionService
                     new ErrorDetails.InvalidRequest.Missing(field));
         }
         validateWorld(request.world());
-        validateMaxResults(request.maxResults());
+        int effectiveMaxResults = effectiveMaxResults(request.maxResults());
         return this.admission.execute(
                 () -> {
                     OrthographicViewAlgorithms.ViewGeometry geometry =
@@ -142,7 +142,7 @@ public final class RegionInspectionService
                             capture.worldName(),
                             geometry.region().min(),
                             blocks,
-                            request.maxResults());
+                            effectiveMaxResults);
                 });
     }
 
@@ -156,14 +156,15 @@ public final class RegionInspectionService
                 world, origin, packed.palettes(), packed.placements(), packed.runs());
     }
 
-    private void validateMaxResults(int maxResults) throws OperationException {
-        if (maxResults < 1 || maxResults > this.maxInspectionResults) {
+    private int effectiveMaxResults(int requested) throws OperationException {
+        if (requested < 1) {
             throw new OperationException(
                     OperationFailure.INVALID_REQUEST,
-                    "maxResults must be between 1 and " + this.maxInspectionResults,
+                    "maxResults must be positive",
                     new ErrorDetails.InvalidRequest.OutOfRange(
-                            "maxResults", maxResults, 1, this.maxInspectionResults));
+                            "maxResults", requested, 1, Integer.MAX_VALUE));
         }
+        return Math.min(requested, this.maxInspectionResults);
     }
 
     private void enforceChunkLimit(Cuboid region) throws OperationException {

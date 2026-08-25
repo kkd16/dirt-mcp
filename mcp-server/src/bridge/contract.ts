@@ -94,7 +94,10 @@ const NonBlankStringSchema = z
   .string()
   .min(1)
   .refine((value) => value.trim().length > 0);
-const PlayerSelectorSchema = NonBlankStringSchema.max(36);
+export const PlayerSelectorSchema = NonBlankStringSchema.refine(
+  (value) => codePointLengthAtMost(value, 36),
+  'Player selector must contain at most 36 Unicode code points.',
+).meta({ maxLength: 36, pattern: '.*\\S.*' });
 const JsonSafeIntegerSchema = z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER);
 const PositiveJsonSafeIntegerSchema = JsonSafeIntegerSchema.positive();
 const SignedInt32Schema = JsonSafeIntegerSchema.min(-2_147_483_648).max(2_147_483_647);
@@ -103,6 +106,16 @@ const FieldSchema = NonBlankStringSchema;
 
 function uniqueStrings(values: readonly string[]): boolean {
   return new Set(values).size === values.length;
+}
+
+function codePointLengthAtMost(value: string, maximum: number): boolean {
+  let length = 0;
+  const codePoints = value[Symbol.iterator]();
+  while (!codePoints.next().done) {
+    length += 1;
+    if (length > maximum) return false;
+  }
+  return true;
 }
 
 function reason<const Reason extends string>(value: Reason) {
@@ -137,6 +150,17 @@ const InvalidRequestDetailsSchema = z.discriminatedUnion('reason', [
     value: JsonSafeIntegerSchema,
     minimum: JsonSafeIntegerSchema,
     maximum: JsonSafeIntegerSchema,
+  }).superRefine(({ value, minimum, maximum }, context) => {
+    if (minimum > maximum) {
+      context.addIssue({ code: 'custom', message: 'Minimum must not exceed maximum.', path: ['minimum'] });
+    }
+    if (value >= minimum && value <= maximum) {
+      context.addIssue({
+        code: 'custom',
+        message: 'The rejected value must be outside the allowed range.',
+        path: ['value'],
+      });
+    }
   }),
   reasonWith('too_many_items', {
     fields: z.array(NonBlankStringSchema).min(1).refine(uniqueStrings, 'Fields must be distinct.'),
@@ -163,15 +187,27 @@ const RegionTooLargeDetailsSchema = z.discriminatedUnion('reason', [
       })
       .strict(),
     maximum: PositiveInt32Schema,
+  }).refine(({ dimensions, maximum }) => dimensions.x * dimensions.y * dimensions.z > maximum, {
+    message: 'The requested volume must exceed the maximum.',
+    path: ['dimensions'],
   }),
   reasonWith('touched_chunks', {
     minimumRequired: PositiveJsonSafeIntegerSchema,
     maximum: PositiveInt32Schema,
+  }).refine(({ minimumRequired, maximum }) => minimumRequired > maximum, {
+    message: 'The required chunk count must exceed the maximum.',
+    path: ['minimumRequired'],
   }),
-  reasonWith('perspective_chunks', { requested: PositiveInt32Schema, maximum: PositiveInt32Schema }),
+  reasonWith('perspective_chunks', { requested: PositiveInt32Schema, maximum: PositiveInt32Schema }).refine(
+    ({ requested, maximum }) => requested > maximum,
+    { message: 'The requested chunk count must exceed the maximum.', path: ['requested'] },
+  ),
   reasonWith('block_count', {
     minimumRequired: PositiveJsonSafeIntegerSchema,
     maximum: PositiveInt32Schema,
+  }).refine(({ minimumRequired, maximum }) => minimumRequired > maximum, {
+    message: 'The required block count must exceed the maximum.',
+    path: ['minimumRequired'],
   }),
 ]);
 
@@ -181,12 +217,16 @@ const ResultTooLargeDetailsSchema = z
     minimumRequired: PositiveJsonSafeIntegerSchema,
     maximum: PositiveInt32Schema,
   })
-  .strict();
+  .strict()
+  .refine(({ minimumRequired, maximum }) => minimumRequired > maximum, {
+    message: 'The required result size must exceed the maximum.',
+    path: ['minimumRequired'],
+  });
 
 const HistoryCapacityDetailsSchema = z.discriminatedUnion('reason', [
-  reasonWith('entries_per_world', { maximum: PositiveJsonSafeIntegerSchema }),
-  reasonWith('entries_total', { maximum: PositiveJsonSafeIntegerSchema }),
-  reasonWith('retained_changed_blocks', { maximum: PositiveJsonSafeIntegerSchema }),
+  reasonWith('entries_per_world', { maximum: PositiveInt32Schema }),
+  reasonWith('entries_total', { maximum: PositiveInt32Schema }),
+  reasonWith('retained_changed_blocks', { maximum: PositiveInt32Schema }),
 ]);
 
 const ServerUnavailableDetailsSchema = z.discriminatedUnion('reason', [
@@ -289,7 +329,13 @@ export const BridgeErrorSchema = z.union([
   errorWithDetails('edit_not_found', z.object({ world: NonBlankStringSchema, requestedEditId: z.uuidv4() }).strict()),
   errorWithDetails(
     'edit_not_latest',
-    z.object({ world: NonBlankStringSchema, requestedEditId: z.uuidv4(), newestEditId: z.uuidv4() }).strict(),
+    z
+      .object({ world: NonBlankStringSchema, requestedEditId: z.uuidv4(), newestEditId: z.uuidv4() })
+      .strict()
+      .refine(({ requestedEditId, newestEditId }) => requestedEditId.toLowerCase() !== newestEditId.toLowerCase(), {
+        message: 'Requested and newest edit IDs must identify distinct edits.',
+        path: ['newestEditId'],
+      }),
   ),
   errorWithDetails('history_capacity_exceeded', HistoryCapacityDetailsSchema),
   InternalErrorSchema,
@@ -312,5 +358,32 @@ export const BridgeErrorSchema = z.union([
 ]);
 
 export type BridgeError = z.infer<typeof BridgeErrorSchema>;
+
+const BRIDGE_ERROR_HTTP_STATUS = {
+  bridge_busy: 503,
+  change_limit_exceeded: 413,
+  edit_not_found: 404,
+  edit_not_latest: 409,
+  history_capacity_exceeded: 503,
+  internal_error: 500,
+  invalid_request: 400,
+  method_not_allowed: 405,
+  operation_disabled: 403,
+  player_not_found: 404,
+  player_unavailable: 409,
+  region_too_large: 413,
+  result_too_large: 413,
+  route_not_found: 404,
+  server_unavailable: 503,
+  unauthorized: 401,
+  unhealthy: 503,
+  world_busy: 409,
+  world_not_found: 404,
+  world_unavailable: 503,
+} as const satisfies Record<BridgeError['code'], number>;
+
+export function bridgeErrorMatchesHttpStatus(error: BridgeError, status: number): boolean {
+  return BRIDGE_ERROR_HTTP_STATUS[error.code] === status;
+}
 
 export const BridgeErrorResponseSchema = z.object({ error: BridgeErrorSchema }).strict();

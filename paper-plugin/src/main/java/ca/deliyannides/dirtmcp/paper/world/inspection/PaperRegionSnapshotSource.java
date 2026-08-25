@@ -77,10 +77,10 @@ public final class PaperRegionSnapshotSource implements RegionSnapshotSource {
             List<String> excludeBlockStatePatterns)
             throws OperationException {
         World world = this.server.getWorld(worldName);
-        if (world == null) {
+        if (world == null || !worldName.equals(world.getName())) {
             throw new OperationException(
                     OperationFailure.WORLD_NOT_FOUND,
-                    "World is not loaded: " + worldName,
+                    "World is not loaded with the exact name: " + worldName,
                     new ErrorDetails.WorldNotFound(worldName));
         }
         if (region.min().y() < world.getMinHeight() || region.max().y() >= world.getMaxHeight()) {

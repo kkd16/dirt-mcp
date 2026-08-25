@@ -175,21 +175,21 @@ public sealed interface ErrorDetails extends Serializable {
     }
 
     sealed interface HistoryCapacityExceeded extends ErrorDetails {
-        long maximum();
+        int maximum();
 
-        record EntriesPerWorld(long maximum) implements HistoryCapacityExceeded {
+        record EntriesPerWorld(int maximum) implements HistoryCapacityExceeded {
             public EntriesPerWorld {
                 requirePositive(maximum, "maximum");
             }
         }
 
-        record EntriesTotal(long maximum) implements HistoryCapacityExceeded {
+        record EntriesTotal(int maximum) implements HistoryCapacityExceeded {
             public EntriesTotal {
                 requirePositive(maximum, "maximum");
             }
         }
 
-        record RetainedChangedBlocks(long maximum) implements HistoryCapacityExceeded {
+        record RetainedChangedBlocks(int maximum) implements HistoryCapacityExceeded {
             public RetainedChangedBlocks {
                 requirePositive(maximum, "maximum");
             }
@@ -370,7 +370,7 @@ public sealed interface ErrorDetails extends Serializable {
 
     private static String requirePlayerSelector(String value) {
         String selector = requireNonBlank(value, "player");
-        if (selector.length() > 36) {
+        if (selector.codePointCount(0, selector.length()) > 36) {
             throw new IllegalArgumentException("player must contain at most 36 characters");
         }
         return selector;

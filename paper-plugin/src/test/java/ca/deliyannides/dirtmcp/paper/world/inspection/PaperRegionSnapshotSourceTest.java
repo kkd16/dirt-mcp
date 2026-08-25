@@ -87,7 +87,7 @@ final class PaperRegionSnapshotSourceTest {
         BlockSample sample = capture.sample(new BlockPosition(-1, 0, -1));
 
         assertTrue(mainThread.called);
-        assertEquals("canonical-world", capture.worldName());
+        assertEquals("world", capture.worldName());
         assertEquals(new BlockSample("minecraft:stone", false, true), sample);
         assertEquals(List.of("loaded:-1,-1", "chunk:-1,-1", "sample:15,0,15"), calls);
     }
@@ -191,6 +191,28 @@ final class PaperRegionSnapshotSourceTest {
     }
 
     @Test
+    void rejectsACaseMismatchedWorldName() throws Exception {
+        World world = world((ignored, method, arguments) -> defaultValue(method.getReturnType()));
+        PaperRegionSnapshotSource source =
+                new PaperRegionSnapshotSource(server(world, null, false), new DirectMainThread());
+
+        OperationException failure =
+                assertThrows(
+                        OperationException.class,
+                        () ->
+                                source.capture(
+                                        "WORLD",
+                                        cuboid(
+                                                new BlockPosition(0, 0, 0),
+                                                new BlockPosition(0, 0, 0)),
+                                        List.of(),
+                                        List.of()));
+
+        assertEquals(OperationFailure.WORLD_NOT_FOUND, failure.failure());
+        assertEquals(new ErrorDetails.WorldNotFound("WORLD"), failure.details().orElseThrow());
+    }
+
+    @Test
     void mapsSchedulerFailureToWorldUnavailable() throws Exception {
         MainThread failing =
                 new MainThread() {
@@ -225,7 +247,7 @@ final class PaperRegionSnapshotSourceTest {
                 World.class,
                 (proxy, method, arguments) -> {
                     return switch (method.getName()) {
-                        case "getName" -> "canonical-world";
+                        case "getName" -> "world";
                         case "getMinHeight" -> -64;
                         case "getMaxHeight" -> 320;
                         default -> additional.invoke(proxy, method, arguments);

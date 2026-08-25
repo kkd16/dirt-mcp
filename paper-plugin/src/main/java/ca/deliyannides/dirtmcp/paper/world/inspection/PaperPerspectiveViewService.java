@@ -169,14 +169,15 @@ public final class PaperPerspectiveViewService implements GetPerspectiveView {
                     "source.player must be a non-empty case-insensitive exact online name or canonical UUID",
                     new ErrorDetails.InvalidRequest.InvalidValue("source.player"));
         }
-        if (player.length() > GetPlayerContext.MAX_PLAYER_SELECTOR_LENGTH) {
+        int playerLength = player.codePointCount(0, player.length());
+        if (playerLength > GetPlayerContext.MAX_PLAYER_SELECTOR_LENGTH) {
             throw invalid(
                     "source.player must contain at most "
                             + GetPlayerContext.MAX_PLAYER_SELECTOR_LENGTH
                             + " characters",
                     new ErrorDetails.InvalidRequest.OutOfRange(
                             "source.player.length",
-                            player.length(),
+                            playerLength,
                             1,
                             GetPlayerContext.MAX_PLAYER_SELECTOR_LENGTH));
         }

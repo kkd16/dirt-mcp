@@ -95,10 +95,17 @@ test('preserves only contract-shaped bridge errors', async () => {
   await assert.rejects(malformed.request(BRIDGE_ROUTES.setBlocks, CALL_ID, ResponseSchema, {}), (error: unknown) => {
     return error instanceof ToolFailure && error.code === 'bridge_http_error' && error.editId === undefined;
   });
+
+  const wrongStatus = client(async () => Response.json({ error: failure }, { status: 409 }));
+  await assert.rejects(wrongStatus.request(BRIDGE_ROUTES.setBlocks, CALL_ID, ResponseSchema, {}), (error: unknown) => {
+    return error instanceof ToolFailure && error.code === 'bridge_http_error' && error.editId === undefined;
+  });
 });
 
 test('maps authorization and unstructured HTTP failures to sanitized local failures', async () => {
-  const unauthorized = client(async () => Response.json({ unexpected: 'token value' }, { status: 401 }));
+  const unauthorized = client(
+    async () => new Response('token value', { status: 401, headers: { 'Content-Type': 'text/plain' } }),
+  );
   await assert.rejects(unauthorized.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema), (error: unknown) => {
     if (!(error instanceof ToolFailure) || error.data.code !== 'bridge_unauthorized') return false;
     assert.deepEqual(error.data.details, { reason: 'authentication_failed' });
@@ -110,6 +117,33 @@ test('maps authorization and unstructured HTTP failures to sanitized local failu
     if (!(error instanceof ToolFailure) || error.data.code !== 'bridge_http_error') return false;
     assert.deepEqual(error.data.details, { status: 429 });
     return true;
+  });
+});
+
+test('requires exact HTTP 200 and an application/json response media type', async () => {
+  const unexpectedSuccess = client(async () => Response.json({ value: 'ok' }, { status: 201 }));
+  await assert.rejects(unexpectedSuccess.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema), (error: unknown) => {
+    return error instanceof ToolFailure && error.data.code === 'bridge_http_error' && error.data.details.status === 201;
+  });
+
+  const wrongSuccessMediaType = client(
+    async () => new Response('{"value":"ok"}', { headers: { 'Content-Type': 'text/plain' } }),
+  );
+  await assert.rejects(
+    wrongSuccessMediaType.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema),
+    (error: unknown) => error instanceof ToolFailure && error.code === 'bridge_invalid_response',
+  );
+
+  const parameterizedMediaType = client(
+    async () => new Response('{"value":"ok"}', { headers: { 'Content-Type': 'Application/JSON; Charset=UTF-8' } }),
+  );
+  assert.deepEqual(await parameterizedMediaType.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema), { value: 'ok' });
+
+  const wrongErrorMediaType = client(
+    async () => new Response('{"error":{}}', { status: 503, headers: { 'Content-Type': 'text/plain' } }),
+  );
+  await assert.rejects(wrongErrorMediaType.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema), (error: unknown) => {
+    return error instanceof ToolFailure && error.data.code === 'bridge_http_error' && error.data.details.status === 503;
   });
 });
 
@@ -180,6 +214,7 @@ test('classifies response-body transport failures', async () => {
             controller.error(new TypeError('socket closed'));
           },
         }),
+        { headers: { 'Content-Type': 'application/json' } },
       ),
   );
   await assert.rejects(bridge.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema), (error: unknown) => {
@@ -250,6 +285,18 @@ test('accepts one strict shape for every bridge error code', () => {
 
 test('enforces invalid-request detail invariants and mutation-only failure reasons', () => {
   assert.equal(
+    BridgeErrorResponseSchema.safeParse({
+      error: { code: 'player_not_found', message: 'Missing', details: { player: '🧱'.repeat(36) } },
+    }).success,
+    true,
+  );
+  assert.equal(
+    BridgeErrorResponseSchema.safeParse({
+      error: { code: 'player_not_found', message: 'Missing', details: { player: '🧱'.repeat(37) } },
+    }).success,
+    false,
+  );
+  assert.equal(
     BridgeErrorResponseSchema.safeParse(
       invalidRequest({ reason: 'unsupported_value', target: 'mode', allowedValues: ['a', 'a'] }),
     ).success,
@@ -265,6 +312,42 @@ test('enforces invalid-request detail invariants and mutation-only failure reaso
     BridgeErrorResponseSchema.safeParse(
       invalidRequest({ reason: 'palette_weight_total', field: 'destinationPalette', requested: 100, required: 100 }),
     ).success,
+    false,
+  );
+  assert.equal(
+    BridgeErrorResponseSchema.safeParse(
+      invalidRequest({ reason: 'out_of_range', target: 'depth', value: 5, minimum: 0, maximum: 10 }),
+    ).success,
+    false,
+  );
+  assert.equal(
+    BridgeErrorResponseSchema.safeParse({
+      error: {
+        code: 'region_too_large',
+        message: 'Too large',
+        details: { reason: 'volume', dimensions: { x: 2, y: 2, z: 2 }, maximum: 8 },
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    BridgeErrorResponseSchema.safeParse({
+      error: {
+        code: 'result_too_large',
+        message: 'Too large',
+        details: { reason: 'structure_entries', minimumRequired: 10, maximum: 10 },
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    BridgeErrorResponseSchema.safeParse({
+      error: {
+        code: 'edit_not_latest',
+        message: 'Not latest',
+        details: { world: 'world', requestedEditId: EDIT_ID, newestEditId: EDIT_ID.toUpperCase() },
+      },
+    }).success,
     false,
   );
 

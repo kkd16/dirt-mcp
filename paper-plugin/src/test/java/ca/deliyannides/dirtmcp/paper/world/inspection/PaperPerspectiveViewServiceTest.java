@@ -120,6 +120,20 @@ final class PaperPerspectiveViewServiceTest {
     }
 
     @Test
+    void measuresPlayerSelectorLengthInUnicodeCharacters() throws Exception {
+        GetPerspectiveView.Result expected = result();
+        DirectMainThread mainThread = new DirectMainThread();
+        PaperPerspectiveViewService service =
+                service(mainThread, new TrackingAccess(mainThread, expected));
+
+        assertEquals(
+                expected,
+                service.getPerspectiveView(
+                        new GetPerspectiveView.Request(
+                                new PlayerSource("\ud83d\udee0".repeat(36)), VIEW)));
+    }
+
+    @Test
     void preservesTypedAccessFailuresAndMapsSchedulerFailure() {
         OperationException expected =
                 new OperationException(

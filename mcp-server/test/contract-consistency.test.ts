@@ -21,6 +21,15 @@ test('every MCP bridge route exists in the authoritative OpenAPI contract', () =
     const pathDocument = openApi.slice(pathStart, nextPath < 0 ? undefined : nextPath);
     assert.match(pathDocument, new RegExp(`^    ${route.method.toLowerCase()}:$`, 'mu'));
     assert.match(pathDocument, /components\/parameters\/DirtCallId/u);
+    assert.deepEqual(
+      [...pathDocument.matchAll(/^        '(2\d\d)':/gmu)].map((match) => match[1]),
+      ['200'],
+      `${route.path} must have one exact HTTP 200 success response`,
+    );
+    const successStart = pathDocument.indexOf("        '200':");
+    const nextResponse = pathDocument.indexOf("\n        '", successStart + 1);
+    const successResponse = pathDocument.slice(successStart, nextResponse < 0 ? undefined : nextResponse);
+    assert.match(successResponse, /^            application\/json:$/mu);
   }
   assert.equal(BRIDGE_ROUTES.capabilities.method, 'GET');
   assert.equal(BRIDGE_ROUTES.serverStatus.method, 'POST');

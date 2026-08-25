@@ -1,18 +1,20 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import type { BridgeClient } from '../bridge/client.ts';
-import { BRIDGE_ROUTES } from '../bridge/contract.ts';
+import { BRIDGE_ROUTES, PlayerSelectorSchema } from '../bridge/contract.ts';
 import type { components } from '../generated/openapi.ts';
 import type { DirtLogger } from '../logging.ts';
 import {
   BlockPositionSchema,
   ExactPositionSchema,
+  NonnegativeInt32Schema,
   NonBlankStringSchema,
   PlayerIdentitySchema,
+  PositiveInt32Schema,
   READ_WORLD_ANNOTATIONS,
   RotationSchema,
-  SignedInt32Schema,
   UnitVectorSchema,
+  matchesPlayerSelector,
 } from './common.ts';
 import type { McpToolConfiguration } from './configuration.ts';
 import { executeToolCall, successResult } from './execution.ts';
@@ -26,9 +28,7 @@ const DEFAULT_VIEW = {
   ignorePassableBlocks: false,
 } as const;
 
-const NonnegativeInt32Schema = SignedInt32Schema.nonnegative();
-const PositiveInt32Schema = SignedInt32Schema.positive();
-const PlayerSelectorSchema = NonBlankStringSchema.max(36).describe(
+const PlayerInputSelectorSchema = PlayerSelectorSchema.describe(
   'Case-insensitive exact online player name or canonical UUID.',
 );
 
@@ -40,7 +40,7 @@ const InputRotationSchema = z
   .strict();
 
 const PerspectiveSourceSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('player'), player: PlayerSelectorSchema }).strict(),
+  z.object({ type: z.literal('player'), player: PlayerInputSelectorSchema }).strict(),
   z
     .object({
       type: z.literal('location'),
@@ -135,9 +135,143 @@ export const PerspectiveViewOutputSchema = z
     crosshairHitIndex: NonnegativeInt32Schema.nullable(),
   })
   .strict()
+  .superRefine((response, context) => {
+    let previousRayIndex = -1;
+    let highestFirstSeenPaletteIndex = 0;
+    for (const [index, hit] of response.hits.entries()) {
+      if (hit.row >= response.viewport.height) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Hit row must be inside the resolved viewport.',
+          path: ['hits', index, 'row'],
+        });
+      }
+      if (hit.column >= response.viewport.width) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Hit column must be inside the resolved viewport.',
+          path: ['hits', index, 'column'],
+        });
+      }
+      const rayIndex = hit.row * response.viewport.width + hit.column;
+      if (rayIndex <= previousRayIndex) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Hits must be in strictly increasing row-major order.',
+          path: ['hits', index],
+        });
+      }
+      previousRayIndex = rayIndex;
+
+      if (hit.blockStateIndex > response.blockStatePalette.length) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Hit block-state index must reference the response palette.',
+          path: ['hits', index, 'blockStateIndex'],
+        });
+      } else if (hit.blockStateIndex > highestFirstSeenPaletteIndex) {
+        if (hit.blockStateIndex !== highestFirstSeenPaletteIndex + 1) {
+          context.addIssue({
+            code: 'custom',
+            message: 'Block-state palette entries must be ordered by first appearance in hits.',
+            path: ['hits', index, 'blockStateIndex'],
+          });
+        }
+        highestFirstSeenPaletteIndex = hit.blockStateIndex;
+      }
+      if (hit.distance > response.viewport.maxDistance) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Hit distance must not exceed the resolved maximum distance.',
+          path: ['hits', index, 'distance'],
+        });
+      }
+    }
+    if (highestFirstSeenPaletteIndex !== response.blockStatePalette.length) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Every block-state palette entry must be referenced by a hit.',
+        path: ['blockStatePalette'],
+      });
+    }
+
+    const centerRow = Math.floor(response.viewport.height / 2);
+    const centerColumn = Math.floor(response.viewport.width / 2);
+    const centerHitIndex = response.hits.findIndex((hit) => hit.row === centerRow && hit.column === centerColumn);
+    const expectedCrosshairHitIndex = centerHitIndex === -1 ? null : centerHitIndex;
+    if (response.crosshairHitIndex !== expectedCrosshairHitIndex) {
+      context.addIssue({
+        code: 'custom',
+        message: 'The crosshair hit index must identify the center-ray hit, or be null when it missed.',
+        path: ['crosshairHitIndex'],
+      });
+    }
+  })
   .describe('Resolved camera pose and sparse first Paper block-collision hits.') satisfies z.ZodType<
   components['schemas']['GetPerspectiveViewResponse']
 >;
+
+export function perspectiveViewBridgeOutputSchema(request: components['schemas']['GetPerspectiveViewRequest']) {
+  return PerspectiveViewOutputSchema.superRefine((response, context) => {
+    const viewportFields = [
+      'width',
+      'height',
+      'verticalFieldOfViewDegrees',
+      'maxDistance',
+      'fluidCollision',
+      'ignorePassableBlocks',
+    ] as const;
+    for (const field of viewportFields) {
+      if (response.viewport[field] !== request[field]) {
+        context.addIssue({
+          code: 'custom',
+          message: `The resolved ${field} must match the request.`,
+          path: ['viewport', field],
+        });
+      }
+    }
+
+    if (response.source.type !== request.source.type) {
+      context.addIssue({
+        code: 'custom',
+        message: 'The resolved source type must match the request.',
+        path: ['source', 'type'],
+      });
+      return;
+    }
+    if (request.source.type === 'location') {
+      if (response.world !== request.source.world) {
+        context.addIssue({
+          code: 'custom',
+          message: 'The response world must match the camera world.',
+          path: ['world'],
+        });
+      }
+      if (
+        response.cameraPosition.x !== request.source.cameraPosition.x ||
+        response.cameraPosition.y !== request.source.cameraPosition.y ||
+        response.cameraPosition.z !== request.source.cameraPosition.z
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'The resolved camera position must match the requested camera position.',
+          path: ['cameraPosition'],
+        });
+      }
+      return;
+    }
+
+    if (response.source.type === 'player') {
+      if (!matchesPlayerSelector(response.source.player, request.source.player)) {
+        context.addIssue({
+          code: 'custom',
+          message: 'The resolved player must match the requested player selector.',
+          path: ['source', 'player'],
+        });
+      }
+    }
+  });
+}
 
 export function registerPerspectiveTools(
   server: McpServer,
@@ -172,7 +306,7 @@ export function registerPerspectiveTools(
             const result = await bridge.request(
               BRIDGE_ROUTES.getPerspectiveView,
               callId,
-              PerspectiveViewOutputSchema,
+              perspectiveViewBridgeOutputSchema(request),
               request,
               context.mcpReq.signal,
             );

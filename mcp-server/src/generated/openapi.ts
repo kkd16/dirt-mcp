@@ -296,7 +296,7 @@ export interface components {
             /** @constant */
             readonly code?: "edit_not_found";
             readonly details: {
-                readonly world: string;
+                readonly world: components["schemas"]["WorldName"];
                 readonly requestedEditId: components["schemas"]["UuidV4"];
             };
         };
@@ -305,7 +305,7 @@ export interface components {
             readonly code?: "edit_not_latest";
             /** @description requestedEditId and newestEditId identify distinct edits. */
             readonly details: {
-                readonly world: string;
+                readonly world: components["schemas"]["WorldName"];
                 readonly requestedEditId: components["schemas"]["UuidV4"];
                 readonly newestEditId: components["schemas"]["UuidV4"];
             };
@@ -429,7 +429,7 @@ export interface components {
             /** @constant */
             readonly code?: "world_not_found";
             readonly details: {
-                readonly world: string;
+                readonly world: components["schemas"]["WorldName"];
             };
         };
         readonly WorldUnavailableError: components["schemas"]["BridgeErrorBase"] & {
@@ -517,15 +517,15 @@ export interface components {
         readonly HistoryCapacityDetails: {
             /** @constant */
             readonly reason: "entries_per_world";
-            readonly maximum: components["schemas"]["PositiveJsonSafeInteger"];
+            readonly maximum: components["schemas"]["PositiveInt32"];
         } | {
             /** @constant */
             readonly reason: "entries_total";
-            readonly maximum: components["schemas"]["PositiveJsonSafeInteger"];
+            readonly maximum: components["schemas"]["PositiveInt32"];
         } | {
             /** @constant */
             readonly reason: "retained_changed_blocks";
-            readonly maximum: components["schemas"]["PositiveJsonSafeInteger"];
+            readonly maximum: components["schemas"]["PositiveInt32"];
         };
         readonly ServerUnavailableDetails: {
             /** @enum {string} */
@@ -538,11 +538,11 @@ export interface components {
         readonly WorldBusyDetails: {
             /** @constant */
             readonly reason: "operation_in_progress";
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
         } | {
             /** @constant */
             readonly reason: "recovery_required";
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             readonly newestEditId: components["schemas"]["UuidV4"];
         };
         readonly WorldUnavailableDetails: {
@@ -551,11 +551,11 @@ export interface components {
         } | {
             /** @constant */
             readonly reason: "world_unloaded";
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
         } | {
             /** @enum {string} */
             readonly reason: "chunk_unloaded" | "chunk_load_failed";
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             readonly chunk: components["schemas"]["ChunkPosition"];
         };
         /** @description World-unavailable reasons emitted after a mutation or undo has begun. */
@@ -579,6 +579,8 @@ export interface components {
         /** Format: int32 */
         readonly Int32: number;
         /** Format: int32 */
+        readonly NonNegativeInt32: number;
+        /** Format: int32 */
         readonly PositiveInt32: number;
         /**
          * Format: int64
@@ -590,13 +592,12 @@ export interface components {
          * @description Positive integer within the exact IEEE-754/JSON safe range.
          */
         readonly PositiveJsonSafeInteger: number;
+        /** @description Nonblank Paper world name. Lookups are exact and case-sensitive; successful responses use the canonical loaded-world name. */
+        readonly WorldName: string;
         readonly BlockPosition: {
-            /** Format: int32 */
-            readonly x: number;
-            /** Format: int32 */
-            readonly y: number;
-            /** Format: int32 */
-            readonly z: number;
+            readonly x: components["schemas"]["Int32"];
+            readonly y: components["schemas"]["Int32"];
+            readonly z: components["schemas"]["Int32"];
         };
         readonly ChunkPosition: {
             readonly x: components["schemas"]["Int32"];
@@ -613,22 +614,22 @@ export interface components {
             readonly z: components["schemas"]["PositiveJsonSafeInteger"];
         };
         readonly CountRegionBlockStatesRequest: {
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             readonly min: components["schemas"]["BlockPosition"];
             readonly max: components["schemas"]["BlockPosition"];
         };
         readonly CountRegionBlockStatesResponse: {
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             readonly bounds: components["schemas"]["Bounds"];
             readonly dimensions: components["schemas"]["Dimensions"];
-            /** Format: int64 */
-            readonly volume: number;
+            readonly volume: components["schemas"]["PositiveInt32"];
+            /** @description Observed canonical block states and their positive counts. Counts sum to volume. */
             readonly blockStateCounts: {
-                readonly [key: string]: number;
+                readonly [key: string]: components["schemas"]["PositiveInt32"];
             };
         };
         readonly GetBlocksRequest: {
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             readonly min: components["schemas"]["BlockPosition"];
             readonly max: components["schemas"]["BlockPosition"];
             /** @description Block-state patterns to include; include and exclude lists are limited to 64 entries combined. */
@@ -646,14 +647,14 @@ export interface components {
         };
         /** @description Exact [paletteIndex, x, y, z] tuple; paletteIndex is non-negative and coordinates are signed offsets from origin. */
         readonly PalettePlacement: readonly [
-            number,
+            components["schemas"]["NonNegativeInt32"],
             components["schemas"]["Int32"],
             components["schemas"]["Int32"],
             components["schemas"]["Int32"]
         ];
         /** @description Exact [paletteIndex, x, y, z, toX, toY, toZ] tuple for a component-wise forward inclusive cuboid; coordinates are signed offsets from origin. */
         readonly PaletteRun: readonly [
-            number,
+            components["schemas"]["NonNegativeInt32"],
             components["schemas"]["Int32"],
             components["schemas"]["Int32"],
             components["schemas"]["Int32"],
@@ -662,7 +663,7 @@ export interface components {
             components["schemas"]["Int32"]
         ];
         readonly ExactBlockStructureResponse: {
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             /** @description Normalized minimum inspection bound used by every relative tuple. */
             readonly origin: components["schemas"]["BlockPosition"];
             /** @description First-seen exact singleton palettes. Empty exactly when placements and runs are both empty. */
@@ -673,7 +674,7 @@ export interface components {
             readonly runs: readonly components["schemas"]["PaletteRun"][];
         };
         readonly ScanOrthographicViewRequest: {
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             /** @description Center anchor of the orthographic view; scanning starts one block forward. */
             readonly origin: components["schemas"]["BlockPosition"];
             /**
@@ -681,26 +682,14 @@ export interface components {
              * @enum {string}
              */
             readonly direction: "north" | "east" | "south" | "west" | "up" | "down";
-            /**
-             * Format: int32
-             * @description Viewport cells on each side of the center sightline along the direction's horizontal axis.
-             */
-            readonly horizontalRadius: number;
-            /**
-             * Format: int32
-             * @description Viewport cells on each side of the center sightline along the direction's vertical axis.
-             */
-            readonly verticalRadius: number;
-            /**
-             * Format: int32
-             * @description Blocks scanned forward from the origin; distance 1 is adjacent.
-             */
-            readonly maxDistance: number;
-            /**
-             * Format: int32
-             * @description Zero-based non-air hit to return on each sightline; 0 is the first, 1 is the second, and so on.
-             */
-            readonly depth: number;
+            /** @description Viewport cells on each side of the center sightline along the direction's horizontal axis. */
+            readonly horizontalRadius: components["schemas"]["NonNegativeInt32"];
+            /** @description Viewport cells on each side of the center sightline along the direction's vertical axis. */
+            readonly verticalRadius: components["schemas"]["NonNegativeInt32"];
+            /** @description Blocks scanned forward from the origin; distance 1 is adjacent. */
+            readonly maxDistance: components["schemas"]["PositiveInt32"];
+            /** @description Zero-based non-air hit to return on each sightline; 0 is the first, 1 is the second, and so on. */
+            readonly depth: components["schemas"]["NonNegativeInt32"];
             /** @description Caller ceiling on placements plus runs; Paper also enforces its safety maximum. */
             readonly maxResults: components["schemas"]["PositiveInt32"];
         };
@@ -736,7 +725,7 @@ export interface components {
         };
         readonly PlayerIdentity: {
             readonly name: string;
-            readonly uuid: string;
+            readonly uuid: components["schemas"]["Uuid"];
         };
         readonly Rotation: {
             /**
@@ -773,8 +762,7 @@ export interface components {
              * @enum {string}
              */
             readonly type: "location";
-            /** @description Exact name of an already-loaded Paper world. */
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             /** @description Exact camera and ray origin; no player eye height is added. */
             readonly cameraPosition: components["schemas"]["ExactPosition"];
             readonly rotation: components["schemas"]["PerspectiveInputRotation"];
@@ -832,21 +820,12 @@ export interface components {
             readonly ignorePassableBlocks: boolean;
         };
         readonly PerspectiveViewHit: {
-            /**
-             * Format: int32
-             * @description Zero-based top-to-bottom viewport row.
-             */
-            readonly row: number;
-            /**
-             * Format: int32
-             * @description Zero-based left-to-right viewport column.
-             */
-            readonly column: number;
-            /**
-             * Format: int32
-             * @description One-based index into blockStatePalette.
-             */
-            readonly blockStateIndex: number;
+            /** @description Zero-based top-to-bottom viewport row. */
+            readonly row: components["schemas"]["NonNegativeInt32"];
+            /** @description Zero-based left-to-right viewport column. */
+            readonly column: components["schemas"]["NonNegativeInt32"];
+            /** @description One-based index into blockStatePalette. */
+            readonly blockStateIndex: components["schemas"]["PositiveInt32"];
             readonly blockPosition: components["schemas"]["BlockPosition"];
             readonly hitPosition: components["schemas"]["ExactPosition"];
             /** @description Hit block face when Paper supplies one. */
@@ -867,7 +846,7 @@ export interface components {
             readonly type: string;
             readonly amount: components["schemas"]["PositiveInt32"];
             readonly maxStackSize: components["schemas"]["PositiveInt32"];
-            readonly damage: number | null;
+            readonly damage: components["schemas"]["NonNegativeInt32"] | null;
             readonly maxDamage: components["schemas"]["PositiveInt32"] | null;
             readonly unbreakable: boolean;
             /** @description Enchantments with distinct types in strictly increasing type order. */
@@ -885,8 +864,7 @@ export interface components {
             readonly boots: components["schemas"]["NullablePlayerItemStack"];
         };
         readonly PlayerInventorySlot: {
-            /** Format: int32 */
-            readonly slot: number;
+            readonly slot: components["schemas"]["NonNegativeInt32"];
             readonly item: components["schemas"]["PlayerItemStack"];
         };
         /** @description Sparse occupied container slots in ascending slot order. Player inventory excludes equipment and off-hand; ender chest uses the same shape. */
@@ -907,19 +885,15 @@ export interface components {
             readonly saturation: number;
             /** Format: double */
             readonly exhaustion: number;
-            /** Format: int32 */
-            readonly remainingAir: number;
+            readonly remainingAir: components["schemas"]["Int32"];
             readonly maximumAir: components["schemas"]["Int32"];
-            /** Format: int32 */
-            readonly experienceLevel: number;
+            readonly experienceLevel: components["schemas"]["NonNegativeInt32"];
             /** Format: double */
             readonly experienceProgress: number;
             /** @description Total points calculated from the current experience level and progress. */
             readonly calculatedExperiencePoints: components["schemas"]["Int32"];
-            /** Format: int32 */
-            readonly fireTicks: number;
-            /** Format: int32 */
-            readonly freezeTicks: number;
+            readonly fireTicks: components["schemas"]["Int32"];
+            readonly freezeTicks: components["schemas"]["NonNegativeInt32"];
         };
         readonly PlayerMovement: {
             readonly velocity: components["schemas"]["ExactPosition"];
@@ -938,11 +912,8 @@ export interface components {
         readonly PlayerClient: {
             readonly pingMillis: components["schemas"]["Int32"];
             readonly locale: string;
-            /**
-             * Format: int32
-             * @description Chunk render-distance preference reported by the client.
-             */
-            readonly clientViewDistance: number;
+            /** @description Chunk render-distance preference reported by the client. */
+            readonly clientViewDistance: components["schemas"]["NonNegativeInt32"];
             /** @description Effective Paper chunk load distance for this player. */
             readonly viewDistance: components["schemas"]["Int32"];
             /** @description Effective Paper chunk send distance for this player. */
@@ -979,31 +950,28 @@ export interface components {
             /** Format: date-time */
             readonly capturedAt: string;
             readonly source: components["schemas"]["ResolvedPerspectiveSource"];
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             readonly worldId: components["schemas"]["Uuid"];
             readonly cameraPosition: components["schemas"]["ExactPosition"];
             readonly rotation: components["schemas"]["Rotation"];
             readonly lookDirection: components["schemas"]["ExactPosition"];
             readonly basis: components["schemas"]["PerspectiveViewBasis"];
             readonly viewport: components["schemas"]["ResolvedPerspectiveViewport"];
-            /**
-             * Format: int32
-             * @description Exact size of the conservative loaded-chunk preflight for the sampled rays.
-             */
-            readonly checkedChunkCount: number;
+            /** @description Exact size of the conservative loaded-chunk preflight for the sampled rays. */
+            readonly checkedChunkCount: components["schemas"]["NonNegativeInt32"];
             /** @description Unique block states ordered by first appearance in hits. */
             readonly blockStatePalette: readonly string[];
             /** @description Sparse first hits in strictly increasing row-major viewport order. */
             readonly hits: readonly components["schemas"]["PerspectiveViewHit"][];
             /** @description Zero-based hits index for the center ray, or null when it did not hit a block. */
-            readonly crosshairHitIndex: number | null;
+            readonly crosshairHitIndex: components["schemas"]["NonNegativeInt32"] | null;
         };
         /** @description Coherent Paper main-thread capture. Each requested section is non-null and each excluded section is null. When equipment and inventory are both included, equipment.mainHand equals the selectedHotbarSlot item, or is null when that sparse slot is omitted. */
         readonly GetPlayerContextResponse: {
             /** Format: date-time */
             readonly capturedAt: string;
             readonly player: components["schemas"]["PlayerIdentity"];
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             readonly worldId: components["schemas"]["Uuid"];
             /** @enum {string} */
             readonly gameMode: "survival" | "creative" | "adventure" | "spectator";
@@ -1038,12 +1006,11 @@ export interface components {
             readonly label: components["schemas"]["EditLabel"];
             /** @enum {string} */
             readonly operation: "replace_region_blocks" | "set_blocks";
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             readonly worldId: components["schemas"]["Uuid"];
             /** @description Normalized operation bounds; set-block edits use the smallest inclusive bounds containing every requested position. */
             readonly bounds: components["schemas"]["Bounds"];
-            /** Format: int64 */
-            readonly changedBlockCount: number;
+            readonly changedBlockCount: components["schemas"]["PositiveInt32"];
             /**
              * Format: date-time
              * @description Timestamp recorded when the original edit completed or entered recovery; later undo attempts do not change it.
@@ -1056,7 +1023,7 @@ export interface components {
             readonly status: "committed" | "recovery_required";
         };
         readonly ReplaceRegionBlocksRequest: {
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             readonly label: components["schemas"]["EditLabel"];
             readonly min: components["schemas"]["BlockPosition"];
             readonly max: components["schemas"]["BlockPosition"];
@@ -1072,30 +1039,21 @@ export interface components {
             readonly maxChangedBlocks: components["schemas"]["PositiveInt32"] | null;
         };
         readonly ReplaceRegionBlocksResponse: {
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             /** @description Normalized inclusive bounds from the requested corners. */
             readonly bounds: components["schemas"]["Bounds"];
-            /**
-             * Format: int32
-             * @description Supplied request seed.
-             */
-            readonly seed: number;
+            /** @description Supplied request seed. */
+            readonly seed: components["schemas"]["Int32"];
             /**
              * @description Explicit dryRun=true requires preview; false excludes preview.
              * @enum {string}
              */
             readonly outcome: "preview" | "no_change" | "committed";
             readonly edit: components["schemas"]["EditRecord"] | null;
-            /**
-             * Format: int64
-             * @description Blocks matching a source pattern; cannot exceed the inclusive bounds volume.
-             */
-            readonly matchedBlockCount: number;
-            /**
-             * Format: int64
-             * @description Blocks changed or that would change; cannot exceed matchedBlockCount.
-             */
-            readonly changedBlockCount: number;
+            /** @description Blocks matching a source pattern; cannot exceed the inclusive bounds volume. */
+            readonly matchedBlockCount: components["schemas"]["NonNegativeInt32"];
+            /** @description Blocks changed or that would change; cannot exceed matchedBlockCount. */
+            readonly changedBlockCount: components["schemas"]["NonNegativeInt32"];
         } & ({
             /** @constant */
             readonly outcome?: "preview";
@@ -1109,7 +1067,8 @@ export interface components {
         } | {
             /** @constant */
             readonly outcome?: "committed";
-            readonly changedBlockCount?: unknown;
+            readonly matchedBlockCount?: components["schemas"]["PositiveInt32"];
+            readonly changedBlockCount?: components["schemas"]["PositiveInt32"];
             readonly edit?: components["schemas"]["EditRecord"] & {
                 /** @constant */
                 readonly operation?: "replace_region_blocks";
@@ -1118,7 +1077,7 @@ export interface components {
             };
         });
         readonly SetBlocksRequest: {
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             readonly label: components["schemas"]["EditLabel"];
             readonly origin: components["schemas"]["BlockPosition"];
             /** @description Weighted palettes referenced by zero-based index; empty exactly when placements and runs are both empty, with at most 256 entries across all palettes. */
@@ -1135,35 +1094,23 @@ export interface components {
             readonly maxChangedBlocks: components["schemas"]["PositiveInt32"] | null;
         };
         readonly SetBlocksResponse: {
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             /** @description Smallest inclusive bounds containing all requested resolved blocks, or null for empty geometry. */
             readonly bounds: components["schemas"]["Bounds"] | null;
-            /**
-             * Format: int32
-             * @description Supplied request seed.
-             */
-            readonly seed: number;
+            /** @description Supplied request seed. */
+            readonly seed: components["schemas"]["Int32"];
             /**
              * @description Explicit dryRun=true requires preview; false excludes preview.
              * @enum {string}
              */
             readonly outcome: "preview" | "no_change" | "committed";
             readonly edit: components["schemas"]["EditRecord"] | null;
-            /**
-             * Format: int64
-             * @description Expanded number of unique blocks represented by placements and runs.
-             */
-            readonly blockCount: number;
-            /**
-             * Format: int64
-             * @description Blocks changed or that would change; together with unchangedBlockCount equals blockCount.
-             */
-            readonly changedBlockCount: number;
-            /**
-             * Format: int64
-             * @description Blocks already in their requested state; together with changedBlockCount equals blockCount.
-             */
-            readonly unchangedBlockCount: number;
+            /** @description Expanded number of unique blocks represented by placements and runs. */
+            readonly blockCount: components["schemas"]["NonNegativeInt32"];
+            /** @description Blocks changed or that would change; together with unchangedBlockCount equals blockCount. */
+            readonly changedBlockCount: components["schemas"]["NonNegativeInt32"];
+            /** @description Blocks already in their requested state; together with changedBlockCount equals blockCount. */
+            readonly unchangedBlockCount: components["schemas"]["NonNegativeInt32"];
         } & ({
             /** @constant */
             readonly outcome?: "preview";
@@ -1177,7 +1124,9 @@ export interface components {
         } | {
             /** @constant */
             readonly outcome?: "committed";
-            readonly changedBlockCount?: unknown;
+            readonly bounds?: components["schemas"]["Bounds"];
+            readonly blockCount?: components["schemas"]["PositiveInt32"];
+            readonly changedBlockCount?: components["schemas"]["PositiveInt32"];
             readonly edit?: components["schemas"]["EditRecord"] & {
                 /** @constant */
                 readonly operation?: "set_blocks";
@@ -1186,16 +1135,16 @@ export interface components {
             };
         });
         readonly GetEditHistoryRequest: {
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
         };
         readonly GetEditHistoryResponse: {
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             /** @description Retained undoable edit records for one loaded world UUID, ordered newest first with distinct edit IDs. */
             readonly edits: readonly components["schemas"]["EditRecord"][];
         };
         /** @description Identity-checked request for an exact newest-first prefix of retained edits. The complete list is validated before restoration begins. */
         readonly UndoEditsRequest: {
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             /** @description Case-insensitively distinct retained edit IDs in exact newest-first history order, with no skipped entries and no more entries than the configured per-world history capacity. */
             readonly editIds: readonly components["schemas"]["UuidV4"][];
         };
@@ -1207,7 +1156,7 @@ export interface components {
              * @enum {string}
              */
             readonly outcome: "completed";
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             /** @description Successfully restored and consumed edit records in the requested newest-first order, each as retained immediately before its undo. */
             readonly undoneEdits: readonly components["schemas"]["EditRecord"][];
             readonly undoCallId: components["schemas"]["UuidV4"];
@@ -1224,7 +1173,7 @@ export interface components {
              * @enum {string}
              */
             readonly outcome: "partial";
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             readonly undoCallId: components["schemas"]["UuidV4"];
             /** @description Successfully restored and consumed prefix before the failure, newest first; empty when the first edit failed. */
             readonly undoneEdits: readonly components["schemas"]["EditRecord"][];
@@ -1302,26 +1251,14 @@ export interface components {
             readonly results: readonly components["schemas"]["CommandResult"][];
         };
         readonly OperationLimitConfiguration: {
-            /**
-             * Format: int32
-             * @description Maximum cuboid mutation/count volume or placements in set_blocks.
-             */
-            readonly maxRegionVolume: number;
-            /**
-             * Format: int32
-             * @description Maximum distinct loaded chunks one mutation may touch.
-             */
-            readonly maxEditTouchedChunks: number;
-            /**
-             * Format: int32
-             * @description Maximum distinct loaded chunks a region inspection may snapshot.
-             */
-            readonly maxInspectionTouchedChunks: number;
-            /**
-             * Format: int32
-             * @description Maximum distinct loaded chunks a perspective view may check.
-             */
-            readonly maxPerspectiveTouchedChunks: number;
+            /** @description Maximum cuboid mutation/count volume or expanded blocks represented by a set-blocks edit. */
+            readonly maxRegionVolume: components["schemas"]["PositiveInt32"];
+            /** @description Maximum distinct loaded chunks one mutation may touch. */
+            readonly maxEditTouchedChunks: components["schemas"]["PositiveInt32"];
+            /** @description Maximum distinct loaded chunks a region inspection may snapshot. */
+            readonly maxInspectionTouchedChunks: components["schemas"]["PositiveInt32"];
+            /** @description Maximum distinct loaded chunks a perspective view may check. */
+            readonly maxPerspectiveTouchedChunks: components["schemas"]["PositiveInt32"];
             /**
              * Format: int32
              * @description Maximum match patterns in one operation; inspection include and exclude lists share this cap.
@@ -1332,58 +1269,28 @@ export interface components {
              * @description Maximum exact block-state entries in one edit or exact inspection structure palette.
              */
             readonly maxPaletteEntries: number;
-            /**
-             * Format: int32
-             * @description Maximum blocks one mutation may change; cannot exceed maxRegionVolume.
-             */
-            readonly maxChangedBlocks: number;
-            /**
-             * Format: int32
-             * @description Maximum blocks scanned by exact block retrieval or an orthographic view; cannot exceed maxRegionVolume.
-             */
-            readonly maxInspectionVolume: number;
-            /**
-             * Format: int32
-             * @description Maximum perspective ray count multiplied by maximum ray distance.
-             */
-            readonly maxPerspectiveRayDistanceBudget: number;
-            /**
-             * Format: int32
-             * @description Maximum caller-selectable placement-plus-run limit for exact inspection structures; cannot exceed maxInspectionVolume.
-             */
-            readonly maxInspectionResultLimit: number;
-            /**
-             * Format: int32
-             * @description Maximum rays in one perspective view; cannot exceed maxPerspectiveRayDistanceBudget.
-             */
-            readonly maxPerspectiveRays: number;
-            /**
-             * Format: int32
-             * @description Maximum commands accepted in one ordered command batch.
-             */
-            readonly maxCommandsPerRequest: number;
-            /**
-             * Format: int32
-             * @description Maximum Unicode code points of synchronous plain-text feedback retained across one command batch.
-             */
-            readonly maxCommandFeedbackCharacters: number;
+            /** @description Maximum blocks one mutation may change; cannot exceed maxRegionVolume. */
+            readonly maxChangedBlocks: components["schemas"]["PositiveInt32"];
+            /** @description Maximum blocks scanned by exact block retrieval or an orthographic view; cannot exceed maxRegionVolume. */
+            readonly maxInspectionVolume: components["schemas"]["PositiveInt32"];
+            /** @description Maximum perspective ray count multiplied by maximum ray distance. */
+            readonly maxPerspectiveRayDistanceBudget: components["schemas"]["PositiveInt32"];
+            /** @description Paper safety ceiling on placements plus runs returned by an exact inspection structure. The effective limit is the lower of this value and request maxResults, and cannot exceed maxInspectionVolume. */
+            readonly maxInspectionResultLimit: components["schemas"]["PositiveInt32"];
+            /** @description Maximum rays in one perspective view; cannot exceed maxPerspectiveRayDistanceBudget. */
+            readonly maxPerspectiveRays: components["schemas"]["PositiveInt32"];
+            /** @description Maximum commands accepted in one ordered command batch. */
+            readonly maxCommandsPerRequest: components["schemas"]["PositiveInt32"];
+            /** @description Maximum Unicode code points of synchronous plain-text feedback retained across one command batch. */
+            readonly maxCommandFeedbackCharacters: components["schemas"]["PositiveInt32"];
         };
         readonly EditHistoryConfiguration: {
-            /**
-             * Format: int32
-             * @description Maximum retained undoable edits in one loaded world; cannot exceed maxEntriesTotal.
-             */
-            readonly maxEntriesPerWorld: number;
-            /**
-             * Format: int32
-             * @description Maximum retained undoable edits across all loaded worlds.
-             */
-            readonly maxEntriesTotal: number;
-            /**
-             * Format: int32
-             * @description Maximum sum of changed-block counts across all retained undoable edits; must be at least OperationLimitConfiguration.maxChangedBlocks.
-             */
-            readonly maxRetainedChangedBlocks: number;
+            /** @description Maximum retained undoable edits in one loaded world; cannot exceed maxEntriesTotal. */
+            readonly maxEntriesPerWorld: components["schemas"]["PositiveInt32"];
+            /** @description Maximum retained undoable edits across all loaded worlds. */
+            readonly maxEntriesTotal: components["schemas"]["PositiveInt32"];
+            /** @description Maximum sum of changed-block counts across all retained undoable edits; must be at least OperationLimitConfiguration.maxChangedBlocks. */
+            readonly maxRetainedChangedBlocks: components["schemas"]["PositiveInt32"];
         };
         /** @description Client-relevant operation limits; excludes transport, concurrency, logging, defaults, and MCP policy. */
         readonly ServerStatusConfiguration: {
@@ -1408,7 +1315,7 @@ export interface components {
         };
         readonly OnlinePlayer: {
             readonly name: string;
-            readonly world: string;
+            readonly world: components["schemas"]["WorldName"];
             /** @enum {string} */
             readonly gameMode: "survival" | "creative" | "adventure" | "spectator";
             /**
@@ -1418,27 +1325,29 @@ export interface components {
             readonly facing: "north" | "east" | "south" | "west";
             readonly blockPosition: components["schemas"]["BlockPosition"];
         };
+        /** @description Current player counts and entries; online equals entries length, and entries are ordered by case-insensitive player name. */
         readonly PlayerSummary: {
-            /** Format: int32 */
-            readonly online: number;
-            /** Format: int32 */
-            readonly maximum: number;
+            readonly online: components["schemas"]["NonNegativeInt32"];
+            readonly maximum: components["schemas"]["NonNegativeInt32"];
             readonly entries: readonly components["schemas"]["OnlinePlayer"][];
         };
         readonly WorldStatus: {
-            readonly name: string;
-            readonly environment: string;
-            /** Format: int32 */
-            readonly minY: number;
-            /** Format: int32 */
-            readonly maxY: number;
+            readonly name: components["schemas"]["WorldName"];
+            /**
+             * @description Paper world environment.
+             * @enum {string}
+             */
+            readonly environment: "normal" | "nether" | "the_end" | "custom";
+            /** @description Minimum valid block Y, inclusive. */
+            readonly minY: components["schemas"]["Int32"];
+            /** @description Maximum valid block Y, inclusive. */
+            readonly maxY: components["schemas"]["Int32"];
             readonly spawn: components["schemas"]["BlockPosition"];
             /** Format: int64 */
             readonly timeOfDay: number;
             readonly storm: boolean;
             readonly thundering: boolean;
-            /** Format: int32 */
-            readonly playerCount: number;
+            readonly playerCount: components["schemas"]["NonNegativeInt32"];
         };
         readonly ServerStatusRequest: {
             readonly includePlayers: boolean;

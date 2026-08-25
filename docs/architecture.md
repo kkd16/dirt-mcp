@@ -72,11 +72,13 @@ IDs currently admitted by Paper. Disabled configurable operations fail with
 
 Bridge requests are fully materialized. MCP applies fixed tool defaults and
 generates omitted edit seeds before HTTP dispatch; Paper receives explicit
-values and independently validates them. The status operation is a focused POST
-with explicit section booleans and required nullable player, world, and
-configuration sections in its response. Within edit requests, only an omitted
-mutation caller ceiling is represented by null so Paper can apply its configured
-safety cap.
+values and independently validates them. MCP accepts only exact HTTP 200
+`application/json` successes, schema-checks bridge responses and their request
+correlation, and requires structured error codes to match their HTTP status
+before exposing results to the host. The status operation is a focused POST with
+explicit section booleans and required nullable player, world, and configuration
+sections in its response. Within edit requests, only an omitted mutation caller
+ceiling is represented by null so Paper can apply its configured safety cap.
 
 Inspections share a smaller non-queueing admission pool within the bridge
 request pool. Region snapshots and perspective traces use separate chunk and
@@ -97,7 +99,8 @@ Region inspection never loads or generates terrain. Dirt validates the world,
 height range, volume, result ceiling, and touched chunks before capturing
 thread-safe Paper chunk snapshots on the main thread. Counting, filtering,
 exact geometry extraction, and orthographic scanning then run off-thread.
-Results fail rather than truncate when a configured ceiling would be exceeded.
+Exact structures fail rather than truncate when the effective result ceiling
+would be exceeded.
 
 Player context is captured as one coherent main-thread snapshot. Perspective
 views are a separate operation using either an online player's eye pose or an

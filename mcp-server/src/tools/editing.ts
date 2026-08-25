@@ -11,11 +11,16 @@ import {
   MAX_BLOCK_STATE_PATTERNS,
   MAX_PALETTE_ENTRIES,
   NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
+  NonnegativeInt32Schema,
   NonBlankStringSchema,
   PalettePlacementSchema,
   PaletteRunSchema,
+  PositiveInt32Schema,
   READ_WORLD_ANNOTATIONS,
   SignedInt32Schema,
+  normalizedBounds,
+  sameBounds,
+  type Bounds,
 } from './common.ts';
 import type { McpToolConfiguration } from './configuration.ts';
 import { executeToolCall, successResult } from './execution.ts';
@@ -69,7 +74,6 @@ export const DestinationPaletteSchema = z
   .describe('Destination states resolved by Paper, with equal probability or explicit weights totaling 100.');
 
 const SeedSchema = SignedInt32Schema.describe('Signed 32-bit palette seed.');
-const PositiveInt32Schema = SignedInt32Schema.positive();
 // oxlint-disable-next-line eslint/no-control-regex -- These are precisely the control characters labels forbid.
 const FORBIDDEN_EDIT_LABEL_CHARACTER = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/u;
 
@@ -114,7 +118,7 @@ export const EditRecordSchema = z
     world: NonBlankStringSchema,
     worldId: z.uuid(),
     bounds: BoundsSchema,
-    changedBlockCount: z.number().int().positive(),
+    changedBlockCount: PositiveInt32Schema,
     completedAt: z.iso.datetime({ offset: true }),
     status: z.enum(['committed', 'recovery_required']),
   })
@@ -141,7 +145,7 @@ const ReplaceRegionBlocksOutputShape = {
   world: NonBlankStringSchema,
   bounds: BoundsSchema,
   seed: SeedSchema,
-  matchedBlockCount: z.number().int().nonnegative(),
+  matchedBlockCount: NonnegativeInt32Schema,
 };
 
 export const ReplaceRegionBlocksOutputSchema = z
@@ -151,7 +155,7 @@ export const ReplaceRegionBlocksOutputSchema = z
         ...ReplaceRegionBlocksOutputShape,
         outcome: z.literal('preview'),
         edit: z.null(),
-        changedBlockCount: z.number().int().nonnegative(),
+        changedBlockCount: NonnegativeInt32Schema,
       })
       .strict(),
     z
@@ -170,7 +174,8 @@ export const ReplaceRegionBlocksOutputSchema = z
           operation: z.literal('replace_region_blocks'),
           status: z.literal('committed'),
         }),
-        changedBlockCount: z.number().int().positive(),
+        matchedBlockCount: PositiveInt32Schema,
+        changedBlockCount: PositiveInt32Schema,
       })
       .strict(),
   ])
@@ -202,14 +207,42 @@ export const SetBlocksInputSchema = z
     ...EditOptionsInputShape,
   })
   .strict()
+  .superRefine(({ palettes, placements, runs }, context) => {
+    const geometryCount = placements.length + runs.length;
+    if ((palettes.length === 0) !== (geometryCount === 0)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Palettes must be empty exactly when no block geometry is supplied.',
+        path: ['palettes'],
+      });
+    }
+    for (const [index, [paletteIndex]] of placements.entries()) {
+      if (paletteIndex >= palettes.length) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Placement palette index must reference an existing palette.',
+          path: ['placements', index, 0],
+        });
+      }
+    }
+    for (const [index, [paletteIndex]] of runs.entries()) {
+      if (paletteIndex >= palettes.length) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Run palette index must reference an existing palette.',
+          path: ['runs', index, 0],
+        });
+      }
+    }
+  })
   .describe('One undoable weighted-palette edit from origin-relative block geometry.');
 
 const SetBlocksOutputShape = {
   world: NonBlankStringSchema,
   bounds: BoundsSchema.nullable(),
   seed: SeedSchema,
-  blockCount: z.number().int().nonnegative(),
-  unchangedBlockCount: z.number().int().nonnegative(),
+  blockCount: NonnegativeInt32Schema,
+  unchangedBlockCount: NonnegativeInt32Schema,
 };
 
 export const SetBlocksOutputSchema = z
@@ -219,7 +252,7 @@ export const SetBlocksOutputSchema = z
         ...SetBlocksOutputShape,
         outcome: z.literal('preview'),
         edit: z.null(),
-        changedBlockCount: z.number().int().nonnegative(),
+        changedBlockCount: NonnegativeInt32Schema,
       })
       .strict(),
     z
@@ -235,10 +268,16 @@ export const SetBlocksOutputSchema = z
         ...SetBlocksOutputShape,
         outcome: z.literal('committed'),
         edit: EditRecordSchema.extend({ operation: z.literal('set_blocks'), status: z.literal('committed') }),
-        changedBlockCount: z.number().int().positive(),
+        bounds: BoundsSchema,
+        blockCount: PositiveInt32Schema,
+        changedBlockCount: PositiveInt32Schema,
       })
       .strict(),
   ])
+  .refine((response) => (response.bounds === null) === (response.blockCount === 0), {
+    message: 'Bounds must be null exactly when the represented block count is zero.',
+    path: ['bounds'],
+  })
   .describe('Completed or previewed palette-based block edit.') satisfies z.ZodType<
   components['schemas']['SetBlocksResponse']
 >;
@@ -304,7 +343,6 @@ const UndoEditsBridgeOutputSchema = z.discriminatedUnion('outcome', [
   UndoEditsPartialBridgeSchema,
 ]) satisfies z.ZodType<components['schemas']['UndoEditsResponse']>;
 
-type Bounds = z.infer<typeof BoundsSchema>;
 type EditRecord = z.infer<typeof EditRecordSchema>;
 
 interface EditRequestCorrelation {
@@ -325,27 +363,6 @@ interface EditResponseCorrelation {
 
 function sameUuid(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
-}
-
-function sameBounds(left: Bounds, right: Bounds): boolean {
-  return (
-    left.min.x === right.min.x &&
-    left.min.y === right.min.y &&
-    left.min.z === right.min.z &&
-    left.max.x === right.max.x &&
-    left.max.y === right.max.y &&
-    left.max.z === right.max.z
-  );
-}
-
-function normalizedBounds(
-  min: components['schemas']['BlockPosition'],
-  max: components['schemas']['BlockPosition'],
-): Bounds {
-  return {
-    min: { x: Math.min(min.x, max.x), y: Math.min(min.y, max.y), z: Math.min(min.z, max.z) },
-    max: { x: Math.max(min.x, max.x), y: Math.max(min.y, max.y), z: Math.max(min.z, max.z) },
-  };
 }
 
 function bridgeMismatch(context: z.core.$RefinementCtx, message: string, path: PropertyKey[]): void {
@@ -401,6 +418,15 @@ export function replaceRegionBlocksBridgeOutputSchema(
     }
     if (response.changedBlockCount > response.matchedBlockCount) {
       bridgeMismatch(context, 'The changed-block count cannot exceed the matched-block count.', ['changedBlockCount']);
+    }
+    const boundsVolume =
+      (response.bounds.max.x - response.bounds.min.x + 1) *
+      (response.bounds.max.y - response.bounds.min.y + 1) *
+      (response.bounds.max.z - response.bounds.min.z + 1);
+    if (response.matchedBlockCount > boundsVolume) {
+      bridgeMismatch(context, 'The matched-block count cannot exceed the response bounds volume.', [
+        'matchedBlockCount',
+      ]);
     }
   });
 }

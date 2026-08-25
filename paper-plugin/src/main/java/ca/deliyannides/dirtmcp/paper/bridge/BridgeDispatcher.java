@@ -51,8 +51,10 @@ final class BridgeDispatcher implements AutoCloseable {
         boolean recoveryRisk = false;
         boolean responseTransportFailure = false;
         try {
-            if (!this.authenticator.accepts(
-                    rawExchange.getRequestHeaders().getFirst("Authorization"))) {
+            List<String> authorization = rawExchange.getRequestHeaders().get("Authorization");
+            if (authorization == null
+                    || authorization.size() != 1
+                    || !this.authenticator.accepts(authorization.getFirst())) {
                 exchange.challenge();
                 exchange.sendProblem(
                         401, "A valid bearer token is required", BridgeProblem.unauthorized());
@@ -110,6 +112,9 @@ final class BridgeDispatcher implements AutoCloseable {
                 return;
             }
             try {
+                if ("GET".equals(endpoint.method())) {
+                    exchange.requireEmptyBody();
+                }
                 endpoint.handle(exchange);
             } catch (RequestBodyReader.BodyTimeoutException exception) {
                 requestFailure = exception;

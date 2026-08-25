@@ -58,14 +58,12 @@ public final class PaperPlayerContextService implements GetPlayerContext {
                     "player must be a non-empty case-insensitive exact online name or canonical UUID",
                     new ErrorDetails.InvalidRequest.InvalidValue("player"));
         }
-        if (request.player().length() > MAX_PLAYER_SELECTOR_LENGTH) {
+        int playerLength = request.player().codePointCount(0, request.player().length());
+        if (playerLength > MAX_PLAYER_SELECTOR_LENGTH) {
             throw invalid(
                     "player must contain at most " + MAX_PLAYER_SELECTOR_LENGTH + " characters",
                     new ErrorDetails.InvalidRequest.OutOfRange(
-                            "player.length",
-                            request.player().length(),
-                            1,
-                            MAX_PLAYER_SELECTOR_LENGTH));
+                            "player.length", playerLength, 1, MAX_PLAYER_SELECTOR_LENGTH));
         }
         if (request.include() == null) {
             throw invalid(

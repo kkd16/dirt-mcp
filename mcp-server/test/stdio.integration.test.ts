@@ -417,9 +417,16 @@ test('capability-driven stdio server forwards all twelve tools with MCP-owned de
     { minItems: 7, maxItems: 7, items: false },
   );
   assert.equal(jsonObject(setProperties.world).pattern, '.*\\S.*');
+  const playerProperties = jsonObject(toolInput('get_player_context').properties);
+  assert.equal(jsonObject(playerProperties.player).maxLength, 36);
+  assert.equal(jsonObject(playerProperties.player).pattern, '.*\\S.*');
   const perspectiveProperties = jsonObject(toolInput('get_perspective_view').properties);
   assert.deepEqual(jsonObject(perspectiveProperties.width).not, { multipleOf: 2 });
   assert.deepEqual(jsonObject(perspectiveProperties.height).not, { multipleOf: 2 });
+  const getBlocksTool = catalog.result?.tools?.find((tool) => tool.name === 'get_blocks');
+  assert.ok(getBlocksTool?.outputSchema);
+  const getBlocksOutputProperties = jsonObject(jsonObject(getBlocksTool.outputSchema).properties);
+  assert.equal(jsonObject(getBlocksOutputProperties.palettes).uniqueItems, true);
   const capabilityRequest = requests[0];
   assert.equal(capabilityRequest?.path, '/v1/capabilities');
   assert.equal(capabilityRequest?.method, 'GET');

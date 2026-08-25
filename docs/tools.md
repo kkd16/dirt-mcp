@@ -95,9 +95,9 @@ defaults before sending it.
 
 ## Rules shared by tools
 
-- World names must identify an already-loaded Paper world. Inspection and new
-  edits do not load or generate chunks. Undo may reload existing chunks without
-  generating terrain.
+- World names are exact and case-sensitive and must identify an already-loaded
+  Paper world. Inspection and new edits do not load or generate chunks. Undo
+  may reload existing chunks without generating terrain.
 - Block coordinates are signed 32-bit integers. Region corners are inclusive,
   may be supplied in either order, and are normalized in results.
 - A canonical state includes its namespace and resolved properties, for example
@@ -261,10 +261,10 @@ Structured result:
 
 Include patterns are applied first, then exclusions. The two pattern arrays may
 contain at most 64 entries combined. MCP defaults both arrays to empty,
-`includeAir` to false, and `maxResults` to 1024 before calling Paper. Exceeding
-the effective Paper limit fails rather than truncates. Add `label` to the result
-before sending it to `set_blocks`; changing `origin` copies the structure
-elsewhere.
+`includeAir` to false, and `maxResults` to 1024 before calling Paper. The lower
+of `maxResults` and Paper's configured maximum is the effective ceiling; a
+result exceeding it fails rather than truncates. Add `label` to the result before
+sending it to `set_blocks`; changing `origin` copies the structure elsewhere.
 
 ### `scan_orthographic_view`
 
@@ -309,7 +309,8 @@ Structured result:
 Scanning starts one block away and excludes the requested origin. Directions
 are `north`, `east`, `south`, `west`, `up`, or `down`. The result has the same
 copy-ready structure as `get_blocks`. MCP defaults `depth` to 0 and
-`maxResults` to 1024 before calling Paper.
+`maxResults` to 1024 before calling Paper; the same effective result ceiling
+applies.
 
 ### `get_player_context`
 

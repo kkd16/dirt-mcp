@@ -1,18 +1,22 @@
 import type { McpServer } from '@modelcontextprotocol/server';
+import { isDeepStrictEqual } from 'node:util';
 import * as z from 'zod/v4';
 import type { BridgeClient } from '../bridge/client.ts';
-import { BRIDGE_ROUTES } from '../bridge/contract.ts';
+import { BRIDGE_ROUTES, PlayerSelectorSchema } from '../bridge/contract.ts';
 import type { components } from '../generated/openapi.ts';
 import type { DirtLogger } from '../logging.ts';
 import {
   BlockPositionSchema,
   ExactPositionSchema,
+  NonnegativeInt32Schema,
   NonBlankStringSchema,
   PlayerIdentitySchema,
+  PositiveInt32Schema,
   READ_WORLD_ANNOTATIONS,
   RotationSchema,
   SignedInt32Schema,
   UnitVectorSchema,
+  matchesPlayerSelector,
 } from './common.ts';
 import type { McpToolConfiguration } from './configuration.ts';
 import { executeToolCall, successResult } from './execution.ts';
@@ -27,11 +31,13 @@ const DEFAULT_INCLUDE = {
   effects: false,
 } as const;
 
-const NonnegativeInt32Schema = SignedInt32Schema.nonnegative();
-const PositiveInt32Schema = SignedInt32Schema.positive();
-const PlayerSelectorSchema = NonBlankStringSchema.max(36).describe(
+const PlayerInputSelectorSchema = PlayerSelectorSchema.describe(
   'Case-insensitive exact online player name (available from get_server_status with include.players=true when enabled) or canonical UUID.',
 );
+
+function hasStrictlyIncreasingTypes(entries: readonly { readonly type: string }[]): boolean {
+  return entries.every((entry, index) => index === 0 || entries[index - 1]!.type < entry.type);
+}
 
 const PlayerContextIncludeOptionsSchema = z
   .object({
@@ -64,7 +70,7 @@ const PlayerContextIncludeOptionsSchema = z
 
 export const GetPlayerContextInputSchema = z
   .object({
-    player: PlayerSelectorSchema,
+    player: PlayerInputSelectorSchema,
     include: PlayerContextIncludeOptionsSchema,
   })
   .strict()
@@ -84,6 +90,7 @@ const PlayerItemStackSchema = z
           .object({ type: NonBlankStringSchema.describe('Namespaced enchantment type.'), level: SignedInt32Schema })
           .strict(),
       )
+      .refine(hasStrictlyIncreasingTypes, 'Enchantments must have distinct types in strictly increasing order.')
       .describe('Enchantments sorted by type.'),
   })
   .strict()
@@ -107,6 +114,24 @@ const PlayerInventorySchema = z
     slots: z.array(z.object({ slot: NonnegativeInt32Schema, item: PlayerItemStackSchema }).strict()),
   })
   .strict()
+  .superRefine(({ size, slots }, context) => {
+    for (const [index, entry] of slots.entries()) {
+      if (entry.slot >= size) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Inventory slot must be less than the container size.',
+          path: ['slots', index, 'slot'],
+        });
+      }
+      if (index > 0 && slots[index - 1]!.slot >= entry.slot) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Inventory slots must be distinct and strictly increasing.',
+          path: ['slots', index, 'slot'],
+        });
+      }
+    }
+  })
   .meta({ id: 'PlayerInventory' });
 
 const PlayerVitalsSchema = z
@@ -168,7 +193,9 @@ const PlayerEffectSchema = z
   })
   .strict();
 
-const PlayerEffectsSchema = z.array(PlayerEffectSchema);
+const PlayerEffectsSchema = z
+  .array(PlayerEffectSchema)
+  .refine(hasStrictlyIncreasingTypes, 'Effects must have distinct types in strictly increasing order.');
 
 const PLAYER_POSES = [
   'standing',
@@ -214,9 +241,51 @@ export const PlayerContextOutputSchema = z
     effects: PlayerEffectsSchema.nullable(),
   })
   .strict()
+  .superRefine(({ equipment, inventory }, context) => {
+    if (equipment === null || inventory === null) return;
+    const selectedItem = inventory.slots.find(({ slot }) => slot === equipment.selectedHotbarSlot)?.item ?? null;
+    if (!isDeepStrictEqual(equipment.mainHand, selectedItem)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Main-hand equipment must equal the selected inventory item.',
+        path: ['equipment', 'mainHand'],
+      });
+    }
+  })
   .describe(
     'One coherent Paper main-thread capture; requested sections are non-null and excluded sections are null.',
   ) satisfies z.ZodType<components['schemas']['GetPlayerContextResponse']>;
+
+export function playerContextBridgeOutputSchema(request: components['schemas']['GetPlayerContextRequest']) {
+  return PlayerContextOutputSchema.superRefine((response, context) => {
+    if (!matchesPlayerSelector(response.player, request.player)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'The response player must match the requested player selector.',
+        path: ['player'],
+      });
+    }
+
+    const sections = [
+      ['equipment', request.include.equipment],
+      ['inventory', request.include.inventory],
+      ['enderChest', request.include.enderChest],
+      ['vitals', request.include.vitals],
+      ['movement', request.include.movement],
+      ['client', request.include.client],
+      ['effects', request.include.effects],
+    ] as const;
+    for (const [section, included] of sections) {
+      if ((response[section] !== null) !== included) {
+        context.addIssue({
+          code: 'custom',
+          message: `${section} must be non-null exactly when requested.`,
+          path: [section],
+        });
+      }
+    }
+  });
+}
 
 export function registerPlayerTools(
   server: McpServer,
@@ -248,7 +317,7 @@ export function registerPlayerTools(
             const result = await bridge.request(
               BRIDGE_ROUTES.getPlayerContext,
               callId,
-              PlayerContextOutputSchema,
+              playerContextBridgeOutputSchema(request),
               request,
               context.mcpReq.signal,
             );

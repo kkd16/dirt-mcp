@@ -7,15 +7,15 @@ import type { DirtLogger } from '../logging.ts';
 import {
   BlockPositionSchema,
   EmptyInputSchema,
-  INT32_MAX,
   MAX_BLOCK_STATE_PATTERNS,
   MAX_PALETTE_ENTRIES,
+  NonnegativeInt32Schema,
+  PositiveInt32Schema,
   READ_WORLD_ANNOTATIONS,
+  SignedInt32Schema,
 } from './common.ts';
 import type { McpToolConfiguration } from './configuration.ts';
 import { executeToolCall, successResult } from './execution.ts';
-
-const PositiveInt32Schema = z.number().int().min(1).max(INT32_MAX);
 
 const DEFAULT_STATUS_INCLUDE = {
   players: false,
@@ -76,7 +76,7 @@ const LimitConfigurationSchema = z
       'Maximum perspective ray count multiplied by maximum ray distance.',
     ),
     maxInspectionResultLimit: PositiveInt32Schema.describe(
-      'Maximum caller-selected exact or orthographic inspection result limit.',
+      'Paper ceiling on exact or orthographic inspection results; request maxResults may select a lower ceiling.',
     ),
     maxPerspectiveRays: PositiveInt32Schema.describe('Maximum rays in one perspective view.'),
     maxCommandsPerRequest: PositiveInt32Schema.describe(
@@ -120,8 +120,8 @@ const PerformanceSchema = z
 
 const PlayerSummarySchema = z
   .object({
-    online: z.number().int().nonnegative().describe('Current online player count.'),
-    maximum: z.number().int().nonnegative().describe('Configured player capacity.'),
+    online: NonnegativeInt32Schema.describe('Current online player count.'),
+    maximum: NonnegativeInt32Schema.describe('Configured player capacity.'),
     entries: z
       .array(
         z
@@ -139,6 +139,20 @@ const PlayerSummarySchema = z
       .describe('Online players sorted by name, with location and facing context.'),
   })
   .strict()
+  .superRefine(({ online, entries }, context) => {
+    if (online !== entries.length) {
+      context.addIssue({ code: 'custom', message: 'Online count must equal the number of entries.', path: ['online'] });
+    }
+    for (let index = 1; index < entries.length; index += 1) {
+      if (entries[index - 1]!.name.toLowerCase() > entries[index]!.name.toLowerCase()) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Player entries must be ordered by case-insensitive name.',
+          path: ['entries', index, 'name'],
+        });
+      }
+    }
+  })
   .describe('Current player presence.');
 
 const WorldsSchema = z
@@ -146,14 +160,14 @@ const WorldsSchema = z
     z
       .object({
         name: z.string().min(1).describe('Exact loaded world name accepted by world tools.'),
-        environment: z.string().min(1).describe('Paper world environment, such as normal or nether.'),
-        minY: z.number().int().describe('Minimum valid block Y.'),
-        maxY: z.number().int().describe('Maximum valid block Y, inclusive.'),
+        environment: z.enum(['normal', 'nether', 'the_end', 'custom']).describe('Current Paper world environment.'),
+        minY: SignedInt32Schema.describe('Minimum valid block Y.'),
+        maxY: SignedInt32Schema.describe('Maximum valid block Y, inclusive.'),
         spawn: BlockPositionSchema.describe('Current world spawn block.'),
         timeOfDay: z.number().int().min(0).max(23_999).describe('Current Minecraft time of day.'),
         storm: z.boolean().describe('Whether the world currently has a storm.'),
         thundering: z.boolean().describe('Whether the world is currently thundering.'),
-        playerCount: z.number().int().nonnegative().describe('Players currently in this world.'),
+        playerCount: NonnegativeInt32Schema.describe('Players currently in this world.'),
       })
       .strict(),
   )
@@ -167,6 +181,42 @@ const ServerConfigurationShape = {
 const ServerConfigurationSchema = z
   .object(ServerConfigurationShape)
   .strict()
+  .superRefine(({ limits, editHistory }, context) => {
+    const limitUpperBounds = [
+      ['maxChangedBlocks', limits.maxChangedBlocks, 'maxRegionVolume', limits.maxRegionVolume],
+      ['maxInspectionVolume', limits.maxInspectionVolume, 'maxRegionVolume', limits.maxRegionVolume],
+      ['maxInspectionResultLimit', limits.maxInspectionResultLimit, 'maxInspectionVolume', limits.maxInspectionVolume],
+      [
+        'maxPerspectiveRays',
+        limits.maxPerspectiveRays,
+        'maxPerspectiveRayDistanceBudget',
+        limits.maxPerspectiveRayDistanceBudget,
+      ],
+    ] as const;
+    for (const [field, value, maximumField, maximum] of limitUpperBounds) {
+      if (value > maximum) {
+        context.addIssue({
+          code: 'custom',
+          message: `${field} must not exceed ${maximumField}.`,
+          path: ['limits', field],
+        });
+      }
+    }
+    if (editHistory.maxEntriesPerWorld > editHistory.maxEntriesTotal) {
+      context.addIssue({
+        code: 'custom',
+        message: 'maxEntriesPerWorld must not exceed maxEntriesTotal.',
+        path: ['editHistory', 'maxEntriesPerWorld'],
+      });
+    }
+    if (editHistory.maxRetainedChangedBlocks < limits.maxChangedBlocks) {
+      context.addIssue({
+        code: 'custom',
+        message: 'maxRetainedChangedBlocks must be at least maxChangedBlocks.',
+        path: ['editHistory', 'maxRetainedChangedBlocks'],
+      });
+    }
+  })
   .describe('Active Dirt operation limits and edit-history retention.');
 
 export const GetServerStatusOutputSchema = z
@@ -192,6 +242,25 @@ function bridgeStatusRequest(input: GetServerStatusInput): components['schemas']
     includeWorlds: input.include.worlds,
     includeConfiguration: input.include.configuration,
   };
+}
+
+export function serverStatusBridgeOutputSchema(request: components['schemas']['ServerStatusRequest']) {
+  return GetServerStatusOutputSchema.superRefine((response, context) => {
+    const sections = [
+      ['players', request.includePlayers],
+      ['worlds', request.includeWorlds],
+      ['configuration', request.includeConfiguration],
+    ] as const;
+    for (const [section, included] of sections) {
+      if ((response[section] !== null) !== included) {
+        context.addIssue({
+          code: 'custom',
+          message: `${section} must be non-null exactly when requested.`,
+          path: [section],
+        });
+      }
+    }
+  });
 }
 
 export function registerStatusTools(
@@ -253,11 +322,12 @@ export function registerStatusTools(
             failureContext: `Could not get Dirt server status from ${bridge.origin}`,
           },
           async (callId) => {
+            const request = bridgeStatusRequest(input);
             const result = await bridge.request(
               BRIDGE_ROUTES.serverStatus,
               callId,
-              GetServerStatusOutputSchema,
-              bridgeStatusRequest(input),
+              serverStatusBridgeOutputSchema(request),
+              request,
               context.mcpReq.signal,
             );
             const summary = [`Paper ${result.builds.paper}`];

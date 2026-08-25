@@ -179,10 +179,10 @@ public final class BukkitPerspectiveViewAccess implements PerspectiveViewAccess 
         }
         if (source instanceof LocationSource locationSource) {
             World world = this.server.getWorld(locationSource.world());
-            if (world == null) {
+            if (world == null || !locationSource.world().equals(world.getName())) {
                 throw new OperationException(
                         OperationFailure.WORLD_NOT_FOUND,
-                        "World is not loaded: " + locationSource.world(),
+                        "World is not loaded with the exact name: " + locationSource.world(),
                         new ErrorDetails.WorldNotFound(locationSource.world()));
             }
             requireLocationBlockPosition(locationSource.cameraPosition());

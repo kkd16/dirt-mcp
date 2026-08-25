@@ -1,14 +1,18 @@
-openapi: 3.2.0
+openapi: 3.1.1
 info:
   title: Dirt MCP Paper Bridge
   version: 0.1.0
-  description: Local contract between the Dirt MCP stdio server and Paper plugin.
+  description: Authoritative authenticated loopback HTTP contract between the Dirt MCP stdio server and Paper plugin.
   license:
     name: Apache License 2.0
     identifier: Apache-2.0
 servers:
-  - url: http://127.0.0.1:8765
-    description: Default loopback development endpoint
+  - url: http://127.0.0.1:{port}
+    description: Authenticated loopback bridge endpoint
+    variables:
+      port:
+        default: '8765'
+        description: Paper bridge port configured by the server administrator.
 security:
   - bearerAuth: []
 paths:
@@ -930,6 +934,7 @@ components:
       headers:
         Allow:
           schema:
+            type: string
             const: GET
       content:
         application/json:
@@ -946,6 +951,7 @@ components:
       headers:
         Allow:
           schema:
+            type: string
             const: POST
       content:
         application/json:
@@ -961,6 +967,7 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
+      description: Shared token containing exactly 64 lowercase hexadecimal characters. Used only over the loopback bridge.
   schemas:
     BridgeErrorCode:
       type: string
@@ -1052,9 +1059,7 @@ components:
                 - requestedEditId
               properties:
                 world:
-                  type: string
-                  minLength: 1
-                  pattern: '.*\S.*'
+                  $ref: '#/components/schemas/WorldName'
                 requestedEditId:
                   $ref: '#/components/schemas/UuidV4'
       unevaluatedProperties: false
@@ -1077,9 +1082,7 @@ components:
                 - newestEditId
               properties:
                 world:
-                  type: string
-                  minLength: 1
-                  pattern: '.*\S.*'
+                  $ref: '#/components/schemas/WorldName'
                 requestedEditId:
                   $ref: '#/components/schemas/UuidV4'
                 newestEditId:
@@ -1394,9 +1397,7 @@ components:
                 - world
               properties:
                 world:
-                  type: string
-                  minLength: 1
-                  pattern: '.*\S.*'
+                  $ref: '#/components/schemas/WorldName'
       unevaluatedProperties: false
     WorldUnavailableError:
       allOf:
@@ -1648,7 +1649,7 @@ components:
             reason:
               const: entries_per_world
             maximum:
-              $ref: '#/components/schemas/PositiveJsonSafeInteger'
+              $ref: '#/components/schemas/PositiveInt32'
         - type: object
           additionalProperties: false
           required:
@@ -1658,7 +1659,7 @@ components:
             reason:
               const: entries_total
             maximum:
-              $ref: '#/components/schemas/PositiveJsonSafeInteger'
+              $ref: '#/components/schemas/PositiveInt32'
         - type: object
           additionalProperties: false
           required:
@@ -1668,7 +1669,7 @@ components:
             reason:
               const: retained_changed_blocks
             maximum:
-              $ref: '#/components/schemas/PositiveJsonSafeInteger'
+              $ref: '#/components/schemas/PositiveInt32'
     ServerUnavailableDetails:
       oneOf:
         - type: object
@@ -1702,9 +1703,7 @@ components:
             reason:
               const: operation_in_progress
             world:
-              type: string
-              minLength: 1
-              pattern: '.*\S.*'
+              $ref: '#/components/schemas/WorldName'
         - type: object
           additionalProperties: false
           required:
@@ -1715,9 +1714,7 @@ components:
             reason:
               const: recovery_required
             world:
-              type: string
-              minLength: 1
-              pattern: '.*\S.*'
+              $ref: '#/components/schemas/WorldName'
             newestEditId:
               $ref: '#/components/schemas/UuidV4'
     WorldUnavailableDetails:
@@ -1742,9 +1739,7 @@ components:
             reason:
               const: world_unloaded
             world:
-              type: string
-              minLength: 1
-              pattern: '.*\S.*'
+              $ref: '#/components/schemas/WorldName'
         - type: object
           additionalProperties: false
           required:
@@ -1758,9 +1753,7 @@ components:
                 - chunk_unloaded
                 - chunk_load_failed
             world:
-              type: string
-              minLength: 1
-              pattern: '.*\S.*'
+              $ref: '#/components/schemas/WorldName'
             chunk:
               $ref: '#/components/schemas/ChunkPosition'
     MutationWorldUnavailableDetails:
@@ -1809,6 +1802,7 @@ components:
     Uuid:
       type: string
       format: uuid
+      pattern: '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
     UuidV4:
       type: string
       format: uuid
@@ -1817,6 +1811,11 @@ components:
       type: integer
       format: int32
       minimum: -2147483648
+      maximum: 2147483647
+    NonNegativeInt32:
+      type: integer
+      format: int32
+      minimum: 0
       maximum: 2147483647
     PositiveInt32:
       type: integer
@@ -1835,6 +1834,11 @@ components:
       format: int64
       minimum: 1
       maximum: 9007199254740991
+    WorldName:
+      type: string
+      minLength: 1
+      pattern: '.*\S.*'
+      description: Nonblank Paper world name. Lookups are exact and case-sensitive; successful responses use the canonical loaded-world name.
     BlockPosition:
       type: object
       additionalProperties: false
@@ -1844,14 +1848,11 @@ components:
         - z
       properties:
         x:
-          type: integer
-          format: int32
+          $ref: '#/components/schemas/Int32'
         y:
-          type: integer
-          format: int32
+          $ref: '#/components/schemas/Int32'
         z:
-          type: integer
-          format: int32
+          $ref: '#/components/schemas/Int32'
     ChunkPosition:
       type: object
       additionalProperties: false
@@ -1898,9 +1899,7 @@ components:
         - max
       properties:
         world:
-          type: string
-          minLength: 1
-          pattern: '.*\S.*'
+          $ref: '#/components/schemas/WorldName'
         min:
           $ref: '#/components/schemas/BlockPosition'
         max:
@@ -1916,22 +1915,22 @@ components:
         - blockStateCounts
       properties:
         world:
-          type: string
-          minLength: 1
+          $ref: '#/components/schemas/WorldName'
         bounds:
           $ref: '#/components/schemas/Bounds'
         dimensions:
           $ref: '#/components/schemas/Dimensions'
         volume:
-          type: integer
-          format: int64
-          minimum: 1
+          $ref: '#/components/schemas/PositiveInt32'
         blockStateCounts:
           type: object
+          minProperties: 1
+          description: Observed canonical block states and their positive counts. Counts sum to volume.
+          propertyNames:
+            minLength: 1
+            pattern: '.*\S.*'
           additionalProperties:
-            type: integer
-            format: int64
-            minimum: 0
+            $ref: '#/components/schemas/PositiveInt32'
     GetBlocksRequest:
       type: object
       additionalProperties: false
@@ -1945,9 +1944,7 @@ components:
         - maxResults
       properties:
         world:
-          type: string
-          minLength: 1
-          pattern: '.*\S.*'
+          $ref: '#/components/schemas/WorldName'
         min:
           $ref: '#/components/schemas/BlockPosition'
         max:
@@ -1985,6 +1982,7 @@ components:
         blockState:
           type: string
           minLength: 1
+          pattern: '.*\S.*'
           description: Exact canonical block state represented by this palette.
     PalettePlacement:
       type: array
@@ -1992,10 +1990,7 @@ components:
       maxItems: 4
       description: Exact [paletteIndex, x, y, z] tuple; paletteIndex is non-negative and coordinates are signed offsets from origin.
       prefixItems:
-        - type: integer
-          format: int32
-          minimum: 0
-          maximum: 2147483647
+        - $ref: '#/components/schemas/NonNegativeInt32'
         - $ref: '#/components/schemas/Int32'
         - $ref: '#/components/schemas/Int32'
         - $ref: '#/components/schemas/Int32'
@@ -2006,10 +2001,7 @@ components:
       maxItems: 7
       description: Exact [paletteIndex, x, y, z, toX, toY, toZ] tuple for a component-wise forward inclusive cuboid; coordinates are signed offsets from origin.
       prefixItems:
-        - type: integer
-          format: int32
-          minimum: 0
-          maximum: 2147483647
+        - $ref: '#/components/schemas/NonNegativeInt32'
         - $ref: '#/components/schemas/Int32'
         - $ref: '#/components/schemas/Int32'
         - $ref: '#/components/schemas/Int32'
@@ -2028,14 +2020,14 @@ components:
         - runs
       properties:
         world:
-          type: string
-          minLength: 1
+          $ref: '#/components/schemas/WorldName'
         origin:
           description: Normalized minimum inspection bound used by every relative tuple.
           $ref: '#/components/schemas/BlockPosition'
         palettes:
           type: array
           maxItems: 256
+          uniqueItems: true
           description: First-seen exact singleton palettes. Empty exactly when placements and runs are both empty.
           items:
             type: array
@@ -2067,9 +2059,7 @@ components:
         - maxResults
       properties:
         world:
-          type: string
-          minLength: 1
-          pattern: '.*\S.*'
+          $ref: '#/components/schemas/WorldName'
         origin:
           description: Center anchor of the orthographic view; scanning starts one block forward.
           $ref: '#/components/schemas/BlockPosition'
@@ -2084,24 +2074,16 @@ components:
             - up
             - down
         horizontalRadius:
-          type: integer
-          format: int32
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
           description: Viewport cells on each side of the center sightline along the direction's horizontal axis.
         verticalRadius:
-          type: integer
-          format: int32
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
           description: Viewport cells on each side of the center sightline along the direction's vertical axis.
         maxDistance:
-          type: integer
-          format: int32
-          minimum: 1
+          $ref: '#/components/schemas/PositiveInt32'
           description: Blocks scanned forward from the origin; distance 1 is adjacent.
         depth:
-          type: integer
-          format: int32
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
           description: Zero-based non-air hit to return on each sightline; 0 is the first, 1 is the second, and so on.
         maxResults:
           description: Caller ceiling on placements plus runs; Paper also enforces its safety maximum.
@@ -2185,8 +2167,7 @@ components:
           minLength: 1
           pattern: '.*\S.*'
         uuid:
-          type: string
-          pattern: '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
+          $ref: '#/components/schemas/Uuid'
     Rotation:
       type: object
       additionalProperties: false
@@ -2241,10 +2222,7 @@ components:
         type:
           const: location
         world:
-          type: string
-          minLength: 1
-          pattern: '.*\S.*'
-          description: Exact name of an already-loaded Paper world.
+          $ref: '#/components/schemas/WorldName'
         cameraPosition:
           allOf:
             - $ref: '#/components/schemas/ExactPosition'
@@ -2389,19 +2367,13 @@ components:
         - distance
       properties:
         row:
-          type: integer
-          format: int32
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
           description: Zero-based top-to-bottom viewport row.
         column:
-          type: integer
-          format: int32
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
           description: Zero-based left-to-right viewport column.
         blockStateIndex:
-          type: integer
-          format: int32
-          minimum: 1
+          $ref: '#/components/schemas/PositiveInt32'
           description: One-based index into blockStatePalette.
         blockPosition:
           $ref: '#/components/schemas/BlockPosition'
@@ -2461,9 +2433,7 @@ components:
           $ref: '#/components/schemas/PositiveInt32'
         damage:
           oneOf:
-            - type: integer
-              format: int32
-              minimum: 0
+            - $ref: '#/components/schemas/NonNegativeInt32'
             - type: 'null'
         maxDamage:
           oneOf:
@@ -2517,9 +2487,7 @@ components:
         - item
       properties:
         slot:
-          type: integer
-          format: int32
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
         item:
           $ref: '#/components/schemas/PlayerItemStack'
     PlayerInventory:
@@ -2576,14 +2544,11 @@ components:
           type: number
           format: double
         remainingAir:
-          type: integer
-          format: int32
+          $ref: '#/components/schemas/Int32'
         maximumAir:
           $ref: '#/components/schemas/Int32'
         experienceLevel:
-          type: integer
-          format: int32
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
         experienceProgress:
           type: number
           format: double
@@ -2593,12 +2558,9 @@ components:
           $ref: '#/components/schemas/Int32'
           description: Total points calculated from the current experience level and progress.
         fireTicks:
-          type: integer
-          format: int32
+          $ref: '#/components/schemas/Int32'
         freezeTicks:
-          type: integer
-          format: int32
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
     PlayerMovement:
       type: object
       additionalProperties: false
@@ -2655,9 +2617,7 @@ components:
           minLength: 1
           pattern: '.*\S.*'
         clientViewDistance:
-          type: integer
-          format: int32
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
           description: Chunk render-distance preference reported by the client.
         viewDistance:
           allOf:
@@ -2748,9 +2708,7 @@ components:
         source:
           $ref: '#/components/schemas/ResolvedPerspectiveSource'
         world:
-          type: string
-          minLength: 1
-          pattern: '.*\S.*'
+          $ref: '#/components/schemas/WorldName'
         worldId:
           $ref: '#/components/schemas/Uuid'
         cameraPosition:
@@ -2764,9 +2722,7 @@ components:
         viewport:
           $ref: '#/components/schemas/ResolvedPerspectiveViewport'
         checkedChunkCount:
-          type: integer
-          format: int32
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
           description: Exact size of the conservative loaded-chunk preflight for the sampled rays.
         blockStatePalette:
           type: array
@@ -2783,9 +2739,7 @@ components:
             $ref: '#/components/schemas/PerspectiveViewHit'
         crosshairHitIndex:
           oneOf:
-            - type: integer
-              format: int32
-              minimum: 0
+            - $ref: '#/components/schemas/NonNegativeInt32'
             - type: 'null'
           description: Zero-based hits index for the center ray, or null when it did not hit a block.
     GetPlayerContextResponse:
@@ -2819,9 +2773,7 @@ components:
         player:
           $ref: '#/components/schemas/PlayerIdentity'
         world:
-          type: string
-          minLength: 1
-          pattern: '.*\S.*'
+          $ref: '#/components/schemas/WorldName'
         worldId:
           $ref: '#/components/schemas/Uuid'
         gameMode:
@@ -2945,18 +2897,14 @@ components:
             - replace_region_blocks
             - set_blocks
         world:
-          type: string
-          minLength: 1
-          pattern: '.*\S.*'
+          $ref: '#/components/schemas/WorldName'
         worldId:
           $ref: '#/components/schemas/Uuid'
         bounds:
           description: Normalized operation bounds; set-block edits use the smallest inclusive bounds containing every requested position.
           $ref: '#/components/schemas/Bounds'
         changedBlockCount:
-          type: integer
-          format: int64
-          minimum: 1
+          $ref: '#/components/schemas/PositiveInt32'
         completedAt:
           type: string
           format: date-time
@@ -2982,9 +2930,7 @@ components:
         - maxChangedBlocks
       properties:
         world:
-          type: string
-          minLength: 1
-          pattern: '.*\S.*'
+          $ref: '#/components/schemas/WorldName'
         label:
           $ref: '#/components/schemas/EditLabel'
         min:
@@ -3038,8 +2984,10 @@ components:
         - properties:
             outcome:
               const: committed
+            matchedBlockCount:
+              $ref: '#/components/schemas/PositiveInt32'
             changedBlockCount:
-              minimum: 1
+              $ref: '#/components/schemas/PositiveInt32'
             edit:
               allOf:
                 - $ref: '#/components/schemas/EditRecord'
@@ -3058,14 +3006,12 @@ components:
         - changedBlockCount
       properties:
         world:
-          type: string
-          minLength: 1
+          $ref: '#/components/schemas/WorldName'
         bounds:
           description: Normalized inclusive bounds from the requested corners.
           $ref: '#/components/schemas/Bounds'
         seed:
-          type: integer
-          format: int32
+          $ref: '#/components/schemas/Int32'
           description: Supplied request seed.
         outcome:
           type: string
@@ -3079,14 +3025,10 @@ components:
             - $ref: '#/components/schemas/EditRecord'
             - type: 'null'
         matchedBlockCount:
-          type: integer
-          format: int64
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
           description: Blocks matching a source pattern; cannot exceed the inclusive bounds volume.
         changedBlockCount:
-          type: integer
-          format: int64
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
           description: Blocks changed or that would change; cannot exceed matchedBlockCount.
     SetBlocksRequest:
       type: object
@@ -3103,9 +3045,7 @@ components:
         - maxChangedBlocks
       properties:
         world:
-          type: string
-          minLength: 1
-          pattern: '.*\S.*'
+          $ref: '#/components/schemas/WorldName'
         label:
           $ref: '#/components/schemas/EditLabel'
         origin:
@@ -3161,8 +3101,12 @@ components:
         - properties:
             outcome:
               const: committed
+            bounds:
+              $ref: '#/components/schemas/Bounds'
+            blockCount:
+              $ref: '#/components/schemas/PositiveInt32'
             changedBlockCount:
-              minimum: 1
+              $ref: '#/components/schemas/PositiveInt32'
             edit:
               allOf:
                 - $ref: '#/components/schemas/EditRecord'
@@ -3182,16 +3126,14 @@ components:
         - unchangedBlockCount
       properties:
         world:
-          type: string
-          minLength: 1
+          $ref: '#/components/schemas/WorldName'
         bounds:
           description: Smallest inclusive bounds containing all requested resolved blocks, or null for empty geometry.
           oneOf:
             - $ref: '#/components/schemas/Bounds'
             - type: 'null'
         seed:
-          type: integer
-          format: int32
+          $ref: '#/components/schemas/Int32'
           description: Supplied request seed.
         outcome:
           type: string
@@ -3205,19 +3147,13 @@ components:
             - $ref: '#/components/schemas/EditRecord'
             - type: 'null'
         blockCount:
-          type: integer
-          format: int64
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
           description: Expanded number of unique blocks represented by placements and runs.
         changedBlockCount:
-          type: integer
-          format: int64
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
           description: Blocks changed or that would change; together with unchangedBlockCount equals blockCount.
         unchangedBlockCount:
-          type: integer
-          format: int64
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
           description: Blocks already in their requested state; together with changedBlockCount equals blockCount.
     GetEditHistoryRequest:
       type: object
@@ -3226,9 +3162,7 @@ components:
         - world
       properties:
         world:
-          type: string
-          minLength: 1
-          pattern: '.*\S.*'
+          $ref: '#/components/schemas/WorldName'
     GetEditHistoryResponse:
       type: object
       additionalProperties: false
@@ -3237,8 +3171,7 @@ components:
         - edits
       properties:
         world:
-          type: string
-          minLength: 1
+          $ref: '#/components/schemas/WorldName'
         edits:
           type: array
           uniqueItems: true
@@ -3254,9 +3187,7 @@ components:
         - editIds
       properties:
         world:
-          type: string
-          minLength: 1
-          pattern: '.*\S.*'
+          $ref: '#/components/schemas/WorldName'
         editIds:
           type: array
           minItems: 1
@@ -3287,9 +3218,7 @@ components:
         outcome:
           const: completed
         world:
-          type: string
-          minLength: 1
-          pattern: '.*\S.*'
+          $ref: '#/components/schemas/WorldName'
         undoneEdits:
           type: array
           minItems: 1
@@ -3317,9 +3246,7 @@ components:
         outcome:
           const: partial
         world:
-          type: string
-          minLength: 1
-          pattern: '.*\S.*'
+          $ref: '#/components/schemas/WorldName'
         undoCallId:
           $ref: '#/components/schemas/UuidV4'
         undoneEdits:
@@ -3498,24 +3425,16 @@ components:
         - maxCommandFeedbackCharacters
       properties:
         maxRegionVolume:
-          type: integer
-          format: int32
-          minimum: 1
-          description: Maximum cuboid mutation/count volume or placements in set_blocks.
+          $ref: '#/components/schemas/PositiveInt32'
+          description: Maximum cuboid mutation/count volume or expanded blocks represented by a set-blocks edit.
         maxEditTouchedChunks:
-          type: integer
-          format: int32
-          minimum: 1
+          $ref: '#/components/schemas/PositiveInt32'
           description: Maximum distinct loaded chunks one mutation may touch.
         maxInspectionTouchedChunks:
-          type: integer
-          format: int32
-          minimum: 1
+          $ref: '#/components/schemas/PositiveInt32'
           description: Maximum distinct loaded chunks a region inspection may snapshot.
         maxPerspectiveTouchedChunks:
-          type: integer
-          format: int32
-          minimum: 1
+          $ref: '#/components/schemas/PositiveInt32'
           description: Maximum distinct loaded chunks a perspective view may check.
         maxBlockStatePatterns:
           type: integer
@@ -3530,39 +3449,25 @@ components:
           maximum: 256
           description: Maximum exact block-state entries in one edit or exact inspection structure palette.
         maxChangedBlocks:
-          type: integer
-          format: int32
-          minimum: 1
+          $ref: '#/components/schemas/PositiveInt32'
           description: Maximum blocks one mutation may change; cannot exceed maxRegionVolume.
         maxInspectionVolume:
-          type: integer
-          format: int32
-          minimum: 1
+          $ref: '#/components/schemas/PositiveInt32'
           description: Maximum blocks scanned by exact block retrieval or an orthographic view; cannot exceed maxRegionVolume.
         maxPerspectiveRayDistanceBudget:
-          type: integer
-          format: int32
-          minimum: 1
+          $ref: '#/components/schemas/PositiveInt32'
           description: Maximum perspective ray count multiplied by maximum ray distance.
         maxInspectionResultLimit:
-          type: integer
-          format: int32
-          minimum: 1
-          description: Maximum caller-selectable placement-plus-run limit for exact inspection structures; cannot exceed maxInspectionVolume.
+          $ref: '#/components/schemas/PositiveInt32'
+          description: Paper safety ceiling on placements plus runs returned by an exact inspection structure. The effective limit is the lower of this value and request maxResults, and cannot exceed maxInspectionVolume.
         maxPerspectiveRays:
-          type: integer
-          format: int32
-          minimum: 1
+          $ref: '#/components/schemas/PositiveInt32'
           description: Maximum rays in one perspective view; cannot exceed maxPerspectiveRayDistanceBudget.
         maxCommandsPerRequest:
-          type: integer
-          format: int32
-          minimum: 1
+          $ref: '#/components/schemas/PositiveInt32'
           description: Maximum commands accepted in one ordered command batch.
         maxCommandFeedbackCharacters:
-          type: integer
-          format: int32
-          minimum: 1
+          $ref: '#/components/schemas/PositiveInt32'
           description: Maximum Unicode code points of synchronous plain-text feedback retained across one command batch.
     EditHistoryConfiguration:
       type: object
@@ -3573,19 +3478,13 @@ components:
         - maxRetainedChangedBlocks
       properties:
         maxEntriesPerWorld:
-          type: integer
-          format: int32
-          minimum: 1
+          $ref: '#/components/schemas/PositiveInt32'
           description: Maximum retained undoable edits in one loaded world; cannot exceed maxEntriesTotal.
         maxEntriesTotal:
-          type: integer
-          format: int32
-          minimum: 1
+          $ref: '#/components/schemas/PositiveInt32'
           description: Maximum retained undoable edits across all loaded worlds.
         maxRetainedChangedBlocks:
-          type: integer
-          format: int32
-          minimum: 1
+          $ref: '#/components/schemas/PositiveInt32'
           description: Maximum sum of changed-block counts across all retained undoable edits; must be at least OperationLimitConfiguration.maxChangedBlocks.
     ServerStatusConfiguration:
       type: object
@@ -3657,8 +3556,7 @@ components:
           type: string
           minLength: 1
         world:
-          type: string
-          minLength: 1
+          $ref: '#/components/schemas/WorldName'
         gameMode:
           type: string
           enum:
@@ -3679,19 +3577,16 @@ components:
     PlayerSummary:
       type: object
       additionalProperties: false
+      description: Current player counts and entries; online equals entries length, and entries are ordered by case-insensitive player name.
       required:
         - online
         - maximum
         - entries
       properties:
         online:
-          type: integer
-          format: int32
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
         maximum:
-          type: integer
-          format: int32
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
         entries:
           type: array
           items:
@@ -3711,17 +3606,21 @@ components:
         - playerCount
       properties:
         name:
-          type: string
-          minLength: 1
+          $ref: '#/components/schemas/WorldName'
         environment:
           type: string
-          minLength: 1
+          description: Paper world environment.
+          enum:
+            - normal
+            - nether
+            - the_end
+            - custom
         minY:
-          type: integer
-          format: int32
+          $ref: '#/components/schemas/Int32'
+          description: Minimum valid block Y, inclusive.
         maxY:
-          type: integer
-          format: int32
+          $ref: '#/components/schemas/Int32'
+          description: Maximum valid block Y, inclusive.
         spawn:
           $ref: '#/components/schemas/BlockPosition'
         timeOfDay:
@@ -3734,9 +3633,7 @@ components:
         thundering:
           type: boolean
         playerCount:
-          type: integer
-          format: int32
-          minimum: 0
+          $ref: '#/components/schemas/NonNegativeInt32'
     ServerStatusRequest:
       type: object
       additionalProperties: false

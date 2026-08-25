@@ -70,6 +70,17 @@ final class PaperPlayerContextServiceTest {
     }
 
     @Test
+    void measuresPlayerSelectorLengthInUnicodeCharacters() throws Exception {
+        GetPlayerContext.Result expected = result();
+        PaperPlayerContextService service =
+                new PaperPlayerContextService(
+                        new DirectMainThread(), ignored -> expected, new InspectionAdmission(1));
+
+        assertEquals(
+                expected, service.getPlayerContext(request("\ud83d\udee0".repeat(36), BASE_ONLY)));
+    }
+
+    @Test
     void preservesTypedPaperFailures() {
         OperationException expected =
                 new OperationException(

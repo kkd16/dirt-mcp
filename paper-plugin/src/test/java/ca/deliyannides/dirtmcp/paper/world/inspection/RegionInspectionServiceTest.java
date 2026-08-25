@@ -182,7 +182,7 @@ final class RegionInspectionServiceTest {
                         List.of(),
                         false,
                         1);
-        GetBlocks.Request tooManyResults =
+        GetBlocks.Request invalidResultLimit =
                 new GetBlocks.Request(
                         "world",
                         position(0, 0, 0),
@@ -190,7 +190,7 @@ final class RegionInspectionServiceTest {
                         List.of(),
                         List.of(),
                         false,
-                        3);
+                        0);
 
         assertEquals(
                 OperationFailure.REGION_TOO_LARGE,
@@ -198,9 +198,52 @@ final class RegionInspectionServiceTest {
                         .failure());
         assertEquals(
                 OperationFailure.INVALID_REQUEST,
-                assertThrows(OperationException.class, () -> service.getBlocks(tooManyResults))
+                assertThrows(OperationException.class, () -> service.getBlocks(invalidResultLimit))
                         .failure());
         assertFalse(source.captured);
+    }
+
+    @Test
+    void appliesConfiguredResultCeilingWithoutRejectingALargerCallerCeiling() throws Exception {
+        FakeSnapshotSource source = new FakeSnapshotSource();
+        source.samples.put(position(0, 0, 0), solid("stone"));
+        RegionInspectionService service =
+                new RegionInspectionService(
+                        source, 100, 3, 2, 16, 8, 8, new InspectionAdmission(1));
+
+        ExactBlockStructure withinConfiguredLimit =
+                service.getBlocks(
+                        new GetBlocks.Request(
+                                "world",
+                                position(0, 0, 0),
+                                position(0, 0, 0),
+                                List.of(),
+                                List.of(),
+                                false,
+                                3));
+
+        assertEquals(1, withinConfiguredLimit.blockCount());
+
+        source.samples.put(position(1, 0, 0), solid("dirt"));
+        source.samples.put(position(2, 0, 0), solid("stone"));
+        OperationException failure =
+                assertThrows(
+                        OperationException.class,
+                        () ->
+                                service.getBlocks(
+                                        new GetBlocks.Request(
+                                                "world",
+                                                position(0, 0, 0),
+                                                position(2, 0, 0),
+                                                List.of(),
+                                                List.of(),
+                                                false,
+                                                3)));
+
+        assertEquals(OperationFailure.RESULT_TOO_LARGE, failure.failure());
+        assertEquals(
+                new ErrorDetails.ResultTooLarge.StructureEntries(3, 2),
+                failure.details().orElseThrow());
     }
 
     @Test

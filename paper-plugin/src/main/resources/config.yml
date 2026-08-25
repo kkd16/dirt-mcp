@@ -59,7 +59,7 @@ limits:
   max-inspection-volume: 262144
   # Maximum conservative perspective ray-count x distance work budget.
   max-perspective-ray-distance-budget: 131072
-  # Highest exact-structure entry or orthographic maxResults.
+  # Paper ceiling on exact-structure placements plus runs.
   max-inspection-results: 4096
   # Maximum rays in one perspective view.
   max-perspective-rays: 2048

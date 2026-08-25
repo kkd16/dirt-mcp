@@ -18,7 +18,11 @@ import {
   undoEditsBridgeOutputSchema,
 } from '../dist/tools/editing.js';
 import { MCP_TOOL_NAMES, toolConfigurationFromCapabilities } from '../dist/tools/configuration.js';
-import { GetServerStatusInputSchema, GetServerStatusOutputSchema } from '../dist/tools/status.js';
+import {
+  GetServerStatusInputSchema,
+  GetServerStatusOutputSchema,
+  serverStatusBridgeOutputSchema,
+} from '../dist/tools/status.js';
 
 const CALL_ID = '11111111-1111-4111-8111-111111111111';
 const EDIT_ID = '22222222-2222-4222-8222-222222222222';
@@ -80,6 +84,33 @@ test('status input and output use the hard-cut projected contract', () => {
     },
   };
   assert.equal(GetServerStatusOutputSchema.safeParse(output).success, true);
+  const players = {
+    online: 2,
+    maximum: 20,
+    entries: [
+      {
+        name: 'Alex',
+        world: 'world',
+        gameMode: 'creative',
+        facing: 'north',
+        blockPosition: { x: 0, y: 64, z: 0 },
+      },
+      {
+        name: 'builder',
+        world: 'world',
+        gameMode: 'survival',
+        facing: 'south',
+        blockPosition: { x: 1, y: 64, z: 0 },
+      },
+    ],
+  } as const;
+  assert.equal(GetServerStatusOutputSchema.safeParse({ ...output, players }).success, true);
+  assert.equal(GetServerStatusOutputSchema.safeParse({ ...output, players: { ...players, online: 1 } }).success, false);
+  assert.equal(
+    GetServerStatusOutputSchema.safeParse({ ...output, players: { ...players, entries: players.entries.toReversed() } })
+      .success,
+    false,
+  );
   assert.equal(
     GetServerStatusOutputSchema.safeParse({
       ...output,
@@ -94,6 +125,25 @@ test('status input and output use the hard-cut projected contract', () => {
     }).success,
     false,
   );
+  assert.equal(
+    GetServerStatusOutputSchema.safeParse({
+      ...output,
+      configuration: {
+        ...output.configuration,
+        limits: { ...output.configuration.limits, maxInspectionResultLimit: 1_000_001 },
+      },
+    }).success,
+    false,
+  );
+
+  const bridgeSchema = serverStatusBridgeOutputSchema({
+    includePlayers: false,
+    includeWorlds: true,
+    includeConfiguration: false,
+  });
+  assert.equal(bridgeSchema.safeParse({ ...output, configuration: null, worlds: [] }).success, true);
+  assert.equal(bridgeSchema.safeParse({ ...output, configuration: null, worlds: null }).success, false);
+  assert.equal(bridgeSchema.safeParse({ ...output, players: { online: 0, maximum: 20, entries: [] } }).success, false);
 });
 
 test('edit input schemas validate MCP arguments and materialize dryRun', () => {
@@ -137,6 +187,17 @@ test('edit input schemas validate MCP arguments and materialize dryRun', () => {
   });
   assert.equal(set.dryRun, false);
   assert.equal(SetBlocksInputSchema.safeParse({ ...set, placements: [[0, 0, 0]] }).success, false);
+  assert.equal(SetBlocksInputSchema.safeParse({ ...set, placements: [[1, 0, 0, 0]] }).success, false);
+  assert.equal(SetBlocksInputSchema.safeParse({ ...set, palettes: [] }).success, false);
+  assert.equal(SetBlocksInputSchema.safeParse({ ...set, palettes: [], placements: [] }).success, true);
+  assert.equal(
+    SetBlocksInputSchema.safeParse({ ...set, placements: [], runs: [[1, 0, 0, 0, 0, 0, 0]] }).success,
+    false,
+  );
+  assert.equal(
+    SetBlocksInputSchema.safeParse({ ...set, placements: [], runs: [[0, 1, 0, 0, 0, 0, 0]] }).success,
+    false,
+  );
   const maximumPalettes = [
     Array.from({ length: 128 }, (_, index) => ({ blockState: `minecraft:test_a_${index}` })),
     Array.from({ length: 128 }, (_, index) => ({ blockState: `minecraft:test_b_${index}` })),
@@ -164,6 +225,7 @@ test('edit responses are structural and follow the new response projection', () 
   };
   assert.equal(ReplaceRegionBlocksOutputSchema.safeParse(replace).success, true);
   assert.equal(ReplaceRegionBlocksOutputSchema.safeParse({ ...replace, destinationPalette: [] }).success, false);
+  assert.equal(ReplaceRegionBlocksOutputSchema.safeParse({ ...replace, matchedBlockCount: 0 }).success, false);
 
   const set = {
     world: 'world',
@@ -177,6 +239,20 @@ test('edit responses are structural and follow the new response projection', () 
   };
   assert.equal(SetBlocksOutputSchema.safeParse(set).success, true);
   assert.equal(SetBlocksOutputSchema.safeParse({ ...set, palettes: [] }).success, false);
+  assert.equal(SetBlocksOutputSchema.safeParse({ ...set, bounds: null }).success, false);
+  assert.equal(SetBlocksOutputSchema.safeParse({ ...set, blockCount: 0 }).success, false);
+  assert.equal(
+    SetBlocksOutputSchema.safeParse({
+      ...set,
+      bounds: null,
+      outcome: 'no_change',
+      edit: null,
+      blockCount: 0,
+      changedBlockCount: 0,
+      unchangedBlockCount: 0,
+    }).success,
+    true,
+  );
   assert.equal(GetEditHistoryOutputSchema.safeParse({ world: 'world', edits: [edit] }).success, true);
   assert.equal(GetEditHistoryOutputSchema.safeParse({ world: 'world', edits: [edit, edit] }).success, false);
 });
@@ -237,6 +313,7 @@ test('edit bridge responses correlate with their request and call identity', () 
     replaceSchema.safeParse({ ...replace, edit: { ...replace.edit, label: 'Different label' } }).success,
     false,
   );
+  assert.equal(replaceSchema.safeParse({ ...replace, matchedBlockCount: 3 }).success, false);
   assert.equal(
     replaceSchema.safeParse({
       ...replace,

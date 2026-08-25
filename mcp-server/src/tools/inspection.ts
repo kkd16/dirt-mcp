@@ -14,7 +14,11 @@ import {
   NonBlankStringSchema,
   PalettePlacementSchema,
   PaletteRunSchema,
+  PositiveInt32Schema,
   READ_WORLD_ANNOTATIONS,
+  normalizedBounds,
+  sameBlockPosition,
+  sameBounds,
 } from './common.ts';
 import type { McpToolConfiguration } from './configuration.ts';
 import { executeToolCall, successResult } from './execution.ts';
@@ -41,9 +45,11 @@ const CountRegionBlockStatesOutputSchema = z
     world: NonBlankStringSchema.describe('Inspected world name.'),
     bounds: BoundsSchema,
     dimensions: DimensionsSchema,
-    volume: z.number().int().positive().describe('Total blocks scanned, including air.'),
+    volume: PositiveInt32Schema.describe('Total blocks scanned, including air.'),
     blockStateCounts: z
-      .record(NonBlankStringSchema, z.number().int().nonnegative())
+      .record(NonBlankStringSchema, PositiveInt32Schema)
+      .refine((counts) => Object.keys(counts).length > 0, 'The histogram must contain at least one block state.')
+      .meta({ minProperties: 1 })
       .describe('Canonical block-state string to occurrence count.'),
   })
   .strict()
@@ -69,7 +75,9 @@ export const GetBlocksInputSchema = z
       .min(1)
       .max(INT32_MAX)
       .default(DEFAULT_MAX_RESULTS)
-      .describe('Maximum returned placements plus runs; defaults to 1024.'),
+      .describe(
+        'Caller ceiling on returned placements plus runs; Paper may enforce a lower ceiling. Defaults to 1024.',
+      ),
   })
   .strict()
   .refine(
@@ -86,6 +94,7 @@ const ExactPaletteEntrySchema = z
 const ExactPalettesSchema = z
   .array(z.tuple([ExactPaletteEntrySchema]))
   .max(MAX_PALETTE_ENTRIES)
+  .meta({ uniqueItems: true })
   .describe('Exact singleton palettes referenced by placements and runs.');
 
 export const ExactBlockStructureOutputSchema = z
@@ -97,6 +106,44 @@ export const ExactBlockStructureOutputSchema = z
     runs: z.array(PaletteRunSchema).describe('Matching blocks packed as origin-relative inclusive cuboids.'),
   })
   .strict()
+  .superRefine((structure, context) => {
+    const geometryCount = structure.placements.length + structure.runs.length;
+    if ((structure.palettes.length === 0) !== (geometryCount === 0)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Palettes must be empty exactly when the structure has no geometry.',
+        path: ['palettes'],
+      });
+    }
+
+    const states = structure.palettes.map(([entry]) => entry.blockState);
+    if (new Set(states).size !== states.length) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Exact palettes must contain distinct block states.',
+        path: ['palettes'],
+      });
+    }
+
+    for (const [index, [paletteIndex]] of structure.placements.entries()) {
+      if (paletteIndex >= structure.palettes.length) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Placement palette index must reference an existing palette.',
+          path: ['placements', index, 0],
+        });
+      }
+    }
+    for (const [index, [paletteIndex]] of structure.runs.entries()) {
+      if (paletteIndex >= structure.palettes.length) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Run palette index must reference an existing palette.',
+          path: ['runs', index, 0],
+        });
+      }
+    }
+  })
   .describe('Replay-ready exact block geometry.') satisfies z.ZodType<
   components['schemas']['ExactBlockStructureResponse']
 >;
@@ -126,10 +173,103 @@ export const ScanOrthographicViewInputSchema = z
       .min(1)
       .max(INT32_MAX)
       .default(DEFAULT_MAX_RESULTS)
-      .describe('Maximum returned placements plus runs; defaults to 1024.'),
+      .describe(
+        'Caller ceiling on returned placements plus runs; Paper may enforce a lower ceiling. Defaults to 1024.',
+      ),
   })
   .strict()
   .describe('Bounded orthographic sightlines scanned for a selected non-air depth.');
+
+export function countRegionBlockStatesBridgeOutputSchema(
+  request: components['schemas']['CountRegionBlockStatesRequest'],
+) {
+  return CountRegionBlockStatesOutputSchema.superRefine((response, context) => {
+    const expectedBounds = normalizedBounds(request.min, request.max);
+    const expectedDimensions = {
+      x: expectedBounds.max.x - expectedBounds.min.x + 1,
+      y: expectedBounds.max.y - expectedBounds.min.y + 1,
+      z: expectedBounds.max.z - expectedBounds.min.z + 1,
+    };
+    const expectedVolume = expectedDimensions.x * expectedDimensions.y * expectedDimensions.z;
+    const countedVolume = Object.values(response.blockStateCounts).reduce((total, count) => total + count, 0);
+
+    if (response.world !== request.world) {
+      context.addIssue({
+        code: 'custom',
+        message: 'The response world must match the requested world.',
+        path: ['world'],
+      });
+    }
+    if (!sameBounds(response.bounds, expectedBounds)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'The response bounds must match the normalized requested bounds.',
+        path: ['bounds'],
+      });
+    }
+    if (
+      response.dimensions.x !== expectedDimensions.x ||
+      response.dimensions.y !== expectedDimensions.y ||
+      response.dimensions.z !== expectedDimensions.z
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'The response dimensions must match the normalized bounds.',
+        path: ['dimensions'],
+      });
+    }
+    if (response.volume !== expectedVolume) {
+      context.addIssue({ code: 'custom', message: 'The response volume must match its dimensions.', path: ['volume'] });
+    }
+    if (countedVolume !== response.volume) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Block-state counts must sum to the response volume.',
+        path: ['blockStateCounts'],
+      });
+    }
+  });
+}
+
+function validateExactStructureCorrelation(
+  request: { readonly world: string; readonly maxResults: number },
+  response: z.infer<typeof ExactBlockStructureOutputSchema>,
+  context: z.core.$RefinementCtx,
+): void {
+  if (response.world !== request.world) {
+    context.addIssue({
+      code: 'custom',
+      message: 'The response world must match the requested world.',
+      path: ['world'],
+    });
+  }
+  if (response.placements.length + response.runs.length > request.maxResults) {
+    context.addIssue({
+      code: 'custom',
+      message: 'The response structure must not exceed the requested result ceiling.',
+      path: ['placements'],
+    });
+  }
+}
+
+export function getBlocksBridgeOutputSchema(request: components['schemas']['GetBlocksRequest']) {
+  return ExactBlockStructureOutputSchema.superRefine((response, context) => {
+    validateExactStructureCorrelation(request, response, context);
+    if (!sameBlockPosition(response.origin, normalizedBounds(request.min, request.max).min)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'The response origin must match the normalized minimum request corner.',
+        path: ['origin'],
+      });
+    }
+  });
+}
+
+export function scanOrthographicViewBridgeOutputSchema(request: components['schemas']['ScanOrthographicViewRequest']) {
+  return ExactBlockStructureOutputSchema.superRefine((response, context) => {
+    validateExactStructureCorrelation(request, response, context);
+  });
+}
 
 export function registerInspectionTools(
   server: McpServer,
@@ -161,7 +301,7 @@ export function registerInspectionTools(
             const result = await bridge.request(
               BRIDGE_ROUTES.countRegionBlockStates,
               callId,
-              CountRegionBlockStatesOutputSchema,
+              countRegionBlockStatesBridgeOutputSchema(request),
               request,
               context.mcpReq.signal,
             );
@@ -193,7 +333,7 @@ export function registerInspectionTools(
             const result = await bridge.request(
               BRIDGE_ROUTES.getBlocks,
               callId,
-              ExactBlockStructureOutputSchema,
+              getBlocksBridgeOutputSchema(request),
               request,
               context.mcpReq.signal,
             );
@@ -230,7 +370,7 @@ export function registerInspectionTools(
             const result = await bridge.request(
               BRIDGE_ROUTES.scanOrthographicView,
               callId,
-              ExactBlockStructureOutputSchema,
+              scanOrthographicViewBridgeOutputSchema(request),
               request,
               context.mcpReq.signal,
             );

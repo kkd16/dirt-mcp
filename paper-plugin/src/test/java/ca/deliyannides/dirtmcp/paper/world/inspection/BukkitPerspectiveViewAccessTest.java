@@ -147,6 +147,27 @@ final class BukkitPerspectiveViewAccessTest {
         assertEquals(0, locationRayCalls.get());
     }
 
+    @Test
+    void rejectsACaseMismatchedSyntheticWorldName() {
+        World world = world(null, new AtomicInteger(), true);
+        PaperPerspectiveViewService service = service(server(null, world));
+
+        OperationException failure =
+                assertThrows(
+                        OperationException.class,
+                        () ->
+                                service.getPerspectiveView(
+                                        new GetPerspectiveView.Request(
+                                                new LocationSource(
+                                                        "WORLD",
+                                                        new ExactPosition(0.5, 65, 0.5),
+                                                        new Rotation(0, 0)),
+                                                VIEW)));
+
+        assertEquals(OperationFailure.WORLD_NOT_FOUND, failure.failure());
+        assertEquals(new ErrorDetails.WorldNotFound("WORLD"), failure.details().orElseThrow());
+    }
+
     private static PaperPerspectiveViewService service(Server server) {
         return new PaperPerspectiveViewService(
                 new DirectMainThread(),
