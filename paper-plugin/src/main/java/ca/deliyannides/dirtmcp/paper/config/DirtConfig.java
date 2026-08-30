@@ -3,10 +3,21 @@ package ca.deliyannides.dirtmcp.paper.config;
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeOperation;
 import java.util.HashSet;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-public record DirtConfig(Bridge bridge, Logging logging, Limits limits, EditHistory editHistory) {
+public record DirtConfig(
+        Bridge bridge,
+        AccessControl accessControl,
+        Logging logging,
+        Limits limits,
+        EditHistory editHistory) {
     public DirtConfig {
-        if (bridge == null || logging == null || limits == null || editHistory == null) {
+        if (bridge == null
+                || accessControl == null
+                || logging == null
+                || limits == null
+                || editHistory == null) {
             throw new IllegalArgumentException("Configuration sections are required");
         }
         requireAtMost(
@@ -14,6 +25,43 @@ public record DirtConfig(Bridge bridge, Logging logging, Limits limits, EditHist
                 limits.maxChangedBlocks(),
                 "edit-history.max-retained-changed-blocks",
                 editHistory.maxRetainedChangedBlocks());
+    }
+
+    public record AccessControl(String origin, int connectTimeoutMillis, int requestTimeoutMillis) {
+        private static final Pattern LOOPBACK_ORIGIN =
+                Pattern.compile("http://127\\.0\\.0\\.1(?::([1-9][0-9]{0,4}))?/?");
+        private static final int MAXIMUM_TIMEOUT_MILLIS = 30_000;
+
+        public AccessControl {
+            if (origin == null) {
+                throw new IllegalArgumentException(
+                        "access-control.url must be an HTTP 127.0.0.1 origin");
+            }
+            Matcher match = LOOPBACK_ORIGIN.matcher(origin);
+            if (!match.matches()) {
+                throw new IllegalArgumentException(
+                        "access-control.url must be an HTTP 127.0.0.1 origin");
+            }
+            if (match.group(1) != null && Integer.parseInt(match.group(1)) > 65_535) {
+                throw new IllegalArgumentException(
+                        "access-control.url port must be between 1 and 65535");
+            }
+            origin = origin.endsWith("/") ? origin.substring(0, origin.length() - 1) : origin;
+            requireTimeout("access-control.connect-timeout-millis", connectTimeoutMillis);
+            requireTimeout("access-control.request-timeout-millis", requestTimeoutMillis);
+            if (requestTimeoutMillis < connectTimeoutMillis) {
+                throw new IllegalArgumentException(
+                        "access-control.request-timeout-millis must not be less than "
+                                + "access-control.connect-timeout-millis");
+            }
+        }
+
+        private static void requireTimeout(String path, int value) {
+            if (value < 1 || value > MAXIMUM_TIMEOUT_MILLIS) {
+                throw new IllegalArgumentException(
+                        path + " must be between 1 and " + MAXIMUM_TIMEOUT_MILLIS);
+            }
+        }
     }
 
     public enum ConsoleLogLevel {

@@ -1,16 +1,28 @@
 package ca.deliyannides.dirtmcp.paper.command;
 
+import ca.deliyannides.dirtmcp.paper.access.AccessControl;
+import ca.deliyannides.dirtmcp.paper.access.AccessControlException;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.logging.LogContext;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
+import ca.deliyannides.dirtmcp.paper.platform.MainThread;
+import ca.deliyannides.dirtmcp.paper.platform.PaperMainThreadException;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus;
 import com.mojang.brigadier.Command;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
+import java.net.URI;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -19,19 +31,23 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
 
-/** Paper-facing operator command for inspecting the active Dirt MCP runtime. */
+/** Paper-facing command for operator administration and authenticated player linking. */
 public final class DirtAdminCommand {
-    public static final String PERMISSION = "dirtmcp.command";
+    public static final String ADMIN_PERMISSION = "dirtmcp.admin";
+    public static final String LINK_PERMISSION = "dirtmcp.link";
 
     private static final TextColor ACCENT = TextColor.color(0x38BDF8);
     private static final TextColor SECONDARY_ACCENT = TextColor.color(0x22D3EE);
-    private static final String DESCRIPTION = "Local-first access to live Minecraft worlds";
+    private static final String DESCRIPTION = "Secure access to live Minecraft worlds";
 
     private final String pluginName;
     private final String pluginVersion;
     private final DirtConfig config;
     private final GetServerStatus status;
+    private final AccessControl access;
+    private final MainThread mainThread;
     private final DirtLog log;
 
     public DirtAdminCommand(
@@ -39,31 +55,141 @@ public final class DirtAdminCommand {
             String pluginVersion,
             DirtConfig config,
             GetServerStatus status,
+            AccessControl access,
+            MainThread mainThread,
             DirtLog log) {
         this.pluginName = Objects.requireNonNull(pluginName, "pluginName");
         this.pluginVersion = Objects.requireNonNull(pluginVersion, "pluginVersion");
         this.config = Objects.requireNonNull(config, "config");
         this.status = Objects.requireNonNull(status, "status");
+        this.access = Objects.requireNonNull(access, "access");
+        this.mainThread = Objects.requireNonNull(mainThread, "mainThread");
         this.log = Objects.requireNonNull(log, "log");
     }
 
     public LiteralCommandNode<CommandSourceStack> command() {
         return Commands.literal("dirt")
-                .requires(source -> source.getSender().hasPermission(PERMISSION))
                 .executes(context -> showHelp(context.getSource().getSender()))
                 .then(
                         Commands.literal("help")
                                 .executes(context -> showHelp(context.getSource().getSender())))
                 .then(
                         Commands.literal("version")
+                                .requires(source -> hasAdminPermission(source.getSender()))
                                 .executes(context -> showVersion(context.getSource().getSender())))
                 .then(
                         Commands.literal("status")
+                                .requires(source -> hasAdminPermission(source.getSender()))
                                 .executes(context -> showStatus(context.getSource().getSender())))
                 .then(
                         Commands.literal("config")
+                                .requires(source -> hasAdminPermission(source.getSender()))
                                 .executes(context -> showConfig(context.getSource().getSender())))
+                .then(accessCommand())
+                .then(
+                        Commands.literal("link")
+                                .requires(source -> hasLinkPermission(source.getSender()))
+                                .executes(context -> link(context.getSource().getSender())))
                 .build();
+    }
+
+    private LiteralArgumentBuilder<CommandSourceStack> accessCommand() {
+        return Commands.literal("access")
+                .requires(source -> hasAdminPermission(source.getSender()))
+                .then(
+                        Commands.literal("users")
+                                .executes(context -> listUsers(context.getSource().getSender(), 1))
+                                .then(
+                                        Commands.argument("page", IntegerArgumentType.integer(1))
+                                                .executes(
+                                                        context ->
+                                                                listUsers(
+                                                                        context.getSource()
+                                                                                .getSender(),
+                                                                        IntegerArgumentType
+                                                                                .getInteger(
+                                                                                        context,
+                                                                                        "page")))))
+                .then(
+                        Commands.literal("invitations")
+                                .executes(
+                                        context ->
+                                                listInvitations(context.getSource().getSender(), 1))
+                                .then(
+                                        Commands.argument("page", IntegerArgumentType.integer(1))
+                                                .executes(
+                                                        context ->
+                                                                listInvitations(
+                                                                        context.getSource()
+                                                                                .getSender(),
+                                                                        IntegerArgumentType
+                                                                                .getInteger(
+                                                                                        context,
+                                                                                        "page")))))
+                .then(
+                        Commands.literal("invite")
+                                .then(
+                                        Commands.literal("create")
+                                                .executes(
+                                                        context ->
+                                                                createInvitation(
+                                                                        context.getSource()
+                                                                                .getSender())))
+                                .then(
+                                        Commands.literal("revoke")
+                                                .then(
+                                                        Commands.argument(
+                                                                        "id",
+                                                                        StringArgumentType.word())
+                                                                .executes(
+                                                                        context ->
+                                                                                revokeInvitation(
+                                                                                        context.getSource()
+                                                                                                .getSender(),
+                                                                                        StringArgumentType
+                                                                                                .getString(
+                                                                                                        context,
+                                                                                                        "id"))))))
+                .then(userCommand());
+    }
+
+    private LiteralArgumentBuilder<CommandSourceStack> userCommand() {
+        LiteralArgumentBuilder<CommandSourceStack> user = Commands.literal("user");
+        user.then(userAction("disable", this.access::disableUser, "disabled"));
+        user.then(userAction("enable", this.access::enableUser, "enabled"));
+        user.then(
+                Commands.literal("recover")
+                        .then(
+                                Commands.argument("handle", StringArgumentType.word())
+                                        .executes(
+                                                context ->
+                                                        createUserRecovery(
+                                                                context.getSource().getSender(),
+                                                                StringArgumentType.getString(
+                                                                        context, "handle")))));
+        user.then(userAction("unlink", this.access::unlinkUser, "unlinked"));
+        return user;
+    }
+
+    private LiteralArgumentBuilder<CommandSourceStack> userAction(
+            String command,
+            Function<String, CompletionStage<AccessControl.UserMutationResult>> action,
+            String completedAction) {
+        return Commands.literal(command)
+                .then(
+                        Commands.argument("handle", StringArgumentType.word())
+                                .executes(
+                                        context -> {
+                                            String handle =
+                                                    StringArgumentType.getString(context, "handle");
+                                            return runAsync(
+                                                    context.getSource().getSender(),
+                                                    () -> action.apply(handle),
+                                                    result ->
+                                                            userMutationMessage(
+                                                                    result.user(),
+                                                                    completedAction));
+                                        }));
     }
 
     private int showHelp(CommandSender sender) {
@@ -71,9 +197,16 @@ public final class DirtAdminCommand {
         message.append(Component.newline());
         message.append(Component.text(DESCRIPTION, NamedTextColor.GRAY));
         message.append(Component.newline()).append(Component.newline());
-        appendCommand(message, "/dirt status", "View live server and bridge status");
-        appendCommand(message, "/dirt config", "Inspect the active configuration");
-        appendCommand(message, "/dirt version", "Show plugin version information");
+        if (hasAdminPermission(sender)) {
+            appendCommand(message, "/dirt access users", "View dashboard users");
+            appendCommand(message, "/dirt access invitations", "View dashboard invitations");
+            appendCommand(message, "/dirt status", "View live server and bridge status");
+            appendCommand(message, "/dirt config", "Inspect the active configuration");
+            appendCommand(message, "/dirt version", "Show plugin version information");
+        }
+        if (sender instanceof Player && hasLinkPermission(sender)) {
+            appendCommand(message, "/dirt link", "Link this Minecraft account privately");
+        }
         sender.sendMessage(message.build());
         return Command.SINGLE_SUCCESS;
     }
@@ -114,6 +247,7 @@ public final class DirtAdminCommand {
         message.append(Component.text("● Running", NamedTextColor.GREEN, TextDecoration.BOLD));
         message.append(Component.newline()).append(Component.newline());
         appendValue(message, "Bridge", "127.0.0.1:" + this.config.bridge().port());
+        appendValue(message, "Access", this.config.accessControl().origin());
         appendValue(message, "Minecraft", result.builds().minecraft());
         appendValue(message, "Paper", result.builds().paper());
         appendValue(message, "Dirt MCP", result.builds().dirtPlugin());
@@ -158,6 +292,12 @@ public final class DirtAdminCommand {
                         .map(operation -> operation.operationId())
                         .toList());
 
+        DirtConfig.AccessControl accessControl = this.config.accessControl();
+        appendSection(message, "Access Control");
+        appendValue(message, "url", accessControl.origin());
+        appendValue(message, "connect-timeout-millis", accessControl.connectTimeoutMillis());
+        appendValue(message, "request-timeout-millis", accessControl.requestTimeoutMillis());
+
         DirtConfig.Logging logging = this.config.logging();
         appendSection(message, "Logging");
         appendValue(message, "console-level", logging.consoleLevel().configName());
@@ -196,6 +336,316 @@ public final class DirtAdminCommand {
         return Command.SINGLE_SUCCESS;
     }
 
+    private int listUsers(CommandSender sender, int page) {
+        return runAsync(sender, () -> this.access.listUsers(page), this::usersMessage);
+    }
+
+    private int listInvitations(CommandSender sender, int page) {
+        return runAsync(sender, () -> this.access.listInvitations(page), this::invitationsMessage);
+    }
+
+    private int createInvitation(CommandSender sender) {
+        Player operator = requireInGameOperator(sender);
+        if (operator == null) {
+            return 0;
+        }
+        return runAsync(operator, this.access::createInvitation, this::createdInvitationMessage);
+    }
+
+    private int revokeInvitation(CommandSender sender, String id) {
+        return runAsync(
+                sender,
+                () -> this.access.revokeInvitation(id),
+                result ->
+                        confirmation(
+                                "Invitation Revoked",
+                                "Invitation " + result.invitation().id() + " is revoked."));
+    }
+
+    private int createUserRecovery(CommandSender sender, String handle) {
+        Player operator = requireInGameOperator(sender);
+        if (operator == null) {
+            return 0;
+        }
+        return runAsync(
+                operator, () -> this.access.createUserRecovery(handle), this::userRecoveryMessage);
+    }
+
+    private int link(CommandSender sender) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(
+                    failureMessage("Minecraft account linking must be run by an in-game player."));
+            return 0;
+        }
+        return runAsync(
+                player,
+                () ->
+                        this.access.createMinecraftLinkChallenge(
+                                player.getUniqueId(), player.getName()),
+                this::minecraftLinkMessage);
+    }
+
+    private Player requireInGameOperator(CommandSender sender) {
+        if (sender instanceof Player player && player.isOp()) {
+            return player;
+        }
+        sender.sendMessage(
+                failureMessage("This secret command must be run in-game by an operator."));
+        return null;
+    }
+
+    private <T> int runAsync(
+            CommandSender sender,
+            Supplier<CompletionStage<T>> operation,
+            Function<T, Component> successMessage) {
+        sender.sendMessage(progressMessage());
+        final CompletionStage<T> pending;
+        try {
+            pending = Objects.requireNonNull(operation.get(), "operation result");
+        } catch (RuntimeException failure) {
+            deliver(sender, accessFailureMessage(failure));
+            return 0;
+        }
+        pending.whenComplete(
+                (result, failure) -> {
+                    Component message;
+                    if (failure != null) {
+                        message = accessFailureMessage(failure);
+                    } else {
+                        try {
+                            message = Objects.requireNonNull(successMessage.apply(result));
+                        } catch (RuntimeException renderFailure) {
+                            message = accessFailureMessage(renderFailure);
+                        }
+                    }
+                    deliver(sender, message);
+                });
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private void deliver(CommandSender sender, Component message) {
+        try {
+            this.mainThread.run(() -> sender.sendMessage(message));
+        } catch (PaperMainThreadException ignored) {
+            // Plugin shutdown owns this boundary; never spill private command output to logs.
+        }
+    }
+
+    private Component usersMessage(AccessControl.UserPage result) {
+        TextComponent.Builder message = panel("Access / Users");
+        appendPageSummary(message, result.page(), result.totalPages(), result.totalItems());
+        if (result.items().isEmpty()) {
+            message.append(Component.newline());
+            message.append(Component.text("  No users on this page.", NamedTextColor.GRAY));
+        }
+        for (AccessControl.UserSummary user : result.items()) {
+            message.append(Component.newline()).append(Component.newline());
+            message.append(Component.text("  " + user.handle(), SECONDARY_ACCENT));
+            message.append(
+                    Component.text(
+                            "  " + user.status().wireName(),
+                            user.status() == AccessControl.UserStatus.ACTIVE
+                                    ? NamedTextColor.GREEN
+                                    : NamedTextColor.RED));
+            message.append(Component.newline());
+            if (user.minecraftAccount() == null) {
+                message.append(Component.text("    Minecraft: unlinked", NamedTextColor.GRAY));
+            } else {
+                message.append(
+                        Component.text(
+                                "    Minecraft: "
+                                        + user.minecraftAccount().name()
+                                        + " ("
+                                        + user.minecraftAccount().uuid()
+                                        + ')',
+                                NamedTextColor.GRAY));
+            }
+        }
+        appendPageControls(message, "users", result.page(), result.totalPages());
+        return message.build();
+    }
+
+    private Component invitationsMessage(AccessControl.InvitationPage result) {
+        TextComponent.Builder message = panel("Access / Invitations");
+        appendPageSummary(message, result.page(), result.totalPages(), result.totalItems());
+        if (result.items().isEmpty()) {
+            message.append(Component.newline());
+            message.append(Component.text("  No invitations on this page.", NamedTextColor.GRAY));
+        }
+        for (AccessControl.InvitationSummary invitation : result.items()) {
+            message.append(Component.newline()).append(Component.newline());
+            Component id =
+                    Component.text("  " + invitation.id(), SECONDARY_ACCENT)
+                            .clickEvent(ClickEvent.copyToClipboard(invitation.id()))
+                            .hoverEvent(copyHover("invitation ID"));
+            message.append(id);
+            message.append(
+                    Component.text(
+                            "  " + invitation.status().wireName(),
+                            invitation.status() == AccessControl.InvitationStatus.PENDING
+                                    ? NamedTextColor.GREEN
+                                    : NamedTextColor.GRAY));
+            message.append(Component.newline());
+            message.append(
+                    Component.text("    Expires: " + invitation.expiresAt(), NamedTextColor.GRAY));
+        }
+        appendPageControls(message, "invitations", result.page(), result.totalPages());
+        return message.build();
+    }
+
+    private Component createdInvitationMessage(AccessControl.CreateInvitationResult result) {
+        return privateUrlMessage(
+                "Invitation Created",
+                "Invitation "
+                        + result.invitation().id()
+                        + " expires at "
+                        + result.invitation().expiresAt(),
+                "Private invitation URL",
+                result.inviteUrl());
+    }
+
+    private Component userRecoveryMessage(AccessControl.UserRecoveryResult result) {
+        return privateUrlMessage(
+                "User Recovery",
+                "Recovery for " + result.user().handle() + " expires at " + result.expiresAt(),
+                "Private recovery URL",
+                result.recoveryUrl());
+    }
+
+    private Component minecraftLinkMessage(AccessControl.MinecraftLinkChallenge result) {
+        TextComponent.Builder message = panel("Minecraft Link");
+        message.append(Component.newline());
+        message.append(
+                Component.text(
+                        "Private one-use challenge • expires at " + result.expiresAt(),
+                        NamedTextColor.GRAY));
+        message.append(Component.newline()).append(Component.newline());
+        message.append(Component.text("  Code  ", NamedTextColor.GRAY));
+        message.append(
+                Component.text(result.code(), SECONDARY_ACCENT, TextDecoration.BOLD)
+                        .clickEvent(ClickEvent.copyToClipboard(result.code()))
+                        .hoverEvent(copyHover("link code")));
+        appendPrivateUrl(message, "Link URL", result.linkUrl());
+        return message.build();
+    }
+
+    private static Component privateUrlMessage(String title, String detail, String label, URI url) {
+        TextComponent.Builder message = panel(title);
+        message.append(Component.newline());
+        message.append(Component.text(detail, NamedTextColor.GRAY));
+        appendPrivateUrl(message, label, url);
+        message.append(Component.newline());
+        message.append(
+                Component.text(
+                        "  Keep this URL private; it is shown only in this message.",
+                        NamedTextColor.RED));
+        return message.build();
+    }
+
+    private static void appendPrivateUrl(TextComponent.Builder message, String label, URI url) {
+        String value = url.toString();
+        message.append(Component.newline()).append(Component.newline());
+        message.append(Component.text("  " + label + "  ", NamedTextColor.GRAY));
+        message.append(
+                Component.text(value, SECONDARY_ACCENT)
+                        .clickEvent(ClickEvent.copyToClipboard(value))
+                        .hoverEvent(copyHover("private URL")));
+    }
+
+    private static Component userMutationMessage(
+            AccessControl.UserSummary user, String completedAction) {
+        return confirmation(
+                "User Updated", "User " + user.handle() + " was " + completedAction + '.');
+    }
+
+    private static Component confirmation(String title, String detail) {
+        TextComponent.Builder message = panel(title);
+        message.append(Component.newline());
+        message.append(Component.text("● " + detail, NamedTextColor.GREEN));
+        return message.build();
+    }
+
+    private static Component progressMessage() {
+        TextComponent.Builder message = panel("Access");
+        message.append(Component.newline());
+        message.append(Component.text("Contacting the dashboard…", NamedTextColor.GRAY));
+        return message.build();
+    }
+
+    private static Component accessFailureMessage(Throwable failure) {
+        Throwable cause = unwrap(failure);
+        String message =
+                cause instanceof AccessControlException accessFailure
+                        ? accessFailure.getMessage()
+                        : "The dashboard access request failed.";
+        return failureMessage(message);
+    }
+
+    private static Throwable unwrap(Throwable failure) {
+        Throwable current = failure;
+        while (current instanceof CompletionException
+                && current.getCause() != null
+                && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current;
+    }
+
+    private static Component failureMessage(String detail) {
+        TextComponent.Builder message = panel("Access Unavailable");
+        message.append(Component.newline());
+        message.append(Component.text("● " + detail, NamedTextColor.RED));
+        return message.build();
+    }
+
+    private static void appendPageSummary(
+            TextComponent.Builder message, int page, int totalPages, long totalItems) {
+        message.append(Component.newline());
+        int displayedTotalPages = Math.max(1, totalPages);
+        message.append(
+                Component.text(
+                        "Page "
+                                + page
+                                + " / "
+                                + displayedTotalPages
+                                + "  •  "
+                                + totalItems
+                                + " total",
+                        NamedTextColor.GRAY));
+    }
+
+    private static void appendPageControls(
+            TextComponent.Builder message, String collection, int page, int totalPages) {
+        if (page <= 1 && page >= totalPages) {
+            return;
+        }
+        message.append(Component.newline()).append(Component.newline());
+        if (page > 1) {
+            appendPageControl(message, collection, page - 1, "‹ Previous");
+        }
+        if (page > 1 && page < totalPages) {
+            message.append(Component.text("  ", NamedTextColor.DARK_GRAY));
+        }
+        if (page < totalPages) {
+            appendPageControl(message, collection, page + 1, "Next ›");
+        }
+    }
+
+    private static void appendPageControl(
+            TextComponent.Builder message, String collection, int page, String label) {
+        String command = "/dirt access " + collection + ' ' + page;
+        message.append(
+                Component.text(label, SECONDARY_ACCENT)
+                        .clickEvent(ClickEvent.runCommand(command))
+                        .hoverEvent(
+                                HoverEvent.showText(
+                                        Component.text("Open page " + page, NamedTextColor.GRAY))));
+    }
+
+    private static HoverEvent<Component> copyHover(String value) {
+        return HoverEvent.showText(Component.text("Click to copy " + value, NamedTextColor.GRAY));
+    }
+
     private static TextComponent.Builder panel(String title) {
         return Component.text()
                 .append(Component.text("◆ ", ACCENT))
@@ -228,5 +678,13 @@ public final class DirtAdminCommand {
         message.append(Component.newline());
         message.append(Component.text("  " + label + "  ", NamedTextColor.GRAY));
         message.append(Component.text(String.valueOf(value), NamedTextColor.WHITE));
+    }
+
+    private static boolean hasAdminPermission(CommandSender sender) {
+        return sender.isOp() && sender.hasPermission(ADMIN_PERMISSION);
+    }
+
+    private static boolean hasLinkPermission(CommandSender sender) {
+        return sender.hasPermission(LINK_PERMISSION);
     }
 }

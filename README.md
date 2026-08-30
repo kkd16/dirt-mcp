@@ -1,12 +1,11 @@
 # Dirt MCP
 
-Dirt MCP connects an MCP host to a live Minecraft world through Paper. Local AI
-agents can inspect terrain and player context, preview or run bounded,
-deterministic bulk edits with
-[FastAsyncWorldEdit (FAWE)](https://modrinth.com/plugin/fastasyncworldedit), and
-undo recent Dirt edits.
+Dirt MCP is a self-hosted passkey dashboard and authenticated MCP endpoint for
+inspecting and editing a live Paper world. It keeps Minecraft and FAWE behind an
+authenticated loopback bridge while allowing standards-based MCP clients to
+connect through HTTPS.
 
-The usual workflow is:
+The normal world workflow remains:
 
 ```text
 inspect -> preview -> edit -> verify -> undo if needed
@@ -15,7 +14,7 @@ inspect -> preview -> edit -> verify -> undo if needed
 > **Paper remains the sole owner of the live world.** Dirt never edits region
 > files directly, and inspections do not load or generate terrain.
 
-## What you can do
+## Capabilities
 
 | Area     | Capabilities                                                                    |
 | -------- | ------------------------------------------------------------------------------- |
@@ -25,32 +24,59 @@ inspect -> preview -> edit -> verify -> undo if needed
 | Preview  | Preview edits with reproducible seeds before committing them.                   |
 | Undo     | Inspect labeled in-memory history and undo an exact newest-first edit prefix.   |
 | Commands | Run bounded command batches through an operator-level, non-player sender.       |
-| Access   | Paper administrators allow bridge operations; MCP owns the tool catalog.        |
+| Access   | Invite-only passkey accounts linked one-to-one with Minecraft identities.       |
 
-See the [tool reference](docs/tools.md) for the complete catalog and schemas.
+The dashboard intentionally contains only sign-in, enrollment, account,
+Minecraft-link, and MCP connection surfaces. It is not a world editor. See the
+[tool reference](docs/tools.md) for the complete MCP catalog and schemas.
+
+## Architecture
+
+```text
+browser / MCP client --HTTPS--> Caddy --> web + OAuth + MCP --> SQLite
+                                            |
+                                            | authenticated 127.0.0.1 HTTP
+                                            v
+                                      Paper plugin --> FAWE
+                                            |
+                                            +--> private web control API
+```
+
+Caddy is the only public HTTP process. Paper may expose its Minecraft game port
+separately, while the Node service, world bridge, and Paper-to-web
+account-control API remain on `127.0.0.1`. The two loopback directions use
+different bearer credentials.
+
+The public MCP endpoint is current, stateless Streamable HTTP at `POST /mcp`.
+It uses OAuth authorization code flow with PKCE S256 and the single
+`dirt:mcp` scope. Every request rechecks that its account is active and linked
+to an online-mode Minecraft UUID. There are no roles or per-account permission
+records: every eligible account receives the same tool set permitted by Paper's
+global operation allowlist.
 
 ## Requirements
 
-Dirt MCP follows the latest stable Paper release and does not support older
-Minecraft versions.
+Dirt follows the latest stable Paper release and does not support older server
+generations.
 
-| Dependency                                                          | Version                         |
-| ------------------------------------------------------------------- | ------------------------------- |
-| [Paper](https://papermc.io/downloads/paper/)                        | 26.2, API build 116 stable      |
-| [Java](https://docs.papermc.io/paper/getting-started/#requirements) | 25                              |
-| [FAWE](https://modrinth.com/plugin/fastasyncworldedit)              | 2.15.4                          |
-| Node.js                                                             | 26 or newer                     |
-| pnpm                                                                | 11.22.0 or a newer 11.x release |
+| Dependency                                                          | Version                    |
+| ------------------------------------------------------------------- | -------------------------- |
+| [Paper](https://papermc.io/downloads/paper/)                        | 26.2, API build 121 stable |
+| [Java](https://docs.papermc.io/paper/getting-started/#requirements) | 25                         |
+| [FAWE](https://modrinth.com/plugin/fastasyncworldedit)              | 2.15.4                     |
+| Node.js                                                             | 26 or newer                |
+| pnpm                                                                | 11.24.0 or newer 11.x      |
+| Docker Engine / Compose                                             | current Linux releases     |
 
-Building from source also requires GNU Make. The full development workflow uses
-curl, tmux, ShellCheck 0.9 or newer, and actionlint 1.7.12 or newer. Development
-scripts target Linux or WSL.
+The production Compose topology uses Linux host networking so the containerized
+web service can reach the native Paper bridge at `127.0.0.1`. A real DNS name
+pointing at the host and inbound ports 80/443 are required. Choose the permanent
+hostname before enrolling passkeys because WebAuthn credentials are bound to
+the relying-party domain.
 
-## Setup
+## Production setup
 
-### 1. Clone and build
-
-Build the Paper plugin and MCP server:
+### 1. Build and install Paper
 
 ```bash
 git clone https://github.com/kkd16/dirt-mcp.git
@@ -58,143 +84,151 @@ cd dirt-mcp
 make build
 ```
 
-The build outputs:
+Install `paper-plugin/build/libs/dirt-mcp-paper-<version>.jar` and FAWE in the
+native Paper server's `plugins/` directory. Dirt requires `online-mode=true` and
+will refuse account linking on an offline-mode server.
 
-```text
-paper-plugin/build/libs/dirt-mcp-paper-<version>.jar
-mcp-server/dist/index.js
-```
+### 2. Create private credentials
 
-### 2. Install the Paper plugins
-
-Put the Dirt JAR and FAWE 2.15.4 in the Paper server's `plugins/` directory.
-Dirt will not load without FAWE.
-
-### 3. Create the bridge secret and start Paper
-
-Generate the required 64-character lowercase hexadecimal secret, then start
-Paper with it set:
+Create distinct random values for the Paper world bridge, Paper account-control
+client, and web authentication service. Keep them outside version control and
+the Docker build context, readable only by their services. The example Compose
+file uses mounted secret files; `.env.example` contains only non-secret settings.
 
 ```bash
-export DIRT_MCP_BRIDGE_TOKEN="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
-java -Xms2G -Xmx2G -jar paper.jar --nogui
+install -d -m 700 secrets
+sudo install -d -o 1000 -g 1000 -m 700 backups
+for name in auth-secret bridge-token control-token; do
+  node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))" > "secrets/$name"
+  chmod 444 "secrets/$name"
+done
 ```
 
-On first run, Dirt creates `plugins/DirtMCP/config.yml`. The shipped
-[configuration](paper-plugin/src/main/resources/config.yml) covers the bridge
-operation allowlist, operation limits, logging, edit-history retention, and the
-bridge port. Restart Paper after changing it.
+Supply the bridge and control values to Paper as
+`DIRT_MCP_BRIDGE_TOKEN` and `DIRT_MCP_CONTROL_TOKEN`. Configure the web service
+with the same values through its corresponding mounted secret files. Never
+reuse either value as the web authentication secret.
 
-To hide tools, remove their OpenAPI operation IDs from
-`bridge.allowed-operations`, then restart Paper and the MCP host. An empty list
-exposes no tools; the mandatory `/v1/capabilities` endpoint remains available.
+On first start, Paper creates `plugins/DirtMCP/config.yml`. The shipped
+[configuration](paper-plugin/src/main/resources/config.yml) covers the private
+ports, global operation allowlist, operation limits, logging, and bounded undo
+history. Restart Paper after changes. Never proxy or publish its bridge port.
 
-### 4. Connect the MCP host
+### 3. Configure and start the HTTPS service
 
-Point the MCP host at the built TypeScript server and give it the same secret.
-For hosts with an `mcpServers` JSON configuration:
-
-```json
-{
-  "mcpServers": {
-    "dirt": {
-      "command": "node",
-      "args": ["/absolute/path/to/dirt-mcp/mcp-server/dist/index.js"],
-      "env": {
-        "DIRT_MCP_BRIDGE_URL": "http://127.0.0.1:8765",
-        "DIRT_MCP_BRIDGE_TOKEN": "<same secret supplied to Paper>"
-      }
-    }
-  }
-}
+```bash
+cp .env.example .env
+# Set the permanent public hostname and secret-file paths in your local deployment.
+docker compose build
+docker compose run --rm migrate
+docker compose up -d web caddy
 ```
 
-Restart the MCP host after rebuilding the TypeScript server or changing Paper's
-allowed bridge operations. On startup, MCP reads `/v1/capabilities` and enables
-the corresponding tools from its own catalog. Call `ping_server` to test the
-whole path through the MCP server, bridge, Paper, and FAWE.
+The deployment uses a non-root Node image, a pinned Caddy edge, persistent
+SQLite and Caddy volumes, and no published application or Paper bridge port.
+Back up SQLite with the provided online-backup command before migration or
+upgrade; do not copy only the main database file while WAL mode is active.
 
-### Local development with Codex
+```bash
+DIRT_BACKUP_DESTINATION="dirt-$(date +%Y%m%d-%H%M%S).sqlite3" \
+  docker compose run --rm backup
+```
 
-The checked-in `.codex/config.toml` launches Dirt through
-`scripts/run-dirt-mcp`. Run `make up`, then start or restart Codex from the
-trusted checkout.
+The destination must be a new filename inside the pre-created `backups/`
+directory. The command refuses to overwrite an existing backup. The production
+image runs as UID/GID 1000, so that numeric owner must be able to write the
+backup directory. Compose file secrets preserve their host ownership and mode,
+so the files are read-only but world-readable for the non-root container. The
+mode-0700 host directory prevents other host users from reaching them.
+
+### 4. Create and link the first account
+
+Join Minecraft as an operator and run:
+
+```text
+/dirt access invite create
+```
+
+Open the private click-to-copy URL, choose a handle, and enroll a passkey. Then
+run `/dirt link` as the same online Minecraft player and open its private link
+while recently signed in. Dirt enforces one web account to one Minecraft UUID.
+
+Operators can list and administer access in game:
+
+```text
+/dirt access users [page]
+/dirt access invitations [page]
+/dirt access invite create
+/dirt access invite revoke <id>
+/dirt access user disable <handle>
+/dirt access user enable <handle>
+/dirt access user recover <handle>
+/dirt access user unlink <handle>
+```
+
+Invite and recovery creation are in-game-only because they return secrets.
+They are never printed to the server console or detail logs.
+
+### 5. Connect an MCP client
+
+Give a current remote-MCP client the URL `https://your-host.example/mcp`. The
+client discovers Dirt's OAuth metadata, opens browser authorization, and sends
+audience-bound access tokens to the MCP resource. Dirt does not support stdio,
+legacy SSE, dynamic client registration, client credentials, or compatibility
+endpoints.
+
+The authorization screen warns that Dirt includes
+`run_minecraft_commands`, which has console-equivalent authority. Paper's
+`bridge.allowed-operations` list is the single global upper bound. Remove an
+operation ID and restart Paper to remove the corresponding tool for everyone.
 
 ## Security and operations
 
-- The bridge binds to `127.0.0.1`, and every endpoint requires bearer
-  authentication. Never proxy it, expose it publicly, log its token, or commit
-  credentials.
-- The MCP server sends a fresh `X-Dirt-Call-Id` UUIDv4 on every bridge request;
-  Paper retains it with mutation records for cross-process correlation.
-- Paper console logs show concise operator events. Bounded, rotating JSON Lines
-  detail logs live under `plugins/DirtMCP/logs/`.
-- MCP stdout is for protocol messages only; diagnostics go to stderr.
+- Keep Paper, the web service, and Caddy on the same Linux host. Only Caddy
+  should accept internet HTTP traffic; expose Paper's game port as needed, but
+  never its bridge or control APIs.
+- Use HTTPS for the permanent origin. Secure passkey and session cookies are not
+  designed for an HTTP production origin.
+- Do not log or commit bearer tokens, invite/recovery/link values, WebAuthn
+  challenges, authorization codes, or access/refresh tokens.
+- Recovery is operator-issued passkey re-enrollment. It replaces old passkeys
+  and revokes the account's sessions, consent, authorization codes, and refresh
+  grants. An already-issued access token expires within five minutes; disable or
+  unlink the account when access must stop immediately.
 - Edits are synchronous and bounded, with one Dirt mutation at a time per world.
-- Undo history is in-memory only and is cleared on world unload or server
-  restart.
+  Undo history is memory-only and clears on world unload or restart.
+- Command batches are non-atomic and outside Dirt's FAWE limits and undo. Do not
+  retry them blindly after an ambiguous timeout. Keep normal server backups.
 
-Keep each label and edit focused on one reversible intent. Batch undo validates
-the complete newest-first ID list before starting, then restores sequentially;
-if a runtime failure follows successful undos, inspect history before retrying.
-Undo is a flat stack and does not create redo entries.
-
-Command batches are non-atomic and may cause effects outside Dirt's edit limits
-and history. Do not retry them blindly after an ambiguous timeout. Keep normal
-server backups.
-
-Paper operators can use `/dirt` for live status, configuration, and bridge
-operation summaries. It requires `dirtmcp.command`, which operators receive by
-default.
+See [architecture](docs/architecture.md) for trust boundaries and
+[the Paper bridge contract](protocol/openapi.yaml) plus
+[the access-control contract](protocol/access-control.openapi.yaml) for the two
+private loopback APIs.
 
 ## Development
 
-The repository includes a disposable managed Paper world in the ignored
+The repository includes a disposable managed Paper world under the ignored
 `paper-plugin/run/` directory. Running it means accepting the
 [Minecraft EULA](https://aka.ms/MinecraftEULA).
 
-| Command       | Purpose                                           |
-| ------------- | ------------------------------------------------- |
-| `make doctor` | Check the development toolchain.                  |
-| `make up`     | Start the managed server, or reuse it if running. |
-| `make reload` | Rebuild and safely restart after changes.         |
-| `make verify` | Run the complete local gate and live smoke tests. |
-| `make down`   | Stop the managed server.                          |
+| Command       | Purpose                                                  |
+| ------------- | -------------------------------------------------------- |
+| `make doctor` | Check the development toolchain.                         |
+| `make up`     | Start the managed native Paper server.                   |
+| `make reload` | Rebuild and safely restart Paper after plugin changes.   |
+| `make web`    | Migrate and run the local dashboard at `localhost:3000`. |
+| `make build`  | Build the Paper plugin and web service.                  |
+| `make verify` | Run the complete local gate and live Paper smoke tests.  |
+| `make down`   | Stop the managed Paper server.                           |
 
-The managed server uses Minecraft port `25566` and bridge port `8765`. To use
-different ports for a new server:
-
-```bash
-make up MC_PORT=25567 BRIDGE_PORT=9876
-```
-
-Paper does not support plugin hot reload. Use `make reload` after Java or plugin
-configuration changes. Run `make help` for the full command list.
-
-## Contributing
-
-Keep changes focused and respect the component boundaries:
-
-| Concern             | Location                |
-| ------------------- | ----------------------- |
-| Paper and FAWE code | `paper-plugin`          |
-| MCP behavior        | `mcp-server`            |
-| Wire contracts      | `protocol/openapi.yaml` |
-
-Each tool change should cover Java behavior, OpenAPI, TypeScript schemas, MCP
-exposure, tests, and concise documentation.
+The managed server uses Minecraft port `25566` and bridge port `8765`. Paper
+does not support plugin hot reload. Use `make reload` after Java or plugin
+configuration changes.
 
 Run the smallest relevant check while working. Before handing off code or
 contract changes, run `make verify` once. Do not hand-edit generated runtime
-files or world data, and do not commit secrets. See [`AGENTS.md`](AGENTS.md) for
-the rest of the repository rules.
-
-## Documentation
-
-- [Architecture](docs/architecture.md)
-- [MCP tool reference](docs/tools.md)
-- [Bridge OpenAPI contract](protocol/openapi.yaml)
-- [Plugin configuration](paper-plugin/src/main/resources/config.yml)
+files, lockfiles, or world data, and do not commit secrets. See
+[`AGENTS.md`](AGENTS.md) for repository rules.
 
 ## License
 

@@ -2,7 +2,7 @@ openapi: 3.1.1
 info:
   title: Dirt MCP Paper Bridge
   version: 0.1.0
-  description: Authoritative authenticated loopback HTTP contract between the Dirt MCP stdio server and Paper plugin.
+  description: Authoritative authenticated loopback HTTP contract between the Dirt web service and Paper plugin.
   license:
     name: Apache License 2.0
     identifier: Apache-2.0
@@ -2969,19 +2969,25 @@ components:
       type: object
       additionalProperties: false
       oneOf:
-        - properties:
+        - required:
+            - outcome
+          properties:
             outcome:
               const: preview
             edit:
               type: 'null'
-        - properties:
+        - required:
+            - outcome
+          properties:
             outcome:
               const: no_change
             changedBlockCount:
               const: 0
             edit:
               type: 'null'
-        - properties:
+        - required:
+            - outcome
+          properties:
             outcome:
               const: committed
             matchedBlockCount:
@@ -3086,19 +3092,25 @@ components:
       type: object
       additionalProperties: false
       oneOf:
-        - properties:
+        - required:
+            - outcome
+          properties:
             outcome:
               const: preview
             edit:
               type: 'null'
-        - properties:
+        - required:
+            - outcome
+          properties:
             outcome:
               const: no_change
             changedBlockCount:
               const: 0
             edit:
               type: 'null'
-        - properties:
+        - required:
+            - outcome
+          properties:
             outcome:
               const: committed
             bounds:

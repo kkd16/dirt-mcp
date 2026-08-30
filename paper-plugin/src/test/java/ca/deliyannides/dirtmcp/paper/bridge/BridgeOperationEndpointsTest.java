@@ -901,6 +901,7 @@ final class BridgeOperationEndpointsTest {
                                 standard.bridge().maxConcurrentInspections(),
                                 64,
                                 standard.bridge().allowedOperations()),
+                        standard.accessControl(),
                         standard.logging(),
                         new DirtConfig.Limits(
                                 limits.maxRegionVolume(),
@@ -1154,6 +1155,7 @@ final class BridgeOperationEndpointsTest {
                         bridge.maxConcurrentInspections(),
                         bridge.maxRequestBytes(),
                         allowedOperations),
+                config.accessControl(),
                 config.logging(),
                 config.limits(),
                 config.editHistory());

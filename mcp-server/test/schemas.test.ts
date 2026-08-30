@@ -60,7 +60,7 @@ test('status input and output use the hard-cut projected contract', () => {
   assert.deepEqual(input, { include: { players: false, worlds: true, configuration: false } });
 
   const output = {
-    builds: { minecraft: '26.2', paper: '26.2-116', dirtPlugin: '0.1.0', fawe: '2.15.4' },
+    builds: { minecraft: '26.2', paper: '26.2-121', dirtPlugin: '0.1.0', fawe: '2.15.4' },
     performance: { tpsOneMinute: 20, averageTickTimeMillis: 4.2 },
     players: null,
     worlds: null,

@@ -1056,17 +1056,17 @@ export interface components {
             readonly changedBlockCount: components["schemas"]["NonNegativeInt32"];
         } & ({
             /** @constant */
-            readonly outcome?: "preview";
+            readonly outcome: "preview";
             readonly edit?: null;
         } | {
             /** @constant */
-            readonly outcome?: "no_change";
+            readonly outcome: "no_change";
             /** @constant */
             readonly changedBlockCount?: 0;
             readonly edit?: null;
         } | {
             /** @constant */
-            readonly outcome?: "committed";
+            readonly outcome: "committed";
             readonly matchedBlockCount?: components["schemas"]["PositiveInt32"];
             readonly changedBlockCount?: components["schemas"]["PositiveInt32"];
             readonly edit?: components["schemas"]["EditRecord"] & {
@@ -1113,17 +1113,17 @@ export interface components {
             readonly unchangedBlockCount: components["schemas"]["NonNegativeInt32"];
         } & ({
             /** @constant */
-            readonly outcome?: "preview";
+            readonly outcome: "preview";
             readonly edit?: null;
         } | {
             /** @constant */
-            readonly outcome?: "no_change";
+            readonly outcome: "no_change";
             /** @constant */
             readonly changedBlockCount?: 0;
             readonly edit?: null;
         } | {
             /** @constant */
-            readonly outcome?: "committed";
+            readonly outcome: "committed";
             readonly bounds?: components["schemas"]["Bounds"];
             readonly blockCount?: components["schemas"]["PositiveInt32"];
             readonly changedBlockCount?: components["schemas"]["PositiveInt32"];

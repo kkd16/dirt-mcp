@@ -7,15 +7,17 @@ The usual workflow is:
 inspect -> preview -> edit -> verify -> undo if needed
 ```
 
-The MCP server owns this catalog, its schemas, annotations, and model-facing
-defaults. At startup it reads Paper's allowed bridge operation IDs from
-`/v1/capabilities` and registers only the corresponding tools. Operations that
-are not admitted do not appear in MCP discovery.
+The web service owns this catalog, its schemas, annotations, and model-facing
+defaults. For each authenticated MCP request it reads Paper's allowed bridge
+operation IDs from `/v1/capabilities` and registers only the corresponding
+tools. Operations that are not admitted do not appear in MCP discovery.
 
 ## What is sent over MCP?
 
-Yes: MCP stdio messages are JSON-RPC, and each tool's arguments and structured
-result are JSON objects. During discovery, `tools/list` advertises an
+Yes: MCP Streamable HTTP messages are JSON-RPC, and each tool's arguments and
+structured result are JSON objects. Dirt accepts independent authenticated
+`POST /mcp` requests; it does not expose legacy SSE, GET streams, or MCP
+sessions. During discovery, `tools/list` advertises an
 `inputSchema` and `outputSchema` in JSON Schema. Those live schemas, generated
 from Dirt's Zod schemas, define the machine-readable structure for inputs and
 non-error completions. Dirt also enforces documented cross-field refinements at
@@ -72,7 +74,7 @@ only the exact `arguments` it supplies and the `structuredContent` it uses.
 Example values are concrete JSON payloads, not a replacement for the exhaustive
 schemas returned by `tools/list`. The
 [OpenAPI contract](../protocol/openapi.yaml) describes the separate, internal
-HTTP bridge between the MCP server and Paper. MCP generates an
+HTTP bridge between the web service and Paper. MCP generates an
 `X-Dirt-Call-Id` UUIDv4 for every bridge request and fully materializes fixed
 defaults before sending it.
 
@@ -162,7 +164,7 @@ Structured result:
 {
   "builds": {
     "minecraft": "26.2",
-    "paper": "26.2-116-main",
+    "paper": "26.2-121-main",
     "dirtPlugin": "0.1.0",
     "fawe": "2.15.4"
   },

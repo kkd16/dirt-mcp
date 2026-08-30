@@ -1,0 +1,13 @@
+.git
+.env
+.env.*
+backups/
+secrets/
+node_modules/
+**/node_modules/
+**/dist/
+**/build/
+.gradle/
+paper-plugin/run/
+mcp-server/data/
+*.log

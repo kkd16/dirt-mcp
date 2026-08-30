@@ -1,0 +1,168 @@
+name: dirt-mcp
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: dirt-mcp-web:local
+    network_mode: host
+    init: true
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    environment:
+      DIRT_PUBLIC_ORIGIN: https://${DIRT_PUBLIC_HOST:?DIRT_PUBLIC_HOST is required}
+      DIRT_DATABASE_PATH: /var/lib/dirt-mcp/dirt.sqlite3
+      DIRT_WEB_PORT: '3000'
+      DIRT_MCP_BRIDGE_URL: http://127.0.0.1:8765
+      DIRT_AUTH_SECRET_FILE: /run/secrets/auth-secret
+      DIRT_BRIDGE_TOKEN_FILE: /run/secrets/bridge-token
+      DIRT_CONTROL_TOKEN_FILE: /run/secrets/control-token
+    secrets:
+      - auth-secret
+      - bridge-token
+      - control-token
+    volumes:
+      - dirt-data:/var/lib/dirt-mcp
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: '3'
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - --input-type=module
+        - --eval
+        - const response = await fetch('http://127.0.0.1:3000/healthz'); if (!response.ok) process.exit(1)
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  migrate:
+    profiles:
+      - operations
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: dirt-mcp-web:local
+    network_mode: none
+    init: true
+    restart: 'no'
+    cap_drop:
+      - ALL
+    environment:
+      DIRT_PUBLIC_ORIGIN: https://${DIRT_PUBLIC_HOST:?DIRT_PUBLIC_HOST is required}
+      DIRT_DATABASE_PATH: /var/lib/dirt-mcp/dirt.sqlite3
+      DIRT_WEB_PORT: '3000'
+      DIRT_MCP_BRIDGE_URL: http://127.0.0.1:8765
+      DIRT_AUTH_SECRET_FILE: /run/secrets/auth-secret
+      DIRT_BRIDGE_TOKEN_FILE: /run/secrets/bridge-token
+      DIRT_CONTROL_TOKEN_FILE: /run/secrets/control-token
+    secrets:
+      - auth-secret
+      - bridge-token
+      - control-token
+    volumes:
+      - dirt-data:/var/lib/dirt-mcp
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - dist/migrate.js
+
+  backup:
+    profiles:
+      - operations
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: dirt-mcp-web:local
+    network_mode: none
+    init: true
+    restart: 'no'
+    cap_drop:
+      - ALL
+    environment:
+      DIRT_DATABASE_PATH: /var/lib/dirt-mcp/dirt.sqlite3
+      DIRT_BACKUP_DESTINATION: ${DIRT_BACKUP_DESTINATION:-}
+    volumes:
+      - dirt-data:/var/lib/dirt-mcp:ro
+      - type: bind
+        source: ./backups
+        target: /backups
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    entrypoint:
+      - /bin/sh
+      - -eu
+      - -c
+    command:
+      - |-
+        case "$${DIRT_BACKUP_DESTINATION}" in
+          ''|.|..|*/*)
+            echo 'DIRT_BACKUP_DESTINATION must be a new file name without slashes.' >&2
+            exit 64
+            ;;
+        esac
+        exec node dist/backup.js "/backups/$${DIRT_BACKUP_DESTINATION}"
+
+  caddy:
+    image: caddy:2.11.4-alpine
+    network_mode: host
+    init: true
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      DIRT_PUBLIC_HOST: ${DIRT_PUBLIC_HOST:?DIRT_PUBLIC_HOST is required}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: '3'
+
+secrets:
+  auth-secret:
+    file: ${DIRT_AUTH_SECRET_FILE:?DIRT_AUTH_SECRET_FILE is required}
+  bridge-token:
+    file: ${DIRT_BRIDGE_TOKEN_FILE:?DIRT_BRIDGE_TOKEN_FILE is required}
+  control-token:
+    file: ${DIRT_CONTROL_TOKEN_FILE:?DIRT_CONTROL_TOKEN_FILE is required}
+
+volumes:
+  dirt-data:
+  caddy-config:
+  caddy-data:

@@ -1,5 +1,7 @@
 package ca.deliyannides.dirtmcp.paper.bootstrap;
 
+import ca.deliyannides.dirtmcp.paper.access.AccessControl;
+import ca.deliyannides.dirtmcp.paper.access.HttpAccessControlClient;
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeServer;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.CapabilitiesEndpoint;
 import ca.deliyannides.dirtmcp.paper.bridge.endpoint.CountRegionBlockStatesEndpoint;
@@ -48,6 +50,7 @@ public final class DirtRuntime implements AutoCloseable {
     private final WorldEditService worldEditor;
     private final WorldEditLifecycleListener worldLifecycle;
     private final BridgeServer bridge;
+    private final AccessControl accessControl;
     private final DirtLog log;
     private final AtomicBoolean closed = new AtomicBoolean();
 
@@ -56,27 +59,36 @@ public final class DirtRuntime implements AutoCloseable {
             WorldEditService worldEditor,
             WorldEditLifecycleListener worldLifecycle,
             BridgeServer bridge,
+            AccessControl accessControl,
             DirtLog log) {
         this.mainThread = mainThread;
         this.worldEditor = worldEditor;
         this.worldLifecycle = worldLifecycle;
         this.bridge = bridge;
+        this.accessControl = accessControl;
         this.log = log;
     }
 
     public static DirtRuntime start(
-            JavaPlugin plugin, DirtConfig config, String bearerToken, DirtLog log)
+            JavaPlugin plugin,
+            DirtConfig config,
+            String bridgeBearerToken,
+            String controlBearerToken,
+            DirtLog log)
             throws IOException {
         Objects.requireNonNull(plugin, "plugin");
         Objects.requireNonNull(config, "config");
-        Objects.requireNonNull(bearerToken, "bearerToken");
+        Objects.requireNonNull(bridgeBearerToken, "bridgeBearerToken");
+        Objects.requireNonNull(controlBearerToken, "controlBearerToken");
         Objects.requireNonNull(log, "log");
 
         PaperMainThread mainThread = new PaperMainThread(plugin);
         WorldEditService worldEditor = null;
         WorldEditLifecycleListener worldLifecycle = null;
         BridgeServer bridge = null;
+        AccessControl accessControl = null;
         try {
+            accessControl = new HttpAccessControlClient(config.accessControl(), controlBearerToken);
             PaperServerStatusService status =
                     new PaperServerStatusService(
                             mainThread, new BukkitServerStatusAccess(plugin, config));
@@ -121,7 +133,7 @@ public final class DirtRuntime implements AutoCloseable {
             bridge =
                     new BridgeServer(
                             config,
-                            bearerToken,
+                            bridgeBearerToken,
                             List.of(
                                     new CapabilitiesEndpoint(config.bridge().allowedOperations()),
                                     new PingEndpoint(status),
@@ -138,7 +150,7 @@ public final class DirtRuntime implements AutoCloseable {
                                     new RunMinecraftCommandsEndpoint(commands)),
                             log);
             bridge.start();
-            registerAdminCommand(plugin, config, status, log);
+            registerAdminCommand(plugin, config, status, accessControl, mainThread, log);
             String detailSummary =
                     log.hasDetailFile()
                             ? "detailed logs: " + plugin.getDataPath().resolve("logs")
@@ -153,7 +165,8 @@ public final class DirtRuntime implements AutoCloseable {
                                     config.bridge().allowedOperations().size())
                             .with("detail_file_available", log.hasDetailFile());
             log.info("runtime", "runtime.started", message, context);
-            return new DirtRuntime(mainThread, worldEditor, worldLifecycle, bridge, log);
+            return new DirtRuntime(
+                    mainThread, worldEditor, worldLifecycle, bridge, accessControl, log);
         } catch (IOException | RuntimeException | Error failure) {
             if (bridge != null) {
                 try {
@@ -176,6 +189,13 @@ public final class DirtRuntime implements AutoCloseable {
                     failure.addSuppressed(cleanupFailure);
                 }
             }
+            if (accessControl != null) {
+                try {
+                    accessControl.close();
+                } catch (RuntimeException | Error cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+            }
             try {
                 mainThread.close();
             } catch (RuntimeException | Error cleanupFailure) {
@@ -186,11 +206,22 @@ public final class DirtRuntime implements AutoCloseable {
     }
 
     private static void registerAdminCommand(
-            JavaPlugin plugin, DirtConfig config, PaperServerStatusService status, DirtLog log) {
+            JavaPlugin plugin,
+            DirtConfig config,
+            PaperServerStatusService status,
+            AccessControl accessControl,
+            PaperMainThread mainThread,
+            DirtLog log) {
         PluginMeta metadata = plugin.getPluginMeta();
         DirtAdminCommand adminCommand =
                 new DirtAdminCommand(
-                        metadata.getName(), metadata.getVersion(), config, status, log);
+                        metadata.getName(),
+                        metadata.getVersion(),
+                        config,
+                        status,
+                        accessControl,
+                        mainThread,
+                        log);
         plugin.getLifecycleManager()
                 .registerEventHandler(
                         LifecycleEvents.COMMANDS,
@@ -198,7 +229,7 @@ public final class DirtRuntime implements AutoCloseable {
                                 event.registrar()
                                         .register(
                                                 adminCommand.command(),
-                                                "Inspect Dirt MCP status and configuration"));
+                                                "Manage Dirt MCP access and inspect diagnostics"));
     }
 
     @Override
@@ -209,6 +240,7 @@ public final class DirtRuntime implements AutoCloseable {
         Throwable failure = null;
         failure = cleanup(failure, () -> HandlerList.unregisterAll(this.worldLifecycle));
         failure = cleanup(failure, this.worldEditor::beginStopping);
+        failure = cleanup(failure, this.accessControl::close);
         failure = cleanup(failure, this.bridge::close);
         try {
             if (!this.worldEditor.closeIfQuiescent()) {

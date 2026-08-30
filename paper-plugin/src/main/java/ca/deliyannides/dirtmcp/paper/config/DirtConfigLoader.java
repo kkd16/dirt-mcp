@@ -9,7 +9,7 @@ import org.bukkit.configuration.file.FileConfiguration;
 
 public final class DirtConfigLoader {
     private static final Set<String> SECTIONS =
-            Set.of("bridge", "logging", "limits", "edit-history");
+            Set.of("bridge", "access-control", "logging", "limits", "edit-history");
     private static final Set<String> REQUIRED_PATHS =
             Set.of(
                     "bridge.port",
@@ -19,6 +19,9 @@ public final class DirtConfigLoader {
                     "bridge.max-concurrent-inspections",
                     "bridge.max-request-bytes",
                     "bridge.allowed-operations",
+                    "access-control.url",
+                    "access-control.connect-timeout-millis",
+                    "access-control.request-timeout-millis",
                     "logging.console-level",
                     "logging.detail-file-max-bytes",
                     "logging.detail-file-retained-files",
@@ -41,10 +44,16 @@ public final class DirtConfigLoader {
 
     private DirtConfigLoader() {}
 
-    public static DirtConfig load(FileConfiguration config, String portOverride) {
+    public static DirtConfig load(
+            FileConfiguration config, String portOverride, String accessControlUrlOverride) {
         validateKeys(config);
         int configuredPort = requiredInteger(config, "bridge.port");
         int port = parsePortOverride(portOverride, configuredPort);
+        String configuredAccessControlUrl = requiredString(config, "access-control.url");
+        String accessControlUrl =
+                accessControlUrlOverride == null || accessControlUrlOverride.isBlank()
+                        ? configuredAccessControlUrl
+                        : accessControlUrlOverride;
 
         return new DirtConfig(
                 new DirtConfig.Bridge(
@@ -55,6 +64,10 @@ public final class DirtConfigLoader {
                         requiredInteger(config, "bridge.max-concurrent-inspections"),
                         requiredInteger(config, "bridge.max-request-bytes"),
                         requiredOperations(config, "bridge.allowed-operations")),
+                new DirtConfig.AccessControl(
+                        accessControlUrl,
+                        requiredInteger(config, "access-control.connect-timeout-millis"),
+                        requiredInteger(config, "access-control.request-timeout-millis")),
                 new DirtConfig.Logging(
                         DirtConfig.ConsoleLogLevel.parse(
                                 requiredString(config, "logging.console-level")

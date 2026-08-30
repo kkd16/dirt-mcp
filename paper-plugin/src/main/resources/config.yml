@@ -31,6 +31,13 @@ bridge:
     - undoEdits
     - runMinecraftCommands
 
+access-control:
+  # Loopback origin of the Dirt web service. DIRT_MCP_CONTROL_URL overrides this value.
+  url: http://127.0.0.1:3000
+  # Connection and complete-request deadlines for Paper administrative calls.
+  connect-timeout-millis: 2000
+  request-timeout-millis: 5000
+
 logging:
   # Minimum severity shown in the Paper console: info, warning, or error.
   # Read-only requests and previews remain in the detailed file at every level.

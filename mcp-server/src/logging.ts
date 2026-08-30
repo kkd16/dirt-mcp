@@ -1,4 +1,4 @@
-const SERVICE = 'dirt-mcp-stdio';
+const SERVICE = 'dirt-mcp-web';
 const MAX_STRING_LENGTH = 2_048;
 const TRUNCATION_SUFFIX = '...[truncated]';
 const REDACTED = '[redacted]';

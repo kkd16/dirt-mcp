@@ -20,6 +20,9 @@ paper-plugin/run/
 .env
 .env.*
 !.env.example
+/secrets/
+/backups/
+/mcp-server/data/
 
 # Editors and operating systems
 .idea/

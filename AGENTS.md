@@ -2,25 +2,34 @@
 
 ## Product and architecture
 
-Dirt MCP is a local-first interface for inspecting and editing a live Paper
-world. The MCP server communicates over authenticated loopback HTTP with a Paper
-plugin, which owns Minecraft and FAWE access. `protocol/openapi.yaml` is the
-authoritative bridge contract; `docs/tools.md` records the public MCP surface,
-and `docs/architecture.md` defines ownership and product boundaries.
+Dirt MCP is a self-hosted interface for inspecting and editing a live Paper
+world. Its web service owns the dashboard, accounts, OAuth authorization, and
+public MCP endpoint. It communicates over authenticated loopback HTTP with a
+Paper plugin, which owns Minecraft and FAWE access. `protocol/openapi.yaml` is
+the authoritative world bridge contract, `protocol/access-control.openapi.yaml`
+is the private Paper-to-web account-control contract, `docs/tools.md` records
+the public MCP surface, and `docs/architecture.md` defines ownership and product
+boundaries.
 
 - Support only the latest stable Paper release. Verify official sources before
   changing Paper, Java, Gradle, FAWE, or MCP dependencies.
 - Keep the bridge on `127.0.0.1`, require bearer authentication for world
   endpoints, and never log or commit tokens.
+- Expose only the HTTPS edge. Keep web and Paper control listeners on
+  `127.0.0.1`, reject private control routes at the edge, and use distinct
+  credentials for the world bridge and Paper-to-web control API.
+- Require invite-only passkey accounts and OAuth for MCP. An account must be
+  active and linked one-to-one with an online-mode Minecraft UUID before it can
+  use MCP.
 - Paper owns live worlds. Never edit world files or `.mca` data behind a running
   server.
 - FAWE is required for edits. Keep FAWE types and behavior behind Dirt-owned
   Java services; wire schemas must remain implementation-neutral.
 - Keep Paper/FAWE code in `paper-plugin`, MCP code in `mcp-server`, and wire
   contracts in `protocol`.
-- Keep v1 synchronous and local: one mutation per world, bounded in-memory undo,
-  and no persistent jobs, database, remote transport, permission integrations,
-  renderer, web UI, or speculative extension points.
+- Keep v1 small: one synchronous mutation per world, bounded in-memory undo, one
+  SQLite database, one fixed MCP scope, and no persistent jobs, roles,
+  per-account permissions, renderer, world UI, or speculative extension points.
 
 ## Engineering
 
@@ -37,7 +46,8 @@ and `docs/architecture.md` defines ownership and product boundaries.
   project initialization and configuration changes when they can preserve the
   established configuration; edit configuration directly only when no suitable
   command exists.
-- MCP stdio stdout is protocol-only; diagnostics go to stderr.
+- Never log bearer credentials, invite or recovery secrets, WebAuthn challenges,
+  authorization codes, or raw command text.
 - Preserve user changes. Commit only when asked.
 
 ## Workflow

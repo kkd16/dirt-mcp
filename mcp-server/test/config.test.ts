@@ -1,8 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BridgeConfigurationError, readBridgeConfig } from '../dist/config.js';
+import {
+  BridgeConfigurationError,
+  readBridgeConfig,
+  readRuntimeConfig,
+  RuntimeConfigurationError,
+} from '../dist/config.js';
 
 const TOKEN = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+const CONTROL_TOKEN = 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
+const AUTH_SECRET = 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
 
 test('reads the default and normalized loopback bridge origins', () => {
   assert.deepEqual(readBridgeConfig({ DIRT_MCP_BRIDGE_TOKEN: TOKEN }), {
@@ -71,4 +78,51 @@ test('rejects bridge URLs that are not a bare HTTP IPv4 loopback origin', () => 
     () => readBridgeConfig({ DIRT_MCP_BRIDGE_TOKEN: TOKEN, DIRT_MCP_BRIDGE_URL: invalidUrls[0] }),
     (error) => error instanceof BridgeConfigurationError && error.code === 'bridge_url_invalid',
   );
+});
+
+test('runtime config prefers secret files and requires pairwise-distinct trust secrets', () => {
+  const files: Record<string, string> = {
+    '/bridge': `${TOKEN}\n`,
+    '/control': `${CONTROL_TOKEN}\r\n`,
+    '/auth': AUTH_SECRET,
+  };
+  const config = readRuntimeConfig(
+    {
+      DIRT_BRIDGE_TOKEN_FILE: '/bridge',
+      DIRT_CONTROL_TOKEN_FILE: '/control',
+      DIRT_AUTH_SECRET_FILE: '/auth',
+      DIRT_MCP_BRIDGE_TOKEN: CONTROL_TOKEN,
+      DIRT_CONTROL_TOKEN: TOKEN,
+      DIRT_PUBLIC_ORIGIN: 'http://127.0.0.1:3000',
+      DIRT_DATABASE_PATH: './data/dirt.sqlite',
+    },
+    (path) =>
+      files[path] ??
+      (() => {
+        throw new Error('missing');
+      })(),
+  );
+  assert.equal(config.bridge.token, TOKEN);
+  assert.equal(config.controlToken, CONTROL_TOKEN);
+  assert.equal(config.authSecret, AUTH_SECRET);
+  assert.equal(config.port, 3000);
+  assert.equal(config.rpId, '127.0.0.1');
+
+  for (const [bridge, control, auth] of [
+    [TOKEN, TOKEN, AUTH_SECRET],
+    [TOKEN, CONTROL_TOKEN, TOKEN],
+    [TOKEN, CONTROL_TOKEN, CONTROL_TOKEN],
+  ]) {
+    assert.throws(
+      () =>
+        readRuntimeConfig({
+          DIRT_MCP_BRIDGE_TOKEN: bridge,
+          DIRT_CONTROL_TOKEN: control,
+          DIRT_AUTH_SECRET: auth,
+          DIRT_PUBLIC_ORIGIN: 'https://dirt.example',
+          DIRT_DATABASE_PATH: './data/dirt.sqlite',
+        }),
+      (error) => error instanceof RuntimeConfigurationError && error.code === 'secrets_not_distinct',
+    );
+  }
 });

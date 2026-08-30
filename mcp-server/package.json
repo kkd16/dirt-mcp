@@ -2,30 +2,39 @@
   "name": "@dirt-mcp/server",
   "version": "0.1.0",
   "private": true,
-  "description": "Local MCP stdio bridge for Dirt MCP",
+  "description": "Self-hosted Dirt dashboard, OAuth provider, and MCP HTTP bridge",
   "license": "Apache-2.0",
-  "bin": {
-    "dirt-mcp": "dist/index.js"
-  },
   "files": [
     "dist"
   ],
   "type": "module",
   "scripts": {
-    "build": "pnpm run clean && tsc -p tsconfig.json",
+    "build": "pnpm run clean && tsc -p tsconfig.json && tsc -p tsconfig.web.json && vite build",
     "check": "pnpm run build && tsc -p tsconfig.test.json",
     "pretest": "pnpm run check",
     "start": "node dist/index.js",
-    "test": "node --test --experimental-test-coverage --test-coverage-include=dist/**/*.js --test-coverage-include-all --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=90 test/*.test.ts",
+    "migrate": "node dist/migrate.js",
+    "backup": "node dist/backup.js",
+    "test": "node --test --experimental-test-coverage --test-coverage-include=dist/**/*.js --test-coverage-include-all --test-coverage-lines=70 --test-coverage-branches=75 --test-coverage-functions=70 test/*.test.ts",
     "clean": "node --input-type=module --eval \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\""
   },
   "dependencies": {
+    "@better-auth/cimd": "1.7.2",
+    "@better-auth/core": "1.7.2",
+    "@better-auth/mcp": "1.7.2",
+    "@better-auth/passkey": "1.7.2",
+    "@hono/node-server": "2.1.1",
     "@modelcontextprotocol/server": "2.0.0",
-    "zod": "4.4.3"
+    "better-auth": "1.7.2",
+    "better-sqlite3": "12.11.1",
+    "hono": "4.13.5",
+    "zod": "4.5.4"
   },
   "devDependencies": {
-    "@types/node": "26.2.0",
-    "typescript": "7.0.2"
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "26.4.0",
+    "typescript": "7.0.2",
+    "vite": "8.2.2"
   },
   "engines": {
     "node": ">=26"

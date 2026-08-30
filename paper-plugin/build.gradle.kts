@@ -64,7 +64,7 @@ spotless {
 }
 
 pmd {
-    toolVersion = "7.26.0"
+    toolVersion = "7.27.0"
     isConsoleOutput = true
     rulesMinimumPriority = 2
     ruleSets =
@@ -75,7 +75,7 @@ pmd {
 }
 
 spotbugs {
-    toolVersion = "4.10.3"
+    toolVersion = "4.10.4"
     effort = Effort.MAX
     reportLevel = Confidence.HIGH
     ignoreFailures = false

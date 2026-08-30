@@ -72,6 +72,7 @@ final class BridgeTestFixture {
                         1,
                         262_144,
                         List.of(BridgeOperation.values())),
+                new DirtConfig.AccessControl("http://127.0.0.1:3000", 2_000, 5_000),
                 new DirtConfig.Logging(DirtConfig.ConsoleLogLevel.INFO, 10_485_760, 5),
                 new DirtConfig.Limits(
                         1_000_000, 256, 32, 64, 64, 256, 250_000, 32_768, 65_536, 654, 512, 10,

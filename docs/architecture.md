@@ -1,45 +1,55 @@
 # Architecture
 
-Dirt MCP is a same-machine bridge between an MCP host and a live Paper server.
-Paper owns world state and persistence; Dirt exposes bounded operations against
-already-loaded worlds without reading or writing Minecraft region files.
+Dirt MCP is a self-hosted dashboard and authenticated MCP endpoint for a live
+Paper server. Paper owns world state and persistence; Dirt exposes bounded
+operations against already-loaded worlds without reading or writing Minecraft
+region files.
 
 ```text
-MCP host
-   | stdio
-   v
-TypeScript MCP server
-   | authenticated HTTP on 127.0.0.1
-   v
-Dirt MCP Paper plugin
-   | validated operations and scheduler boundaries
-   v
-FAWE and Paper-owned live worlds
+Browser / remote MCP client
+          | HTTPS
+          v
+        Caddy
+          | HTTP on 127.0.0.1
+          v
+Dashboard + OAuth + MCP service ---- SQLite accounts and credentials
+          | authenticated HTTP on 127.0.0.1
+          v
+    Dirt MCP Paper plugin ----------> private account-control API
+          |                            on 127.0.0.1
+          v
+    FAWE and Paper-owned live worlds
 ```
 
 ## Components and ownership
 
-### MCP server
+### Web and MCP service
 
-`mcp-server` owns the agent-facing interface:
+`mcp-server` is one Node.js process that owns the user-facing and agent-facing
+interfaces:
 
-- MCP stdio transport and tool registration;
+- server-rendered dashboard pages and their small WebAuthn browser client;
+- invite-only passkey accounts, browser sessions, recovery, and Minecraft links;
+- OAuth authorization and the stateless Streamable HTTP `POST /mcp` endpoint;
 - the public tool catalog, descriptions, annotations, and fixed input defaults;
 - Zod input, success-output, and structured failure schemas;
-- environment validation and the authenticated bridge client;
-- structured diagnostics on stderr while stdout remains protocol-only.
+- environment validation and authenticated loopback clients; and
+- a private loopback API used by Paper's access commands.
 
-At startup it reads Paper's authenticated capabilities endpoint, maps allowed
-bridge operation IDs to its own tool catalog, and registers only tools whose
-operation is admitted. It forwards a generated UUID with every bridge request so MCP
-and Paper logs can be correlated. It does not read world files, implement
-Minecraft parsing, or delegate MCP policy to Paper.
+Each MCP request authenticates an OAuth access token, then checks the current
+account is active and linked to exactly one Minecraft UUID. It reads Paper's
+authenticated capabilities, maps allowed bridge operation IDs to its own tool
+catalog, and creates a request-scoped MCP server with only admitted tools. It
+forwards a generated UUID with every bridge request so web and Paper logs can be
+correlated. It does not read world files, implement Minecraft parsing, or
+delegate account policy to Paper.
 
 ### Paper plugin
 
 `paper-plugin` owns everything that touches the Minecraft server:
 
 - plugin lifecycle, configuration, authentication, and request admission;
+- operator access commands and the asynchronous private control client;
 - the bridge operation allowlist and capabilities response;
 - world, player, chunk, block-state, and command access;
 - explicit transitions onto and off Paper's main thread;
@@ -50,20 +60,55 @@ HTTP endpoints decode into Dirt-owned models and call narrow feature services.
 Paper and FAWE types remain behind those services and do not appear in MCP or
 wire schemas.
 
-### Protocol
+### Protocols
 
 [`protocol/openapi.yaml`](../protocol/openapi.yaml) is the authoritative HTTP
-contract between Java and TypeScript. It contains implemented routes, request
-and response bodies, required headers, and structured error variants. The
+world bridge contract between Java and TypeScript. It contains implemented
+routes, request and response bodies, required headers, and structured error
+variants. The world bridge's
 [generated immutable TypeScript declarations](../mcp-server/src/generated/openapi.ts)
-are freshness-checked against it. The [tool reference](tools.md) documents the
-separate composed MCP interface.
+are freshness-checked against that contract.
+[`protocol/access-control.openapi.yaml`](../protocol/access-control.openapi.yaml)
+is the separate private Paper-to-web account-control contract. The
+[tool reference](tools.md) documents the composed MCP interface.
+
+## Identity and authorization
+
+Registration is invite-only and passkey-only. Raw invitation, recovery, and
+link secrets are random, short-lived, single-use values; only their SHA-256
+digests are stored. Browser-facing links keep secrets in URL fragments, exchange
+them through a POST, clear the fragment, and continue with a secure, HTTP-only,
+same-site enrollment cookie. Passkey ceremonies require user verification.
+Recovery is an operator-issued re-enrollment that removes the account's prior
+passkeys and revokes its sessions, consent, authorization codes, and refresh
+grants. Already-issued access tokens expire within five minutes. Disabling or
+unlinking an account blocks those tokens immediately because every MCP request
+reloads the account.
+
+Paper operators create and revoke invitations, disable or enable accounts,
+issue recovery links, and unlink Minecraft identities through `/dirt access`.
+An online player starts linking with `/dirt link`; Paper supplies the
+online-mode-authenticated UUID and current name to the private control API and
+returns a short-lived link URL only to that player. A recently authenticated
+web account consumes it. Database constraints and one transaction enforce one
+web account to one Minecraft UUID.
+
+MCP authorization uses one fixed `dirt:mcp` scope. The service supports current
+client metadata discovery plus authorization code flow with PKCE S256; it does
+not support dynamic client registration, client credentials, legacy MCP
+transports, or compatibility endpoints. Every MCP request validates the token's
+issuer, audience, expiry, and scope, then reloads the account so disable and
+unlink actions take effect immediately. There are deliberately no roles or
+per-account capability records in v1: every active, linked account receives the
+same Paper-limited tool catalog.
 
 ## Execution model
 
 The bridge listens only on `127.0.0.1`, requires bearer authentication, and
-admits a bounded number of concurrent requests. MCP calls remain synchronous;
-there is no job service, database, or remote transport.
+admits a bounded number of concurrent requests. MCP calls remain synchronous
+and independent: there is no MCP session, server-sent event stream, persistent
+job service, or persistent world history. SQLite persists only identity,
+credentials, sessions, OAuth state, invitations, and link challenges.
 
 Every authenticated bridge request carries `X-Dirt-Call-Id`. The mandatory
 `getCapabilities` control-plane operation reports the configurable operation
@@ -171,31 +216,43 @@ dispatch begins can therefore leave completion ambiguous.
 
 ## Security and observability
 
-The configured bridge URL accepted by the MCP process must be a bare
-`http://127.0.0.1` origin with an optional port. Tokens are supplied through the
-process environment and are excluded from logs along with raw request bodies,
-complete block payloads, command text, and command feedback.
+The configured bridge and control URLs must be bare `http://127.0.0.1` origins
+with optional ports. They use distinct bearer credentials. Production secrets
+are mounted from files, and credentials are excluded from logs along with raw
+request bodies, complete block payloads, command text, command feedback,
+WebAuthn challenges, invitation values, recovery values, and OAuth tokens and
+codes.
+
+The Node service also binds to `127.0.0.1`. Caddy is the only internet-facing
+HTTP process, terminates HTTPS, rejects `/internal/*` before proxying, and adds
+the public response security headers. Paper may expose its Minecraft game port
+separately. The application requires its exact canonical origin, uses secure
+host-only cookies, validates mutation origins, sends a restrictive content
+security policy, and exposes no cross-origin API.
 
 Paper writes concise lifecycle, mutation, undo, warning, and failure events to
 its console and bounded structured detail events to rotating JSON Lines files.
-The MCP process writes one structured completion record per accepted call to
-stderr. Call and edit IDs correlate records across both processes without
-exposing credentials.
+The web service writes structured lifecycle, tool, and sanitized failure
+records. Call and edit IDs correlate records across both processes without
+exposing credentials. Secret-producing Paper commands are player-only, render
+results privately, and never write the secret to console or server logs.
 
 ## Boundaries
 
-Dirt intentionally provides synchronous, local, semantic operations rather
-than a general Minecraft automation platform. It does not provide persistent
-jobs or persistent history, a database, remote bridge access, permission
-integration, direct world-file editing, a renderer or web UI, player control,
-schematics, or support for multiple Paper generations.
+Dirt intentionally provides synchronous, semantic world operations rather than
+a general Minecraft automation platform. Its dashboard is limited to account,
+security, linking, and MCP connection status. It does not provide persistent
+jobs or persistent world history, remote bridge access, roles or per-account
+permissions, direct world-file editing, a renderer, world controls, player
+control, schematics, or support for multiple Paper generations.
 
 Dependencies point inward through Dirt-owned operation contracts:
 
 ```text
-bootstrap -> bridge endpoints -> operation contracts <- feature services
-                                      ^                    |
-                                      |             Paper / FAWE adapters
+public edge -> web/auth/MCP -> bridge operation contracts <- feature services
+                    ^                    ^                       |
+                    |                    |                Paper / FAWE adapters
+                    +---- SQLite   Paper control client
 ```
 
 This boundary keeps the public tool and wire contracts independent of Paper and

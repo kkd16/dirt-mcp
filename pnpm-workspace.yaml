@@ -1,3 +1,6 @@
 packages:
   - mcp-server
+injectWorkspacePackages: true
+allowBuilds:
+  better-sqlite3: true
 minimumReleaseAgeStrict: true

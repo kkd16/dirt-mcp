@@ -4,9 +4,13 @@ SHELL := /bin/bash
 
 MC_PORT ?= 25566
 BRIDGE_PORT ?= 8765
-DEV_TOKEN_FILE := paper-plugin/run/.dirt-mcp-token
+DEV_BRIDGE_TOKEN_FILE := paper-plugin/run/.dirt-mcp-token
+DEV_CONTROL_TOKEN_FILE := paper-plugin/run/.dirt-mcp-control-token
+DEV_AUTH_SECRET_FILE := paper-plugin/run/.dirt-auth-secret
+DEV_DATABASE_FILE := mcp-server/data/dirt.sqlite3
+DEV_PUBLIC_ORIGIN ?= http://localhost:3000
 
-.PHONY: help doctor install node-deps build build-java build-mcp dev-build paper-runtime check verify ci format dev-token up reload down status logs console command smoke mcp health clean
+.PHONY: help doctor install node-deps build build-java build-web dev-build paper-runtime check verify ci format dev-secrets web up reload down status logs console command smoke health clean
 
 help: ## Show the available development commands.
 	@awk 'BEGIN { FS = ":.*## "; printf "Dirt MCP development commands:\n\n" } /^[a-zA-Z_-]+:.*## / { printf "  %-14s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -16,7 +20,7 @@ doctor: ## Verify the required Java, Node.js, pnpm, Gradle, curl, tmux, and lint
 	@command -v java >/dev/null || { printf 'Java 25 is required.\n' >&2; exit 1; }
 	@command -v jar >/dev/null || { printf 'The Java 25 JDK jar tool is required.\n' >&2; exit 1; }
 	@command -v node >/dev/null || { printf 'Node.js 26 or newer is required.\n' >&2; exit 1; }
-	@command -v pnpm >/dev/null || { printf 'pnpm 11.22.0 or a newer 11.x release is required.\n' >&2; exit 1; }
+	@command -v pnpm >/dev/null || { printf 'pnpm 11.24.0 or a newer 11.x release is required.\n' >&2; exit 1; }
 	@command -v curl >/dev/null || { printf 'curl is required.\n' >&2; exit 1; }
 	@command -v tmux >/dev/null || { printf 'tmux is required for the managed development server.\n' >&2; exit 1; }
 	@command -v shellcheck >/dev/null || { printf 'ShellCheck 0.9.0 or newer is required.\n' >&2; exit 1; }
@@ -31,8 +35,8 @@ doctor: ## Verify the required Java, Node.js, pnpm, Gradle, curl, tmux, and lint
 	  else \
 	    pnpm_minor=-1; \
 	  fi; \
-	  if (( pnpm_minor < 22 )); then \
-	    printf 'Expected pnpm 11.22.0 or a newer 11.x release, found pnpm %s.\n' "$$pnpm_version" >&2; exit 1; fi
+	  if (( pnpm_minor < 24 )); then \
+	    printf 'Expected pnpm 11.24.0 or a newer 11.x release, found pnpm %s.\n' "$$pnpm_version" >&2; exit 1; fi
 	@shellcheck_version="$$(shellcheck --version | awk '/^version:/ { print $$2 }')"; \
 	  if [[ "$$(printf '%s\n%s\n' 0.9.0 "$$shellcheck_version" | sort -V | head -n 1)" != 0.9.0 ]]; then \
 	    printf 'Expected ShellCheck 0.9.0 or newer, found %s.\n' "$$shellcheck_version" >&2; exit 1; fi
@@ -52,16 +56,16 @@ install: node-deps ## Install the locked Node.js dependencies.
 node-deps:
 	pnpm install --frozen-lockfile
 
-build: build-java build-mcp ## Build the Paper plugin and MCP server.
+build: build-java build-web ## Build the Paper plugin and web service.
 
 build-java: ## Compile and test the Paper plugin.
 	./gradlew build
 	@scripts/validate-paper-jar
 
-build-mcp: node-deps ## Compile the MCP server.
+build-web: node-deps ## Compile the dashboard and HTTP MCP service.
 	pnpm run build
 
-dev-build: node-deps paper-runtime ## Incrementally compile the Paper plugin and MCP server without tests.
+dev-build: node-deps paper-runtime ## Incrementally compile the Paper plugin and web service without tests.
 	pnpm run build
 
 paper-runtime:
@@ -78,7 +82,6 @@ verify: ## Run the complete incremental local gate, including managed Paper smok
 	@$(MAKE) --no-print-directory smoke
 
 ci: doctor ## Run the clean complete gate used by continuous integration.
-	pnpm clean
 	@$(MAKE) --no-print-directory clean
 	@$(MAKE) --no-print-directory verify
 
@@ -86,29 +89,41 @@ format: node-deps ## Apply the repository's Java, TypeScript, and configuration 
 	./gradlew spotlessApply
 	pnpm run format
 
-dev-token: ## Create or repair the ignored local bearer token and its permissions.
-	@mkdir -p "$(dir $(DEV_TOKEN_FILE))"
-	@token=''; \
-	  if [[ -f "$(DEV_TOKEN_FILE)" ]]; then token="$$(<"$(DEV_TOKEN_FILE)")"; fi; \
+dev-secrets: ## Create or repair the ignored, distinct local service credentials.
+	@mkdir -p "$(dir $(DEV_BRIDGE_TOKEN_FILE))"
+	@for token_file in "$(DEV_BRIDGE_TOKEN_FILE)" "$(DEV_CONTROL_TOKEN_FILE)" "$(DEV_AUTH_SECRET_FILE)"; do \
+	  token=''; \
+	  if [[ -f "$$token_file" ]]; then token="$$(<"$$token_file")"; fi; \
 	  if [[ ! "$$token" =~ ^[0-9a-f]{64}$$ ]]; then \
-	  umask 077; \
-	  node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))" > "$(DEV_TOKEN_FILE)"; \
-	  printf 'Generated local Dirt MCP token at %s.\n' "$(DEV_TOKEN_FILE)" >&2; \
-	fi
-	@chmod 600 "$(DEV_TOKEN_FILE)"
+	    umask 077; \
+	    node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))" > "$$token_file"; \
+	    printf 'Generated local Dirt credential at %s.\n' "$$token_file" >&2; \
+	  fi; \
+	  chmod 600 "$$token_file"; \
+	done
+
+web: export DIRT_PUBLIC_ORIGIN := $(DEV_PUBLIC_ORIGIN)
+web: export DIRT_DATABASE_PATH := $(abspath $(DEV_DATABASE_FILE))
+web: export DIRT_AUTH_SECRET_FILE := $(abspath $(DEV_AUTH_SECRET_FILE))
+web: export DIRT_BRIDGE_TOKEN_FILE := $(abspath $(DEV_BRIDGE_TOKEN_FILE))
+web: export DIRT_CONTROL_TOKEN_FILE := $(abspath $(DEV_CONTROL_TOKEN_FILE))
+web: build-web dev-secrets ## Migrate and run the local dashboard and MCP HTTP service.
+	@mkdir -p "$(dir $(DEV_DATABASE_FILE))"
+	pnpm --filter @dirt-mcp/server run migrate
+	pnpm --filter @dirt-mcp/server run start
 
 up: ## Start the managed Paper development server and wait until it is ready.
-	@$(MAKE) --no-print-directory dev-token
+	@$(MAKE) --no-print-directory dev-secrets
 	@if scripts/dev-paper status >/dev/null 2>&1; then \
 	  scripts/dev-paper status; \
 	else \
-	  $(MAKE) --no-print-directory dev-build; \
+	  $(MAKE) --no-print-directory paper-runtime; \
 	  scripts/dev-paper up "$(MC_PORT)" "$(BRIDGE_PORT)"; \
 	fi
 
 reload: ## Rebuild and gracefully restart the managed development server.
-	@$(MAKE) --no-print-directory dev-token
-	@$(MAKE) --no-print-directory dev-build
+	@$(MAKE) --no-print-directory dev-secrets
+	@$(MAKE) --no-print-directory paper-runtime
 	@scripts/dev-paper restart "$(MC_PORT)" "$(BRIDGE_PORT)"
 
 down: ## Stop the managed development server cleanly.
@@ -129,7 +144,7 @@ command: ## Send one Paper console command with CMD='...'.
 	@scripts/dev-paper command "$$DIRT_MCP_DEV_COMMAND"
 
 smoke: ## Restart Paper and run the complete managed-server integration gate.
-	@$(MAKE) --no-print-directory dev-token
+	@$(MAKE) --no-print-directory dev-secrets
 	@$(MAKE) --no-print-directory paper-runtime
 	@scripts/dev-paper restart "$(MC_PORT)" "$(BRIDGE_PORT)"
 	@node scripts/smoke-managed-server.mjs || { \
@@ -138,12 +153,9 @@ smoke: ## Restart Paper and run the complete managed-server integration gate.
 	}
 	@scripts/validate-paper-log running
 
-mcp: ## Run the built MCP stdio server for an MCP host.
-	@scripts/run-dirt-mcp
-
 health: ## Run the authenticated end-to-end Dirt/Paper/FAWE ping.
 	@scripts/dev-paper health
 
 clean: ## Remove generated build outputs; preserve the local Paper world.
 	./gradlew clean
-	$(RM) -r mcp-server/dist
+	pnpm --filter @dirt-mcp/server run clean

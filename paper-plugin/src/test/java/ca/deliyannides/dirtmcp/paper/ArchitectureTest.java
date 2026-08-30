@@ -76,6 +76,7 @@ final class ArchitectureTest {
                 .and()
                 .resideInAnyPackage(
                         "ca.deliyannides.dirtmcp.paper.status..",
+                        "ca.deliyannides.dirtmcp.paper.access..",
                         "ca.deliyannides.dirtmcp.paper.command..",
                         "ca.deliyannides.dirtmcp.paper.world.inspection..",
                         "ca.deliyannides.dirtmcp.paper.world.edit..")
@@ -102,11 +103,12 @@ final class ArchitectureTest {
     }
 
     @Test
-    void jsonSerializationStaysInsideTheBridgeAndLoggingAdapters() {
+    void jsonSerializationStaysInsideTransportAndLoggingAdapters() {
         noClasses()
                 .that()
                 .resideOutsideOfPackages(
                         "ca.deliyannides.dirtmcp.paper.bridge..",
+                        "ca.deliyannides.dirtmcp.paper.access..",
                         "ca.deliyannides.dirtmcp.paper.logging..")
                 .should()
                 .dependOnClassesThat()

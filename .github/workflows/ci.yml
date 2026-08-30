@@ -60,6 +60,20 @@ jobs:
           tar --extract --gzip --file "${ci_tool_dir}/actionlint.tar.gz" --directory "${ci_tool_dir}" actionlint
           sudo install --mode 0755 "${ci_tool_dir}/actionlint" /usr/local/bin/actionlint
 
+      - name: Validate the production deployment
+        env:
+          DIRT_AUTH_SECRET_FILE: /dev/null
+          DIRT_BRIDGE_TOKEN_FILE: /dev/null
+          DIRT_CONTROL_TOKEN_FILE: /dev/null
+          DIRT_PUBLIC_HOST: dirt.example.com
+        run: |
+          docker compose config --quiet
+          docker build --pull --tag dirt-mcp-web:ci .
+          docker run --rm \
+            --env DIRT_PUBLIC_HOST=dirt.example.com \
+            --volume "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2.11.4-alpine validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
       - name: Verify every component
         run: make ci
 

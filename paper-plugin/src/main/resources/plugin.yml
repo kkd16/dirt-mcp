@@ -7,6 +7,9 @@ website: https://github.com/kkd16/dirt-mcp
 api-version: '${paperVersion}'
 depend: [FastAsyncWorldEdit]
 permissions:
-  dirtmcp.command:
-    description: View Dirt MCP status and active Paper bridge configuration
+  dirtmcp.admin:
+    description: Manage Dirt MCP access and view Paper bridge diagnostics
     default: op
+  dirtmcp.link:
+    description: Link your Minecraft account to Dirt MCP
+    default: true

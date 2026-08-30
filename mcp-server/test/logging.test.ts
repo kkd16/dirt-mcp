@@ -43,7 +43,7 @@ test('writes one structured JSON line with inherited and sanitized context', () 
   assert.deepEqual(record, {
     timestamp: record.timestamp,
     level: 'info',
-    service: 'dirt-mcp-stdio',
+    service: 'dirt-mcp-web',
     component: 'tool',
     event: 'tool.completed',
     message: 'Tool call completed.\nStill one record.',

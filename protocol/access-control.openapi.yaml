@@ -1,0 +1,664 @@
+openapi: 3.1.1
+info:
+  title: Dirt MCP Access Control
+  version: 0.1.0
+  description: Authenticated loopback contract from the Paper plugin to the Dirt web service.
+  license:
+    name: Apache License 2.0
+    identifier: Apache-2.0
+servers:
+  - url: http://127.0.0.1:{port}
+    description: Web-service control endpoint on the Paper host
+    variables:
+      port:
+        default: '3000'
+security:
+  - bearerAuth: []
+paths:
+  /internal/v1/access/users:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
+    get:
+      operationId: listAccessUsers
+      summary: List account summaries for an in-game administrator
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: One bounded page of users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /internal/v1/access/invitations:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
+    get:
+      operationId: listAccessInvitations
+      summary: List invitation summaries for an in-game administrator
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: One bounded page of invitations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+    post:
+      operationId: createAccessInvitation
+      summary: Create an invitation and return its secret URL once
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyRequest'
+      responses:
+        '200':
+          description: Created invitation and its one-time secret URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateInvitationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /internal/v1/access/invitations/{id}/revoke:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
+      - $ref: '#/components/parameters/InvitationId'
+    post:
+      operationId: revokeAccessInvitation
+      summary: Revoke an invitation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyRequest'
+      responses:
+        '200':
+          description: Revoked invitation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationMutationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /internal/v1/access/users/{handle}/disable:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
+      - $ref: '#/components/parameters/UserHandle'
+    post:
+      operationId: disableAccessUser
+      summary: Disable a user account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/UserMutationSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /internal/v1/access/users/{handle}/enable:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
+      - $ref: '#/components/parameters/UserHandle'
+    post:
+      operationId: enableAccessUser
+      summary: Enable a user account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/UserMutationSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /internal/v1/access/users/{handle}/recovery:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
+      - $ref: '#/components/parameters/UserHandle'
+    post:
+      operationId: createAccessUserRecovery
+      summary: Create a short-lived account recovery URL and return it once
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyRequest'
+      responses:
+        '200':
+          description: User summary and one-time recovery URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRecoveryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /internal/v1/access/users/{handle}/unlink:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
+      - $ref: '#/components/parameters/UserHandle'
+    post:
+      operationId: unlinkAccessUserMinecraftAccount
+      summary: Remove a user's linked Minecraft account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/UserMutationSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /internal/v1/access/minecraft-links/challenges:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
+    post:
+      operationId: createMinecraftLinkChallenge
+      summary: Create a ten-minute one-use challenge for the authenticated online player
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MinecraftLinkChallengeRequest'
+      responses:
+        '200':
+          description: Private challenge code and link URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MinecraftLinkChallengeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Dedicated 64-character lowercase hexadecimal control token used only over loopback.
+  parameters:
+    DirtCallId:
+      name: X-Dirt-Call-Id
+      in: header
+      required: true
+      description: Paper-generated UUIDv4 used to correlate one control request without exposing credentials.
+      schema:
+        $ref: '#/components/schemas/UuidV4'
+    Page:
+      name: page
+      in: query
+      required: true
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+    InvitationId:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/OpaqueSelector'
+    UserHandle:
+      name: handle
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/OpaqueSelector'
+  responses:
+    UserMutationSuccess:
+      description: Updated user summary
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UserMutationResponse'
+    BadRequest:
+      description: Invalid path, query, call ID, or request body
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Missing or invalid dedicated control bearer
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            const: Bearer realm="dirt-mcp-control"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Request did not originate from the loopback interface
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Requested account or invitation does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Requested access transition conflicts with current state
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalError:
+      description: Unexpected web-service failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unavailable:
+      description: Access-control storage or service is unavailable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    EmptyRequest:
+      type: object
+      additionalProperties: false
+    Uuid:
+      type: string
+      format: uuid
+    UuidV4:
+      type: string
+      format: uuid
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    OpaqueSelector:
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: '.*\S.*'
+    NonBlankString:
+      type: string
+      minLength: 1
+      maxLength: 256
+      pattern: '.*\S.*'
+    MinecraftName:
+      type: string
+      minLength: 1
+      maxLength: 16
+      pattern: '.*\S.*'
+    SafeWebUrl:
+      type: string
+      format: uri
+      maxLength: 2048
+      pattern: '^(?:https://[^/@\s]+|http://(?:127\.0\.0\.1|localhost)(?::[1-9][0-9]{0,4})?)(?:[/?#]|$)'
+    UserStatus:
+      type: string
+      enum:
+        - active
+        - disabled
+    InvitationStatus:
+      type: string
+      enum:
+        - pending
+        - accepted
+        - revoked
+        - expired
+    MinecraftAccount:
+      type: object
+      additionalProperties: false
+      required:
+        - uuid
+        - name
+      properties:
+        uuid:
+          $ref: '#/components/schemas/Uuid'
+        name:
+          $ref: '#/components/schemas/MinecraftName'
+    UserSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - handle
+        - status
+        - minecraftAccount
+        - createdAt
+      properties:
+        id:
+          $ref: '#/components/schemas/NonBlankString'
+        handle:
+          $ref: '#/components/schemas/NonBlankString'
+        status:
+          $ref: '#/components/schemas/UserStatus'
+        minecraftAccount:
+          oneOf:
+            - $ref: '#/components/schemas/MinecraftAccount'
+            - type: 'null'
+        createdAt:
+          type: string
+          format: date-time
+    InvitationSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - status
+        - createdAt
+        - expiresAt
+      properties:
+        id:
+          $ref: '#/components/schemas/NonBlankString'
+        status:
+          $ref: '#/components/schemas/InvitationStatus'
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+    UserPage:
+      type: object
+      additionalProperties: false
+      required:
+        - callId
+        - page
+        - pageSize
+        - totalItems
+        - totalPages
+        - items
+      properties:
+        callId:
+          $ref: '#/components/schemas/UuidV4'
+        page:
+          type: integer
+          format: int32
+          minimum: 1
+        pageSize:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 50
+        totalItems:
+          type: integer
+          format: int64
+          minimum: 0
+        totalPages:
+          type: integer
+          format: int32
+          minimum: 0
+        items:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/UserSummary'
+    InvitationPage:
+      type: object
+      additionalProperties: false
+      required:
+        - callId
+        - page
+        - pageSize
+        - totalItems
+        - totalPages
+        - items
+      properties:
+        callId:
+          $ref: '#/components/schemas/UuidV4'
+        page:
+          type: integer
+          format: int32
+          minimum: 1
+        pageSize:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 50
+        totalItems:
+          type: integer
+          format: int64
+          minimum: 0
+        totalPages:
+          type: integer
+          format: int32
+          minimum: 0
+        items:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/InvitationSummary'
+    CallResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - callId
+      properties:
+        callId:
+          $ref: '#/components/schemas/UuidV4'
+    CreateInvitationResponse:
+      allOf:
+        - $ref: '#/components/schemas/CallResponse'
+        - type: object
+          required:
+            - invitation
+            - inviteUrl
+          properties:
+            invitation:
+              $ref: '#/components/schemas/InvitationSummary'
+            inviteUrl:
+              $ref: '#/components/schemas/SafeWebUrl'
+      unevaluatedProperties: false
+    InvitationMutationResponse:
+      allOf:
+        - $ref: '#/components/schemas/CallResponse'
+        - type: object
+          required:
+            - invitation
+          properties:
+            invitation:
+              $ref: '#/components/schemas/InvitationSummary'
+      unevaluatedProperties: false
+    UserMutationResponse:
+      allOf:
+        - $ref: '#/components/schemas/CallResponse'
+        - type: object
+          required:
+            - user
+          properties:
+            user:
+              $ref: '#/components/schemas/UserSummary'
+      unevaluatedProperties: false
+    UserRecoveryResponse:
+      allOf:
+        - $ref: '#/components/schemas/CallResponse'
+        - type: object
+          required:
+            - user
+            - recoveryUrl
+            - expiresAt
+          properties:
+            user:
+              $ref: '#/components/schemas/UserSummary'
+            recoveryUrl:
+              $ref: '#/components/schemas/SafeWebUrl'
+            expiresAt:
+              type: string
+              format: date-time
+      unevaluatedProperties: false
+    MinecraftLinkChallengeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - minecraftUuid
+        - minecraftName
+      properties:
+        minecraftUuid:
+          $ref: '#/components/schemas/Uuid'
+        minecraftName:
+          $ref: '#/components/schemas/MinecraftName'
+    MinecraftLinkChallengeResponse:
+      allOf:
+        - $ref: '#/components/schemas/CallResponse'
+        - type: object
+          required:
+            - code
+            - linkUrl
+            - expiresAt
+          properties:
+            code:
+              type: string
+              minLength: 1
+              maxLength: 128
+              pattern: '.*\S.*'
+              description: Private one-use code valid for ten minutes.
+            linkUrl:
+              $ref: '#/components/schemas/SafeWebUrl'
+            expiresAt:
+              type: string
+              format: date-time
+      unevaluatedProperties: false
+    ControlErrorCode:
+      type: string
+      enum:
+        - invalid_request
+        - unauthorized
+        - not_found
+        - conflict
+        - unavailable
+        - internal_error
+    ControlError:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+      properties:
+        code:
+          $ref: '#/components/schemas/ControlErrorCode'
+        message:
+          type: string
+          minLength: 1
+          maxLength: 512
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - callId
+        - error
+      properties:
+        callId:
+          description: Echoed request ID, or null only when the header was absent or malformed.
+          oneOf:
+            - $ref: '#/components/schemas/UuidV4'
+            - type: 'null'
+        error:
+          $ref: '#/components/schemas/ControlError'

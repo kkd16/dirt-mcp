@@ -1,78 +1,52 @@
-#!/usr/bin/env node
-
-import { serveStdio } from '@modelcontextprotocol/server/stdio';
-import { randomUUID } from 'node:crypto';
+import { serve } from '@hono/node-server';
+import { AccessRepository } from './access/repository.ts';
+import { createAuth } from './auth.ts';
 import { BridgeClient } from './bridge/client.ts';
-import { BRIDGE_ROUTES, BridgeCapabilitiesSchema } from './bridge/contract.ts';
-import { ToolFailure, toolFailureLogLevel } from './bridge/errors.ts';
-import { BridgeConfigurationError, readBridgeConfig, type BridgeConfig } from './config.ts';
-import { createLogger, safeErrorFields, type LogFields } from './logging.ts';
-import { createDirtServer } from './server.ts';
-import { toolConfigurationFromCapabilities, type McpToolConfiguration } from './tools/configuration.ts';
+import { readRuntimeConfig, RuntimeConfigurationError } from './config.ts';
+import { createLogger, safeErrorFields } from './logging.ts';
+import { createDirtMcpHandler } from './mcp-http.ts';
+import { openDatabase } from './storage.ts';
+import { createWebApp } from './web/app.ts';
 
 async function main(): Promise<void> {
   const logger = createLogger('runtime');
-  let config: BridgeConfig;
   try {
-    config = readBridgeConfig(process.env);
-  } catch (error: unknown) {
-    logger.error('runtime.start_failed', 'Dirt MCP could not start.', failureLogFields(error));
-    process.exitCode = 1;
-    return;
-  }
-
-  const bridge = new BridgeClient(config);
-  const callId = randomUUID();
-  const started = performance.now();
-  let toolConfiguration: McpToolConfiguration;
-  try {
-    const capabilities = await bridge.request(BRIDGE_ROUTES.capabilities, callId, BridgeCapabilitiesSchema);
-    toolConfiguration = toolConfigurationFromCapabilities(capabilities);
-    logger
-      .child({ component: 'catalog', operation: 'get_capabilities', call_id: callId })
-      .info('catalog.loaded', 'Loaded the bridge capability snapshot.', {
-        enabled_tool_count: Object.values(toolConfiguration).filter(Boolean).length,
-        operations: capabilities.operations.join(','),
-        duration_ms: elapsedMilliseconds(started),
+    const config = readRuntimeConfig(process.env);
+    const database = openDatabase(config.databasePath);
+    const repository = new AccessRepository(database);
+    repository.assertSchema();
+    const bridge = new BridgeClient(config.bridge);
+    const auth = createAuth(config, database, repository);
+    const mcp = createDirtMcpHandler(auth, bridge, repository, config, logger);
+    const app = createWebApp({ auth, config, logger, mcp, repository });
+    const httpServer = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: config.port });
+    let closing = false;
+    const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
+      if (closing) return;
+      closing = true;
+      logger.info('runtime.stopping', 'Dirt web service is stopping.', { signal });
+      const stopped = new Promise<void>((resolve, reject) => {
+        httpServer.close((error) => (error === undefined ? resolve() : reject(error)));
       });
+      await mcp.close();
+      await stopped;
+      database.close();
+      logger.info('runtime.stopped', 'Dirt web service stopped.');
+    };
+    process.once('SIGINT', () => void shutdown('SIGINT'));
+    process.once('SIGTERM', () => void shutdown('SIGTERM'));
+    logger.info('runtime.started', 'Dirt web service is listening.', {
+      bind_address: '127.0.0.1',
+      port: config.port,
+      bridge_origin: config.bridge.origin,
+    });
   } catch (error: unknown) {
-    const fields = { ...failureLogFields(error), duration_ms: elapsedMilliseconds(started) };
-    const level = error instanceof ToolFailure ? toolFailureLogLevel(error) : 'error';
-    const startupLogger = logger.child({ component: 'catalog', operation: 'get_capabilities', call_id: callId });
-    if (level === 'error') startupLogger.error('runtime.start_failed', 'Could not load bridge capabilities.', fields);
-    else startupLogger.warning('runtime.start_failed', 'Could not load bridge capabilities.', fields);
+    logger.error('runtime.start_failed', 'Dirt web service could not start.', {
+      ...safeErrorFields(error),
+      ...(error instanceof RuntimeConfigurationError ? { error_code: error.code } : {}),
+    });
     process.exitCode = 1;
-    return;
   }
-
-  serveStdio(() => createDirtServer(bridge, toolConfiguration, logger), {
-    onerror(error) {
-      logger
-        .child({ component: 'stdio' })
-        .error('stdio.error', 'The MCP stdio transport reported an error.', failureLogFields(error));
-    },
-  });
-  logger.info('runtime.started', 'Dirt MCP is listening over stdio.', {
-    transport: 'stdio',
-    bridge_origin: config.origin,
-  });
 }
 
-function failureLogFields(error: unknown): LogFields {
-  return {
-    ...safeErrorFields(error),
-    ...(error instanceof ToolFailure
-      ? {
-          error_code: error.code,
-          ...(error.editId === undefined ? {} : { edit_id: error.editId }),
-        }
-      : {}),
-    ...(error instanceof BridgeConfigurationError ? { error_code: error.code } : {}),
-  };
-}
-
-function elapsedMilliseconds(started: number): number {
-  return Math.max(0, Math.round(performance.now() - started));
-}
-
-void main();
+await main();

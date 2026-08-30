@@ -20,12 +20,15 @@ import org.junit.jupiter.params.provider.MethodSource;
 final class DirtConfigLoaderTest {
     @Test
     void loadsTheCompleteShippedConfiguration() {
-        DirtConfig config = DirtConfigLoader.load(defaultConfiguration(), null);
+        DirtConfig config = DirtConfigLoader.load(defaultConfiguration(), null, null);
 
         assertEquals(
                 new DirtConfig.Bridge(
                         8_765, 5, 5, 32, 4, 1_048_576, List.of(BridgeOperation.values())),
                 config.bridge());
+        assertEquals(
+                new DirtConfig.AccessControl("http://127.0.0.1:3000", 2_000, 5_000),
+                config.accessControl());
         assertEquals(
                 new DirtConfig.Logging(DirtConfig.ConsoleLogLevel.INFO, 10_485_760, 5),
                 config.logging());
@@ -43,7 +46,10 @@ final class DirtConfigLoaderTest {
         configuration.set("bridge.allowed-operations", List.of());
 
         assertTrue(
-                DirtConfigLoader.load(configuration, null).bridge().allowedOperations().isEmpty());
+                DirtConfigLoader.load(configuration, null, null)
+                        .bridge()
+                        .allowedOperations()
+                        .isEmpty());
     }
 
     @Test
@@ -53,7 +59,9 @@ final class DirtConfigLoaderTest {
 
         assertEquals(
                 513,
-                DirtConfigLoader.load(configuration, null).limits().maxInspectionTouchedChunks());
+                DirtConfigLoader.load(configuration, null, null)
+                        .limits()
+                        .maxInspectionTouchedChunks());
     }
 
     @Test
@@ -66,7 +74,7 @@ final class DirtConfigLoaderTest {
         IllegalArgumentException error =
                 assertThrows(
                         IllegalArgumentException.class,
-                        () -> DirtConfigLoader.load(configuration, null));
+                        () -> DirtConfigLoader.load(configuration, null, null));
 
         assertEquals("bridge.max-request-bytes is required", error.getMessage());
     }
@@ -75,7 +83,8 @@ final class DirtConfigLoaderTest {
     @MethodSource("validPortOverrides")
     void acceptsValidPortOverrides(String override, int expected) {
         assertEquals(
-                expected, DirtConfigLoader.load(defaultConfiguration(), override).bridge().port());
+                expected,
+                DirtConfigLoader.load(defaultConfiguration(), override, null).bridge().port());
     }
 
     @ParameterizedTest
@@ -83,7 +92,25 @@ final class DirtConfigLoaderTest {
     void rejectsInvalidPortOverrides(String override) {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> DirtConfigLoader.load(defaultConfiguration(), override));
+                () -> DirtConfigLoader.load(defaultConfiguration(), override, null));
+    }
+
+    @ParameterizedTest
+    @MethodSource("validAccessControlOverrides")
+    void acceptsOnlyExplicitLoopbackAccessControlOverrides(String override, String expected) {
+        assertEquals(
+                expected,
+                DirtConfigLoader.load(defaultConfiguration(), null, override)
+                        .accessControl()
+                        .origin());
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidAccessControlOverrides")
+    void rejectsUnsafeAccessControlOverrides(String override) {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> DirtConfigLoader.load(defaultConfiguration(), null, override));
     }
 
     @ParameterizedTest
@@ -93,7 +120,8 @@ final class DirtConfigLoaderTest {
         configuration.set(path, value);
 
         assertThrows(
-                IllegalArgumentException.class, () -> DirtConfigLoader.load(configuration, null));
+                IllegalArgumentException.class,
+                () -> DirtConfigLoader.load(configuration, null, null));
     }
 
     private static Stream<Arguments> validPortOverrides() {
@@ -107,6 +135,26 @@ final class DirtConfigLoaderTest {
 
     private static Stream<String> invalidPortOverrides() {
         return Stream.of("0", "65536", "1.5", "paper");
+    }
+
+    private static Stream<Arguments> validAccessControlOverrides() {
+        return Stream.of(
+                Arguments.of(null, "http://127.0.0.1:3000"),
+                Arguments.of("", "http://127.0.0.1:3000"),
+                Arguments.of("http://127.0.0.1", "http://127.0.0.1"),
+                Arguments.of("http://127.0.0.1:4321/", "http://127.0.0.1:4321"));
+    }
+
+    private static Stream<String> invalidAccessControlOverrides() {
+        return Stream.of(
+                "https://127.0.0.1:3000",
+                "http://localhost:3000",
+                "http://0.0.0.0:3000",
+                "http://127.0.0.1:0",
+                "http://127.0.0.1:65536",
+                "http://127.0.0.1:3000/path",
+                "http://127.0.0.1:3000?query=true",
+                "http://127.0.0.1:3000#fragment");
     }
 
     private static Stream<Arguments> invalidConfigurationValues() {
@@ -131,6 +179,13 @@ final class DirtConfigLoaderTest {
                 Arguments.of("bridge.max-concurrent-inspections", 33),
                 Arguments.of("bridge.max-request-bytes", 0),
                 Arguments.of("bridge.max-request-bytes", 67_108_865),
+                Arguments.of("access-control.url", null),
+                Arguments.of("access-control.url", "http://localhost:3000"),
+                Arguments.of("access-control.connect-timeout-millis", 0),
+                Arguments.of("access-control.connect-timeout-millis", 30_001),
+                Arguments.of("access-control.request-timeout-millis", 1_999),
+                Arguments.of("access-control.request-timeout-millis", 30_001),
+                Arguments.of("access-control.unknown", true),
                 Arguments.of("limits.max-region-volume", 0),
                 Arguments.of("limits.max-edit-touched-chunks", 0),
                 Arguments.of("limits.max-inspection-touched-chunks", 0),

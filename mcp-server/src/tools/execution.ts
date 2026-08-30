@@ -28,6 +28,7 @@ export async function executeToolCall(
     call_id: callId,
     request_id: details.context.mcpReq.id,
     client: clientLabel(details.context),
+    ...authenticationLogContext(details.context),
     ...(details.world === undefined ? {} : { world: details.world }),
   });
   let failure: ToolFailure | undefined;
@@ -95,4 +96,13 @@ function clientLabel(context: ServerContext): string {
     }
   }
   return 'unknown';
+}
+
+function authenticationLogContext(context: ServerContext): LogFields {
+  const authInfo = context.http?.authInfo;
+  const userId = authInfo?.extra?.userId;
+  return {
+    ...(typeof userId === 'string' ? { user_id: userId } : {}),
+    ...(authInfo?.clientId === undefined ? {} : { client_id: authInfo.clientId }),
+  };
 }
