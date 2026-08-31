@@ -94,7 +94,7 @@ export function registerInternalRoutes(app: Hono, dependencies: InternalRouteDep
     return context.json({
       callId,
       code: result.code,
-      linkUrl: `${config.publicOrigin}/link#code=${encodeURIComponent(result.code)}`,
+      linkUrl: `${config.publicOrigin}/dashboard#code=${encodeURIComponent(result.code)}`,
       expiresAt: result.expiresAt,
     });
   });

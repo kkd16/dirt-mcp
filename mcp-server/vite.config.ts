@@ -4,9 +4,14 @@ export default defineConfig({
   build: {
     outDir: 'dist/public',
     rolldownOptions: {
-      input: 'src/web/client.ts',
+      input: {
+        app: 'src/web/client.ts',
+        styles: 'src/web/app.css',
+      },
       output: {
-        entryFileNames: 'app.js',
+        entryFileNames: 'assets/[name].js',
+        assetFileNames: (asset) =>
+          asset.names.some((name) => name.endsWith('.css')) ? 'assets/app.css' : 'assets/[name]-[hash][extname]',
       },
     },
   },

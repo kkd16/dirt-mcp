@@ -76,11 +76,11 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
     mcp = createDirtMcpHandler(auth, bridge, repository, config, silentLogger);
     const app = createWebApp({
       auth,
+      bridge,
       config,
       logger: silentLogger,
       mcp,
       repository,
-      clientScript: '',
       isLoopback: () => true,
     });
     let jwksRequests = 0;

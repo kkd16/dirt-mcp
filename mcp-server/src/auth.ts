@@ -224,7 +224,7 @@ export function createAuthOptions(
       }),
       // @ts-expect-error -- https://github.com/better-auth/better-auth/issues/10213
       mcp({
-        loginPage: '/sign-in',
+        loginPage: '/',
         consentPage: '/consent',
         resource,
         scopes: ['dirt:mcp', 'offline_access'],

@@ -1,6 +1,9 @@
 import { getConnInfo } from '@hono/node-server/conninfo';
-import { readFileSync } from 'node:fs';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { Hono, type Context } from 'hono';
+import { jsxRenderer } from 'hono/jsx-renderer';
 import { routePath } from 'hono/route';
 import { secureHeaders } from 'hono/secure-headers';
 import * as z from 'zod';
@@ -14,10 +17,21 @@ import {
   SESSION_FRESH_AGE_SECONDS,
   type DirtAuth,
 } from '../auth.ts';
+import type { BridgeClient } from '../bridge/client.ts';
+import { BRIDGE_ROUTES, BridgeCapabilitiesSchema } from '../bridge/contract.ts';
 import type { RuntimeConfig } from '../config.ts';
 import { safeErrorFields, type DirtLogger } from '../logging.ts';
 import type { DirtMcpHandler } from '../mcp-http.ts';
-import { consentPage, dashboardPage, errorPage, linkPage, onboardingPage, signInPage, stylesheet } from './pages.ts';
+import { MCP_TOOL_OPERATIONS, toolConfigurationFromCapabilities } from '../tools/configuration.ts';
+import {
+  ConsentPage,
+  DashboardPage,
+  ErrorPage,
+  OnboardingPage,
+  PublicPage,
+  type DashboardViewModel,
+  type ReadinessSummary,
+} from './pages.tsx';
 
 const onboardingTokenSchema = z.string().min(20).max(256);
 const onboardingExchangeSchema = z.discriminatedUnion('kind', [
@@ -26,6 +40,7 @@ const onboardingExchangeSchema = z.discriminatedUnion('kind', [
 ]);
 const linkSchema = z.object({ code: z.string().trim().min(8).max(24) }).strict();
 const RECENT_AUTHENTICATION_MS = SESSION_FRESH_AGE_SECONDS * 1_000;
+const PingResponseSchema = z.object({ status: z.literal('ok') }).strict();
 const SENSITIVE_OAUTH_PATHS = new Set([
   '/api/auth/oauth2/authorize',
   '/api/auth/oauth2/consent',
@@ -45,21 +60,23 @@ type WebAuth = Pick<DirtAuth, 'handler'> & {
 
 interface WebAppDependencies {
   readonly auth: WebAuth;
+  readonly bridge: Pick<BridgeClient, 'request'>;
   readonly config: RuntimeConfig;
   readonly logger: DirtLogger;
   readonly mcp: DirtMcpHandler;
   readonly repository: AccessRepository;
   readonly isLoopback?: (context: Context) => boolean;
-  readonly clientScript?: string;
+  readonly assetRoot?: string;
 }
 
 export function createWebApp(dependencies: WebAppDependencies): Hono {
-  const { auth, config, mcp, repository } = dependencies;
+  const { auth, bridge, config, mcp, repository } = dependencies;
   const expectedHost = new URL(config.publicOrigin).host;
   const loopbackHost = `127.0.0.1:${config.port}`;
-  const clientScript =
-    dependencies.clientScript ?? readFileSync(new URL('../public/app.js', import.meta.url), { encoding: 'utf8' });
+  const assetRoot = dependencies.assetRoot ?? fileURLToPath(new URL('../public', import.meta.url));
   const app = new Hono();
+
+  app.use('*', jsxRenderer());
 
   app.use(
     '*',
@@ -112,8 +129,7 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
     if (
       path.startsWith('/api/') ||
       path === '/mcp' ||
-      (context.req.method === 'GET' &&
-        ['/', '/sign-in', '/invite', '/recover', '/dashboard', '/link', '/consent'].includes(path))
+      (context.req.method === 'GET' && ['/', '/invite', '/recover', '/dashboard', '/consent'].includes(path))
     ) {
       context.header('Cache-Control', 'no-store');
     }
@@ -126,14 +142,16 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
     isLoopback: dependencies.isLoopback ?? isLoopbackConnection,
   });
 
-  app.get('/assets/app.css', (context) => {
-    context.header('Cache-Control', 'no-cache');
-    return context.body(stylesheet, 200, { 'Content-Type': 'text/css; charset=utf-8' });
+  app.use('/assets/*', async (context, next) => {
+    await next();
+    if (context.res.status === 200) {
+      context.res.headers.set(
+        'Cache-Control',
+        /-[a-zA-Z0-9_-]{8,}\./u.test(context.req.path) ? 'public, max-age=31536000, immutable' : 'no-cache',
+      );
+    }
   });
-  app.get('/assets/app.js', (context) => {
-    context.header('Cache-Control', 'no-cache');
-    return context.body(clientScript, 200, { 'Content-Type': 'text/javascript; charset=utf-8' });
-  });
+  app.use('/assets/*', serveStatic({ root: assetRoot }));
 
   app.use('/api/auth/oauth2/*', async (context, next) => {
     // Better Auth matches its endpoint routes against URL.pathname without
@@ -145,15 +163,15 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
     const authorizationRequest = oauthPath === '/api/auth/oauth2/authorize' && context.req.method === 'GET';
     if (sessionUser === null || !isRecentlyAuthenticated(sessionUser.sessionCreatedAt)) {
       if (authorizationRequest) {
-        return context.redirect(`/sign-in${new URL(context.req.url).search}`, 303);
+        return context.redirect(`/${new URL(context.req.url).search}`, 303);
       }
       return context.json({ error: 'Recent passkey authentication is required.' }, 403);
     }
     if (sessionUser.user.minecraftAccount === null) {
       if (authorizationRequest) {
-        return context.html(
-          errorPage('Minecraft link required', 'Link a Minecraft account before authorizing MCP.'),
-          403,
+        context.status(403);
+        return context.render(
+          ErrorPage({ title: 'Minecraft link required', message: 'Link a Minecraft account before authorizing MCP.' }),
         );
       }
       return context.json({ error: 'Link a Minecraft account before authorizing MCP.' }, 403);
@@ -200,38 +218,51 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
   );
 
   app.get('/', async (context) => {
-    const user = await currentUser(auth, repository, context.req.raw.headers);
-    return context.redirect(user === null ? '/sign-in' : '/dashboard', 303);
+    const sessionUser = await currentSessionUser(auth, repository, context.req.raw.headers);
+    const requestUrl = new URL(context.req.url);
+    if (requestUrl.searchParams.has('client_id')) {
+      if (sessionUser !== null && isRecentlyAuthenticated(sessionUser.sessionCreatedAt)) {
+        return context.redirect(`/api/auth/oauth2/authorize${requestUrl.search}`, 303);
+      }
+      return context.render(PublicPage({}));
+    }
+    if (sessionUser !== null) return context.redirect('/dashboard', 303);
+    return context.render(PublicPage({}));
   });
-  app.get('/sign-in', (context) => context.html(signInPage()));
-  app.get('/invite', (context) => context.html(onboardingPage('invitation')));
-  app.get('/recover', (context) => context.html(onboardingPage('recovery')));
+  app.get('/invite', (context) => context.render(OnboardingPage({ kind: 'invitation' })));
+  app.get('/recover', (context) => context.render(OnboardingPage({ kind: 'recovery' })));
   app.get('/dashboard', async (context) => {
-    const user = await currentUser(auth, repository, context.req.raw.headers);
-    if (user === null) return context.redirect('/sign-in', 303);
+    const sessionUser = await currentSessionUser(auth, repository, context.req.raw.headers);
+    if (sessionUser === null) return context.render(PublicPage({ continuation: 'minecraft-link' }));
     context.header('Set-Cookie', expiredOnboardingCookie(config.publicOrigin));
-    return context.html(dashboardPage(user));
-  });
-  app.get('/link', async (context) => {
-    const user = await currentUser(auth, repository, context.req.raw.headers);
-    if (user === null) return context.redirect('/sign-in', 303);
-    return context.html(linkPage(user));
+    const model = await dashboardViewModel(bridge, repository, sessionUser.user, config.publicOrigin);
+    return context.render(DashboardPage({ model }));
   });
   app.get('/consent', async (context) => {
     const sessionUser = await currentSessionUser(auth, repository, context.req.raw.headers);
     if (sessionUser === null || !isRecentlyAuthenticated(sessionUser.sessionCreatedAt)) {
-      return context.redirect(`/sign-in${new URL(context.req.url).search}`, 303);
+      return context.redirect(`/${new URL(context.req.url).search}`, 303);
     }
     if (sessionUser.user.minecraftAccount === null) {
-      return context.html(
-        errorPage('Minecraft link required', 'Link a Minecraft account before authorizing MCP.'),
-        403,
+      context.status(403);
+      return context.render(
+        ErrorPage({ title: 'Minecraft link required', message: 'Link a Minecraft account before authorizing MCP.' }),
       );
     }
     const query = new URL(context.req.url).searchParams;
-    const clientName = query.get('client_id') ?? 'this MCP client';
+    const requestedClientId = query.get('client_id') ?? 'Unknown MCP client';
     const scopes = (query.get('scope') ?? 'dirt:mcp').split(' ').filter((scope) => scope.length > 0);
-    return context.html(consentPage(sessionUser.user, clientName, scopes));
+    return context.render(
+      ConsentPage({
+        model: {
+          user: sessionUser.user,
+          client: repository.findOAuthClient(requestedClientId),
+          requestedClientId,
+          redirectUri: query.get('redirect_uri'),
+          scopes,
+        },
+      }),
+    );
   });
 
   app.notFound((context) => {
@@ -245,7 +276,8 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
       );
     }
     context.header('Cache-Control', 'no-store');
-    return context.html(errorPage('Not found', 'That page does not exist.'), 404);
+    context.status(404);
+    return context.render(ErrorPage({ title: 'Not found', message: 'That page does not exist.' }));
   });
   app.onError((error, context) => {
     if (context.req.path.startsWith('/internal/v1/access/')) {
@@ -273,10 +305,41 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
       .error('web.request_failed', 'Web request failed unexpectedly.', { path: context.req.path });
     if (apiRequest) return context.json({ error: 'An internal error occurred.' }, 500);
     context.header('Cache-Control', 'no-store');
-    return context.html(errorPage('Something went wrong', 'Please try again.'), 500);
+    context.status(500);
+    return context.render(ErrorPage({ title: 'Something went wrong', message: 'Please try again.' }));
   });
 
   return app;
+}
+
+async function dashboardViewModel(
+  bridge: Pick<BridgeClient, 'request'>,
+  repository: AccessRepository,
+  user: UserSummary,
+  publicOrigin: string,
+): Promise<DashboardViewModel> {
+  const readiness = await dashboardReadiness(bridge);
+  return {
+    user,
+    passkeys: repository.listPasskeys(user.id),
+    clients: repository.listAuthorizedClients(user.id),
+    readiness,
+    mcpEndpoint: `${publicOrigin}/mcp`,
+  };
+}
+
+async function dashboardReadiness(bridge: Pick<BridgeClient, 'request'>): Promise<ReadinessSummary> {
+  const [ping, capabilities] = await Promise.allSettled([
+    bridge.request(BRIDGE_ROUTES.ping, randomUUID(), PingResponseSchema),
+    bridge.request(BRIDGE_ROUTES.capabilities, randomUUID(), BridgeCapabilitiesSchema),
+  ]);
+  const configuration =
+    capabilities.status === 'fulfilled' ? toolConfigurationFromCapabilities(capabilities.value) : null;
+  return {
+    bridgeAvailable: ping.status === 'fulfilled' && capabilities.status === 'fulfilled',
+    enabledTools: configuration === null ? 0 : Object.values(configuration).filter(Boolean).length,
+    totalTools: Object.keys(MCP_TOOL_OPERATIONS).length,
+  };
 }
 
 function expiredOnboardingCookie(publicOrigin: string): string {
@@ -301,10 +364,6 @@ function canonicalPublicRequest(request: Request, publicOrigin: string): Request
     init.duplex = 'half';
   }
   return new Request(`${publicOrigin}${incoming.pathname}${incoming.search}`, init);
-}
-
-async function currentUser(auth: WebAuth, repository: AccessRepository, headers: Headers): Promise<UserSummary | null> {
-  return (await currentSessionUser(auth, repository, headers))?.user ?? null;
 }
 
 async function currentSessionUser(

@@ -90,8 +90,8 @@ export function createDirtMcpHandler(
       if (mcpMethodHeader !== null) inbound.mcpMethodHeader = mcpMethodHeader;
       if (mcpNameHeader !== null) inbound.mcpNameHeader = mcpNameHeader;
       const classification = classifyInboundRequest(inbound);
-      if (classification.kind === 'modern' && protocolVersionHeader === null) {
-        return jsonRpcError(400, -32_600, 'MCP-Protocol-Version is required for 2026-07-28 requests.');
+      if (classification.kind !== 'modern' || protocolVersionHeader === null) {
+        return jsonRpcError(400, -32_600, 'A complete MCP 2026-07-28 request envelope is required.');
       }
       const authInfo: AuthInfo = {
         token: accessToken,

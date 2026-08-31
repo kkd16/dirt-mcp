@@ -16,6 +16,24 @@ export interface UserSummary {
   readonly createdAt: string;
 }
 
+export interface AuthorizedClientSummary {
+  readonly clientId: string;
+  readonly name: string | null;
+  readonly scopes: readonly string[];
+  readonly authorizedAt: string;
+}
+
+export interface OAuthClientSummary {
+  readonly clientId: string;
+  readonly name: string | null;
+  readonly redirectUris: readonly string[];
+}
+
+export interface PasskeySummary {
+  readonly name: string;
+  readonly createdAt: string;
+}
+
 interface InvitationSummary {
   readonly id: string;
   readonly status: 'pending' | 'accepted' | 'revoked' | 'expired';
@@ -90,6 +108,24 @@ type RecoveryClaimRow = {
   expiresAt: string;
   usedAt: string | null;
   handle: string;
+};
+
+type AuthorizedClientRow = {
+  clientId: string;
+  name: string | null;
+  scopes: string;
+  createdAt: string;
+};
+
+type OAuthClientRow = {
+  clientId: string;
+  name: string | null;
+  redirectUris: string;
+};
+
+type PasskeyRow = {
+  name: string | null;
+  createdAt: string;
 };
 
 export class AccessError extends Error {
@@ -348,6 +384,48 @@ export class AccessRepository {
     return row.authorizationVersion;
   }
 
+  listAuthorizedClients(userId: string): readonly AuthorizedClientSummary[] {
+    const rows = this.database
+      .prepare<[string], AuthorizedClientRow>(
+        `SELECT oauthConsent.clientId, oauthClient.name, oauthConsent.scopes, oauthConsent.createdAt
+         FROM oauthConsent
+         JOIN oauthClient ON oauthClient.clientId = oauthConsent.clientId
+         WHERE oauthConsent.userId = ?
+         ORDER BY oauthConsent.createdAt DESC, oauthConsent.id DESC`,
+      )
+      .all(userId);
+    return rows.map((row) => ({
+      clientId: row.clientId,
+      name: nonBlankOrNull(row.name),
+      scopes: parseStringArray(row.scopes, 'OAuth consent scopes'),
+      authorizedAt: toRfc3339(row.createdAt),
+    }));
+  }
+
+  findOAuthClient(clientId: string): OAuthClientSummary | null {
+    const row = this.database
+      .prepare<[string], OAuthClientRow>('SELECT clientId, name, redirectUris FROM oauthClient WHERE clientId = ?')
+      .get(clientId);
+    if (row === undefined) return null;
+    return {
+      clientId: row.clientId,
+      name: nonBlankOrNull(row.name),
+      redirectUris: parseStringArray(row.redirectUris, 'OAuth client redirect URIs'),
+    };
+  }
+
+  listPasskeys(userId: string): readonly PasskeySummary[] {
+    const rows = this.database
+      .prepare<[string], PasskeyRow>(
+        'SELECT name, createdAt FROM passkey WHERE userId = ? ORDER BY createdAt DESC, id DESC',
+      )
+      .all(userId);
+    return rows.map((row) => ({
+      name: nonBlankOrNull(row.name) ?? 'Passkey',
+      createdAt: toRfc3339(row.createdAt),
+    }));
+  }
+
   revokeAuthorization(userId: string, now = new Date()): void {
     this.rotateAuthorization(userId, now);
     this.database.prepare('DELETE FROM session WHERE userId = ?').run(userId);
@@ -515,4 +593,21 @@ function toEpochMilliseconds(value: string): number {
     throw new Error('The Dirt database contains an invalid timestamp.');
   }
   return milliseconds;
+}
+
+function parseStringArray(value: string, field: string): readonly string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error(`The Dirt database contains invalid ${field}.`);
+  }
+  if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === 'string')) {
+    throw new Error(`The Dirt database contains invalid ${field}.`);
+  }
+  return parsed;
+}
+
+function nonBlankOrNull(value: string | null): string | null {
+  return value === null || value.trim().length === 0 ? null : value;
 }

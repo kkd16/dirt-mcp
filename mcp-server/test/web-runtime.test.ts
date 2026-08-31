@@ -13,6 +13,8 @@ import {
   normalizeHandle,
   onboardingCookieName,
 } from '../dist/auth.js';
+import { BridgeClient } from '../dist/bridge/client.js';
+import { BRIDGE_OPERATION_IDS } from '../dist/bridge/contract.js';
 import type { RuntimeConfig } from '../dist/config.js';
 import type { DirtLogger, LogFields } from '../dist/logging.js';
 import { extractAccessToken } from '../dist/mcp-http.js';
@@ -33,6 +35,7 @@ const config: RuntimeConfig = {
 };
 const database = openDatabase(config.databasePath);
 const repository = new AccessRepository(database);
+const readyBridge = testBridge(BRIDGE_OPERATION_IDS);
 const migration = await getMigrations(createAuthOptions(config, database, repository));
 await migration.runMigrations();
 repository.assertSchema();
@@ -71,6 +74,8 @@ test('Better Auth is passkey-only and MCP OAuth uses the fixed narrow policy', a
     | { options?: Record<string, unknown> }
     | undefined;
   assert.ok(oauth !== undefined);
+  assert.equal(oauth.options?.loginPage, '/');
+  assert.equal(oauth.options?.consentPage, '/consent');
   assert.deepEqual(oauth.options?.scopes, ['dirt:mcp', 'offline_access']);
   assert.deepEqual(oauth.options?.grantTypes, ['authorization_code', 'refresh_token']);
   assert.equal(oauth.options?.accessTokenExpiresIn, 300);
@@ -165,9 +170,9 @@ test('unexpected auth transport failures use the sanitized web error boundary', 
   };
   const app = createWebApp({
     auth,
+    bridge: readyBridge,
     config,
     repository,
-    clientScript: '',
     isLoopback: () => true,
     logger,
     mcp: { fetch: async () => new Response(null, { status: 501 }), close: async () => {} },
@@ -338,9 +343,9 @@ test('internal routes enforce loopback, UUIDv4 calls, exact envelopes, and bound
   };
   const app = createWebApp({
     auth,
+    bridge: readyBridge,
     config,
     repository,
-    clientScript: '',
     isLoopback: () => loopback,
     logger: internalLogger,
     mcp: { fetch: async () => new Response(null, { status: 501 }), close: async () => {} },
@@ -405,6 +410,20 @@ test('internal routes enforce loopback, UUIDv4 calls, exact envelopes, and bound
   assert.equal(created.callId, validCallId);
   assert.match(String(created.inviteUrl), /^http:\/\/localhost:3000\/invite#token=/u);
   assert.equal(create.headers.get('Cache-Control'), 'no-store');
+
+  const linkChallenge = await app.request('/internal/v1/access/minecraft-links/challenges', {
+    method: 'POST',
+    headers: baseHeaders,
+    body: JSON.stringify({
+      minecraftUuid: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      minecraftName: 'FieldPlayer',
+    }),
+  });
+  assert.equal(linkChallenge.status, 200);
+  assert.match(
+    String(((await linkChallenge.json()) as Record<string, unknown>).linkUrl),
+    /^http:\/\/localhost:3000\/dashboard#code=/u,
+  );
 
   let internalBodyCanceled = false;
   const cancelableInternalBody = new ReadableStream<Uint8Array>({
@@ -481,9 +500,30 @@ test('web shell exposes a loopback health check and hardened consent copy', asyn
   const health = await app.request('/healthz');
   assert.equal(health.status, 200);
   assert.deepEqual(await health.json(), { status: 'ok' });
+
+  const home = await app.request('/', { headers: { Host: 'localhost:3000' } });
+  assert.equal(home.status, 200);
+  const homeHtml = await home.text();
+  assert.match(homeHtml, /^<!DOCTYPE html>/u);
+  assert.match(homeHtml, /MCP for your/u);
+  assert.match(homeHtml, /Online/u);
+  assert.match(homeHtml, /Sign in with a passkey/u);
+  assert.doesNotMatch(homeHtml, /Paper and FAWE online/u);
+
+  const signedOutDashboard = await app.request('/dashboard', { headers: { Host: 'localhost:3000' } });
+  assert.equal(signedOutDashboard.status, 200);
+  assert.match(await signedOutDashboard.text(), /Sign in and continue/u);
+
+  const removedPages = await Promise.all(
+    ['/sign-in', '/link'].map((path) => app.request(path, { headers: { Host: 'localhost:3000' } })),
+  );
+  for (const removed of removedPages) {
+    assert.equal(removed.status, 404);
+  }
+
   const invite = await app.request('/invite', { headers: { Host: 'localhost:3000' } });
   assert.equal(invite.status, 200);
-  assert.match(await invite.text(), /Create your Dirt account/u);
+  assert.match(await invite.text(), /Create your account/u);
   assert.equal(invite.headers.get('Cache-Control'), 'no-store');
   assert.equal(invite.headers.get('Content-Security-Policy')?.includes("frame-ancestors 'none'"), true);
   assert.equal(
@@ -527,6 +567,19 @@ test('web shell exposes a loopback health check and hardened consent copy', asyn
   const asset = await app.request('/assets/app.js', { headers: { Host: 'localhost:3000' } });
   assert.equal(asset.status, 200);
   assert.equal(asset.headers.get('Cache-Control'), 'no-cache');
+  assert.match(asset.headers.get('Content-Type') ?? '', /javascript/u);
+
+  const stylesheet = await app.request('/assets/app.css', { headers: { Host: 'localhost:3000' } });
+  assert.equal(stylesheet.status, 200);
+  assert.equal(stylesheet.headers.get('Cache-Control'), 'no-cache');
+  assert.match(stylesheet.headers.get('Content-Type') ?? '', /text\/css/u);
+  const stylesheetBody = await stylesheet.text();
+  const fontPath = /url\((\/assets\/[^)]+\.woff2)\)/u.exec(stylesheetBody)?.[1];
+  assert.ok(fontPath !== undefined);
+  const font = await app.request(fontPath, { headers: { Host: 'localhost:3000' } });
+  assert.equal(font.status, 200);
+  assert.equal(font.headers.get('Cache-Control'), 'public, max-age=31536000, immutable');
+  assert.match(font.headers.get('Content-Type') ?? '', /font\/woff2/u);
 
   const jwks = await app.request('/api/auth/jwks', { headers: { Host: 'localhost:3000' } });
   assert.equal(jwks.status, 200);
@@ -611,9 +664,9 @@ test('web shell exposes a loopback health check and hardened consent copy', asyn
         },
       },
     },
+    bridge: readyBridge,
     config: publicConfig,
     repository,
-    clientScript: '',
     isLoopback: () => true,
     logger: silentLogger,
     mcp: {
@@ -645,6 +698,119 @@ test('web shell exposes a loopback health check and hardened consent copy', asyn
   assert.equal(canonicalAuthBody, '{"auth":true}');
   assert.equal(canonicalMcpUrl, 'https://dirt.example/mcp?request=two');
   assert.equal(canonicalMcpBody, '{"mcp":true}');
+});
+
+test('the public gateway preserves OAuth and Minecraft-link continuations', async () => {
+  const now = new Date();
+  insertUser('navigation-user', 'navigator', now);
+  database
+    .prepare('UPDATE "user" SET minecraftUuid = ?, minecraftName = ? WHERE id = ?')
+    .run('12121212-1212-4121-8121-121212121212', 'Navigator', 'navigation-user');
+  let sessionCreatedAt = new Date();
+  const app = testWebApp(sessionAuth('navigation-user', () => sessionCreatedAt));
+  const headers = { Host: 'localhost:3000' };
+
+  const signedInHome = await app.request('/', { headers });
+  assert.equal(signedInHome.status, 303);
+  assert.equal(signedInHome.headers.get('Location'), '/dashboard');
+
+  const oauthQuery = '?client_id=https%3A%2F%2Ffield.example%2Fclient.json&scope=dirt%3Amcp';
+  const freshContinuation = await app.request(`/${oauthQuery}`, { headers });
+  assert.equal(freshContinuation.status, 303);
+  assert.equal(freshContinuation.headers.get('Location'), `/api/auth/oauth2/authorize${oauthQuery}`);
+
+  sessionCreatedAt = new Date(Date.now() - 6 * 60 * 1_000);
+  const staleContinuation = await app.request(`/${oauthQuery}`, { headers });
+  assert.equal(staleContinuation.status, 200);
+  assert.match(await staleContinuation.text(), /Sign in with a passkey/u);
+});
+
+test('dashboard presents safe identity, readiness, client, and passkey summaries', async () => {
+  const now = new Date('2026-08-31T12:00:00.000Z');
+  insertUser('dashboard-user', 'fieldworker', now);
+  database
+    .prepare('UPDATE "user" SET minecraftUuid = ?, minecraftName = ? WHERE id = ?')
+    .run('34343434-3434-4343-8343-343434343434', 'FieldWorker', 'dashboard-user');
+  database
+    .prepare(
+      'INSERT INTO passkey (id, name, publicKey, userId, credentialID, counter, deviceType, backedUp, createdAt) VALUES (?, ?, ?, ?, ?, 0, ?, 1, ?)',
+    )
+    .run(
+      'dashboard-passkey',
+      'Workshop key',
+      'private-public-key-material',
+      'dashboard-user',
+      'private-credential-id',
+      'multiDevice',
+      now.toISOString(),
+    );
+  const clientId = 'https://client-dashboard.example/client.json';
+  database
+    .prepare('INSERT INTO oauthClient (id, clientId, name, redirectUris) VALUES (?, ?, ?, ?)')
+    .run(
+      'dashboard-client',
+      clientId,
+      '<script>Survey client</script>',
+      JSON.stringify(['https://client-dashboard.example/callback']),
+    );
+  database
+    .prepare('INSERT INTO oauthConsent (id, clientId, userId, scopes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(
+      'dashboard-consent',
+      clientId,
+      'dashboard-user',
+      JSON.stringify(['dirt:mcp']),
+      now.toISOString(),
+      now.toISOString(),
+    );
+
+  const app = testWebApp(sessionAuth('dashboard-user', () => new Date()));
+  const response = await app.request('/dashboard', { headers: { Host: 'localhost:3000' } });
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /MCP ready/u);
+  assert.match(html, /Paper and FAWE online/u);
+  assert.match(html, />12<\/span>\s*<span>of 12 MCP tools enabled/u);
+  assert.match(html, /FieldWorker/u);
+  assert.match(html, /34343434-3434-4343-8343-343434343434/u);
+  assert.match(html, /http:\/\/localhost:3000\/mcp/u);
+  assert.match(html, /&lt;script&gt;Survey client&lt;\/script&gt;/u);
+  assert.doesNotMatch(html, /<script>Survey client<\/script>/u);
+  assert.match(html, /client-dashboard\.example/u);
+  assert.match(html, /dirt:mcp/u);
+  assert.match(html, /Full Dirt access/u);
+  assert.match(html, /Workshop key/u);
+  assert.doesNotMatch(html, /private-public-key-material/u);
+  assert.doesNotMatch(html, /private-credential-id/u);
+  assert.doesNotMatch(html, /Disconnect|Revoke client/u);
+
+  const zeroTools = await testWebApp(
+    sessionAuth('dashboard-user', () => new Date()),
+    config,
+    testBridge([]),
+  ).request('/dashboard', { headers: { Host: 'localhost:3000' } });
+  const zeroToolsHtml = await zeroTools.text();
+  assert.match(zeroToolsHtml, /No tools enabled/u);
+  assert.match(zeroToolsHtml, />0<\/span>\s*<span>of 12 MCP tools enabled/u);
+
+  const degraded = await testWebApp(
+    sessionAuth('dashboard-user', () => new Date()),
+    config,
+    testBridge(BRIDGE_OPERATION_IDS, false),
+  ).request('/dashboard', { headers: { Host: 'localhost:3000' } });
+  const degradedHtml = await degraded.text();
+  assert.equal(degraded.status, 200);
+  assert.match(degradedHtml, /Paper offline/u);
+  assert.match(degradedHtml, /Account controls remain available/u);
+
+  insertUser('unlinked-dashboard-user', 'unlinkeduser', now);
+  const unlinked = await testWebApp(sessionAuth('unlinked-dashboard-user', () => new Date())).request('/dashboard', {
+    headers: { Host: 'localhost:3000' },
+  });
+  const unlinkedHtml = await unlinked.text();
+  assert.match(unlinkedHtml, /Link Minecraft/u);
+  assert.match(unlinkedHtml, /One-time link code/u);
+  assert.match(unlinkedHtml, /No authorized clients/u);
 });
 
 test('onboarding exchanges invitation and recovery secrets, and fresh sessions link Minecraft', async () => {
@@ -705,6 +871,14 @@ test('OAuth grants require a fresh passkey session and a linked account', async 
   database
     .prepare('UPDATE "user" SET minecraftUuid = ?, minecraftName = ? WHERE id = ?')
     .run('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'OAuthPlayer', 'oauth-user');
+  database
+    .prepare('INSERT INTO oauthClient (id, clientId, name, redirectUris) VALUES (?, ?, ?, ?)')
+    .run(
+      'oauth-page-client',
+      'https://client.example/client.json',
+      'Map Room',
+      JSON.stringify(['https://client.example/callback']),
+    );
   let sessionCreatedAt = new Date(Date.now() - 6 * 60 * 1_000);
   const app = testWebApp(sessionAuth('oauth-user', () => sessionCreatedAt));
   const oauthQuery =
@@ -713,10 +887,10 @@ test('OAuth grants require a fresh passkey session and a linked account', async 
 
   const staleConsentPage = await app.request(`/consent${oauthQuery}`, { headers: browserHeaders });
   assert.equal(staleConsentPage.status, 303);
-  assert.equal(staleConsentPage.headers.get('Location'), `/sign-in${oauthQuery}`);
+  assert.equal(staleConsentPage.headers.get('Location'), `/${oauthQuery}`);
   const staleAuthorize = await app.request(`/api/auth/oauth2/authorize${oauthQuery}`, { headers: browserHeaders });
   assert.equal(staleAuthorize.status, 303);
-  assert.equal(staleAuthorize.headers.get('Location'), `/sign-in${oauthQuery}`);
+  assert.equal(staleAuthorize.headers.get('Location'), `/${oauthQuery}`);
   const rejectedVariants = await Promise.all(
     [
       `/api/auth/oauth2/authorize/${oauthQuery}`,
@@ -731,7 +905,7 @@ test('OAuth grants require a fresh passkey session and a linked account', async 
     headers: browserHeaders,
   });
   assert.equal(normalizedAuthorize.status, 303);
-  assert.equal(normalizedAuthorize.headers.get('Location'), `/sign-in${oauthQuery}`);
+  assert.equal(normalizedAuthorize.headers.get('Location'), `/${oauthQuery}`);
   const staleConsentPost = await app.request('/api/auth/oauth2/consent', {
     method: 'POST',
     headers: {
@@ -750,6 +924,20 @@ test('OAuth grants require a fresh passkey session and a linked account', async 
   });
   assert.equal(freshConsentPage.status, 200);
   assert.doesNotMatch(await freshConsentPage.text(), /<h1>Allow <script>/u);
+
+  const knownConsentPage = await app.request(`/consent${oauthQuery}`, { headers: browserHeaders });
+  assert.equal(knownConsentPage.status, 200);
+  const knownConsentHtml = await knownConsentPage.text();
+  assert.match(knownConsentHtml, /Allow Map Room/u);
+  assert.match(knownConsentHtml, /client\.example/u);
+  assert.match(knownConsentHtml, /run_minecraft_commands/u);
+
+  const localhostConsent = await app.request(
+    '/consent?client_id=https%3A%2F%2Fclient.example%2Fclient.json&redirect_uri=http%3A%2F%2Flocalhost%3A3456%2Fcallback&scope=dirt%3Amcp',
+    { headers: browserHeaders },
+  );
+  assert.equal(localhostConsent.status, 200);
+  assert.match(await localhostConsent.text(), /returns to a local app/u);
 
   repository.unlinkUser('oauthuser');
   const unlinkedConsentPost = await app.request('/api/auth/oauth2/consent', {
@@ -921,15 +1109,28 @@ function sessionAuth(userId: string, createdAt: () => Date) {
   };
 }
 
-function testWebApp(appAuth: Parameters<typeof createWebApp>[0]['auth'] = auth, appConfig: RuntimeConfig = config) {
+function testWebApp(
+  appAuth: Parameters<typeof createWebApp>[0]['auth'] = auth,
+  appConfig: RuntimeConfig = config,
+  appBridge: BridgeClient = readyBridge,
+) {
   return createWebApp({
     auth: appAuth,
+    bridge: appBridge,
     config: appConfig,
     repository,
-    clientScript: '',
     isLoopback: () => true,
     logger: silentLogger,
     mcp: { fetch: async () => new Response(null, { status: 501 }), close: async () => {} },
+  });
+}
+
+function testBridge(operations: readonly string[], pingAvailable = true): BridgeClient {
+  return new BridgeClient(config.bridge, async (request) => {
+    const input = request instanceof Request ? request.url : request.toString();
+    const path = new URL(input).pathname;
+    if (path === '/v1/ping' && !pingAvailable) return Response.json({ unavailable: true }, { status: 503 });
+    return Response.json(path === '/v1/ping' ? { status: 'ok' } : { operations });
   });
 }
 

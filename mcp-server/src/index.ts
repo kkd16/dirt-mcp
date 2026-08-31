@@ -79,7 +79,7 @@ async function initializeApplication(config: RuntimeConfig, database: Database.D
   await auth.$context;
   const mcp = createDirtMcpHandler(auth, bridge, repository, config, logger);
   try {
-    const app = createWebApp({ auth, config, logger, mcp, repository });
+    const app = createWebApp({ auth, bridge, config, logger, mcp, repository });
     return { app, mcp };
   } catch (error: unknown) {
     return cleanupAndThrow(error, () => mcp.close(), 'Dirt application initialization and cleanup both failed.');

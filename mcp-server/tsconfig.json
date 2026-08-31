@@ -3,6 +3,8 @@
     "target": "ES2025",
     "lib": ["ES2025"],
     "module": "NodeNext",
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx",
     "rewriteRelativeImportExtensions": true,
     "erasableSyntaxOnly": true,
     "resolveJsonModule": true,
@@ -21,6 +23,6 @@
     "skipLibCheck": true,
     "noEmitOnError": true
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["src/web/client.ts"]
 }
