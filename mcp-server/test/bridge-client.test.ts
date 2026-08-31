@@ -147,10 +147,96 @@ test('requires exact HTTP 200 and an application/json response media type', asyn
   });
 });
 
-test('rejects malformed JSON and structurally invalid successful responses without edit salvage', async () => {
+test('cancels unread response bodies on errors that do not inspect them', async () => {
+  await Promise.all(
+    [
+      { status: 401, contentType: 'application/json', expectedCode: 'bridge_unauthorized' },
+      { status: 503, contentType: 'text/plain', expectedCode: 'bridge_http_error' },
+      { status: 200, contentType: 'text/plain', expectedCode: 'bridge_invalid_response' },
+    ].map(async ({ status, contentType, expectedCode }) => {
+      let cancelled = false;
+      const bridge = client(
+        async () =>
+          new Response(
+            new ReadableStream({
+              cancel() {
+                cancelled = true;
+              },
+            }),
+            { status, headers: { 'Content-Type': contentType } },
+          ),
+      );
+
+      await assert.rejects(bridge.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema), (error: unknown) => {
+        return error instanceof ToolFailure && error.code === expectedCode;
+      });
+      assert.equal(cancelled, true, `expected the HTTP ${status} ${contentType} body to be cancelled`);
+    }),
+  );
+});
+
+test('bounds JSON responses and cancels the remaining body without exposing its content', async () => {
+  let declaredBodyCancelled = false;
+  const declaredOversize = client(
+    async () =>
+      new Response(
+        new ReadableStream({
+          cancel() {
+            declaredBodyCancelled = true;
+          },
+        }),
+        {
+          headers: {
+            'Content-Length': String(8 * 1_024 * 1_024 + 1),
+            'Content-Type': 'application/json',
+          },
+        },
+      ),
+  );
+  await assert.rejects(declaredOversize.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema), (error: unknown) => {
+    return (
+      error instanceof ToolFailure && error.code === 'bridge_invalid_response' && !error.message.includes('secret')
+    );
+  });
+  assert.equal(declaredBodyCancelled, true);
+
+  let streamedBodyCancelled = false;
+  const streamedOversize = client(
+    async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(`{"error":{"code":"internal_error","message":"secret"}}`));
+            controller.enqueue(new Uint8Array(8 * 1_024 * 1_024));
+          },
+          cancel() {
+            streamedBodyCancelled = true;
+          },
+        }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } },
+      ),
+  );
+  await assert.rejects(streamedOversize.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema), (error: unknown) => {
+    return error instanceof ToolFailure && error.code === 'bridge_http_error' && !error.message.includes('secret');
+  });
+  assert.equal(streamedBodyCancelled, true);
+});
+
+test('rejects malformed JSON, invalid UTF-8, and structurally invalid successful responses without edit salvage', async () => {
   const malformedJson = client(async () => new Response('{', { headers: { 'Content-Type': 'application/json' } }));
   await assert.rejects(
     malformedJson.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema),
+    (error: unknown) => error instanceof ToolFailure && error.code === 'bridge_invalid_response',
+  );
+
+  const invalidUtf8 = client(
+    async () =>
+      new Response(new Uint8Array([123, 34, 118, 97, 108, 117, 101, 34, 58, 34, 255, 34, 125]), {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+  );
+  await assert.rejects(
+    invalidUtf8.request(BRIDGE_ROUTES.ping, CALL_ID, ResponseSchema),
     (error: unknown) => error instanceof ToolFailure && error.code === 'bridge_invalid_response',
   );
 

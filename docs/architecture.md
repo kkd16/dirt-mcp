@@ -81,9 +81,10 @@ them through a POST, clear the fragment, and continue with a secure, HTTP-only,
 same-site enrollment cookie. Passkey ceremonies require user verification.
 Recovery is an operator-issued re-enrollment that removes the account's prior
 passkeys and revokes its sessions, consent, authorization codes, and refresh
-grants. Already-issued access tokens expire within five minutes. Disabling or
-unlinking an account blocks those tokens immediately because every MCP request
-reloads the account.
+grants. Recovery and every account eligibility transition rotate the account's
+authorization generation, immediately invalidating previously issued access
+tokens. Every MCP request also reloads the account and requires it to be active
+and linked.
 
 Paper operators create and revoke invitations, disable or enable accounts,
 issue recovery links, and unlink Minecraft identities through `/dirt access`.
@@ -97,8 +98,8 @@ MCP authorization uses one fixed `dirt:mcp` scope. The service supports current
 client metadata discovery plus authorization code flow with PKCE S256; it does
 not support dynamic client registration, client credentials, legacy MCP
 transports, or compatibility endpoints. Every MCP request validates the token's
-issuer, audience, expiry, and scope, then reloads the account so disable and
-unlink actions take effect immediately. There are deliberately no roles or
+issuer, audience, expiry, scope, and current authorization generation, then
+reloads the account's active and linked state. There are deliberately no roles or
 per-account capability records in v1: every active, linked account receives the
 same Paper-limited tool catalog.
 

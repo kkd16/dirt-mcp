@@ -350,6 +350,7 @@ interface EditRequestCorrelation {
   readonly label: string;
   readonly seed: number;
   readonly dryRun: boolean;
+  readonly maxChangedBlocks: number | null;
 }
 
 interface EditResponseCorrelation {
@@ -384,6 +385,11 @@ function validateEditCorrelation(
   }
   if ((response.outcome === 'preview') !== request.dryRun) {
     bridgeMismatch(context, 'The response outcome must match the requested dry-run mode.', ['outcome']);
+  }
+  if (request.maxChangedBlocks !== null && response.changedBlockCount > request.maxChangedBlocks) {
+    bridgeMismatch(context, 'The changed-block count must not exceed the requested per-call ceiling.', [
+      'changedBlockCount',
+    ]);
   }
   if (response.outcome !== 'committed' || response.edit === null) return;
 
@@ -434,12 +440,60 @@ export function replaceRegionBlocksBridgeOutputSchema(
 export function setBlocksBridgeOutputSchema(request: components['schemas']['SetBlocksRequest'], callId: string) {
   return SetBlocksOutputSchema.superRefine((response, context) => {
     validateEditCorrelation(request, response, callId, 'set_blocks', context);
+    const requestedGeometry = setBlocksRequestGeometry(request);
+    if (
+      (response.bounds === null) !== (requestedGeometry.bounds === null) ||
+      (response.bounds !== null &&
+        requestedGeometry.bounds !== null &&
+        !sameBounds(response.bounds, requestedGeometry.bounds))
+    ) {
+      bridgeMismatch(context, 'The response bounds must contain exactly the requested set-block geometry.', ['bounds']);
+    }
+    if (BigInt(response.blockCount) !== requestedGeometry.blockCount) {
+      bridgeMismatch(context, 'The represented block count must match the requested set-block geometry.', [
+        'blockCount',
+      ]);
+    }
     if (response.changedBlockCount + response.unchangedBlockCount !== response.blockCount) {
       bridgeMismatch(context, 'Changed and unchanged block counts must total the represented block count.', [
         'blockCount',
       ]);
     }
   });
+}
+
+function setBlocksRequestGeometry(request: components['schemas']['SetBlocksRequest']): {
+  readonly bounds: Bounds | null;
+  readonly blockCount: bigint;
+} {
+  let bounds: Bounds | null = null;
+  let blockCount = BigInt(request.placements.length);
+  const include = (x: number, y: number, zCoordinate: number): void => {
+    const position = { x: request.origin.x + x, y: request.origin.y + y, z: request.origin.z + zCoordinate };
+    bounds =
+      bounds === null
+        ? { min: position, max: position }
+        : {
+            min: {
+              x: Math.min(bounds.min.x, position.x),
+              y: Math.min(bounds.min.y, position.y),
+              z: Math.min(bounds.min.z, position.z),
+            },
+            max: {
+              x: Math.max(bounds.max.x, position.x),
+              y: Math.max(bounds.max.y, position.y),
+              z: Math.max(bounds.max.z, position.z),
+            },
+          };
+  };
+
+  for (const [, x, y, zCoordinate] of request.placements) include(x, y, zCoordinate);
+  for (const [, x, y, zCoordinate, toX, toY, toZ] of request.runs) {
+    include(x, y, zCoordinate);
+    include(toX, toY, toZ);
+    blockCount += BigInt(toX - x + 1) * BigInt(toY - y + 1) * BigInt(toZ - zCoordinate + 1);
+  }
+  return { bounds, blockCount };
 }
 
 export function getEditHistoryBridgeOutputSchema(request: components['schemas']['GetEditHistoryRequest']) {

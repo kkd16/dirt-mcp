@@ -177,6 +177,9 @@ tasks {
 
     jar {
         archiveBaseName = "dirt-mcp-paper"
+        from(rootProject.file("LICENSE")) {
+            into("META-INF")
+        }
     }
 
     withType<AbstractArchiveTask>().configureEach {

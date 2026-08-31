@@ -363,6 +363,39 @@ final class BridgeDispatcherTest {
         assertEquals("committed", context.values().get("outcome"));
     }
 
+    @Test
+    void suppressesBothFailureMetadataAndStackDetailsForSensitiveEndpoints() throws Exception {
+        List<LogRecord> records = new ArrayList<>();
+        DirtLog log = recordingLog(records);
+        BridgeEndpoint endpoint =
+                endpoint(
+                        "runMinecraftCommands",
+                        "POST",
+                        "/v1/run-minecraft-commands",
+                        exchange -> {
+                            exchange.suppressFailureDetails();
+                            throw new OperationException(
+                                    OperationFailure.SERVER_UNAVAILABLE,
+                                    "say private-command-payload",
+                                    new ErrorDetails.ServerUnavailable.PaperUnavailable(),
+                                    new IllegalStateException("private-command-payload"));
+                        });
+        TestExchange exchange = new TestExchange("POST", "/v1/run-minecraft-commands");
+
+        try (log;
+                BridgeDispatcher dispatcher = dispatcher(List.of(endpoint), allOperations(), log)) {
+            dispatcher.handle(exchange);
+        }
+
+        assertEquals(503, exchange.getResponseCode());
+        assertEquals(1, records.size());
+        LogRecord audit = records.getFirst();
+        LogContext context = (LogContext) audit.getParameters()[0];
+        assertFalse(context.values().containsKey("failure_reason"));
+        assertEquals(null, audit.getThrown());
+        assertFalse(context.values().toString().contains("private-command-payload"));
+    }
+
     private static BridgeDispatcher dispatcher(
             List<BridgeEndpoint> endpoints, List<BridgeOperation> allowedOperations, DirtLog log) {
         return new BridgeDispatcher(

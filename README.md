@@ -59,14 +59,14 @@ global operation allowlist.
 Dirt follows the latest stable Paper release and does not support older server
 generations.
 
-| Dependency                                                          | Version                    |
-| ------------------------------------------------------------------- | -------------------------- |
-| [Paper](https://papermc.io/downloads/paper/)                        | 26.2, API build 121 stable |
-| [Java](https://docs.papermc.io/paper/getting-started/#requirements) | 25                         |
-| [FAWE](https://modrinth.com/plugin/fastasyncworldedit)              | 2.15.4                     |
-| Node.js                                                             | 26 or newer                |
-| pnpm                                                                | 11.24.0 or newer 11.x      |
-| Docker Engine / Compose                                             | current Linux releases     |
+| Dependency                                                          | Version                                 |
+| ------------------------------------------------------------------- | --------------------------------------- |
+| [Paper](https://papermc.io/downloads/paper/)                        | 26.2, API build 121 stable              |
+| [Java](https://docs.papermc.io/paper/getting-started/#requirements) | 25                                      |
+| [FAWE](https://modrinth.com/plugin/fastasyncworldedit)              | 2.15.4                                  |
+| Node.js                                                             | 24 or newer (24.20.0 LTS in production) |
+| pnpm                                                                | 11.24.0 or newer 11.x                   |
+| Docker Engine / Compose                                             | current Linux releases                  |
 
 The production Compose topology uses Linux host networking so the containerized
 web service can reach the native Paper bridge at `127.0.0.1`. A real DNS name
@@ -124,10 +124,11 @@ docker compose run --rm migrate
 docker compose up -d web caddy
 ```
 
-The deployment uses a non-root Node image, a pinned Caddy edge, persistent
-SQLite and Caddy volumes, and no published application or Paper bridge port.
-Back up SQLite with the provided online-backup command before migration or
-upgrade; do not copy only the main database file while WAL mode is active.
+The deployment uses a non-root Node image, digest-pinned Node and Caddy images,
+persistent SQLite and Caddy volumes, and no published application or Paper
+bridge port. Back up SQLite with the provided online-backup command before
+migration or upgrade; do not copy only the main database file while WAL mode is
+active.
 
 ```bash
 DIRT_BACKUP_DESTINATION="dirt-$(date +%Y%m%d-%H%M%S).sqlite3" \
@@ -135,11 +136,44 @@ DIRT_BACKUP_DESTINATION="dirt-$(date +%Y%m%d-%H%M%S).sqlite3" \
 ```
 
 The destination must be a new filename inside the pre-created `backups/`
-directory. The command refuses to overwrite an existing backup. The production
-image runs as UID/GID 1000, so that numeric owner must be able to write the
-backup directory. Compose file secrets preserve their host ownership and mode,
-so the files are read-only but world-readable for the non-root container. The
-mode-0700 host directory prevents other host users from reaching them.
+directory. The command refuses to overwrite an existing backup and publishes
+it mode 0600. The production image runs as UID/GID 1000, so that numeric owner
+must be able to write the backup directory. Compose file secrets preserve their
+host ownership and mode, so the files are read-only but world-readable for the
+non-root container. The mode-0700 host directory prevents other host users from
+reaching them.
+
+For an upgrade, take the online backup first, stop the deployment, rebuild, run
+the migration, and start it again. `docker compose down` preserves the named
+data volumes unless `--volumes` is explicitly added, and ensures changes to the
+bind-mounted edge configuration take effect. Compose gives the edge and web
+processes five minutes and fifteen seconds to finish an admitted world
+operation before either can be killed during shutdown.
+
+```bash
+docker compose down
+docker compose build
+docker compose run --rm migrate
+docker compose up -d web caddy
+```
+
+Keep copies of backups off-host and test restoration periodically. To restore,
+stop the deployment, copy a chosen backup into the data volume through the
+non-networked `migrate` service, remove stale WAL sidecars, migrate it, and
+restart. Replace the example backup filename before running this command.
+
+```bash
+docker compose down
+docker compose run --rm --no-deps \
+  --volume ./backups:/restore:ro \
+  --entrypoint /bin/sh migrate -eu -c '
+    cp /restore/dirt-20260830-120000.sqlite3 /var/lib/dirt-mcp/dirt.sqlite3.restore
+    rm -f /var/lib/dirt-mcp/dirt.sqlite3-wal /var/lib/dirt-mcp/dirt.sqlite3-shm
+    mv -f /var/lib/dirt-mcp/dirt.sqlite3.restore /var/lib/dirt-mcp/dirt.sqlite3
+  '
+docker compose run --rm migrate
+docker compose up -d web caddy
+```
 
 ### 4. Create and link the first account
 
@@ -193,8 +227,8 @@ operation ID and restart Paper to remove the corresponding tool for everyone.
   challenges, authorization codes, or access/refresh tokens.
 - Recovery is operator-issued passkey re-enrollment. It replaces old passkeys
   and revokes the account's sessions, consent, authorization codes, and refresh
-  grants. An already-issued access token expires within five minutes; disable or
-  unlink the account when access must stop immediately.
+  grants. Recovery, disable, enable, link, and unlink transitions also rotate an
+  authorization generation that immediately invalidates existing access tokens.
 - Edits are synchronous and bounded, with one Dirt mutation at a time per world.
   Undo history is memory-only and clears on world unload or restart.
 - Command batches are non-atomic and outside Dirt's FAWE limits and undo. Do not

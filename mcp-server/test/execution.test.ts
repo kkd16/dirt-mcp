@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CLIENT_INFO_META_KEY, type ServerContext } from '@modelcontextprotocol/server';
+import { CLIENT_INFO_META_KEY } from '@modelcontextprotocol/server';
 import { ToolFailure, ToolFailureResultSchema, toolFailureLogLevel } from '../dist/bridge/errors.js';
 import type { DirtLogger, LogFields } from '../dist/logging.js';
 import { executeToolCall, successResult } from '../dist/tools/execution.js';
@@ -33,14 +33,23 @@ function recordingLogger(entries: Entry[], loggerContext: LogFields = {}): DirtL
   };
 }
 
-function context(envelope?: Record<string, unknown>): ServerContext {
+function context(
+  envelope?: Record<string, unknown>,
+  authentication?: { readonly clientId: string; readonly userId: string },
+): Parameters<typeof executeToolCall>[1]['context'] {
   return {
-    mcpReq: {
-      id: 7,
-      envelope,
-      signal: new AbortController().signal,
-    },
-  } as unknown as ServerContext;
+    mcpReq: envelope === undefined ? {} : { envelope },
+    ...(authentication === undefined
+      ? {}
+      : {
+          http: {
+            authInfo: {
+              clientId: authentication.clientId,
+              extra: { userId: authentication.userId },
+            },
+          },
+        }),
+  };
 }
 
 test('successResult keeps structured content canonical and text concise', () => {
@@ -57,7 +66,10 @@ test('executeToolCall returns successes and records bounded call metadata', asyn
     {
       operation: 'get_blocks',
       world: 'world',
-      context: context({ [CLIENT_INFO_META_KEY]: { name: 'test-client', version: '1.2.3' } }),
+      context: context(
+        { [CLIENT_INFO_META_KEY]: { name: 'test-client', version: '1.2.3' } },
+        { clientId: 'https://client.example/client.json?secret=hidden', userId: 'user-one' },
+      ),
       failureContext: 'Could not get blocks',
     },
     async (callId) => {
@@ -70,6 +82,13 @@ test('executeToolCall returns successes and records bounded call metadata', asyn
   assert.equal(entries[0]?.level, 'info');
   assert.equal(entries[0]?.event, 'tool.completed');
   assert.equal(entries[0]?.context.client, 'test-client/1.2.3');
+  assert.equal(entries[0]?.context.user_id, 'user-one');
+  assert.equal(
+    entries[0]?.context.client_id_fingerprint,
+    '4bc931e7b27f79e68a407ebb5401a4e3c96bea72e5906be22e9f5ee600500acf',
+  );
+  assert.equal(entries[0]?.context.request_id, undefined);
+  assert.doesNotMatch(JSON.stringify(entries[0]?.context), /secret=hidden/u);
   assert.equal(entries[0]?.context.world, 'world');
   assert.equal(entries[0]?.fields?.success, true);
   assert.equal(typeof entries[0]?.fields?.duration_ms, 'number');

@@ -2,7 +2,8 @@ const SERVICE = 'dirt-mcp-web';
 const MAX_STRING_LENGTH = 2_048;
 const TRUNCATION_SUFFIX = '...[truncated]';
 const REDACTED = '[redacted]';
-const SENSITIVE_FIELD = /(api_?key|access_?key|authorization|bearer|credential|password|secret|token)/i;
+const SENSITIVE_FIELD =
+  /(api_?key|access_?key|auth_?code|authorization|bearer|challenge|command|credential|invite|invitation|password|recovery|secret|token|webauthn)/i;
 const RESERVED_FIELDS = new Set(['timestamp', 'level', 'service', 'event', 'message', 'pid']);
 
 type LogLevel = 'info' | 'warning' | 'error';

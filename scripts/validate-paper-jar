@@ -16,6 +16,7 @@ if [[ ! -f "${jar_file}" ]]; then
 fi
 entries="$(jar tf "${jar_file}")"
 required_entries=(
+  'META-INF/LICENSE'
   'plugin.yml'
   'config.yml'
   'ca/deliyannides/dirtmcp/paper/DirtMcpPlugin.class'

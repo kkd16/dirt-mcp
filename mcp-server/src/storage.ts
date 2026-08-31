@@ -1,8 +1,31 @@
 import Database from 'better-sqlite3';
+import { chmodSync, closeSync, constants, openSync } from 'node:fs';
 import { configureDatabase } from './access/repository.ts';
 
 export function openDatabase(path: string, readonly = false): Database.Database {
+  if (!readonly) {
+    const descriptor = openSync(path, constants.O_CREAT | constants.O_RDONLY, 0o600);
+    closeSync(descriptor);
+    chmodSync(path, 0o600);
+    secureSidecars(path);
+  }
   const database = new Database(path, { readonly, fileMustExist: readonly });
-  configureDatabase(database, readonly);
-  return database;
+  try {
+    configureDatabase(database, readonly);
+    if (!readonly) secureSidecars(path);
+    return database;
+  } catch (error: unknown) {
+    database.close();
+    throw error;
+  }
+}
+
+function secureSidecars(path: string): void {
+  for (const suffix of ['-journal', '-shm', '-wal']) {
+    try {
+      chmodSync(`${path}${suffix}`, 0o600);
+    } catch (error: unknown) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+    }
+  }
 }

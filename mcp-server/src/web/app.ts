@@ -1,13 +1,20 @@
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { readFileSync } from 'node:fs';
 import { Hono, type Context } from 'hono';
+import { routePath } from 'hono/route';
 import { secureHeaders } from 'hono/secure-headers';
 import * as z from 'zod/v4';
 import { AccessError, type AccessRepository, type UserSummary } from '../access/repository.ts';
 import { internalError, registerInternalRoutes } from '../access/routes.ts';
-import { createOnboardingTicket, normalizeHandle, onboardingCookieHeader, type DirtAuth } from '../auth.ts';
+import {
+  createOnboardingTicket,
+  normalizeHandle,
+  onboardingCookieHeader,
+  SESSION_FRESH_AGE_SECONDS,
+  type DirtAuth,
+} from '../auth.ts';
 import type { RuntimeConfig } from '../config.ts';
-import type { DirtLogger } from '../logging.ts';
+import { safeErrorFields, type DirtLogger } from '../logging.ts';
 import type { DirtMcpHandler } from '../mcp-http.ts';
 import { consentPage, dashboardPage, errorPage, linkPage, onboardingPage, signInPage, stylesheet } from './pages.ts';
 
@@ -20,10 +27,26 @@ const onboardingExchangeSchema = z
   .strict();
 const linkSchema = z.object({ code: z.string().trim().min(8).max(24) }).strict();
 const MAX_BROWSER_BODY_BYTES = 16_384;
-const RECENT_AUTHENTICATION_MS = 5 * 60 * 1_000;
+const RECENT_AUTHENTICATION_MS = SESSION_FRESH_AGE_SECONDS * 1_000;
+const SENSITIVE_OAUTH_PATHS = new Set([
+  '/api/auth/oauth2/authorize',
+  '/api/auth/oauth2/consent',
+  '/api/auth/oauth2/continue',
+]);
+
+interface WebSession {
+  readonly session: { readonly createdAt: Date };
+  readonly user: { readonly id: string };
+}
+
+type WebAuth = Pick<DirtAuth, 'handler'> & {
+  readonly api: {
+    readonly getSession: (context: { readonly headers: Headers }) => Promise<WebSession | null>;
+  };
+};
 
 export interface WebAppDependencies {
-  readonly auth: DirtAuth;
+  readonly auth: WebAuth;
   readonly config: RuntimeConfig;
   readonly logger: DirtLogger;
   readonly mcp: DirtMcpHandler;
@@ -110,6 +133,33 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
     return context.body(clientScript, 200, { 'Content-Type': 'text/javascript; charset=utf-8' });
   });
 
+  app.use('/api/auth/oauth2/*', async (context, next) => {
+    // Better Auth matches its endpoint routes against URL.pathname without
+    // decoding percent escapes. Use the same value so an alternate spelling
+    // is either guarded by both routers or rejected by Better Auth.
+    const oauthPath = new URL(context.req.url).pathname;
+    if (!SENSITIVE_OAUTH_PATHS.has(oauthPath)) return next();
+    const sessionUser = await currentSessionUser(auth, repository, context.req.raw.headers);
+    const authorizationRequest = oauthPath === '/api/auth/oauth2/authorize' && context.req.method === 'GET';
+    if (sessionUser === null || !isRecentlyAuthenticated(sessionUser.sessionCreatedAt)) {
+      if (authorizationRequest) {
+        return context.redirect(`/sign-in${new URL(context.req.url).search}`, 303);
+      }
+      return context.json({ error: 'Recent passkey authentication is required.' }, 403);
+    }
+    if (sessionUser.user.minecraftAccount === null) {
+      if (authorizationRequest) {
+        return context.html(
+          errorPage('Minecraft link required', 'Link a Minecraft account before authorizing MCP.'),
+          403,
+        );
+      }
+      return context.json({ error: 'Link a Minecraft account before authorizing MCP.' }, 403);
+    }
+    if (context.req.method !== 'GET') requireSameOrigin(context, config.publicOrigin);
+    return next();
+  });
+
   app.all('/api/auth/*', async (context) =>
     withNoStore(await auth.handler(canonicalPublicRequest(context.req.raw, config.publicOrigin))),
   );
@@ -135,12 +185,12 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
   app.post('/api/access/minecraft-link', async (context) => {
     requireSameOrigin(context, config.publicOrigin);
     const body = linkSchema.parse(await readSmallJson(context.req.raw));
-    const session = await auth.api.getSession({ headers: context.req.raw.headers });
-    if (session === null) return context.json({ error: 'Sign in again before linking Minecraft.' }, 401);
-    if (Date.now() - new Date(session.session.createdAt).getTime() > RECENT_AUTHENTICATION_MS) {
+    const sessionUser = await currentSessionUser(auth, repository, context.req.raw.headers);
+    if (sessionUser === null) return context.json({ error: 'Sign in again before linking Minecraft.' }, 401);
+    if (!isRecentlyAuthenticated(sessionUser.sessionCreatedAt)) {
       return context.json({ error: 'Sign in again before linking Minecraft.' }, 403);
     }
-    const user = repository.consumeMinecraftLinkChallenge(session.user.id, body.code);
+    const user = repository.consumeMinecraftLinkChallenge(sessionUser.user.id, body.code);
     return context.json({ user });
   });
 
@@ -167,9 +217,11 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
     return context.html(linkPage(user));
   });
   app.get('/consent', async (context) => {
-    const user = await currentUser(auth, repository, context.req.raw.headers);
-    if (user === null) return context.redirect(`/sign-in${new URL(context.req.url).search}`, 303);
-    if (user.minecraftAccount === null) {
+    const sessionUser = await currentSessionUser(auth, repository, context.req.raw.headers);
+    if (sessionUser === null || !isRecentlyAuthenticated(sessionUser.sessionCreatedAt)) {
+      return context.redirect(`/sign-in${new URL(context.req.url).search}`, 303);
+    }
+    if (sessionUser.user.minecraftAccount === null) {
       return context.html(
         errorPage('Minecraft link required', 'Link a Minecraft account before authorizing MCP.'),
         403,
@@ -178,7 +230,7 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
     const query = new URL(context.req.url).searchParams;
     const clientName = query.get('client_id') ?? 'this MCP client';
     const scopes = (query.get('scope') ?? 'dirt:mcp').split(' ').filter((scope) => scope.length > 0);
-    return context.html(consentPage(user, clientName, scopes));
+    return context.html(consentPage(sessionUser.user, clientName, scopes));
   });
 
   app.notFound((context) => {
@@ -198,6 +250,14 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
     if (context.req.path.startsWith('/internal/v1/access/')) {
       const failure = internalError(error);
       const callId = validCallIdOrNull(context.req.header('X-Dirt-Call-Id'));
+      if (failure.code === 'internal_error') {
+        dependencies.logger
+          .child({ component: 'access_control', call_id: callId })
+          .error('access_control.request_failed', 'Internal access-control request failed.', {
+            route: routePath(context),
+            ...safeErrorFields(error),
+          });
+      }
       return context.json({ callId, error: { code: failure.code, message: failure.message } }, failure.status);
     }
     if (context.req.path.startsWith('/api/')) {
@@ -254,20 +314,31 @@ function validCallIdOrNull(value: string | undefined): string | null {
     : null;
 }
 
-async function currentUser(
-  auth: DirtAuth,
+async function currentUser(auth: WebAuth, repository: AccessRepository, headers: Headers): Promise<UserSummary | null> {
+  return (await currentSessionUser(auth, repository, headers))?.user ?? null;
+}
+
+async function currentSessionUser(
+  auth: WebAuth,
   repository: AccessRepository,
   headers: Headers,
-): Promise<UserSummary | null> {
+): Promise<{ readonly user: UserSummary; readonly sessionCreatedAt: number } | null> {
   const session = await auth.api.getSession({ headers });
   if (session === null) return null;
   try {
     const user = repository.requireUserById(session.user.id);
-    return user.status === 'active' ? user : null;
+    if (user.status !== 'active') return null;
+    const sessionCreatedAt = new Date(session.session.createdAt).getTime();
+    return Number.isFinite(sessionCreatedAt) ? { user, sessionCreatedAt } : null;
   } catch (error: unknown) {
     if (error instanceof AccessError && error.code === 'not_found') return null;
     throw error;
   }
+}
+
+function isRecentlyAuthenticated(createdAt: number, now = Date.now()): boolean {
+  const age = now - createdAt;
+  return age >= 0 && age <= RECENT_AUTHENTICATION_MS;
 }
 
 function isLoopbackConnection(context: Context): boolean {
@@ -287,40 +358,39 @@ async function readSmallJson(request: Request): Promise<unknown> {
   }
   const length = request.headers.get('Content-Length');
   if (length !== null && (!/^\d+$/u.test(length) || Number(length) > MAX_BROWSER_BODY_BYTES)) {
+    await cancelRequestBody(request);
     throw new AccessError('invalid', 'Request body is too large.');
   }
-  const reader = request.body?.getReader();
-  if (reader === undefined) throw new SyntaxError('missing body');
-  const chunks: Uint8Array[] = [];
-  let total: number;
+  if (request.body === null) throw new SyntaxError('missing body');
+  let bytes = new Uint8Array(8_192);
+  let total = 0;
   try {
-    total = await readBrowserChunks(reader, chunks, 0);
-  } finally {
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  try {
-    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    await request.body.pipeTo(
+      new WritableStream<Uint8Array>({
+        write(chunk) {
+          const nextTotal = total + chunk.byteLength;
+          if (nextTotal > MAX_BROWSER_BODY_BYTES) throw new AccessError('invalid', 'Request body is too large.');
+          if (nextTotal > bytes.byteLength) {
+            const grown = new Uint8Array(Math.min(MAX_BROWSER_BODY_BYTES, Math.max(nextTotal, bytes.byteLength * 2)));
+            grown.set(bytes.subarray(0, total));
+            bytes = grown;
+          }
+          bytes.set(chunk, total);
+          total = nextTotal;
+        },
+      }),
+    );
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, total)));
   } catch (error: unknown) {
-    if (error instanceof SyntaxError) throw error;
+    if (error instanceof SyntaxError || error instanceof AccessError) throw error;
     throw new AccessError('invalid', 'Request body must be valid UTF-8 JSON.');
   }
 }
 
-async function readBrowserChunks(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-  chunks: Uint8Array[],
-  total: number,
-): Promise<number> {
-  const result = await reader.read();
-  if (result.done) return total;
-  const nextTotal = total + result.value.byteLength;
-  if (nextTotal > MAX_BROWSER_BODY_BYTES) throw new AccessError('invalid', 'Request body is too large.');
-  chunks.push(result.value);
-  return readBrowserChunks(reader, chunks, nextTotal);
+async function cancelRequestBody(request: Request): Promise<void> {
+  try {
+    await request.body?.cancel();
+  } catch {
+    // The stream may already have been canceled by pipeTo.
+  }
 }

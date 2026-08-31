@@ -73,15 +73,28 @@ test('command bridge output accounts for the requested command count', () => {
     message: 'Command was not found.',
     rawMessage: null,
   } as const;
+  const secondDispatched = { ...dispatched, command: 'say again' } as const;
+  const requestedNotFound = { ...notFound, command: 'say hello' } as const;
   const output = {
     sender: { name: 'Dirt MCP', isOperator: true, isPlayer: false },
     feedbackTruncated: false,
-    results: [dispatched, dispatched],
+    results: [dispatched, secondDispatched],
   } as const;
   const schema = runMinecraftCommandsBridgeOutputSchema({ commands: ['say hello', 'say again'] });
 
   assert.equal(schema.safeParse(output).success, true);
   assert.equal(schema.safeParse({ ...output, results: [dispatched] }).success, false);
-  assert.equal(schema.safeParse({ ...output, results: [notFound] }).success, true);
-  assert.equal(schema.safeParse({ ...output, results: [dispatched, dispatched, dispatched] }).success, false);
+  assert.equal(schema.safeParse({ ...output, results: [requestedNotFound] }).success, true);
+  assert.equal(schema.safeParse({ ...output, results: [dispatched, dispatched] }).success, false);
+  assert.equal(
+    runMinecraftCommandsBridgeOutputSchema({ commands: [' \u1680/\u2000say hello\u3000'] }).safeParse({
+      ...output,
+      results: [dispatched],
+    }).success,
+    true,
+  );
+  assert.equal(
+    schema.safeParse({ ...output, results: [dispatched, secondDispatched, secondDispatched] }).success,
+    false,
+  );
 });

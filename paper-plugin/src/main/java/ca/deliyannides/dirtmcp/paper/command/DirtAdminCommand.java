@@ -616,6 +616,12 @@ public final class DirtAdminCommand {
 
     private static void appendPageControls(
             TextComponent.Builder message, String collection, int page, int totalPages) {
+        int lastPage = Math.max(1, totalPages);
+        if (page > lastPage) {
+            message.append(Component.newline()).append(Component.newline());
+            appendPageControl(message, collection, lastPage, "‹ Last page");
+            return;
+        }
         if (page <= 1 && page >= totalPages) {
             return;
         }

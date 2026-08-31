@@ -211,11 +211,18 @@ export class AccessRepository {
   }
 
   unlinkUser(handle: string): UserSummary {
-    const changed = this.database
-      .prepare('UPDATE "user" SET minecraftUuid = NULL, minecraftName = NULL, updatedAt = ? WHERE handle = ?')
-      .run(Date.now(), handle);
-    if (changed.changes !== 1) throw new AccessError('not_found', 'User not found.');
-    return this.requireUserByHandle(handle);
+    const now = new Date();
+    const transaction = this.database.transaction(() => {
+      const changed = this.database
+        .prepare<[number, string], { id: string }>(
+          'UPDATE "user" SET minecraftUuid = NULL, minecraftName = NULL, updatedAt = ? WHERE handle = ? RETURNING id',
+        )
+        .get(now.getTime(), handle);
+      if (changed === undefined) throw new AccessError('not_found', 'User not found.');
+      this.revokeAuthorization(changed.id, now);
+      return this.requireUserByHandle(handle);
+    });
+    return transaction.immediate();
   }
 
   createRecovery(handle: string, now = new Date()): SecretRecovery {
@@ -223,6 +230,7 @@ export class AccessRepository {
     const secret = randomSecret();
     const expiresAt = new Date(now.getTime() + RECOVERY_TTL_MS);
     const transaction = this.database.transaction(() => {
+      this.database.prepare('DELETE FROM credentialRecovery WHERE expiresAt <= ?').run(now.getTime());
       this.database
         .prepare('UPDATE credentialRecovery SET usedAt = ? WHERE userId = ? AND usedAt IS NULL')
         .run(now.getTime(), user.id);
@@ -290,6 +298,10 @@ export class AccessRepository {
       this.database
         .prepare('UPDATE "user" SET minecraftUuid = ?, minecraftName = ?, updatedAt = ? WHERE id = ?')
         .run(challenge.minecraftUuid, challenge.minecraftName, now.getTime(), userId);
+      // Rotate the OAuth generation on every authorization-eligibility
+      // transition. Keep this fresh browser session so the user can continue
+      // from linking into a new authorization ceremony.
+      this.rotateAuthorization(userId, now);
       const consumed = this.database
         .prepare('UPDATE minecraftLinkChallenge SET usedAt = ?, usedByUserId = ? WHERE id = ? AND usedAt IS NULL')
         .run(now.getTime(), userId, challenge.id);
@@ -323,13 +335,47 @@ export class AccessRepository {
     return { kind: 'recovery', recordId: row.id, handle: row.handle };
   }
 
-  findMcpUser(userId: string): McpUser | null {
+  findMcpUser(userId: string, authorizationVersion: number): McpUser | null {
     const row = this.database
-      .prepare<[string, UserStatus], McpUser>(
-        'SELECT id, minecraftUuid FROM "user" WHERE id = ? AND status = ? AND minecraftUuid IS NOT NULL',
+      .prepare<[string, UserStatus, number], McpUser>(
+        'SELECT id, minecraftUuid FROM "user" WHERE id = ? AND status = ? AND authorizationVersion = ? AND minecraftUuid IS NOT NULL AND minecraftName IS NOT NULL',
       )
-      .get(userId, 'active');
+      .get(userId, 'active', authorizationVersion);
     return row ?? null;
+  }
+
+  requireAuthorizationVersion(userId: string): number {
+    const row = this.database
+      .prepare<[string], { authorizationVersion: number }>('SELECT authorizationVersion FROM "user" WHERE id = ?')
+      .get(userId);
+    if (row === undefined) throw new AccessError('not_found', 'User not found.');
+    if (!Number.isSafeInteger(row.authorizationVersion) || row.authorizationVersion < 0) {
+      throw new Error('The Dirt database contains an invalid authorization version.');
+    }
+    return row.authorizationVersion;
+  }
+
+  revokeAuthorization(userId: string, now = new Date()): void {
+    this.rotateAuthorization(userId, now);
+    this.database.prepare('DELETE FROM session WHERE userId = ?').run(userId);
+  }
+
+  private rotateAuthorization(userId: string, now = new Date()): void {
+    const updated = this.database
+      .prepare('UPDATE "user" SET authorizationVersion = authorizationVersion + 1, updatedAt = ? WHERE id = ?')
+      .run(now.getTime(), userId);
+    if (updated.changes !== 1) throw new AccessError('not_found', 'User not found.');
+    this.database
+      .prepare(
+        `DELETE FROM verification
+         WHERE json_valid(value)
+           AND json_extract(value, '$.type') = 'authorization_code'
+           AND json_extract(value, '$.userId') = ?`,
+      )
+      .run(userId);
+    this.database.prepare('DELETE FROM oauthAccessToken WHERE userId = ?').run(userId);
+    this.database.prepare('DELETE FROM oauthRefreshToken WHERE userId = ?').run(userId);
+    this.database.prepare('DELETE FROM oauthConsent WHERE userId = ?').run(userId);
   }
 
   requireUserById(id: string): UserSummary {
@@ -379,11 +425,18 @@ export class AccessRepository {
   }
 
   private setUserStatus(handle: string, status: UserStatus): UserSummary {
-    const changed = this.database
-      .prepare('UPDATE "user" SET status = ?, updatedAt = ? WHERE handle = ?')
-      .run(status, Date.now(), handle);
-    if (changed.changes !== 1) throw new AccessError('not_found', 'User not found.');
-    return this.requireUserByHandle(handle);
+    const now = new Date();
+    const transaction = this.database.transaction(() => {
+      const changed = this.database
+        .prepare<[UserStatus, number, string], { id: string }>(
+          'UPDATE "user" SET status = ?, updatedAt = ? WHERE handle = ? RETURNING id',
+        )
+        .get(status, now.getTime(), handle);
+      if (changed === undefined) throw new AccessError('not_found', 'User not found.');
+      this.revokeAuthorization(changed.id, now);
+      return this.requireUserByHandle(handle);
+    });
+    return transaction.immediate();
   }
 
   private requireUserByHandle(handle: string): UserSummary {
@@ -445,11 +498,13 @@ function scalarCount(database: Database.Database, sql: string): number {
 }
 
 function toUserSummary(row: UserRow): UserSummary {
-  const status: UserStatus = row.status === 'disabled' ? 'disabled' : 'active';
+  if (row.status !== 'active' && row.status !== 'disabled') {
+    throw new Error('The Dirt database contains an invalid user status.');
+  }
   return {
     id: row.id,
     handle: row.handle,
-    status,
+    status: row.status,
     minecraftAccount:
       row.minecraftUuid === null || row.minecraftName === null
         ? null
@@ -480,7 +535,10 @@ function toRfc3339(value: number | string): string {
 }
 
 function toEpochMilliseconds(value: number | string): number {
-  if (typeof value === 'number') return value;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : new Date(value).getTime();
+  const milliseconds =
+    typeof value === 'number' ? value : /^-?\d+(?:\.\d+)?$/u.test(value) ? Number(value) : new Date(value).getTime();
+  if (!Number.isFinite(milliseconds) || Number.isNaN(new Date(milliseconds).getTime())) {
+    throw new Error('The Dirt database contains an invalid timestamp.');
+  }
+  return milliseconds;
 }

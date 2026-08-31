@@ -192,7 +192,7 @@ final class BridgeDispatcher implements AutoCloseable {
         context = optional(context, "request_bytes", exchange.requestBytes());
         context = optional(context, "response_bytes", exchange.responseBytes());
         context = optional(context, "error_code", exchange.errorCode());
-        if (!unexpectedFailure && failure != null) {
+        if (!unexpectedFailure && failure != null && !exchange.suppressesFailureDetails()) {
             context = optional(context, "failure_reason", failure.getMessage());
         }
         for (Map.Entry<String, Object> field : exchange.auditFields().entrySet()) {

@@ -165,6 +165,20 @@ final class DirtAdminCommandTest {
     }
 
     @Test
+    void anOutOfRangePageOffersOneHopBackToTheLastAvailablePage() throws Exception {
+        StubAccessControl access = new StubAccessControl();
+        access.users =
+                CompletableFuture.completedFuture(
+                        new AccessControl.UserPage(CALL_ID, 999, 20, 21, 2, List.of()));
+        CommandFixture fixture =
+                fixture(new SenderAccess(true, true, false, false), status(), access);
+
+        assertEquals(1, fixture.execute("dirt access users 999"));
+        assertTrue(fixture.lastPlainMessage().contains("‹ Last page"));
+        assertTrue(hasRunCommand(fixture.lastMessage(), "/dirt access users 2"));
+    }
+
+    @Test
     void nonSecretMutationsCallTheExpectedControlOperations() throws Exception {
         StubAccessControl access = new StubAccessControl();
         CommandFixture fixture =
@@ -346,6 +360,17 @@ final class DirtAdminCommandTest {
             return true;
         }
         return component.children().stream().anyMatch(child -> hasCopyValue(child, value));
+    }
+
+    private static boolean hasRunCommand(Component component, String value) {
+        ClickEvent<?> click = component.clickEvent();
+        if (click != null
+                && click.action() == ClickEvent.Action.RUN_COMMAND
+                && click.payload() instanceof ClickEvent.Payload.Text text
+                && text.value().equals(value)) {
+            return true;
+        }
+        return component.children().stream().anyMatch(child -> hasRunCommand(child, value));
     }
 
     private static YamlConfiguration pluginMetadata() {

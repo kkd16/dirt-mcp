@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -32,6 +32,7 @@ test('backup command uses SQLite online backup and refuses overwrite', () => {
   });
   assert.equal(first.status, 0, first.stderr);
   assert.equal(existsSync(destination), true);
+  assert.equal(statSync(destination).mode & 0o777, 0o600);
   const backup = new Database(destination, { readonly: true });
   assert.equal((backup.prepare('SELECT value FROM marker').get() as { value: string }).value, 'safe');
   backup.close();
@@ -46,4 +47,24 @@ test('backup command uses SQLite online backup and refuses overwrite', () => {
   const unchanged = new Database(destination, { readonly: true });
   assert.equal((unchanged.prepare('SELECT value FROM marker').get() as { value: string }).value, 'safe');
   unchanged.close();
+});
+
+test('backup command refuses dangling symbolic links and removes temporary files', () => {
+  const symlinkDestination = join(directory, 'dangling-backup.sqlite');
+  const absentTarget = join(directory, 'absent.sqlite');
+  symlinkSync(absentTarget, symlinkDestination);
+
+  const result = spawnSync(process.execPath, ['dist/backup.js', symlinkDestination], {
+    cwd: new URL('..', import.meta.url),
+    encoding: 'utf8',
+    env: environment,
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /refusing to overwrite/u);
+  assert.equal(lstatSync(symlinkDestination).isSymbolicLink(), true);
+  assert.equal(existsSync(absentTarget), false);
+  assert.deepEqual(
+    readdirSync(directory).filter((entry) => entry.startsWith('.dirt-backup-')),
+    [],
+  );
 });

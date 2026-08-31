@@ -54,8 +54,12 @@ export function createDirtMcpHandler(
     async (request, claims) => {
       const userId = typeof claims.sub === 'string' ? claims.sub : undefined;
       const clientId = typeof claims.azp === 'string' ? claims.azp : undefined;
+      const authorizationVersion = claims.dirt_auth_version;
       const scopes = parseScopes(claims.scope);
-      const user = userId === undefined ? null : repository.findMcpUser(userId);
+      if (userId === undefined || !isAuthorizationVersion(authorizationVersion)) {
+        return mcpAuthorizationError(401, 'The access token is not a valid Dirt authorization.', resource);
+      }
+      const user = repository.findMcpUser(userId, authorizationVersion);
       if (user === null) {
         return jsonRpcError(403, -32_000, 'The Dirt account must be active and linked to a Minecraft account.');
       }
@@ -72,7 +76,7 @@ export function createDirtMcpHandler(
       }
       let parsedBody: unknown;
       try {
-        parsedBody = JSON.parse(await readBoundedText(request.clone(), MAX_MCP_BODY_BYTES));
+        parsedBody = JSON.parse(await readBoundedText(request, MAX_MCP_BODY_BYTES));
       } catch (error: unknown) {
         if (error instanceof BodyTooLargeError) {
           return jsonRpcError(413, -32_600, 'Request body is too large.');
@@ -116,6 +120,10 @@ export function createDirtMcpHandler(
   return { fetch: authenticated, close: () => sdkHandler.close() };
 }
 
+function isAuthorizationVersion(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
 function parseScopes(value: unknown): string[] {
   if (typeof value === 'string') return value.split(' ').filter((scope) => scope.length > 0);
   return Array.isArray(value) ? value.filter((scope): scope is string => typeof scope === 'string') : [];
@@ -151,36 +159,39 @@ class BodyTooLargeError extends Error {}
 async function readBoundedText(request: Request, maximumBytes: number): Promise<string> {
   const contentLength = request.headers.get('Content-Length');
   if (contentLength !== null && /^\d+$/u.test(contentLength) && Number(contentLength) > maximumBytes) {
+    await cancelRequestBody(request);
     throw new BodyTooLargeError();
   }
   if (request.body === null) return '';
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size: number;
+  let output = new Uint8Array(Math.min(maximumBytes, 8_192));
+  let size = 0;
   try {
-    size = await readBodyChunks(reader, chunks, 0, maximumBytes);
-  } finally {
-    reader.releaseLock();
+    await request.body.pipeTo(
+      new WritableStream<Uint8Array>({
+        write(chunk) {
+          const nextSize = size + chunk.byteLength;
+          if (nextSize > maximumBytes) throw new BodyTooLargeError();
+          if (nextSize > output.byteLength) {
+            const grown = new Uint8Array(Math.min(maximumBytes, Math.max(nextSize, output.byteLength * 2)));
+            grown.set(output.subarray(0, size));
+            output = grown;
+          }
+          output.set(chunk, size);
+          size = nextSize;
+        },
+      }),
+    );
+  } catch (error: unknown) {
+    if (error instanceof BodyTooLargeError) await cancelRequestBody(request);
+    throw error;
   }
-  const output = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    output.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder('utf-8', { fatal: true }).decode(output);
+  return new TextDecoder('utf-8', { fatal: true }).decode(output.subarray(0, size));
 }
 
-async function readBodyChunks(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-  chunks: Uint8Array[],
-  size: number,
-  maximumBytes: number,
-): Promise<number> {
-  const result = await reader.read();
-  if (result.done) return size;
-  const nextSize = size + result.value.byteLength;
-  if (nextSize > maximumBytes) throw new BodyTooLargeError();
-  chunks.push(result.value);
-  return readBodyChunks(reader, chunks, nextSize, maximumBytes);
+async function cancelRequestBody(request: Request): Promise<void> {
+  try {
+    await request.body?.cancel();
+  } catch {
+    // The stream may already have been canceled by pipeTo.
+  }
 }

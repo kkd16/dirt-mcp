@@ -303,6 +303,11 @@ test('edit bridge responses correlate with their request and call identity', () 
   } as const;
   const replaceSchema = replaceRegionBlocksBridgeOutputSchema(replaceRequest, CALL_ID);
   assert.equal(replaceSchema.safeParse(replace).success, true);
+  assert.equal(
+    replaceRegionBlocksBridgeOutputSchema({ ...replaceRequest, maxChangedBlocks: 1 }, CALL_ID).safeParse(replace)
+      .success,
+    false,
+  );
   assert.equal(replaceSchema.safeParse({ ...replace, world: 'other' }).success, false);
   assert.equal(replaceSchema.safeParse({ ...replace, seed: 43 }).success, false);
   assert.equal(
@@ -350,12 +355,41 @@ test('edit bridge responses correlate with their request and call identity', () 
   assert.equal(setSchema.safeParse(set).success, true);
   assert.equal(setSchema.safeParse({ ...set, unchangedBlockCount: 1 }).success, false);
   assert.equal(
+    setSchema.safeParse({ ...set, blockCount: 3, changedBlockCount: 2, unchangedBlockCount: 1 }).success,
+    false,
+  );
+  const shiftedBounds = { min: { x: 1, y: 64, z: 0 }, max: { x: 2, y: 64, z: 0 } } as const;
+  assert.equal(
+    setSchema.safeParse({ ...set, bounds: shiftedBounds, edit: { ...edit, bounds: shiftedBounds } }).success,
+    false,
+  );
+  assert.equal(
     setSchema.safeParse({
       ...set,
       edit: { ...edit, bounds: { min: edit.bounds.min, max: edit.bounds.min } },
     }).success,
     false,
   );
+
+  const runSchema = setBlocksBridgeOutputSchema(
+    {
+      ...setRequest,
+      placements: [],
+      runs: [[0, -1, 0, 0, 1, 1, 0]],
+    },
+    CALL_ID,
+  );
+  const runResult = {
+    ...set,
+    outcome: 'no_change',
+    edit: null,
+    bounds: { min: { x: -1, y: 64, z: 0 }, max: { x: 1, y: 65, z: 0 } },
+    blockCount: 6,
+    changedBlockCount: 0,
+    unchangedBlockCount: 6,
+  } as const;
+  assert.equal(runSchema.safeParse(runResult).success, true);
+  assert.equal(runSchema.safeParse({ ...runResult, blockCount: 5, unchangedBlockCount: 5 }).success, false);
 });
 
 test('history and undo bridge responses preserve world, call, and exact prefix identity', () => {

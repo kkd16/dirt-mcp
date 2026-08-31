@@ -119,6 +119,7 @@ test('inspection bridge responses correlate with their request and exact counts'
   const getSchema = getBlocksBridgeOutputSchema(getRequest);
   assert.equal(getSchema.safeParse(structure).success, true);
   assert.equal(getSchema.safeParse({ ...structure, origin: { x: 1, y: 64, z: 2 } }).success, false);
+  assert.equal(getSchema.safeParse({ ...structure, placements: [[0, 2, 0, 0]] }).success, false);
   assert.equal(
     getSchema.safeParse({
       ...structure,
@@ -140,6 +141,41 @@ test('inspection bridge responses correlate with their request and exact counts'
     depth: 0,
     maxResults: 1,
   });
-  assert.equal(scanSchema.safeParse(structure).success, true);
-  assert.equal(scanSchema.safeParse({ ...structure, world: 'other' }).success, false);
+  const scanStructure = { ...structure, origin: { x: 0, y: 64, z: -16 } };
+  assert.equal(scanSchema.safeParse(scanStructure).success, true);
+  assert.equal(scanSchema.safeParse({ ...scanStructure, world: 'other' }).success, false);
+  assert.equal(scanSchema.safeParse({ ...scanStructure, origin: { x: 0, y: 64, z: -15 } }).success, false);
+  assert.equal(scanSchema.safeParse({ ...scanStructure, placements: [[0, 0, 0, 16]] }).success, false);
+});
+
+test('orthographic bridge correlation covers every axis direction', () => {
+  const cases = [
+    { direction: 'north', origin: { x: -2, y: -1, z: -3 }, maximumOffset: [4, 2, 2] },
+    { direction: 'east', origin: { x: 1, y: -1, z: -2 }, maximumOffset: [2, 2, 4] },
+    { direction: 'south', origin: { x: -2, y: -1, z: 1 }, maximumOffset: [4, 2, 2] },
+    { direction: 'west', origin: { x: -3, y: -1, z: -2 }, maximumOffset: [2, 2, 4] },
+    { direction: 'up', origin: { x: -2, y: 1, z: -1 }, maximumOffset: [4, 2, 2] },
+    { direction: 'down', origin: { x: -2, y: -3, z: -1 }, maximumOffset: [4, 2, 2] },
+  ] as const;
+
+  for (const testCase of cases) {
+    const schema = scanOrthographicViewBridgeOutputSchema({
+      world: 'world',
+      origin: { x: 0, y: 0, z: 0 },
+      direction: testCase.direction,
+      horizontalRadius: 2,
+      verticalRadius: 1,
+      maxDistance: 3,
+      depth: 0,
+      maxResults: 1,
+    });
+    const structure = {
+      world: 'world',
+      origin: testCase.origin,
+      palettes: [[{ blockState: 'minecraft:stone' }]],
+      placements: [[0, ...testCase.maximumOffset]],
+      runs: [],
+    };
+    assert.equal(schema.safeParse(structure).success, true, testCase.direction);
+  }
 });

@@ -161,8 +161,18 @@ public interface AccessControl extends AutoCloseable {
         if (totalItems < 0 || totalPages < 0) {
             throw new IllegalArgumentException("page totals must not be negative");
         }
+        long expectedTotalPages =
+                totalItems == 0 ? 0 : Math.addExact(Math.floorDiv(totalItems - 1, pageSize), 1);
+        if (expectedTotalPages != totalPages) {
+            throw new IllegalArgumentException("totalPages must match totalItems and pageSize");
+        }
         if (items.size() > pageSize) {
             throw new IllegalArgumentException("items must not exceed pageSize");
+        }
+        long firstItem = (long) (page - 1) * pageSize;
+        long itemsAvailableOnPage = Math.min(pageSize, Math.max(0, totalItems - firstItem));
+        if (items.size() > itemsAvailableOnPage) {
+            throw new IllegalArgumentException("items must belong to the reported page totals");
         }
     }
 

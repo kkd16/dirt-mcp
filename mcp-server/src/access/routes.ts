@@ -139,6 +139,7 @@ async function requireBody<T>(request: Request, schema: z.ZodType<T>): Promise<T
   if (contentType !== 'application/json') throw new AccessError('invalid', 'Content-Type must be application/json.');
   const contentLength = request.headers.get('Content-Length');
   if (contentLength !== null && (!/^\d+$/u.test(contentLength) || Number(contentLength) > 16_384)) {
+    await cancelRequestBody(request);
     throw new AccessError('invalid', 'Request body is too large.');
   }
   const text = await readBoundedText(request, 16_384);
@@ -147,39 +148,37 @@ async function requireBody<T>(request: Request, schema: z.ZodType<T>): Promise<T
 
 async function readBoundedText(request: Request, maximumBytes: number): Promise<string> {
   if (request.body === null) return '';
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size: number;
+  let combined = new Uint8Array(Math.min(maximumBytes, 8_192));
+  let size = 0;
   try {
-    size = await readBodyChunks(reader, chunks, 0, maximumBytes);
-  } finally {
-    reader.releaseLock();
-  }
-  const combined = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    combined.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(combined);
-  } catch {
+    await request.body.pipeTo(
+      new WritableStream<Uint8Array>({
+        write(chunk) {
+          const nextSize = size + chunk.byteLength;
+          if (nextSize > maximumBytes) throw new AccessError('invalid', 'Request body is too large.');
+          if (nextSize > combined.byteLength) {
+            const grown = new Uint8Array(Math.min(maximumBytes, Math.max(nextSize, combined.byteLength * 2)));
+            grown.set(combined.subarray(0, size));
+            combined = grown;
+          }
+          combined.set(chunk, size);
+          size = nextSize;
+        },
+      }),
+    );
+    return new TextDecoder('utf-8', { fatal: true }).decode(combined.subarray(0, size));
+  } catch (error: unknown) {
+    if (error instanceof AccessError) throw error;
     throw new AccessError('invalid', 'Request body must be valid UTF-8 JSON.');
   }
 }
 
-async function readBodyChunks(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-  chunks: Uint8Array[],
-  size: number,
-  maximumBytes: number,
-): Promise<number> {
-  const result = await reader.read();
-  if (result.done) return size;
-  const nextSize = size + result.value.byteLength;
-  if (nextSize > maximumBytes) throw new AccessError('invalid', 'Request body is too large.');
-  chunks.push(result.value);
-  return readBodyChunks(reader, chunks, nextSize, maximumBytes);
+async function cancelRequestBody(request: Request): Promise<void> {
+  try {
+    await request.body?.cancel();
+  } catch {
+    // The stream may already have been canceled by pipeTo.
+  }
 }
 
 export function internalError(error: unknown): {

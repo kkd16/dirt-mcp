@@ -33,9 +33,9 @@ jobs:
           java-version: '25'
 
       - name: Set up pnpm and Node.js
-        uses: pnpm/setup@84cb39b217b10273981911c288cd62326dc7c6d2 # v2.0.2
+        uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
         with:
-          runtime: node@26
+          runtime: node@24.20.0
           cache: false
           install: false
 
@@ -69,10 +69,9 @@ jobs:
         run: |
           docker compose config --quiet
           docker build --pull --tag dirt-mcp-web:ci .
-          docker run --rm \
-            --env DIRT_PUBLIC_HOST=dirt.example.com \
-            --volume "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
-            caddy:2.11.4-alpine validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          docker run --rm --entrypoint /bin/sh dirt-mcp-web:ci -c 'test -r /app/LICENSE'
+          docker compose run --rm --no-deps caddy \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
       - name: Verify every component
         run: make ci

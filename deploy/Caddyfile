@@ -1,11 +1,26 @@
 {
 	admin off
+	servers {
+		# MCP POST requests can mutate world state, so reject replayable TLS early data.
+		0rtt off
+		# Leave room below Node's 16 KiB parser limit for proxy-added headers.
+		max_header_size 12KiB
+		strict_sni_host on
+		timeouts {
+			read_body 2m
+			read_header 10s
+		}
+	}
+}
+
+http:// {
+	respond 400
 }
 
 {$DIRT_PUBLIC_HOST} {
 	encode zstd gzip
 	request_body {
-		max_size 4MB
+		max_size 4MiB
 	}
 
 	header {

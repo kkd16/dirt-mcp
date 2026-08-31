@@ -209,9 +209,17 @@ final class DirtLogTest {
                         "access_token",
                         "api_key",
                         "bearer_value",
+                        "auth_code",
                         "password_hash",
                         "client_secret",
-                        "credential")) {
+                        "credential",
+                        "invite_url",
+                        "recovery_code",
+                        "link_challenge",
+                        "webauthn_challenge",
+                        "command",
+                        "raw_command",
+                        "command_text")) {
             assertThrows(IllegalArgumentException.class, () -> LogContext.of(key, "leak"));
         }
         for (String key : List.of("timestamp", "service", "thread_id", "exception")) {

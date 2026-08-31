@@ -145,4 +145,20 @@ test('perspective bridge responses preserve the requested source and viewport', 
   assert.equal(schema.safeParse({ ...output, world: 'other' }).success, false);
   assert.equal(schema.safeParse({ ...output, viewport: { ...output.viewport, width: 5 } }).success, false);
   assert.equal(schema.safeParse({ ...output, cameraPosition: { x: 1, y: 64, z: 0.5 } }).success, false);
+  assert.equal(schema.safeParse({ ...output, rotation: { yaw: 1, pitch: 0 } }).success, false);
+
+  const requestedRotation = { yaw: 540, pitch: 12.345 };
+  const normalizedRequest = GetPerspectiveViewInputSchema.parse({
+    ...request,
+    source: { ...request.source, rotation: requestedRotation },
+  });
+  const normalizedSchema = perspectiveViewBridgeOutputSchema(normalizedRequest);
+  assert.equal(
+    normalizedSchema.safeParse({
+      ...output,
+      rotation: { yaw: -180, pitch: Math.fround(12.345) },
+    }).success,
+    true,
+  );
+  assert.equal(normalizedSchema.safeParse({ ...output, rotation: requestedRotation }).success, false);
 });

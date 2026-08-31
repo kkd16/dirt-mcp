@@ -15,7 +15,7 @@
     "start": "node dist/index.js",
     "migrate": "node dist/migrate.js",
     "backup": "node dist/backup.js",
-    "test": "node --test --experimental-test-coverage --test-coverage-include=dist/**/*.js --test-coverage-include-all --test-coverage-lines=70 --test-coverage-branches=75 --test-coverage-functions=70 test/*.test.ts",
+    "test": "node --test --experimental-test-coverage --test-coverage-include=dist/**/*.js --test-coverage-lines=70 --test-coverage-branches=75 --test-coverage-functions=70 test/*.test.ts",
     "clean": "node --input-type=module --eval \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\""
   },
   "dependencies": {
@@ -32,11 +32,11 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "9.6.0",
-    "@types/node": "26.4.0",
+    "@types/node": "24.13.3",
     "typescript": "7.0.2",
     "vite": "8.2.2"
   },
   "engines": {
-    "node": ">=26"
+    "node": ">=24"
   }
 }

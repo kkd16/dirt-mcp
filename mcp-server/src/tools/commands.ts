@@ -33,6 +33,8 @@ const NormalizedMinecraftCommandSchema = z
     /^[^ \u0000-\u001F\u007F-\u009F\u1680\u2000-\u2006\u2008-\u200A\u2028\u2029\u205F\u3000](?:[^\u0000-\u001F\u007F-\u009F]*[^ \u0000-\u001F\u007F-\u009F\u1680\u2000-\u2006\u2008-\u200A\u2028\u2029\u205F\u3000])?$/u,
   )
   .describe('Command returned after Paper-owned normalization.');
+const JAVA_STRIP_WHITESPACE =
+  /^[ \u1680\u2000-\u2006\u2008-\u200A\u2028\u2029\u205F\u3000]+|[ \u1680\u2000-\u2006\u2008-\u200A\u2028\u2029\u205F\u3000]+$/gu;
 const commandResultShape = {
   command: NormalizedMinecraftCommandSchema,
   feedback: CommandFeedbackSchema,
@@ -130,7 +132,23 @@ export function runMinecraftCommandsBridgeOutputSchema(input: RunMinecraftComman
         path: ['results'],
       });
     }
+    for (const [index, result] of output.results.entries()) {
+      const requestedCommand = input.commands[index];
+      if (requestedCommand === undefined || result.command !== normalizeMinecraftCommand(requestedCommand)) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Each command result must identify the corresponding normalized request command.',
+          path: ['results', index, 'command'],
+        });
+      }
+    }
   });
+}
+
+function normalizeMinecraftCommand(command: string): string {
+  let normalized = command.replace(JAVA_STRIP_WHITESPACE, '');
+  if (normalized.startsWith('/')) normalized = normalized.slice(1).replace(JAVA_STRIP_WHITESPACE, '');
+  return normalized;
 }
 
 function commandCallResult(input: RunMinecraftCommandsInput, output: RunMinecraftCommandsOutput): CallToolResult {

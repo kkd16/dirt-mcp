@@ -16,6 +16,7 @@ import java.io.InputStream;
 import java.io.Serial;
 import java.io.StringReader;
 import java.math.BigDecimal;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -70,13 +71,18 @@ public final class HttpAccessControlClient implements AccessControl {
         this.origin = URI.create(config.origin());
         this.bearerToken = bearerToken;
         this.requestTimeout = Duration.ofMillis(config.requestTimeoutMillis());
-        this.executor = Executors.newVirtualThreadPerTaskExecutor();
-        this.http =
-                HttpClient.newBuilder()
-                        .connectTimeout(Duration.ofMillis(config.connectTimeoutMillis()))
-                        .followRedirects(HttpClient.Redirect.NEVER)
-                        .executor(this.executor)
-                        .build();
+        ExecutorService newExecutor = Executors.newVirtualThreadPerTaskExecutor();
+        try {
+            this.http = buildHttpClient(config, newExecutor);
+        } catch (RuntimeException | Error failure) {
+            try {
+                newExecutor.shutdownNow();
+            } catch (RuntimeException | Error cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            throw failure;
+        }
+        this.executor = newExecutor;
     }
 
     @Override
@@ -147,9 +153,38 @@ public final class HttpAccessControlClient implements AccessControl {
     @Override
     public void close() {
         if (this.closed.compareAndSet(false, true)) {
-            this.http.shutdownNow();
-            this.executor.shutdownNow();
+            Throwable failure = null;
+            try {
+                this.http.shutdownNow();
+            } catch (RuntimeException | Error shutdownFailure) {
+                failure = shutdownFailure;
+            }
+            try {
+                this.executor.shutdownNow();
+            } catch (RuntimeException | Error shutdownFailure) {
+                if (failure == null) {
+                    failure = shutdownFailure;
+                } else if (failure != shutdownFailure) {
+                    failure.addSuppressed(shutdownFailure);
+                }
+            }
+            if (failure instanceof RuntimeException runtimeFailure) {
+                throw runtimeFailure;
+            }
+            if (failure instanceof Error error) {
+                throw error;
+            }
         }
+    }
+
+    static HttpClient buildHttpClient(DirtConfig.AccessControl config, ExecutorService executor) {
+        return HttpClient.newBuilder()
+                .connectTimeout(Duration.ofMillis(config.connectTimeoutMillis()))
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .proxy(HttpClient.Builder.NO_PROXY)
+                .localAddress(InetAddress.ofLiteral("127.0.0.1"))
+                .executor(executor)
+                .build();
     }
 
     private CompletionStage<UserMutationResult> userMutation(String handle, String action) {

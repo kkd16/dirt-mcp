@@ -13,7 +13,9 @@ public final class LogContext {
     private static final Pattern KEY = Pattern.compile("[a-z][a-z0-9_]*");
     private static final Pattern SENSITIVE_KEY =
             Pattern.compile(
-                    ".*(api_?key|access_?key|authorization|bearer|credential|password|secret|token).*");
+                    ".*(api_?key|access_?key|auth_?code|authorization|bearer|challenge|command|"
+                            + "credential|invite|invitation|password|recovery|secret|token|"
+                            + "webauthn).*");
     private static final Set<String> RESERVED_KEYS =
             Set.of(
                     "timestamp",

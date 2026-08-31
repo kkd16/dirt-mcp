@@ -258,6 +258,14 @@ export function perspectiveViewBridgeOutputSchema(request: components['schemas']
           path: ['cameraPosition'],
         });
       }
+      const expectedRotation = resolvedLocationRotation(request.source.rotation);
+      if (response.rotation.yaw !== expectedRotation.yaw || response.rotation.pitch !== expectedRotation.pitch) {
+        context.addIssue({
+          code: 'custom',
+          message: 'The resolved rotation must match Paper normalization of the requested camera rotation.',
+          path: ['rotation'],
+        });
+      }
       return;
     }
 
@@ -271,6 +279,15 @@ export function perspectiveViewBridgeOutputSchema(request: components['schemas']
       }
     }
   });
+}
+
+function resolvedLocationRotation(rotation: components['schemas']['Rotation']): z.infer<typeof RotationSchema> {
+  let yaw = rotation.yaw % 360;
+  if (yaw >= 180) yaw -= 360;
+  else if (yaw < -180) yaw += 360;
+  yaw = Math.fround(yaw);
+  if (yaw >= 180) yaw = -180;
+  return { yaw: yaw === 0 ? 0 : yaw, pitch: Math.fround(rotation.pitch) };
 }
 
 export function registerPerspectiveTools(

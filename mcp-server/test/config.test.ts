@@ -93,7 +93,7 @@ test('runtime config prefers secret files and requires pairwise-distinct trust s
       DIRT_AUTH_SECRET_FILE: '/auth',
       DIRT_MCP_BRIDGE_TOKEN: CONTROL_TOKEN,
       DIRT_CONTROL_TOKEN: TOKEN,
-      DIRT_PUBLIC_ORIGIN: 'http://127.0.0.1:3000',
+      DIRT_PUBLIC_ORIGIN: 'http://localhost:3000',
       DIRT_DATABASE_PATH: './data/dirt.sqlite',
     },
     (path) =>
@@ -106,7 +106,7 @@ test('runtime config prefers secret files and requires pairwise-distinct trust s
   assert.equal(config.controlToken, CONTROL_TOKEN);
   assert.equal(config.authSecret, AUTH_SECRET);
   assert.equal(config.port, 3000);
-  assert.equal(config.rpId, '127.0.0.1');
+  assert.equal(config.rpId, 'localhost');
 
   for (const [bridge, control, auth] of [
     [TOKEN, TOKEN, AUTH_SECRET],
@@ -123,6 +123,39 @@ test('runtime config prefers secret files and requires pairwise-distinct trust s
           DIRT_DATABASE_PATH: './data/dirt.sqlite',
         }),
       (error) => error instanceof RuntimeConfigurationError && error.code === 'secrets_not_distinct',
+    );
+  }
+});
+
+test('public origin is a WebAuthn-compatible domain origin', () => {
+  const base = {
+    DIRT_MCP_BRIDGE_TOKEN: TOKEN,
+    DIRT_CONTROL_TOKEN: CONTROL_TOKEN,
+    DIRT_AUTH_SECRET: AUTH_SECRET,
+    DIRT_DATABASE_PATH: './data/dirt.sqlite',
+  };
+  assert.equal(readRuntimeConfig({ ...base, DIRT_PUBLIC_ORIGIN: 'https://dirt.example' }).rpId, 'dirt.example');
+  assert.equal(readRuntimeConfig({ ...base, DIRT_PUBLIC_ORIGIN: 'http://localhost:3000' }).rpId, 'localhost');
+  assert.equal(readRuntimeConfig({ ...base, DIRT_PUBLIC_ORIGIN: 'https://dirt.internal' }).rpId, 'dirt.internal');
+  assert.equal(
+    readRuntimeConfig({ ...base, DIRT_PUBLIC_ORIGIN: 'https://xn--bcher-kva.example' }).rpId,
+    'xn--bcher-kva.example',
+  );
+
+  for (const publicOrigin of [
+    'http://127.0.0.1:3000',
+    'https://127.0.0.1',
+    'https://[::1]',
+    'https://dirt.example.',
+    'https://bad_label.example',
+    'https://-dirt.example',
+    'https://dirt-.example',
+    `https://${'a'.repeat(64)}.example`,
+    `https://${`${'a'.repeat(63)}.`.repeat(4)}example`,
+  ]) {
+    assert.throws(
+      () => readRuntimeConfig({ ...base, DIRT_PUBLIC_ORIGIN: publicOrigin }),
+      (error) => error instanceof RuntimeConfigurationError && error.code === 'public_origin_invalid',
     );
   }
 });

@@ -1,9 +1,11 @@
 import { readFileSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { resolve } from 'node:path';
 
 const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:8765';
 const DEFAULT_WEB_PORT = 3_000;
 const SERVICE_TOKEN_PATTERN = /^[0-9a-f]{64}$/u;
+const DNS_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 
 export interface BridgeConfig {
   readonly origin: string;
@@ -224,9 +226,12 @@ function readPublicOrigin(value: string | undefined): string {
   }
   try {
     const url = new URL(value);
-    const localDevelopment = url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
+    const localDevelopment = url.protocol === 'http:' && url.hostname === 'localhost';
+    const hostIsIpLiteral = isIP(url.hostname.replace(/^\[|\]$/gu, '')) !== 0;
     if (
       (url.protocol !== 'https:' && !localDevelopment) ||
+      hostIsIpLiteral ||
+      !isDnsDomainName(url.hostname) ||
       url.username.length > 0 ||
       url.password.length > 0 ||
       url.pathname !== '/' ||
@@ -240,9 +245,17 @@ function readPublicOrigin(value: string | undefined): string {
   } catch {
     throw new RuntimeConfigurationError(
       'public_origin_invalid',
-      'DIRT_PUBLIC_ORIGIN must be a bare HTTPS origin (HTTP localhost is allowed for development)',
+      'DIRT_PUBLIC_ORIGIN must be a bare HTTPS origin with a domain host (HTTP localhost is allowed for development)',
     );
   }
+}
+
+function isDnsDomainName(hostname: string): boolean {
+  return (
+    hostname.length <= 253 &&
+    !hostname.endsWith('.') &&
+    hostname.split('.').every((label) => DNS_LABEL_PATTERN.test(label))
+  );
 }
 
 function readPort(value: string | undefined): number {

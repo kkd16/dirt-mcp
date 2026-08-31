@@ -19,6 +19,7 @@ import {
   normalizedBounds,
   sameBlockPosition,
   sameBounds,
+  type Bounds,
 } from './common.ts';
 import type { McpToolConfiguration } from './configuration.ts';
 import { executeToolCall, successResult } from './execution.ts';
@@ -252,22 +253,102 @@ function validateExactStructureCorrelation(
   }
 }
 
+function validateExactStructureBounds(
+  response: z.infer<typeof ExactBlockStructureOutputSchema>,
+  expectedBounds: Bounds,
+  context: z.core.$RefinementCtx,
+): void {
+  if (!sameBlockPosition(response.origin, expectedBounds.min)) {
+    context.addIssue({
+      code: 'custom',
+      message: 'The response origin must match the minimum inspection bound.',
+      path: ['origin'],
+    });
+  }
+  const maximumOffset = {
+    x: expectedBounds.max.x - expectedBounds.min.x,
+    y: expectedBounds.max.y - expectedBounds.min.y,
+    z: expectedBounds.max.z - expectedBounds.min.z,
+  };
+  const inside = (x: number, y: number, zCoordinate: number): boolean =>
+    x >= 0 &&
+    y >= 0 &&
+    zCoordinate >= 0 &&
+    x <= maximumOffset.x &&
+    y <= maximumOffset.y &&
+    zCoordinate <= maximumOffset.z;
+
+  for (const [index, [, x, y, zCoordinate]] of response.placements.entries()) {
+    if (!inside(x, y, zCoordinate)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Every placement must be inside the requested inspection bounds.',
+        path: ['placements', index],
+      });
+    }
+  }
+  for (const [index, [, x, y, zCoordinate, toX, toY, toZ]] of response.runs.entries()) {
+    if (!inside(x, y, zCoordinate) || !inside(toX, toY, toZ)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Every run must be inside the requested inspection bounds.',
+        path: ['runs', index],
+      });
+    }
+  }
+}
+
+function orthographicBounds(request: components['schemas']['ScanOrthographicViewRequest']): Bounds {
+  const { x, y, z: zCoordinate } = request.origin;
+  const horizontal = request.horizontalRadius;
+  const vertical = request.verticalRadius;
+  const distance = request.maxDistance;
+  switch (request.direction) {
+    case 'north':
+      return {
+        min: { x: x - horizontal, y: y - vertical, z: zCoordinate - distance },
+        max: { x: x + horizontal, y: y + vertical, z: zCoordinate - 1 },
+      };
+    case 'east':
+      return {
+        min: { x: x + 1, y: y - vertical, z: zCoordinate - horizontal },
+        max: { x: x + distance, y: y + vertical, z: zCoordinate + horizontal },
+      };
+    case 'south':
+      return {
+        min: { x: x - horizontal, y: y - vertical, z: zCoordinate + 1 },
+        max: { x: x + horizontal, y: y + vertical, z: zCoordinate + distance },
+      };
+    case 'west':
+      return {
+        min: { x: x - distance, y: y - vertical, z: zCoordinate - horizontal },
+        max: { x: x - 1, y: y + vertical, z: zCoordinate + horizontal },
+      };
+    case 'up':
+      return {
+        min: { x: x - horizontal, y: y + 1, z: zCoordinate - vertical },
+        max: { x: x + horizontal, y: y + distance, z: zCoordinate + vertical },
+      };
+    case 'down':
+      return {
+        min: { x: x - horizontal, y: y - distance, z: zCoordinate - vertical },
+        max: { x: x + horizontal, y: y - 1, z: zCoordinate + vertical },
+      };
+  }
+  throw new Error('Unsupported orthographic direction.');
+}
+
 export function getBlocksBridgeOutputSchema(request: components['schemas']['GetBlocksRequest']) {
   return ExactBlockStructureOutputSchema.superRefine((response, context) => {
     validateExactStructureCorrelation(request, response, context);
-    if (!sameBlockPosition(response.origin, normalizedBounds(request.min, request.max).min)) {
-      context.addIssue({
-        code: 'custom',
-        message: 'The response origin must match the normalized minimum request corner.',
-        path: ['origin'],
-      });
-    }
+    validateExactStructureBounds(response, normalizedBounds(request.min, request.max), context);
   });
 }
 
 export function scanOrthographicViewBridgeOutputSchema(request: components['schemas']['ScanOrthographicViewRequest']) {
   return ExactBlockStructureOutputSchema.superRefine((response, context) => {
     validateExactStructureCorrelation(request, response, context);
+    validateExactStructureBounds(response, orthographicBounds(request), context);
   });
 }
 

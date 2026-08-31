@@ -2,7 +2,7 @@ import { cimd } from '@better-auth/cimd';
 import { fetchClientMetadataResource } from '@better-auth/cimd/node';
 import { getCurrentAdapter } from '@better-auth/core/context';
 import { APIError } from 'better-auth/api';
-import { betterAuth, type Auth, type BetterAuthPlugin } from 'better-auth';
+import { betterAuth, type Auth, type BetterAuthOptions, type BetterAuthPlugin } from 'better-auth';
 import { mcp } from '@better-auth/mcp';
 import { passkey } from '@better-auth/passkey';
 import { jwt } from 'better-auth/plugins';
@@ -13,6 +13,7 @@ import { AccessError, type AccessRepository, type OnboardingClaim } from './acce
 import { dirtAccessSchema } from './access/schema.ts';
 
 const ONBOARDING_TTL_SECONDS = 10 * 60;
+export const SESSION_FRESH_AGE_SECONDS = 5 * 60;
 const HANDLE_PATTERN = /^[a-z0-9][a-z0-9_-]{1,30}[a-z0-9]$/u;
 
 type TicketPayload = OnboardingClaim & { readonly exp: number };
@@ -22,10 +23,18 @@ export function createAuth(
   database: Database.Database,
   repository: AccessRepository,
 ): Auth<any> {
+  return betterAuth(createAuthOptions(config, database, repository));
+}
+
+export function createAuthOptions(
+  config: RuntimeConfig,
+  database: Database.Database,
+  repository: AccessRepository,
+): BetterAuthOptions {
   const resource = `${config.publicOrigin}/mcp`;
   const secure = config.publicOrigin.startsWith('https://');
 
-  return betterAuth({
+  return {
     appName: 'Dirt',
     baseURL: config.publicOrigin,
     basePath: '/api/auth',
@@ -46,12 +55,19 @@ export function createAuth(
         },
         minecraftUuid: { type: 'string', required: false, unique: true, returned: true, input: false },
         minecraftName: { type: 'string', required: false, returned: true, input: false },
+        authorizationVersion: {
+          type: 'number',
+          required: true,
+          defaultValue: 0,
+          returned: false,
+          input: false,
+        },
       },
     },
     session: {
       expiresIn: 7 * 24 * 60 * 60,
       updateAge: 24 * 60 * 60,
-      freshAge: 5 * 60,
+      freshAge: SESSION_FRESH_AGE_SECONDS,
     },
     rateLimit: {
       enabled: true,
@@ -79,6 +95,7 @@ export function createAuth(
     },
     telemetry: { enabled: false },
     logger: { disabled: true },
+    onAPIError: { throw: true },
     disabledPaths: ['/passkey/delete-passkey', '/token'],
     plugins: [
       jwt({ disableSettingJwtHeader: true }),
@@ -93,18 +110,29 @@ export function createAuth(
         registration: {
           requireSession: false,
           resolveUser({ ctx }) {
-            const ticket = requireTicket(ctx.headers, config.authSecret);
+            const ticket = requireTicket(ctx.headers, config.authSecret, config.publicOrigin);
             return {
               id: ticket.kind === 'invitation' ? `invite-${ticket.recordId}` : `recovery-${ticket.recordId}`,
               name: ticket.handle,
               displayName: ticket.handle,
             };
           },
-          async afterVerification({ ctx, verification }) {
+          async afterVerification({ ctx, verification, user }) {
             if (verification.registrationInfo?.userVerified !== true) {
               throw new APIError('UNAUTHORIZED', { message: 'User verification is required.' });
             }
-            const ticket = requireTicket(ctx.headers, config.authSecret);
+            // Better Auth wraps registration in its adapter transaction only
+            // when the caller requests a session. Dirt provisions or recovers
+            // the account in this callback, so accepting `false` could commit
+            // those changes before the passkey itself is persisted.
+            if (ctx.body.createSession !== true) {
+              throw new APIError('BAD_REQUEST', { message: 'Passkey registration must create a fresh session.' });
+            }
+            const ticket = requireTicket(ctx.headers, config.authSecret, config.publicOrigin);
+            const expectedUserId = `${ticket.kind === 'invitation' ? 'invite' : 'recovery'}-${ticket.recordId}`;
+            if (user.id !== expectedUserId || user.name !== ticket.handle) {
+              throw new APIError('UNAUTHORIZED', { message: 'The onboarding ceremony does not match this link.' });
+            }
             const adapter = await getCurrentAdapter(ctx.context.adapter);
             const now = new Date();
             if (ticket.kind === 'recovery') {
@@ -126,25 +154,8 @@ export function createAuth(
                 update: { usedAt: now },
               });
               if (consumed !== 1) throw new APIError('UNAUTHORIZED', { message: 'Recovery link was already used.' });
-              database
-                .prepare(
-                  `DELETE FROM verification
-                   WHERE json_valid(value)
-                     AND json_extract(value, '$.type') = 'authorization_code'
-                     AND json_extract(value, '$.userId') = ?`,
-                )
-                .run(recovery.userId);
-              await adapter.deleteMany({ model: 'oauthConsent', where: [{ field: 'userId', value: recovery.userId }] });
-              await adapter.deleteMany({
-                model: 'oauthAccessToken',
-                where: [{ field: 'userId', value: recovery.userId }],
-              });
-              await adapter.deleteMany({
-                model: 'oauthRefreshToken',
-                where: [{ field: 'userId', value: recovery.userId }],
-              });
+              repository.revokeAuthorization(recovery.userId, now);
               await adapter.deleteMany({ model: 'passkey', where: [{ field: 'userId', value: recovery.userId }] });
-              await adapter.deleteMany({ model: 'session', where: [{ field: 'userId', value: recovery.userId }] });
               return { userId: recovery.userId, name: 'Recovered passkey' };
             }
 
@@ -223,6 +234,11 @@ export function createAuth(
           clientRegistrationRequirePKCE: true,
           clientPrivileges: () => false,
           resourcePrivileges: () => false,
+          customAccessTokenClaims({ user }) {
+            return user === null || user === undefined
+              ? {}
+              : { dirt_auth_version: repository.requireAuthorizationVersion(user.id) };
+          },
         }),
       ),
       cimd({
@@ -231,7 +247,7 @@ export function createAuth(
       }),
       dirtAccessSchema,
     ],
-  });
+  } satisfies BetterAuthOptions;
 }
 
 export type DirtAuth = Auth<any>;
@@ -269,12 +285,13 @@ export function onboardingCookieHeader(
   return `${onboardingCookieName(publicOrigin)}=${ticket.value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${ticket.maxAge}${secure ? '; Secure' : ''}`;
 }
 
-function requireTicket(headers: Headers | undefined, secret: string): TicketPayload {
+function requireTicket(headers: Headers | undefined, secret: string, publicOrigin: string): TicketPayload {
   const cookie = headers?.get('cookie');
+  const expectedName = onboardingCookieName(publicOrigin);
   const match = cookie
     ?.split(';')
     .map((part) => part.trim())
-    .find((part) => part.startsWith('__Host-dirt-onboarding=') || part.startsWith('dirt-onboarding='));
+    .find((part) => part.startsWith(`${expectedName}=`));
   const value = match?.slice((match.indexOf('=') ?? -1) + 1);
   if (value === undefined)
     throw new APIError('UNAUTHORIZED', { message: 'A valid invitation or recovery link is required.' });

@@ -48,6 +48,15 @@ final class AccessControlTest {
                 () -> new AccessControl.UserPage(CALL_ID, 1, 20, -1, 0, List.of()));
         assertThrows(
                 IllegalArgumentException.class,
+                () -> new AccessControl.UserPage(CALL_ID, 1, 20, 21, 1, List.of(user())));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new AccessControl.UserPage(CALL_ID, 2, 20, 1, 1, List.of(user())));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new AccessControl.UserPage(CALL_ID, 2, 20, 21, 2, List.of(user(), user())));
+        assertThrows(
+                IllegalArgumentException.class,
                 () -> new AccessControl.UserPage(CALL_ID, 1, 1, 2, 2, List.of(user(), user())));
         assertThrows(
                 NullPointerException.class,

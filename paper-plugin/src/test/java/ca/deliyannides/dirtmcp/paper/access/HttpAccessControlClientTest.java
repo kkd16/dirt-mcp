@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -197,6 +198,13 @@ final class HttpAccessControlClientTest {
                                                 .getBytes(StandardCharsets.UTF_8),
                                 "application/json"),
                         new InvalidResponse(
+                                "inconsistent page totals",
+                                callId ->
+                                        userPage(callId, 1)
+                                                .replace("\"totalPages\":2", "\"totalPages\":1")
+                                                .getBytes(StandardCharsets.UTF_8),
+                                "application/json"),
+                        new InvalidResponse(
                                 "malformed UTF-8",
                                 ignored -> new byte[] {(byte) 0xc3, 0x28},
                                 "application/json"),
@@ -374,6 +382,20 @@ final class HttpAccessControlClientTest {
                 assertEquals(AccessControlException.Reason.UNAVAILABLE, stopped.reason());
             } finally {
                 client.close();
+            }
+        }
+    }
+
+    @Test
+    void forcesTheControlTransportToBypassProcessWideProxies() {
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            HttpClient http =
+                    HttpAccessControlClient.buildHttpClient(config(3_000, 100, 200), executor);
+            try {
+                assertEquals(HttpClient.Builder.NO_PROXY, http.proxy().orElseThrow());
+                assertEquals(HttpClient.Redirect.NEVER, http.followRedirects());
+            } finally {
+                http.shutdownNow();
             }
         }
     }

@@ -40,6 +40,14 @@ updates:
       time: '09:00'
       timezone: America/Vancouver
 
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:00'
+      timezone: America/Vancouver
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

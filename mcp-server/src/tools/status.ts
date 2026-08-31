@@ -286,7 +286,7 @@ export function registerStatusTools(
           {
             operation: 'ping_server',
             context,
-            failureContext: `Dirt server health check failed at ${bridge.origin}`,
+            failureContext: 'Dirt server health check failed',
           },
           async (callId) => {
             const result = await bridge.request(
@@ -319,7 +319,7 @@ export function registerStatusTools(
           {
             operation: 'get_server_status',
             context,
-            failureContext: `Could not get Dirt server status from ${bridge.origin}`,
+            failureContext: 'Could not get Dirt server status',
           },
           async (callId) => {
             const request = bridgeStatusRequest(input);
