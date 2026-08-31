@@ -42,7 +42,6 @@ export function createDirtMcpHandler(
       return createDirtServer(bridge, toolConfigurationFromCapabilities(capabilities), logger);
     },
     {
-      legacy: 'reject',
       onerror(error) {
         httpLogger.error('mcp.transport_error', 'MCP transport error.', safeErrorFields(error));
       },
