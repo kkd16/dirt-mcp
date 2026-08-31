@@ -9,13 +9,14 @@ import ca.deliyannides.dirtmcp.paper.validation.ServiceToken;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class DirtMcpPlugin extends JavaPlugin {
-    private static final String BRIDGE_TOKEN_FILE_ENVIRONMENT_VARIABLE = "DIRT_BRIDGE_TOKEN_FILE";
-    private static final String CONTROL_TOKEN_FILE_ENVIRONMENT_VARIABLE = "DIRT_CONTROL_TOKEN_FILE";
+    private static final Path BRIDGE_TOKEN_FILE = Path.of("secrets", "bridge-token");
+    private static final Path CONTROL_TOKEN_FILE = Path.of("secrets", "control-token");
+    private static final String BRIDGE_TOKEN_NAME = "bridge token file";
+    private static final String CONTROL_TOKEN_NAME = "control token file";
 
     private DirtRuntime runtime;
 
@@ -26,7 +27,7 @@ public final class DirtMcpPlugin extends JavaPlugin {
         DirtLog log = DirtLog.open(this, config.logging());
 
         try {
-            ControlCredentials credentials = controlCredentials();
+            ControlCredentials credentials = readControlCredentials(getDataFolder().toPath());
             this.runtime =
                     DirtRuntime.start(
                             this,
@@ -107,39 +108,22 @@ public final class DirtMcpPlugin extends JavaPlugin {
     }
 
     static ControlCredentials validateControlCredentials(String bridgeToken, String controlToken) {
-        requireToken(BRIDGE_TOKEN_FILE_ENVIRONMENT_VARIABLE, bridgeToken);
-        requireToken(CONTROL_TOKEN_FILE_ENVIRONMENT_VARIABLE, controlToken);
+        requireToken(BRIDGE_TOKEN_NAME, bridgeToken);
+        requireToken(CONTROL_TOKEN_NAME, controlToken);
         if (bridgeToken.equals(controlToken)) {
             throw new IllegalStateException(
-                    "DIRT_BRIDGE_TOKEN_FILE and DIRT_CONTROL_TOKEN_FILE contents must be distinct");
+                    "Bridge and control token file contents must be distinct");
         }
         return new ControlCredentials(bridgeToken, controlToken);
     }
 
-    static ControlCredentials readControlCredentials(
-            String bridgeTokenFile, String controlTokenFile) {
+    static ControlCredentials readControlCredentials(Path dataDirectory) {
         return validateControlCredentials(
-                readTokenFile(BRIDGE_TOKEN_FILE_ENVIRONMENT_VARIABLE, bridgeTokenFile),
-                readTokenFile(CONTROL_TOKEN_FILE_ENVIRONMENT_VARIABLE, controlTokenFile));
+                readTokenFile(BRIDGE_TOKEN_NAME, dataDirectory.resolve(BRIDGE_TOKEN_FILE)),
+                readTokenFile(CONTROL_TOKEN_NAME, dataDirectory.resolve(CONTROL_TOKEN_FILE)));
     }
 
-    private static ControlCredentials controlCredentials() {
-        return readControlCredentials(
-                System.getenv(BRIDGE_TOKEN_FILE_ENVIRONMENT_VARIABLE),
-                System.getenv(CONTROL_TOKEN_FILE_ENVIRONMENT_VARIABLE));
-    }
-
-    private static String readTokenFile(String name, String pathValue) {
-        if (pathValue == null || pathValue.isBlank()) {
-            throw new IllegalStateException(name + " is required");
-        }
-        final Path path;
-        try {
-            path = Path.of(pathValue);
-        } catch (InvalidPathException exception) {
-            throw new IllegalStateException(
-                    name + " must reference a readable UTF-8 regular file", exception);
-        }
+    private static String readTokenFile(String name, Path path) {
         try {
             if (!Files.isRegularFile(path)) {
                 throw new IllegalStateException(

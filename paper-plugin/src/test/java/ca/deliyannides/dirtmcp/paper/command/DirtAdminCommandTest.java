@@ -94,7 +94,7 @@ final class DirtAdminCommandTest {
                         });
 
         assertEquals(1, fixture.execute("dirt version"));
-        assertTrue(fixture.lastPlainMessage().contains("Version  0.1.0-SNAPSHOT"));
+        assertTrue(fixture.lastPlainMessage().contains("Version  0.1.0"));
         assertEquals(1, fixture.execute("dirt status"));
         assertEquals(new GetServerStatus.Request(true, true, false), captured.get());
         assertTrue(fixture.lastPlainMessage().contains("Bridge  127.0.0.1:8765"));
@@ -287,8 +287,7 @@ final class DirtAdminCommandTest {
             DirectMainThread mainThread) {
         DirtLog log = DirtLog.consoleOnly(NOPLogger.NOP_LOGGER, DirtConfig.ConsoleLogLevel.ERROR);
         DirtAdminCommand command =
-                new DirtAdminCommand(
-                        "DirtMCP", "0.1.0-SNAPSHOT", config(), status, access, mainThread, log);
+                new DirtAdminCommand("DirtMCP", "0.1.0", config(), status, access, mainThread, log);
         return new CommandFixture(senderAccess, command);
     }
 
@@ -312,8 +311,7 @@ final class DirtAdminCommandTest {
     private static GetServerStatus status() {
         GetServerStatus.Result result =
                 new GetServerStatus.Result(
-                        new GetServerStatus.Builds(
-                                "26.2", "Paper build 121", "0.1.0-SNAPSHOT", "2.15.4"),
+                        new GetServerStatus.Builds("26.2", "Paper build 121", "0.1.0", "2.15.4"),
                         new GetServerStatus.Performance(19.95, 4.25),
                         new GetServerStatus.PlayerSummary(
                                 1,

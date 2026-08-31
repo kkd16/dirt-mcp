@@ -1,5 +1,6 @@
 {
   "name": "dirt-mcp",
+  "version": "0.1.0",
   "private": true,
   "description": "Self-hosted passkey dashboard and authenticated MCP access to live Minecraft worlds",
   "license": "Apache-2.0",
@@ -17,7 +18,7 @@
     "lint": "pnpm run lint:code && pnpm run lint:shell && pnpm run lint:workflows && pnpm run lint:markdown",
     "lint:code": "oxlint mcp-server/src mcp-server/vite.config.ts --type-aware --ignore-pattern 'mcp-server/src/generated/**' && oxlint mcp-server/test scripts/*.mjs",
     "lint:markdown": "markdownlint-cli2",
-    "lint:shell": "shellcheck scripts/*.sh",
+    "lint:shell": "shellcheck scripts/*.sh packaging/*.sh",
     "lint:workflows": "actionlint",
     "migrate": "pnpm --filter @dirt-mcp/server migrate",
     "start": "pnpm --filter @dirt-mcp/server start",

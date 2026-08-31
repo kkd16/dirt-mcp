@@ -16,12 +16,9 @@ node_modules/
 # Managed development runtime
 /.dev/
 
-# Local configuration and secrets
+# Local configuration
 .env
 .env.*
-!.env.example
-/secrets/
-/backups/
 
 # Editors and operating systems
 .idea/

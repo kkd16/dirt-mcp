@@ -11,8 +11,7 @@ final class BearerAuthenticator {
     BearerAuthenticator(String token) {
         if (!ServiceToken.isValid(token)) {
             throw new IllegalArgumentException(
-                    "DIRT_BRIDGE_TOKEN_FILE contents must contain exactly 64 lowercase hexadecimal "
-                            + "characters");
+                    "Bridge token must contain exactly 64 lowercase hexadecimal characters");
         }
         this.expectedToken = token.getBytes(StandardCharsets.UTF_8);
     }

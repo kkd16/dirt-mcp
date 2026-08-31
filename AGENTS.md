@@ -57,10 +57,11 @@ Run `make help` for the authoritative root command list and descriptions.
 The root Procfile and Overmind manage Paper plus the single Node web/MCP service.
 Runtime state lives under `.dev/`; its world is disposable. The stack uses
 Minecraft port `25565`, bridge port `8765`, and web port `3000`. Do not commit or
-hand-edit generated runtime files or secrets. Keep secrets only in the managed
-files under `.dev/secrets/`, never in `.env` or `.overmind.env`. Paper plugin
-reload is unsupported, so use `make restart-paper` after plugin changes. Use
-`printf '%s\n' 'version' | make command` to send one Paper console command.
+hand-edit generated runtime files or secrets. Keep the authentication secret in
+`.dev/secrets/` and Paper bridge/control credentials in
+`.dev/paper/plugins/DirtMCP/secrets/`, never in `.env` or `.overmind.env`. Paper
+plugin reload is unsupported, so use `make restart-paper` after plugin changes.
+Use `printf '%s\n' 'version' | make command` to send one Paper console command.
 
 - During iteration, run only the smallest relevant test, lint, or type-check target.
 - Before handing off code or contract changes, run `make verify` once. It already

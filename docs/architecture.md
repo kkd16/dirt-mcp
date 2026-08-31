@@ -219,10 +219,12 @@ dispatch begins can therefore leave completion ambiguous.
 
 The configured bridge and control URLs must be bare `http://127.0.0.1` origins
 with optional ports. They use distinct bearer credentials. Production secrets
-are mounted from files, and credentials are excluded from logs along with raw
-request bodies, complete block payloads, command text, command feedback,
-WebAuthn challenges, invitation values, recovery values, and OAuth tokens and
-codes.
+are loaded from private files. Systemd copies the Paper-owned bridge and control
+credentials into the web service's private credential directory, so the web
+account cannot traverse the Paper tree. Credentials are excluded from logs
+along with raw request bodies, complete block payloads, command text, command
+feedback, WebAuthn challenges, invitation values, recovery values, and OAuth
+tokens and codes.
 
 The Node service also binds to `127.0.0.1`. Caddy is the only internet-facing
 HTTP process, terminates HTTPS, rejects `/internal/*` before proxying, and adds

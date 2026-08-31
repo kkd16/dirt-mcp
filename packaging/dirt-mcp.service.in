@@ -1,0 +1,53 @@
+[Unit]
+Description=Dirt MCP web, OAuth, and MCP service
+After=network.target
+Before=caddy.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=dirt-mcp
+Group=dirt-mcp
+WorkingDirectory=/opt/dirt-mcp/app
+Environment=NODE_ENV=production
+Environment=DIRT_PUBLIC_ORIGIN=https://@HOSTNAME@
+Environment=DIRT_DATABASE_PATH=/var/lib/dirt-mcp/dirt.sqlite3
+Environment=DIRT_AUTH_SECRET_FILE=%d/auth-secret
+Environment=DIRT_BRIDGE_TOKEN_FILE=%d/bridge-token
+Environment=DIRT_CONTROL_TOKEN_FILE=%d/control-token
+LoadCredential=auth-secret:/etc/dirt-mcp/credentials/auth-secret
+LoadCredential="bridge-token:@PAPER_DIR@/plugins/DirtMCP/secrets/bridge-token"
+LoadCredential="control-token:@PAPER_DIR@/plugins/DirtMCP/secrets/control-token"
+ExecStartPre=/opt/dirt-mcp/node/bin/node /opt/dirt-mcp/app/dist/migrate.js
+ExecStart=/opt/dirt-mcp/node/bin/node /opt/dirt-mcp/app/dist/index.js
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=315s
+UMask=0077
+
+StateDirectory=dirt-mcp
+StateDirectoryMode=0700
+InaccessiblePaths="@PAPER_DIR@"
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

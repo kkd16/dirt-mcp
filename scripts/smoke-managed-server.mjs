@@ -10,7 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 const repositoryRoot = dirname(import.meta.dirname);
 const runDirectory = `${repositoryRoot}/.dev/paper`;
 const detailLogDirectory = `${runDirectory}/plugins/DirtMCP/logs`;
-const token = (await readFile(`${repositoryRoot}/.dev/secrets/bridge-token`, 'utf8')).trim();
+const token = (await readFile(`${runDirectory}/plugins/DirtMCP/secrets/bridge-token`, 'utf8')).trim();
 const bridgePort = 8_765;
 
 const world = 'world';
@@ -628,7 +628,7 @@ try {
   ]);
   assert.equal(serverStatus.builds.minecraft, '26.2');
   assert.match(serverStatus.builds.paper, /^26\.2-121-/u);
-  assert.equal(serverStatus.builds.dirtPlugin, '0.1.0-SNAPSHOT');
+  assert.equal(serverStatus.builds.dirtPlugin, '0.1.0');
   assert.match(serverStatus.builds.fawe, /^2\.15\.4(?:[+.-]|$)/u);
   assert.ok(serverStatus.performance.tpsOneMinute >= 0);
   assert.equal(serverStatus.players.online, serverStatus.players.entries.length);

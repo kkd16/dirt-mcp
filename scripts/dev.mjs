@@ -12,12 +12,13 @@ const repositoryRoot = dirname(import.meta.dirname);
 const developmentDirectory = join(repositoryRoot, '.dev');
 const paperDirectory = join(developmentDirectory, 'paper');
 const paperLog = join(paperDirectory, 'logs', 'latest.log');
-const secretsDirectory = join(developmentDirectory, 'secrets');
+const webSecretsDirectory = join(developmentDirectory, 'secrets');
+const paperSecretsDirectory = join(paperDirectory, 'plugins', 'DirtMCP', 'secrets');
 const overmindSocket = join(developmentDirectory, 'overmind.sock');
 const secretFiles = {
-  auth: join(secretsDirectory, 'auth-secret'),
-  bridge: join(secretsDirectory, 'bridge-token'),
-  control: join(secretsDirectory, 'control-token'),
+  auth: join(webSecretsDirectory, 'auth-secret'),
+  bridge: join(paperSecretsDirectory, 'bridge-token'),
+  control: join(paperSecretsDirectory, 'control-token'),
 };
 
 const managedProcesses = ['paper', 'web'];
@@ -144,8 +145,9 @@ async function readCredentials() {
 }
 
 async function ensureCredentials() {
-  await mkdir(secretsDirectory, { recursive: true, mode: 0o700 });
-  await chmod(secretsDirectory, 0o700);
+  const secretDirectories = [webSecretsDirectory, paperSecretsDirectory];
+  await Promise.all(secretDirectories.map((path) => mkdir(path, { recursive: true, mode: 0o700 })));
+  await Promise.all(secretDirectories.map((path) => chmod(path, 0o700)));
   try {
     const credentials = await readCredentials();
     await Promise.all(Object.values(secretFiles).map((path) => chmod(path, 0o600)));
@@ -427,8 +429,8 @@ async function startFresh({ prepare }) {
   await mkdir(developmentDirectory, { recursive: true, mode: 0o700 });
   await chmod(developmentDirectory, 0o700);
   await removeStaleSocket();
-  await ensureCredentials();
   await assertPortsAvailable();
+  await ensureCredentials();
   if (prepare) await prepareFreshStack();
   else await migrate();
   await assertPortsAvailable();
@@ -436,8 +438,11 @@ async function startFresh({ prepare }) {
   await waitForReady();
   const validationFailure = await validatePaperLog('running');
   if (validationFailure !== null) throw new Error(validationFailure);
+}
+
+function reportReady() {
   process.stdout.write(
-    `Dirt MCP is ready: dashboard/MCP http://localhost:${String(ports.web)}, Minecraft 127.0.0.1:${String(ports.minecraft)}, bridge 127.0.0.1:${String(ports.bridge)}.\n`,
+    `Dirt MCP is ready: dashboard/MCP http://localhost:${String(ports.web)}, Minecraft port ${String(ports.minecraft)}, bridge 127.0.0.1:${String(ports.bridge)}.\n`,
   );
 }
 
@@ -459,18 +464,21 @@ async function up() {
   const issues = statuses === null ? [] : await stopStack();
   await startFresh({ prepare: true });
   throwIssues(issues);
+  reportReady();
 }
 
 async function restart() {
   const statuses = await managedStatus({ retries: 5 });
   if (statuses === null) {
-    await startFresh({ prepare: false });
+    await startFresh({ prepare: true });
+    reportReady();
     return;
   }
   if (statuses.get('paper')?.status === 'running') await sendPaperCommand(restartMessage);
   const issues = await stopStack();
-  await startFresh({ prepare: false });
+  await startFresh({ prepare: true });
   throwIssues(issues);
+  reportReady();
 }
 
 async function restartWeb() {
@@ -479,16 +487,19 @@ async function restartWeb() {
     const issues = statuses === null ? [] : await stopStack();
     await startFresh({ prepare: true });
     throwIssues(issues);
+    reportReady();
     return;
   }
 
   const issues = [];
   if (await stopProcess('web', shutdownTimeoutMilliseconds)) issues.push('web required SIGKILL to stop');
+  await run('pnpm', ['install', '--frozen-lockfile']);
+  await run('pnpm', ['run', 'build']);
   await migrate();
   await restartProcess('web');
   await waitForReady();
-  process.stdout.write('The web/MCP service restarted; Paper stayed online.\n');
   throwIssues(issues);
+  process.stdout.write('The web/MCP service restarted; Paper stayed online.\n');
 }
 
 async function restartPaper() {
@@ -497,6 +508,7 @@ async function restartPaper() {
     const issues = statuses === null ? [] : await stopStack();
     await startFresh({ prepare: true });
     throwIssues(issues);
+    reportReady();
     return;
   }
 
@@ -510,14 +522,19 @@ async function restartPaper() {
   const shutdownFailure = await validatePaperLog('shutdown', checkpoint);
   if (shutdownFailure !== null) issues.push(shutdownFailure);
 
+  await run('./gradlew', [':paper-plugin:assemble']);
+  await ensureCredentials();
   await restartProcess('paper');
   await waitForReady({ paperOnly: true });
   const startupFailure = await validatePaperLog('running');
-  if (startupFailure !== null) issues.push(startupFailure);
+  if (startupFailure !== null) {
+    issues.push(startupFailure);
+    throwIssues(issues);
+  }
   await restartProcess('web');
   await waitForReady();
-  process.stdout.write('Paper restarted safely; the web/MCP service was drained and restored.\n');
   throwIssues(issues);
+  process.stdout.write('Paper restarted safely; the web/MCP service was drained and restored.\n');
 }
 
 async function status() {

@@ -1,5 +1,6 @@
 {
 	admin off
+	auto_https disable_redirects
 	persist_config off
 	servers {
 		# MCP POST requests can mutate world state, so reject replayable TLS early data.
@@ -18,7 +19,7 @@ http:// {
 	respond 400
 }
 
-{$DIRT_PUBLIC_HOST} {
+@HOSTNAME@ {
 	encode zstd gzip
 	request_body {
 		max_size 4MiB
@@ -26,7 +27,7 @@ http:// {
 
 	header {
 		-Server
-		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		Strict-Transport-Security "max-age=63072000"
 		X-Content-Type-Options "nosniff"
 	}
 

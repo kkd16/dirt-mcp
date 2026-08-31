@@ -48,53 +48,45 @@ final class DirtMcpPluginSecurityTest {
 
     @Test
     void readsUtf8CredentialsAndStripsOneFinalLineEnding() throws IOException {
-        Path bridgeTokenFile = writeToken("bridge-token", BRIDGE_TOKEN + "\n");
-        Path controlTokenFile = writeToken("control-token", CONTROL_TOKEN + "\r\n");
+        writeToken("bridge-token", BRIDGE_TOKEN + "\n");
+        writeToken("control-token", CONTROL_TOKEN + "\r\n");
 
         DirtMcpPlugin.ControlCredentials credentials =
-                DirtMcpPlugin.readControlCredentials(
-                        bridgeTokenFile.toString(), controlTokenFile.toString());
+                DirtMcpPlugin.readControlCredentials(this.temporaryDirectory);
 
         assertEquals(BRIDGE_TOKEN, credentials.bridgeToken());
         assertEquals(CONTROL_TOKEN, credentials.controlToken());
     }
 
     @Test
-    void requiresBothCredentialFileInputs() throws IOException {
-        Path bridgeTokenFile = writeToken("bridge-token", BRIDGE_TOKEN);
+    void requiresBothCredentialFiles() throws IOException {
         IllegalStateException missingBridge =
                 assertThrows(
                         IllegalStateException.class,
-                        () -> DirtMcpPlugin.readControlCredentials(null, "unused"));
+                        () -> DirtMcpPlugin.readControlCredentials(this.temporaryDirectory));
+        writeToken("bridge-token", BRIDGE_TOKEN);
         IllegalStateException missingControl =
                 assertThrows(
                         IllegalStateException.class,
-                        () ->
-                                DirtMcpPlugin.readControlCredentials(
-                                        bridgeTokenFile.toString(), "  "));
+                        () -> DirtMcpPlugin.readControlCredentials(this.temporaryDirectory));
 
-        assertTrue(missingBridge.getMessage().contains("DIRT_BRIDGE_TOKEN_FILE is required"));
-        assertTrue(missingControl.getMessage().contains("DIRT_CONTROL_TOKEN_FILE is required"));
+        assertTrue(missingBridge.getMessage().contains("bridge token file"));
+        assertTrue(missingControl.getMessage().contains("control token file"));
     }
 
     @Test
     void rejectsMissingAndNonRegularCredentialFiles() throws IOException {
-        Path bridgeTokenFile = writeToken("bridge-token", BRIDGE_TOKEN);
-        Path missing = this.temporaryDirectory.resolve("missing-token");
+        writeToken("control-token", CONTROL_TOKEN);
 
         IllegalStateException missingFailure =
                 assertThrows(
                         IllegalStateException.class,
-                        () ->
-                                DirtMcpPlugin.readControlCredentials(
-                                        missing.toString(), bridgeTokenFile.toString()));
+                        () -> DirtMcpPlugin.readControlCredentials(this.temporaryDirectory));
+        Files.createDirectory(this.temporaryDirectory.resolve("secrets").resolve("bridge-token"));
         IllegalStateException directoryFailure =
                 assertThrows(
                         IllegalStateException.class,
-                        () ->
-                                DirtMcpPlugin.readControlCredentials(
-                                        bridgeTokenFile.toString(),
-                                        this.temporaryDirectory.toString()));
+                        () -> DirtMcpPlugin.readControlCredentials(this.temporaryDirectory));
 
         assertTrue(missingFailure.getMessage().contains("readable UTF-8 regular file"));
         assertTrue(directoryFailure.getMessage().contains("readable UTF-8 regular file"));
@@ -102,34 +94,49 @@ final class DirtMcpPluginSecurityTest {
 
     @Test
     void rejectsCredentialFilesThatAreNotUtf8() throws IOException {
-        Path bridgeTokenFile =
-                Files.write(
-                        this.temporaryDirectory.resolve("bridge-token"),
-                        new byte[] {(byte) 0xc3, 0x28});
-        Path controlTokenFile = writeToken("control-token", CONTROL_TOKEN);
+        writeToken("control-token", CONTROL_TOKEN);
+        Files.write(
+                this.temporaryDirectory.resolve("secrets").resolve("bridge-token"),
+                new byte[] {(byte) 0xc3, 0x28});
 
         IllegalStateException failure =
                 assertThrows(
                         IllegalStateException.class,
-                        () ->
-                                DirtMcpPlugin.readControlCredentials(
-                                        bridgeTokenFile.toString(), controlTokenFile.toString()));
+                        () -> DirtMcpPlugin.readControlCredentials(this.temporaryDirectory));
 
+        assertTrue(failure.getMessage().contains("readable UTF-8 regular file"));
+    }
+
+    @Test
+    void doesNotReadLegacyCredentialFilesFromTheDataDirectoryRoot() throws IOException {
+        Files.writeString(
+                this.temporaryDirectory.resolve("bridge-token"),
+                BRIDGE_TOKEN,
+                StandardCharsets.UTF_8);
+        Files.writeString(
+                this.temporaryDirectory.resolve("control-token"),
+                CONTROL_TOKEN,
+                StandardCharsets.UTF_8);
+
+        IllegalStateException failure =
+                assertThrows(
+                        IllegalStateException.class,
+                        () -> DirtMcpPlugin.readControlCredentials(this.temporaryDirectory));
+
+        assertTrue(failure.getMessage().contains("bridge token file"));
         assertTrue(failure.getMessage().contains("readable UTF-8 regular file"));
     }
 
     @ParameterizedTest
     @MethodSource("invalidTokenFileContents")
     void rejectsMalformedCredentialFileContents(String contents) throws IOException {
-        Path bridgeTokenFile = writeToken("bridge-token", contents);
-        Path controlTokenFile = writeToken("control-token", CONTROL_TOKEN);
+        writeToken("bridge-token", contents);
+        writeToken("control-token", CONTROL_TOKEN);
 
         IllegalStateException failure =
                 assertThrows(
                         IllegalStateException.class,
-                        () ->
-                                DirtMcpPlugin.readControlCredentials(
-                                        bridgeTokenFile.toString(), controlTokenFile.toString()));
+                        () -> DirtMcpPlugin.readControlCredentials(this.temporaryDirectory));
 
         assertTrue(failure.getMessage().contains("64 lowercase hexadecimal"));
         if (!contents.isEmpty()) {
@@ -151,14 +158,12 @@ final class DirtMcpPluginSecurityTest {
 
     @Test
     void rejectsCredentialReuse() throws IOException {
-        Path bridgeTokenFile = writeToken("bridge-token", BRIDGE_TOKEN);
-        Path controlTokenFile = writeToken("control-token", BRIDGE_TOKEN);
+        writeToken("bridge-token", BRIDGE_TOKEN);
+        writeToken("control-token", BRIDGE_TOKEN);
         IllegalStateException failure =
                 assertThrows(
                         IllegalStateException.class,
-                        () ->
-                                DirtMcpPlugin.readControlCredentials(
-                                        bridgeTokenFile.toString(), controlTokenFile.toString()));
+                        () -> DirtMcpPlugin.readControlCredentials(this.temporaryDirectory));
 
         assertTrue(failure.getMessage().contains("must be distinct"));
         assertFalse(failure.getMessage().contains(BRIDGE_TOKEN));
@@ -181,8 +186,8 @@ final class DirtMcpPluginSecurityTest {
     }
 
     private Path writeToken(String name, String contents) throws IOException {
-        return Files.writeString(
-                this.temporaryDirectory.resolve(name), contents, StandardCharsets.UTF_8);
+        Path secrets = Files.createDirectories(this.temporaryDirectory.resolve("secrets"));
+        return Files.writeString(secrets.resolve(name), contents, StandardCharsets.UTF_8);
     }
 
     private static void assertCredentialNotRendered(Throwable failure, String credential) {

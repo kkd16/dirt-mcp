@@ -66,8 +66,7 @@ public final class HttpAccessControlClient implements AccessControl {
         Objects.requireNonNull(config, "config");
         if (!ServiceToken.isValid(bearerToken)) {
             throw new IllegalArgumentException(
-                    "DIRT_CONTROL_TOKEN_FILE contents must contain exactly 64 lowercase "
-                            + "hexadecimal characters");
+                    "Control token must contain exactly 64 lowercase hexadecimal characters");
         }
         this.origin = URI.create(config.origin());
         this.bearerToken = bearerToken;

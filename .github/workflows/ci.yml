@@ -18,7 +18,7 @@ jobs:
   verify:
     name: Verify
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Check out repository
@@ -68,8 +68,153 @@ jobs:
           tar --extract --gzip --file "${ci_tool_dir}/actionlint.tar.gz" --directory "${ci_tool_dir}" actionlint
           sudo install --mode 0755 "${ci_tool_dir}/actionlint" /usr/local/bin/actionlint
 
-      - name: Verify every component
+      - name: Run the clean build, test, and package gate
         run: make ci
+
+      - name: Exercise the native installer
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          NEEDRESTART_MODE: a
+        run: |
+          sudo apt-get purge --yes nginx nginx-common nginx-core apache2 apache2-bin apache2-data apache2-utils
+
+          sudo useradd --system --user-group --home-dir /nonexistent --no-create-home \
+            --shell /usr/sbin/nologin dirt-paper-ci
+          paper_fixture=/srv/dirt-ci-paper
+          sudo install -d -o dirt-paper-ci -g dirt-paper-ci -m 0755 \
+            "${paper_fixture}" "${paper_fixture}/plugins" "${paper_fixture}/.paper"
+
+          fixture_files="$(mktemp -d)"
+          printf '%s\n' 'online-mode=true' > "${fixture_files}/server.properties"
+          printf '%s\n' '{"currentVersion":"26.2-120-a2a42c5 (MC: 26.2)"}' \
+            > "${fixture_files}/version_history.json"
+          sudo install -o dirt-paper-ci -g dirt-paper-ci -m 0644 \
+            "${fixture_files}/server.properties" "${paper_fixture}/server.properties"
+          sudo install -o dirt-paper-ci -g dirt-paper-ci -m 0644 \
+            "${fixture_files}/version_history.json" "${paper_fixture}/.paper/version_history.json"
+
+          mapfile -t archives < <(compgen -G 'build/release/dirt-mcp-*-ubuntu-24.04-x86_64.tar.gz')
+          [[ "${#archives[@]}" -eq 1 ]]
+          extracted="$(mktemp -d)"
+          tar --extract --gzip --file "${archives[0]}" --directory "${extracted}"
+          mapfile -t installers < <(find "${extracted}" -mindepth 2 -maxdepth 2 -type f -name install.sh)
+          [[ "${#installers[@]}" -eq 1 ]]
+
+          if sudo "${installers[0]}" --paper-dir "${paper_fixture}" --hostname 0x7f.1; then
+            printf 'Installer accepted a hostname that the web service normalizes to an IP address.\n' >&2
+            exit 1
+          fi
+          [[ ! -e /etc/dirt-mcp && ! -e /opt/dirt-mcp ]]
+          if sudo "${installers[0]}" \
+            --paper-dir "${paper_fixture}" --hostname ci.dirt-mcp.internal; then
+            printf 'Installer accepted an unsupported Paper build.\n' >&2
+            exit 1
+          fi
+          [[ ! -e /etc/dirt-mcp && ! -e /opt/dirt-mcp ]]
+
+          printf '%s\n' '{"currentVersion":"26.2-121-a2a42c5 (MC: 26.2)"}' \
+            > "${fixture_files}/version_history.json"
+          sudo install -o dirt-paper-ci -g dirt-paper-ci -m 0644 \
+            "${fixture_files}/version_history.json" "${paper_fixture}/.paper/version_history.json"
+
+          printf '%s\n' 'online-mode=false' > "${fixture_files}/server.properties"
+          sudo install -o dirt-paper-ci -g dirt-paper-ci -m 0644 \
+            "${fixture_files}/server.properties" "${paper_fixture}/server.properties"
+          if sudo "${installers[0]}" \
+            --paper-dir "${paper_fixture}" --hostname ci.dirt-mcp.internal; then
+            printf 'Installer accepted offline-mode Paper.\n' >&2
+            exit 1
+          fi
+          [[ ! -e /etc/dirt-mcp && ! -e /opt/dirt-mcp && \
+            ! -e /etc/systemd/system/dirt-mcp.service && ! -e /var/lib/dirt-mcp ]]
+          printf '%s\n' 'online-mode=true' > "${fixture_files}/server.properties"
+          sudo install -o dirt-paper-ci -g dirt-paper-ci -m 0644 \
+            "${fixture_files}/server.properties" "${paper_fixture}/server.properties"
+
+          printf '%s\n' 'conflicting plugin' > "${fixture_files}/WorldEdit.jar"
+          sudo install -o dirt-paper-ci -g dirt-paper-ci -m 0644 \
+            "${fixture_files}/WorldEdit.jar" "${paper_fixture}/plugins/WorldEdit.jar"
+          if sudo "${installers[0]}" \
+            --paper-dir "${paper_fixture}" --hostname ci.dirt-mcp.internal; then
+            printf 'Installer accepted WorldEdit alongside FAWE.\n' >&2
+            exit 1
+          fi
+          [[ ! -e /etc/dirt-mcp && ! -e /opt/dirt-mcp && \
+            ! -e /etc/systemd/system/dirt-mcp.service && ! -e /var/lib/dirt-mcp ]]
+          sudo rm -f -- "${paper_fixture}/plugins/WorldEdit.jar"
+
+          sudo --preserve-env=DEBIAN_FRONTEND,NEEDRESTART_MODE \
+            "${installers[0]}" --paper-dir "${paper_fixture}" --hostname ci.dirt-mcp.internal
+
+          systemctl is-active --quiet dirt-mcp.service
+          systemctl is-enabled --quiet dirt-mcp.service
+          systemctl is-active --quiet caddy.service
+          systemctl is-enabled --quiet caddy.service
+          curl --fail --silent --show-error http://127.0.0.1:3000/healthz > /dev/null
+          curl --insecure --fail --silent --show-error \
+            --retry 20 --retry-all-errors --retry-delay 1 \
+            --resolve ci.dirt-mcp.internal:443:127.0.0.1 \
+            https://ci.dirt-mcp.internal/assets/app.js > /dev/null
+          [[ "$(curl --insecure --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --resolve ci.dirt-mcp.internal:443:127.0.0.1 \
+            https://ci.dirt-mcp.internal/healthz)" == '404' ]]
+          [[ "$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --resolve ci.dirt-mcp.internal:80:127.0.0.1 \
+            http://ci.dirt-mcp.internal/)" == '400' ]]
+          sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          sudo systemd-analyze verify /etc/systemd/system/dirt-mcp.service
+
+          for unused_port in 25565 8765; do
+            if ss -H -ltn "sport = :${unused_port}" | grep -q .; then
+              printf 'Installer unexpectedly opened TCP port %s.\n' "${unused_port}" >&2
+              exit 1
+            fi
+          done
+
+          plugin_secret_directory="${paper_fixture}/plugins/DirtMCP/secrets"
+          [[ "$(sudo stat -c '%U:%G:%a' /opt/dirt-mcp)" == 'root:root:755' ]]
+          [[ "$(sudo stat -c '%U:%G:%a' /opt/dirt-mcp/app)" == 'root:root:755' ]]
+          [[ "$(sudo stat -c '%U:%G:%a' /opt/dirt-mcp/node/bin/node)" == 'root:root:755' ]]
+          sudo -u dirt-mcp test -x /opt/dirt-mcp/node/bin/node
+          sudo -u dirt-mcp test -r /opt/dirt-mcp/app/dist/index.js
+          [[ "$(sudo stat -c '%U:%G:%a' /etc/dirt-mcp)" == 'root:root:700' ]]
+          [[ "$(sudo stat -c '%U:%G:%a' /var/lib/dirt-mcp)" == 'dirt-mcp:dirt-mcp:700' ]]
+          [[ "$(sudo stat -c '%U:%G:%a' /var/lib/dirt-mcp/dirt.sqlite3)" == 'dirt-mcp:dirt-mcp:600' ]]
+          [[ "$(sudo stat -c '%U:%G:%a' /etc/caddy/Caddyfile)" == 'root:caddy:640' ]]
+          [[ "$(sudo stat -c '%U:%G:%a' /etc/systemd/system/dirt-mcp.service)" == 'root:root:644' ]]
+          [[ "$(sudo stat -c '%U:%G:%a' "${paper_fixture}/plugins/dirt-mcp-paper.jar")" == 'dirt-paper-ci:dirt-paper-ci:644' ]]
+          [[ "$(sudo stat -c '%U:%G:%a' "${paper_fixture}/plugins/FastAsyncWorldEdit-Paper-2.15.4.jar")" == 'dirt-paper-ci:dirt-paper-ci:644' ]]
+          [[ "$(sudo stat -c '%U:%G:%a' "${paper_fixture}/plugins/DirtMCP")" == 'dirt-paper-ci:dirt-paper-ci:750' ]]
+          [[ "$(sudo stat -c '%U:%G:%a' "${plugin_secret_directory}")" == 'dirt-paper-ci:dirt-paper-ci:700' ]]
+          [[ "$(sudo stat -c '%U:%G:%a' "${plugin_secret_directory}/bridge-token")" == 'dirt-paper-ci:dirt-paper-ci:600' ]]
+          [[ "$(sudo stat -c '%U:%G:%a' "${plugin_secret_directory}/control-token")" == 'dirt-paper-ci:dirt-paper-ci:600' ]]
+          [[ "$(sudo stat -c '%U:%G:%a' /etc/dirt-mcp/credentials/auth-secret)" == 'root:root:600' ]]
+          [[ "$(sudo sha256sum \
+            "${plugin_secret_directory}/bridge-token" \
+            "${plugin_secret_directory}/control-token" \
+            /etc/dirt-mcp/credentials/auth-secret | awk '{print $1}' | sort --unique | wc --lines)" -eq 3 ]]
+          if sudo -u dirt-mcp test -r "${plugin_secret_directory}/bridge-token"; then
+            printf 'The web service account can read Paper-owned source credentials.\n' >&2
+            exit 1
+          fi
+          if sudo -u dirt-paper-ci test -r /etc/dirt-mcp/credentials/auth-secret; then
+            printf 'The Paper account can read the web authentication secret.\n' >&2
+            exit 1
+          fi
+
+          sudo sha256sum \
+            "${plugin_secret_directory}/bridge-token" \
+            "${plugin_secret_directory}/control-token" \
+            /etc/dirt-mcp/credentials/auth-secret | tee "${fixture_files}/secret-hashes" > /dev/null
+          sudo --preserve-env=DEBIAN_FRONTEND,NEEDRESTART_MODE \
+            "${installers[0]}" --paper-dir "${paper_fixture}" --hostname ci.dirt-mcp.internal
+          sudo sha256sum --check "${fixture_files}/secret-hashes"
+
+      - name: Print native service diagnostics
+        if: failure()
+        run: |
+          sudo systemctl status dirt-mcp.service caddy.service --no-pager || true
+          sudo journalctl --unit dirt-mcp.service --unit caddy.service --no-pager --lines 100 || true
 
       - name: Stop the managed development stack
         if: always()

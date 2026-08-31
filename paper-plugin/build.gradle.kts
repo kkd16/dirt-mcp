@@ -210,6 +210,8 @@ tasks {
 
     jar {
         archiveBaseName = "dirt-mcp-paper"
+        isPreserveFileTimestamps = false
+        isReproducibleFileOrder = true
         from(rootProject.file("LICENSE")) {
             into("META-INF")
         }

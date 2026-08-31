@@ -2,24 +2,30 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor install build build-paper build-web check check-production verify ci format up restart restart-paper restart-web down status health logs console command smoke clean
-# Aggregate gates share build outputs and one managed development stack.
-.NOTPARALLEL: verify ci
+.PHONY: help doctor deps build build-paper build-web package check check-package verify ci format up restart restart-paper restart-web down status health logs console command smoke clean
+# Root targets share build outputs and one managed development stack.
+.NOTPARALLEL:
 
 help: ## Show the available development commands.
 	@awk 'BEGIN { FS = ":.*## "; printf "Dirt MCP development commands:\n\n" } /^[a-zA-Z_-]+:.*## / { printf "  %-20s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 doctor: ## Verify every tool required by development and CI.
+	@. /etc/os-release 2>/dev/null || { printf 'Ubuntu 24.04 x86-64 is required.\n' >&2; exit 1; }; \
+	  [[ "$${ID:-}" == ubuntu && "$${VERSION_ID:-}" == 24.04 && "$$(uname -m)" == x86_64 ]] || \
+	  { printf 'Ubuntu 24.04 x86-64 is required.\n' >&2; exit 1; }
 	@command -v java >/dev/null || { printf 'A Java launcher is required.\n' >&2; exit 1; }
 	@command -v node >/dev/null || { printf 'Node.js is required.\n' >&2; exit 1; }
 	@command -v pnpm >/dev/null || { printf 'pnpm is required.\n' >&2; exit 1; }
 	@command -v overmind >/dev/null || { printf 'Overmind 2.5.1 is required.\n' >&2; exit 1; }
 	@command -v tmux >/dev/null || { printf 'tmux is required by Overmind.\n' >&2; exit 1; }
-	@command -v docker >/dev/null || { printf 'Docker with Compose is required.\n' >&2; exit 1; }
+	@command -v curl >/dev/null || { printf 'curl is required.\n' >&2; exit 1; }
+	@command -v gzip >/dev/null || { printf 'gzip is required.\n' >&2; exit 1; }
+	@command -v tar >/dev/null || { printf 'tar is required.\n' >&2; exit 1; }
+	@command -v xz >/dev/null || { printf 'xz is required.\n' >&2; exit 1; }
+	@command -v sha256sum >/dev/null || { printf 'sha256sum is required.\n' >&2; exit 1; }
+	@command -v systemd-analyze >/dev/null || { printf 'systemd-analyze is required.\n' >&2; exit 1; }
 	@command -v shellcheck >/dev/null || { printf 'ShellCheck is required.\n' >&2; exit 1; }
 	@command -v actionlint >/dev/null || { printf 'actionlint is required.\n' >&2; exit 1; }
-	@docker compose version >/dev/null || { printf 'The Docker Compose plugin is required.\n' >&2; exit 1; }
-	@docker info >/dev/null 2>&1 || { printf 'The Docker daemon is not available.\n' >&2; exit 1; }
 	@if ! ./gradlew -q javaToolchains | grep -Eq 'Language Version:[[:space:]]+25'; then \
 	  printf 'Gradle could not resolve the Java 25 toolchain required by Paper.\n' >&2; exit 1; fi
 	@node -e 'const manifest = require("./package.json"); const expected = manifest.devEngines.runtime.version; if (process.versions.node !== expected) { console.error(`Expected Node.js $${expected}, found $${process.version}.`); process.exit(1); }'
@@ -33,54 +39,53 @@ doctor: ## Verify every tool required by development and CI.
 	@printf 'Gradle: '; ./gradlew --version | awk '/^Gradle / { print $$2; exit }'
 	@printf 'Overmind: %s\n' "$$(overmind --version | awk '{ print $$3 }')"
 	@printf 'tmux: %s\n' "$$(tmux -V | awk '{ print $$2 }')"
-	@printf 'Docker Compose: %s\n' "$$(docker compose version --short)"
+	@printf 'curl: %s\n' "$$(curl --version | awk 'NR == 1 { print $$2 }')"
+	@printf 'gzip: %s\n' "$$(gzip --version | awk 'NR == 1 { print $$2 }')"
+	@printf 'systemd: %s\n' "$$(systemd-analyze --version | awk 'NR == 1 { print $$2 }')"
 	@printf 'ShellCheck: %s\n' "$$(shellcheck --version | awk '/^version:/ { print $$2 }')"
 	@printf 'actionlint: %s\n' "$$(actionlint -version | awk 'NR == 1 { print $$1 }')"
 
-install: ## Install the locked Node.js dependencies.
+deps: ## Install the locked Node.js dependencies.
 	pnpm install --frozen-lockfile
 
-build: build-paper build-web ## Build the Paper plugin and web/MCP service.
+build: build-paper build-web ## Stop the managed stack, then build Paper and web/MCP.
 
-build-paper: ## Build and validate the Paper plugin artifact.
+build-paper: down ## Stop the managed stack, then build and validate the Paper plugin artifact.
 	./gradlew :paper-plugin:assemble
 
-build-web: install ## Build the dashboard and web/MCP service.
+build-web: deps ## Build the dashboard and web/MCP service.
 	pnpm run build
 
-check: install ## Run every offline build, test, lint, format, and contract gate.
+package: build ## Stop the managed stack, then build the native release assets.
+	node scripts/package-native.mjs
+
+check: down deps ## Stop the managed stack, then run every offline build, test, lint, format, and contract gate.
 	./gradlew build
 	pnpm run check
 
-check-production: export DIRT_AUTH_SECRET_FILE := /dev/null
-check-production: export DIRT_BRIDGE_TOKEN_FILE := /dev/null
-check-production: export DIRT_CONTROL_TOKEN_FILE := /dev/null
-check-production: export DIRT_PUBLIC_HOST := dirt.example.com
-check-production: ## Validate every production Compose profile and image.
-	docker compose --profile '*' config --quiet
-	docker compose build
-	docker run --rm --entrypoint /bin/sh dirt-mcp-web:local -c 'test -r /app/LICENSE'
-	docker compose run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile
+check-package: package ## Stop the managed stack, then validate the native package.
+	node scripts/check-native-package.mjs
 
 verify: check smoke ## Run the complete incremental local gate, including live smoke coverage.
 
-ci: doctor clean verify check-production ## Run the clean complete gate used by continuous integration.
+ci: doctor clean verify ## Run the clean build, test, and package gate used by CI.
 	@node scripts/dev.mjs down
+	@$(MAKE) check-package
 
-format: install ## Apply every repository formatter.
+format: deps ## Apply every repository formatter.
 	./gradlew spotlessApply
 	pnpm run format
 
 up: ## Start or reuse the complete Paper and web/MCP development stack.
 	@node scripts/dev.mjs up
 
-restart: build ## Build, then gracefully restart the complete development stack.
+restart: ## Build, then gracefully restart the complete development stack.
 	@node scripts/dev.mjs restart
 
-restart-paper: build-paper ## Build and safely restart Paper, draining web/MCP first.
+restart-paper: ## Build and safely restart Paper, draining web/MCP first.
 	@node scripts/dev.mjs restart-paper
 
-restart-web: build-web ## Build, migrate, and restart only the web/MCP service.
+restart-web: ## Build, migrate, and restart only the web/MCP service.
 	@node scripts/dev.mjs restart-web
 
 down: ## Stop the complete development stack cleanly.
