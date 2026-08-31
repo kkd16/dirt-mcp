@@ -161,7 +161,7 @@ final class DirtConfigLoaderTest {
         return Stream.of(
                 Arguments.of("bridge.allowed-operations", null),
                 Arguments.of("bridge.allowed-operations", "pingServer"),
-                Arguments.of("bridge.allowed-operations", List.of("ping_server")),
+                Arguments.of("bridge.allowed-operations", List.of("unknownOperation")),
                 Arguments.of("bridge.allowed-operations", List.of("pingServer", "pingServer")),
                 Arguments.of("bridge.allowed-operations", Arrays.asList("pingServer", null)),
                 Arguments.of("bridge.unknown", 1),

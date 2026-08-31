@@ -22,7 +22,7 @@ function invalidRequest(details: Record<string, unknown>) {
   return { error: { code: 'invalid_request', message: 'Invalid', details } };
 }
 
-test('defines the mandatory capability route and stable operation IDs', () => {
+test('defines bridge routing policy and capability operation IDs', () => {
   assert.deepEqual(BRIDGE_ROUTES.capabilities, {
     method: 'GET',
     path: '/v1/capabilities',

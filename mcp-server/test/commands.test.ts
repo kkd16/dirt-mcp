@@ -7,6 +7,21 @@ import {
   runMinecraftCommandsBridgeOutputSchema,
 } from '../dist/tools/commands.js';
 
+const DISPATCHED = {
+  command: 'say hello',
+  outcome: 'dispatched',
+  feedback: [],
+  message: null,
+  rawMessage: null,
+} as const;
+const NOT_FOUND = {
+  command: 'missing',
+  outcome: 'not_found',
+  feedback: ['Unknown command'],
+  message: 'Command was not found.',
+  rawMessage: null,
+} as const;
+
 test('command input validation preserves text for Paper-owned normalization', () => {
   const command = '  /say hello  ';
   const parsed = RunMinecraftCommandsInputSchema.parse({ commands: [command] });
@@ -17,20 +32,6 @@ test('command input validation preserves text for Paper-owned normalization', ()
 });
 
 test('command outputs require normalized commands and a valid attempted prefix', () => {
-  const dispatched = {
-    command: 'say hello',
-    outcome: 'dispatched',
-    feedback: [],
-    message: null,
-    rawMessage: null,
-  } as const;
-  const notFound = {
-    command: 'missing',
-    outcome: 'not_found',
-    feedback: ['Unknown command'],
-    message: 'Command was not found.',
-    rawMessage: null,
-  } as const;
   const failed = {
     command: 'fail',
     outcome: 'dispatch_failed',
@@ -38,63 +39,49 @@ test('command outputs require normalized commands and a valid attempted prefix',
     message: 'Dispatch failed.',
     rawMessage: 'Command exception.',
   } as const;
-  assert.equal(CommandResultSchema.safeParse(dispatched).success, true);
-  assert.equal(CommandResultSchema.safeParse(notFound).success, true);
+  assert.equal(CommandResultSchema.safeParse(DISPATCHED).success, true);
+  assert.equal(CommandResultSchema.safeParse(NOT_FOUND).success, true);
   assert.equal(CommandResultSchema.safeParse(failed).success, true);
   assert.equal(CommandResultSchema.safeParse({ ...failed, rawMessage: null }).success, false);
-  assert.equal(CommandResultSchema.safeParse({ ...dispatched, command: ' say hello' }).success, false);
-  assert.equal(CommandResultSchema.safeParse({ ...dispatched, command: 'say\nhello' }).success, false);
+  assert.equal(CommandResultSchema.safeParse({ ...DISPATCHED, command: ' say hello' }).success, false);
+  assert.equal(CommandResultSchema.safeParse({ ...DISPATCHED, command: 'say\nhello' }).success, false);
 
   const output = {
     sender: { name: 'Dirt MCP', isOperator: true, isPlayer: false },
     feedbackTruncated: false,
-    results: [notFound, dispatched],
+    results: [NOT_FOUND, DISPATCHED],
   };
   assert.equal(RunMinecraftCommandsOutputSchema.safeParse(output).success, false);
   assert.equal(
-    RunMinecraftCommandsOutputSchema.safeParse({ ...output, results: [dispatched, notFound] }).success,
+    RunMinecraftCommandsOutputSchema.safeParse({ ...output, results: [DISPATCHED, NOT_FOUND] }).success,
     true,
   );
   assert.equal(RunMinecraftCommandsOutputSchema.safeParse({ ...output, results: [] }).success, false);
 });
 
 test('command bridge output accounts for the requested command count', () => {
-  const dispatched = {
-    command: 'say hello',
-    outcome: 'dispatched',
-    feedback: [],
-    message: null,
-    rawMessage: null,
-  } as const;
-  const notFound = {
-    command: 'missing',
-    outcome: 'not_found',
-    feedback: [],
-    message: 'Command was not found.',
-    rawMessage: null,
-  } as const;
-  const secondDispatched = { ...dispatched, command: 'say again' } as const;
-  const requestedNotFound = { ...notFound, command: 'say hello' } as const;
+  const secondDispatched = { ...DISPATCHED, command: 'say again' } as const;
+  const requestedNotFound = { ...NOT_FOUND, command: 'say hello', feedback: [] } as const;
   const output = {
     sender: { name: 'Dirt MCP', isOperator: true, isPlayer: false },
     feedbackTruncated: false,
-    results: [dispatched, secondDispatched],
+    results: [DISPATCHED, secondDispatched],
   } as const;
   const schema = runMinecraftCommandsBridgeOutputSchema({ commands: ['say hello', 'say again'] });
 
   assert.equal(schema.safeParse(output).success, true);
-  assert.equal(schema.safeParse({ ...output, results: [dispatched] }).success, false);
+  assert.equal(schema.safeParse({ ...output, results: [DISPATCHED] }).success, false);
   assert.equal(schema.safeParse({ ...output, results: [requestedNotFound] }).success, true);
-  assert.equal(schema.safeParse({ ...output, results: [dispatched, dispatched] }).success, false);
+  assert.equal(schema.safeParse({ ...output, results: [DISPATCHED, DISPATCHED] }).success, false);
   assert.equal(
     runMinecraftCommandsBridgeOutputSchema({ commands: [' \u1680/\u2000say hello\u3000'] }).safeParse({
       ...output,
-      results: [dispatched],
+      results: [DISPATCHED],
     }).success,
     true,
   );
   assert.equal(
-    schema.safeParse({ ...output, results: [dispatched, secondDispatched, secondDispatched] }).success,
+    schema.safeParse({ ...output, results: [DISPATCHED, secondDispatched, secondDispatched] }).success,
     false,
   );
 });

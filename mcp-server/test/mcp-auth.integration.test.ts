@@ -184,20 +184,22 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
     for (const rejected of rejectedMalformedTokens) {
       assert.equal(rejected.status, 401);
       assert.match(rejected.headers.get('WWW-Authenticate') ?? '', /error="invalid_token"/u);
-      assert.equal(bridgeRequests, 0);
     }
+    assert.equal(bridgeRequests, 0);
 
     const missingVersion = mcpRequest(resource, issued.token);
     missingVersion.headers.delete('MCP-Protocol-Version');
     assert.equal((await mcp.fetch(missingVersion)).status, 400);
 
-    const legacy = new Request(mcpRequest(resource, issued.token), {
+    const withoutMcpHeaders = new Request(resource, {
       method: 'POST',
+      headers: {
+        Authorization: `Bearer ${issued.token}`,
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
     });
-    legacy.headers.delete('MCP-Protocol-Version');
-    legacy.headers.delete('Mcp-Method');
-    assert.equal((await mcp.fetch(legacy)).status, 400);
+    assert.equal((await mcp.fetch(withoutMcpHeaders)).status, 400);
     assert.equal(bridgeRequests, 0);
 
     const authorized = await mcp.fetch(mcpRequest(resource, issued.token));

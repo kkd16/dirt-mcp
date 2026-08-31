@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
@@ -198,6 +199,12 @@ final class HttpAccessControlClientTest {
                                                 .getBytes(StandardCharsets.UTF_8),
                                 "application/json"),
                         new InvalidResponse(
+                                "uppercase call ID",
+                                callId ->
+                                        userPage(callId.toUpperCase(Locale.ROOT), 1)
+                                                .getBytes(StandardCharsets.UTF_8),
+                                "application/json"),
+                        new InvalidResponse(
                                 "inconsistent page totals",
                                 callId ->
                                         userPage(callId, 1)
@@ -286,7 +293,7 @@ final class HttpAccessControlClientTest {
                                     json(
                                             exchange,
                                             302,
-                                            errorBody(callId(exchange), "unavailable", "x"));
+                                            errorBody(callId(exchange), "internal_error", "x"));
                                 });
                 HttpAccessControlClient client = client(server)) {
             assertEquals(
@@ -431,12 +438,7 @@ final class HttpAccessControlClientTest {
                         500,
                         "internal_error",
                         AccessControlException.Reason.UNAVAILABLE,
-                        "The dashboard access service failed."),
-                Arguments.of(
-                        503,
-                        "unavailable",
-                        AccessControlException.Reason.UNAVAILABLE,
-                        "The dashboard access service is unavailable."));
+                        "The dashboard access service failed."));
     }
 
     private static HttpAccessControlClient client(ControlServer server) {

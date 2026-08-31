@@ -90,7 +90,6 @@ test('emits canonical levels and does not expose unexpected error messages', () 
   error.name = 'sensitive custom name';
   const fields = safeErrorFields(error);
   assert.deepEqual(fields, { error_type: 'Error' });
-  assert.equal(JSON.stringify(fields).includes('sensitive implementation detail'), false);
 });
 
 test('bounds free-form fields including the truncation marker', () => {

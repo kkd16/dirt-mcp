@@ -16,7 +16,6 @@ val paperVersion = providers.gradleProperty("paperVersion").get()
 val paperApiVersion = providers.gradleProperty("paperApiVersion").get()
 val faweVersion = providers.gradleProperty("faweVersion").get()
 val faweModrinthVersionId = providers.gradleProperty("faweModrinthVersionId").get()
-val devServerPort = providers.environmentVariable("DIRT_DEV_PORT").orElse("25566")
 
 group = "ca.deliyannides.dirtmcp"
 version = projectVersion
@@ -119,7 +118,7 @@ tasks {
                 }
                 limit {
                     counter = "BRANCH"
-                    minimum = "0.58".toBigDecimal()
+                    minimum = "0.60".toBigDecimal()
                 }
             }
         }
@@ -146,7 +145,7 @@ tasks {
         downloadPlugins {
             modrinth("z4HZZnLr", faweModrinthVersionId)
         }
-        args("--host", "0.0.0.0", "--port", devServerPort.get())
+        args("--host", "0.0.0.0", "--port", "25566")
         jvmArgs("-Djava.net.preferIPv4Stack=true")
 
         if (providers

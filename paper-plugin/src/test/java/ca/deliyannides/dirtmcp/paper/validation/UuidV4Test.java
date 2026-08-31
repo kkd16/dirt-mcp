@@ -35,13 +35,12 @@ final class UuidV4Test {
     }
 
     @Test
-    void validatesUuidObjects() {
+    void requiresVersionFourUuidObjects() {
         assertEquals(VALID, UuidV4.require(VALID, "id"));
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
                         UuidV4.require(
                                 UUID.fromString("123e4567-e89b-12d3-a456-426614174000"), "id"));
-        assertThrows(NullPointerException.class, () -> UuidV4.require(null, "id"));
     }
 }

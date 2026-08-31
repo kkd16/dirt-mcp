@@ -485,12 +485,6 @@ public final class HttpAccessControlClient implements AccessControl {
                             "internal_error",
                             AccessControlException.Reason.UNAVAILABLE,
                             "The dashboard access service failed.");
-            case 503 ->
-                    requireErrorCode(
-                            code,
-                            "unavailable",
-                            AccessControlException.Reason.UNAVAILABLE,
-                            "The dashboard access service is unavailable.");
             default -> throw protocolFailure();
         };
     }
@@ -504,13 +498,14 @@ public final class HttpAccessControlClient implements AccessControl {
     }
 
     private static UUID verifiedCallId(JsonObject body, UUID expected) {
+        String encoded = string(body, "callId", 36);
         UUID callId;
         try {
-            callId = UuidV4.parseCanonical(string(body, "callId", 36), "callId");
+            callId = UuidV4.parseCanonical(encoded, "callId");
         } catch (IllegalArgumentException exception) {
             throw protocolFailure(exception);
         }
-        if (!expected.equals(callId)) {
+        if (!callId.toString().equals(encoded) || !expected.equals(callId)) {
             throw protocolFailure();
         }
         return callId;

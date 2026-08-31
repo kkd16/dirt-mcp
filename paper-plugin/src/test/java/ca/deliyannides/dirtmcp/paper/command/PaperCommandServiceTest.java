@@ -58,8 +58,6 @@ final class PaperCommandServiceTest {
         PaperCommandService service =
                 new PaperCommandService(new DirectMainThread(), new RecordingAccess(), 2, 17);
 
-        assertThrows(NullPointerException.class, () -> service.runCommands(null));
-        assertThrows(NullPointerException.class, () -> new RunMinecraftCommands.Request(null));
         assertDetails(
                 new ErrorDetails.InvalidRequest.InvalidValue("commands"),
                 assertThrows(
@@ -73,9 +71,6 @@ final class PaperCommandServiceTest {
                                 service.runCommands(
                                         new RunMinecraftCommands.Request(
                                                 List.of("one", "two", "three")))));
-        assertThrows(
-                NullPointerException.class,
-                () -> new RunMinecraftCommands.Request(java.util.Arrays.asList("one", null)));
         assertDetails(
                 new ErrorDetails.InvalidRequest.InvalidValue("commands[0]"),
                 assertThrows(

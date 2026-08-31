@@ -137,6 +137,22 @@ test('reports invalid secret files at the correct trust boundary', () => {
   }
 });
 
+test('rejects invalid control, authentication, database, and port settings', () => {
+  for (const [override, code] of [
+    [{ DIRT_CONTROL_TOKEN: undefined }, 'control_token_required'],
+    [{ DIRT_CONTROL_TOKEN: 'a'.repeat(63) }, 'control_token_invalid'],
+    [{ DIRT_AUTH_SECRET: undefined }, 'auth_secret_required'],
+    [{ DIRT_AUTH_SECRET: 'a'.repeat(31) }, 'auth_secret_invalid'],
+    [{ DIRT_DATABASE_PATH: '' }, 'database_path_required'],
+    [{ DIRT_WEB_PORT: '65536' }, 'web_port_invalid'],
+  ] as const) {
+    assert.throws(
+      () => readRuntimeConfig({ ...BASE_ENVIRONMENT, ...override }),
+      (error) => error instanceof RuntimeConfigurationError && error.code === code,
+    );
+  }
+});
+
 test('public origin is a WebAuthn-compatible domain origin', () => {
   for (const publicOrigin of [
     'https://dirt.example',

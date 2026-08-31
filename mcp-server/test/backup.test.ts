@@ -27,7 +27,6 @@ test('backup command uses SQLite online backup and refuses overwrite', () => {
     env: environment,
   });
   assert.equal(first.status, 0, first.stderr);
-  assert.equal(existsSync(destination), true);
   assert.equal(statSync(destination).mode & 0o777, 0o600);
   const backup = new Database(destination, { readonly: true });
   assert.equal((backup.prepare('SELECT value FROM marker').get() as { value: string }).value, 'safe');

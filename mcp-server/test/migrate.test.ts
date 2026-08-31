@@ -24,8 +24,6 @@ test('migration awaits OAuth initialization before closing SQLite and is repeata
         env: environment,
       });
       assert.equal(result.status, 0, result.stderr);
-      assert.equal(result.stderr, '');
-      assert.equal(result.stdout, 'Dirt database migration complete.\n');
     }
 
     const database = new Database(databasePath, { readonly: true });

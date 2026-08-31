@@ -38,8 +38,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalError'
-        '503':
-          $ref: '#/components/responses/Unavailable'
   /internal/v1/access/invitations:
     parameters:
       - $ref: '#/components/parameters/DirtCallId'
@@ -63,8 +61,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalError'
-        '503':
-          $ref: '#/components/responses/Unavailable'
     post:
       operationId: createAccessInvitation
       summary: Create an invitation and return its secret URL once
@@ -91,8 +87,6 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
-        '503':
-          $ref: '#/components/responses/Unavailable'
   /internal/v1/access/invitations/{id}/revoke:
     parameters:
       - $ref: '#/components/parameters/DirtCallId'
@@ -125,8 +119,6 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
-        '503':
-          $ref: '#/components/responses/Unavailable'
   /internal/v1/access/users/{handle}/disable:
     parameters:
       - $ref: '#/components/parameters/DirtCallId'
@@ -155,8 +147,6 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
-        '503':
-          $ref: '#/components/responses/Unavailable'
   /internal/v1/access/users/{handle}/enable:
     parameters:
       - $ref: '#/components/parameters/DirtCallId'
@@ -185,8 +175,6 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
-        '503':
-          $ref: '#/components/responses/Unavailable'
   /internal/v1/access/users/{handle}/recovery:
     parameters:
       - $ref: '#/components/parameters/DirtCallId'
@@ -219,8 +207,6 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
-        '503':
-          $ref: '#/components/responses/Unavailable'
   /internal/v1/access/users/{handle}/unlink:
     parameters:
       - $ref: '#/components/parameters/DirtCallId'
@@ -249,8 +235,6 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
-        '503':
-          $ref: '#/components/responses/Unavailable'
   /internal/v1/access/minecraft-links/challenges:
     parameters:
       - $ref: '#/components/parameters/DirtCallId'
@@ -280,8 +264,6 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
-        '503':
-          $ref: '#/components/responses/Unavailable'
 components:
   securitySchemes:
     bearerAuth:
@@ -360,12 +342,6 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
     InternalError:
       description: Unexpected web-service failure
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
-    Unavailable:
-      description: Access-control storage or service is unavailable
       content:
         application/json:
           schema:
@@ -633,7 +609,6 @@ components:
         - unauthorized
         - not_found
         - conflict
-        - unavailable
         - internal_error
     ControlError:
       type: object

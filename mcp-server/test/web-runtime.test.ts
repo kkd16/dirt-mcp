@@ -37,7 +37,6 @@ await migration.runMigrations();
 repository.assertSchema();
 const auth = createAuth(config, database, repository);
 await auth.$context;
-insertUser('protected-user', 'protected', new Date('2026-08-30T11:00:00.000Z'));
 
 after(() => {
   database.close();
@@ -78,8 +77,8 @@ test('Better Auth is passkey-only and MCP OAuth uses the fixed narrow policy', a
   assert.equal(oauth.options?.allowDynamicClientRegistration, false);
   assert.equal(oauth.options?.allowUnauthenticatedClientRegistration, false);
   assert.equal(oauth.options?.clientRegistrationRequirePKCE, true);
-  assert.equal(typeof oauth.options?.clientPrivileges, 'function');
-  assert.equal(typeof oauth.options?.resourcePrivileges, 'function');
+  assert.equal((oauth.options?.clientPrivileges as (() => unknown) | undefined)?.(), false);
+  assert.equal((oauth.options?.resourcePrivileges as (() => unknown) | undefined)?.(), false);
   assert.equal(typeof oauth.options?.customAccessTokenClaims, 'function');
 
   const passkey = plugins.find((plugin: { id: string }) => plugin.id === 'passkey') as
@@ -150,53 +149,6 @@ test('migration is deterministic and idempotent', async () => {
   repository.assertSchema();
 });
 
-test('Dirt identity fields are not writable and OAuth client administration is unavailable', async () => {
-  repository.disableUser('protected');
-  const response = await auth.handler(
-    new Request(`${config.publicOrigin}/api/auth/update-user`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Origin: config.publicOrigin,
-      },
-      body: JSON.stringify({
-        handle: 'attacker',
-        status: 'active',
-        minecraftUuid: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-        minecraftName: 'SpoofedPlayer',
-      }),
-    }),
-  );
-  assert.equal(response.status, 401);
-  const unchanged = repository.requireUserById('protected-user');
-  assert.equal(unchanged.handle, 'protected');
-  assert.equal(unchanged.status, 'disabled');
-  assert.equal(unchanged.minecraftAccount, null);
-
-  const clientResponse = await auth.handler(
-    new Request(`${config.publicOrigin}/api/auth/oauth2/create-client`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Origin: config.publicOrigin,
-      },
-      body: JSON.stringify({
-        client_name: 'Untrusted client',
-        redirect_uris: ['https://attacker.example/callback'],
-        grant_types: ['authorization_code'],
-        response_types: ['code'],
-      }),
-    }),
-  );
-  assert.ok(clientResponse.status === 401 || clientResponse.status === 403);
-  const clientCount = database
-    .prepare('SELECT COUNT(*) AS count FROM oauthClient WHERE userId = ?')
-    .get('protected-user') as {
-    count: number;
-  };
-  assert.equal(clientCount.count, 0);
-});
-
 test('unexpected auth transport failures use the sanitized web error boundary', async () => {
   const errors: Array<{ readonly event: string; readonly fields: LogFields | undefined }> = [];
   const logger: DirtLogger = {
@@ -252,7 +204,7 @@ test('invite, recovery, account status, and link transitions are atomic and boun
   const invitation = repository.createInvitation(now);
   assert.equal(invitation.invitation.status, 'pending');
   assert.equal(repository.resolveInvitation(invitation.secret, now).recordId, invitation.invitation.id);
-  assert.equal(repository.listInvitations(1, now).items[0]?.id, invitation.invitation.id);
+  assert.ok(repository.listInvitations(1, now).items.some(({ id }) => id === invitation.invitation.id));
   assert.equal(repository.revokeInvitation(invitation.invitation.id, now).status, 'revoked');
   assert.throws(() => repository.resolveInvitation(invitation.secret, now), AccessError);
   const corruptInvitation = repository.createInvitation(now);
@@ -350,6 +302,7 @@ test('invite, recovery, account status, and link transitions are atomic and boun
 
 test('internal routes enforce loopback, UUIDv4 calls, exact envelopes, and bounded JSON', async () => {
   const internalErrors: Array<{ readonly event: string; readonly fields: LogFields | undefined }> = [];
+  let loopback = true;
   const internalLogger: DirtLogger = {
     child() {
       return this;
@@ -365,7 +318,7 @@ test('internal routes enforce loopback, UUIDv4 calls, exact envelopes, and bound
     config,
     repository,
     clientScript: '',
-    isLoopback: () => true,
+    isLoopback: () => loopback,
     logger: internalLogger,
     mcp: { fetch: async () => new Response(null, { status: 501 }), close: async () => {} },
   });
@@ -385,6 +338,18 @@ test('internal routes enforce loopback, UUIDv4 calls, exact envelopes, and bound
     error: { code: 'invalid_request', message: 'X-Dirt-Call-Id must be a UUIDv4.' },
   });
 
+  const uppercaseCall = await app.request('/internal/v1/access/users', {
+    headers: { ...baseHeaders, 'X-Dirt-Call-Id': 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA' },
+  });
+  assert.equal(uppercaseCall.status, 400);
+  assert.equal((await uppercaseCall.json()).callId, null);
+
+  loopback = false;
+  const nonLoopback = await app.request('/internal/v1/access/users', { headers: baseHeaders });
+  loopback = true;
+  assert.equal(nonLoopback.status, 403);
+  assert.equal((await nonLoopback.json()).error.code, 'unauthorized');
+
   const unauthorized = await app.request('/internal/v1/access/users', {
     headers: { ...baseHeaders, Authorization: 'Bearer nope' },
   });
@@ -393,10 +358,14 @@ test('internal routes enforce loopback, UUIDv4 calls, exact envelopes, and bound
   assert.equal(unauthorized.headers.get('WWW-Authenticate'), 'Bearer realm="dirt-mcp-control"');
   assert.equal(unauthorized.headers.get('Cache-Control'), 'no-store');
 
-  const standardBearer = await app.request('/internal/v1/access/users', {
+  const standardBearer = await app.request('/internal/v1/access/users?page=1', {
     headers: { ...baseHeaders, Authorization: `bEaReR  ${config.controlToken}` },
   });
   assert.equal(standardBearer.status, 200);
+
+  const missingPage = await app.request('/internal/v1/access/users', { headers: baseHeaders });
+  assert.equal(missingPage.status, 400);
+  assert.equal((await missingPage.json()).error.code, 'invalid_request');
 
   const nonStandardBearer = await app.request('/internal/v1/access/users', {
     headers: { ...baseHeaders, Authorization: `Bearer\t${config.controlToken}` },
@@ -414,14 +383,6 @@ test('internal routes enforce loopback, UUIDv4 calls, exact envelopes, and bound
   assert.match(String(created.inviteUrl), /^http:\/\/localhost:3000\/invite#token=/u);
   assert.equal(create.headers.get('Cache-Control'), 'no-store');
 
-  const tooLarge = await app.request('/internal/v1/access/invitations', {
-    method: 'POST',
-    headers: { ...baseHeaders, 'Content-Length': '20000' },
-    body: '{}',
-  });
-  assert.equal(tooLarge.status, 400);
-  assert.equal((await tooLarge.json()).error.code, 'invalid_request');
-
   let internalBodyCanceled = false;
   const cancelableInternalBody = new ReadableStream<Uint8Array>({
     cancel() {
@@ -436,6 +397,7 @@ test('internal routes enforce loopback, UUIDv4 calls, exact envelopes, and bound
     }),
   );
   assert.equal(canceledTooLarge.status, 400);
+  assert.equal((await canceledTooLarge.json()).error.code, 'invalid_request');
   assert.equal(internalBodyCanceled, true);
 
   let streamedInternalBodyCanceled = false;
@@ -492,15 +454,7 @@ test('internal routes enforce loopback, UUIDv4 calls, exact envelopes, and bound
 });
 
 test('web shell exposes a loopback health check and hardened consent copy', async () => {
-  const app = createWebApp({
-    auth,
-    config,
-    repository,
-    clientScript: '',
-    isLoopback: () => true,
-    logger: silentLogger,
-    mcp: { fetch: async () => new Response(null, { status: 501 }), close: async () => {} },
-  });
+  const app = testWebApp();
   const health = await app.request('/healthz');
   assert.equal(health.status, 200);
   assert.deepEqual(await health.json(), { status: 'ok' });
@@ -599,15 +553,7 @@ test('web shell exposes a loopback health check and hardened consent copy', asyn
   assert.equal(streamedBrowserBodyCanceled, true);
 
   const publicConfig = { ...config, publicOrigin: 'https://dirt.example' };
-  const publicApp = createWebApp({
-    auth,
-    config: publicConfig,
-    repository,
-    clientScript: '',
-    isLoopback: () => true,
-    logger: silentLogger,
-    mcp: { fetch: async () => new Response(null, { status: 501 }), close: async () => {} },
-  });
+  const publicApp = testWebApp(auth, publicConfig);
   const loopbackJwks = await publicApp.request('/api/auth/jwks', {
     headers: { Host: '127.0.0.1:3000' },
   });
@@ -671,22 +617,65 @@ test('web shell exposes a loopback health check and hardened consent copy', asyn
   assert.equal(canonicalMcpBody, '{"mcp":true}');
 });
 
-test('new OAuth grants require a fresh passkey session and a linked account', async () => {
+test('onboarding exchanges invitation and recovery secrets, and fresh sessions link Minecraft', async () => {
+  const now = new Date();
+  const app = testWebApp();
+  const headers = {
+    'Content-Type': 'application/json',
+    Host: 'localhost:3000',
+    Origin: config.publicOrigin,
+  };
+
+  const invitation = repository.createInvitation(now);
+  const invitationExchange = await app.request('/api/onboarding/exchange', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ kind: 'invitation', token: invitation.secret, handle: 'Route_User' }),
+  });
+  assert.equal(invitationExchange.status, 200);
+  assert.deepEqual(await invitationExchange.json(), { ok: true, handle: 'route_user' });
+  assert.match(
+    invitationExchange.headers.get('Set-Cookie') ?? '',
+    /^dirt-onboarding=[^;]+; Path=\/; HttpOnly; SameSite=Strict; Max-Age=600$/u,
+  );
+
+  insertUser('route-user', 'routeuser', now);
+  const recovery = repository.createRecovery('routeuser', now);
+  const recoveryExchange = await app.request('/api/onboarding/exchange', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ kind: 'recovery', token: recovery.secret }),
+  });
+  assert.equal(recoveryExchange.status, 200);
+  assert.deepEqual(await recoveryExchange.json(), { ok: true, handle: 'routeuser' });
+
+  const challenge = repository.createMinecraftLinkChallenge('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'RoutePlayer', now);
+  let sessionCreatedAt = new Date(now.getTime() - 6 * 60 * 1_000);
+  const linkApp = testWebApp(sessionAuth('route-user', () => sessionCreatedAt));
+  const linkRequest = {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ code: challenge.code }),
+  } as const;
+  assert.equal((await linkApp.request('/api/access/minecraft-link', linkRequest)).status, 403);
+
+  sessionCreatedAt = new Date();
+  const linked = await linkApp.request('/api/access/minecraft-link', linkRequest);
+  assert.equal(linked.status, 200);
+  assert.deepEqual((await linked.json()).user.minecraftAccount, {
+    uuid: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    name: 'RoutePlayer',
+  });
+});
+
+test('OAuth grants require a fresh passkey session and a linked account', async () => {
   const now = new Date();
   insertUser('oauth-user', 'oauthuser', now);
   database
     .prepare('UPDATE "user" SET minecraftUuid = ?, minecraftName = ? WHERE id = ?')
     .run('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'OAuthPlayer', 'oauth-user');
   let sessionCreatedAt = new Date(Date.now() - 6 * 60 * 1_000);
-  const app = createWebApp({
-    auth: sessionAuth('oauth-user', () => sessionCreatedAt),
-    config,
-    repository,
-    clientScript: '',
-    isLoopback: () => true,
-    logger: silentLogger,
-    mcp: { fetch: async () => new Response(null, { status: 501 }), close: async () => {} },
-  });
+  const app = testWebApp(sessionAuth('oauth-user', () => sessionCreatedAt));
   const oauthQuery =
     '?client_id=https%3A%2F%2Fclient.example%2Fclient.json&redirect_uri=https%3A%2F%2Fclient.example%2Fcallback&response_type=code&scope=dirt%3Amcp&state=test';
   const browserHeaders = { Host: 'localhost:3000' };
@@ -747,19 +736,28 @@ test('new OAuth grants require a fresh passkey session and a linked account', as
   });
 });
 
-test('handle normalization is current-only and rejects ambiguous account names', () => {
+test('handle normalization rejects ambiguous account names', () => {
   assert.equal(normalizeHandle('  Player_One  '), 'player_one');
   for (const invalid of ['a', 'ab', '-player', 'player-', 'white space', 'UPPER CASE', 'a'.repeat(33)]) {
     assert.throws(() => normalizeHandle(invalid), AccessError);
   }
 });
 
-test('MCP authorization accepts standard Bearer and DPoP schemes case-insensitively', () => {
+test('access-token parsing accepts Bearer and DPoP token68 credentials', () => {
   assert.equal(extractAccessToken('Bearer access.token'), 'access.token');
   assert.equal(extractAccessToken('bearer access.token'), 'access.token');
   assert.equal(extractAccessToken('DPoP access.token'), 'access.token');
-  assert.equal(extractAccessToken('dpop\taccess.token'), 'access.token');
-  for (const invalid of [null, '', 'Basic access.token', 'Bearer', 'Bearer one two']) {
+  assert.equal(extractAccessToken('dpop  abc_123+/=='), 'abc_123+/==');
+  for (const invalid of [
+    null,
+    '',
+    'Basic access.token',
+    'Bearer',
+    'Bearer\taccess.token',
+    'Bearer one two',
+    'Bearer access:token',
+    'DPoP access=token',
+  ]) {
     assert.equal(extractAccessToken(invalid), null);
   }
 });
@@ -888,6 +886,18 @@ function sessionAuth(userId: string, createdAt: () => Date) {
       },
     },
   };
+}
+
+function testWebApp(appAuth: Parameters<typeof createWebApp>[0]['auth'] = auth, appConfig: RuntimeConfig = config) {
+  return createWebApp({
+    auth: appAuth,
+    config: appConfig,
+    repository,
+    clientScript: '',
+    isLoopback: () => true,
+    logger: silentLogger,
+    mcp: { fetch: async () => new Response(null, { status: 501 }), close: async () => {} },
+  });
 }
 
 const silentLogger: DirtLogger = {

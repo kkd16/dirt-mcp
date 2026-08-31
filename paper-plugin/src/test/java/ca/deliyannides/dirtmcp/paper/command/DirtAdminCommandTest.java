@@ -82,7 +82,7 @@ final class DirtAdminCommandTest {
     }
 
     @Test
-    void diagnosticsRemainAvailableThroughTheNewAdminPermission() throws Exception {
+    void administratorsCanInspectDiagnostics() throws Exception {
         AtomicReference<GetServerStatus.Request> captured = new AtomicReference<>();
         GetServerStatus delegate = status();
         CommandFixture fixture =
@@ -257,12 +257,11 @@ final class DirtAdminCommandTest {
     }
 
     @Test
-    void pluginMetadataDeclaresOnlyTheHardCutPermissions() {
+    void pluginMetadataDeclaresAccessPermissions() {
         YamlConfiguration metadata = pluginMetadata();
 
         assertTrue(metadata.contains("permissions." + DirtAdminCommand.ADMIN_PERMISSION));
         assertTrue(metadata.contains("permissions." + DirtAdminCommand.LINK_PERMISSION));
-        assertFalse(metadata.contains("permissions.dirtmcp.command"));
         assertEquals(
                 "op",
                 metadata.getString(

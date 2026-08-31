@@ -118,7 +118,7 @@ document.querySelector<HTMLFormElement>('[data-consent]')?.addEventListener('sub
       body: JSON.stringify({ accept, oauth_query: location.search.slice(1) }),
     });
     const body = await responseObject(response);
-    const redirect = optionalString(body, 'redirect_uri') ?? optionalString(body, 'url');
+    const redirect = body.redirect === true ? optionalString(body, 'url') : undefined;
     if (!response.ok || redirect === undefined) {
       return report(optionalString(body, 'error') ?? 'Authorization failed.');
     }

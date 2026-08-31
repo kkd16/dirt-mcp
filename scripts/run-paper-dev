@@ -8,8 +8,8 @@ managed_config_dir="${repo_root}/paper-plugin/run/plugins/DirtMCP"
 managed_fawe_config_dir="${repo_root}/paper-plugin/run/plugins/FastAsyncWorldEdit"
 managed_paper_config_dir="${repo_root}/paper-plugin/run/config"
 
-if [[ $# -ne 2 ]]; then
-  printf 'Usage: %s MC_PORT BRIDGE_PORT\n' "$0" >&2
+if [[ $# -ne 0 ]]; then
+  printf 'Usage: %s\n' "$0" >&2
   exit 2
 fi
 DIRT_BRIDGE_TOKEN=''
@@ -30,8 +30,7 @@ if [[ ! "${DIRT_CONTROL_TOKEN}" =~ ^[0-9a-f]{64}$ ]]; then
 fi
 
 export PAPER_EULA=true
-export DIRT_DEV_PORT="$1"
-export DIRT_BRIDGE_PORT="$2"
+export DIRT_BRIDGE_PORT=8765
 export DIRT_BRIDGE_TOKEN
 export DIRT_CONTROL_TOKEN
 

@@ -73,7 +73,7 @@ test('executeToolCall returns successes and records bounded call metadata', asyn
       failureContext: 'Could not get blocks',
     },
     async (callId) => {
-      assert.match(callId, /^[0-9a-f-]{36}$/u);
+      assert.match(callId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
       return successResult({ value: 'ok' }, 'Done.');
     },
   );
@@ -87,7 +87,6 @@ test('executeToolCall returns successes and records bounded call metadata', asyn
     entries[0]?.context.client_id_fingerprint,
     '4bc931e7b27f79e68a407ebb5401a4e3c96bea72e5906be22e9f5ee600500acf',
   );
-  assert.equal(entries[0]?.context.request_id, undefined);
   assert.doesNotMatch(JSON.stringify(entries[0]?.context), /secret=hidden/u);
   assert.equal(entries[0]?.context.world, 'world');
   assert.equal(entries[0]?.fields?.success, true);

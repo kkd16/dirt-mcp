@@ -12,7 +12,7 @@ const linkChallengeSchema = z
     minecraftName: z.string().trim().min(1).max(16),
   })
   .strict();
-const CALL_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const CALL_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 interface InternalRouteDependencies {
   readonly config: RuntimeConfig;
@@ -122,7 +122,7 @@ function validBearer(header: string | undefined, token: string): boolean {
 }
 
 function parsePage(raw: string | undefined): number {
-  if (raw === undefined) return 1;
+  if (raw === undefined) throw new AccessError('invalid', 'page is required.');
   if (!/^[1-9]\d{0,8}$/u.test(raw)) throw new AccessError('invalid', 'page must be a positive integer.');
   return Number(raw);
 }

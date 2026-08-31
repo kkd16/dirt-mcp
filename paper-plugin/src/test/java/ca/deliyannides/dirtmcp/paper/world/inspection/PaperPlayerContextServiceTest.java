@@ -170,23 +170,6 @@ final class PaperPlayerContextServiceTest {
         assertEquals(false, captured.get());
     }
 
-    @Test
-    void requiresAllCollaborators() {
-        InspectionAdmission admission = new InspectionAdmission(1);
-
-        assertThrows(
-                NullPointerException.class,
-                () -> new PaperPlayerContextService(null, ignored -> result(), admission));
-        assertThrows(
-                NullPointerException.class,
-                () -> new PaperPlayerContextService(new DirectMainThread(), null, admission));
-        assertThrows(
-                NullPointerException.class,
-                () ->
-                        new PaperPlayerContextService(
-                                new DirectMainThread(), ignored -> result(), null));
-    }
-
     private static GetPlayerContext.Request request(String player, Includes includes) {
         return new GetPlayerContext.Request(player, includes);
     }

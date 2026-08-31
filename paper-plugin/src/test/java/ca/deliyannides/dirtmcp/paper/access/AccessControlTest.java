@@ -59,9 +59,6 @@ final class AccessControlTest {
                 IllegalArgumentException.class,
                 () -> new AccessControl.UserPage(CALL_ID, 1, 1, 2, 2, List.of(user(), user())));
         assertThrows(
-                NullPointerException.class,
-                () -> new AccessControl.UserPage(null, 1, 20, 0, 0, List.of()));
-        assertThrows(
                 IllegalArgumentException.class,
                 () ->
                         new AccessControl.UserSummary(

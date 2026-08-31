@@ -11,14 +11,7 @@ const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 const runDirectory = `${repositoryRoot}/paper-plugin/run`;
 const detailLogDirectory = `${runDirectory}/plugins/DirtMCP/logs`;
 const token = (await readFile(`${runDirectory}/.dirt-bridge-token`, 'utf8')).trim();
-const runtimeState = Object.fromEntries(
-  (await readFile(`${runDirectory}/.dirt-mcp-dev-state`, 'utf8'))
-    .trim()
-    .split('\n')
-    .map((line) => line.split('=', 2)),
-);
-const bridgePort = Number(runtimeState.BRIDGE_PORT);
-assert.ok(Number.isInteger(bridgePort) && bridgePort > 0 && bridgePort <= 65_535, 'Invalid bridge port');
+const bridgePort = 8_765;
 
 const world = 'world';
 const min = { x: 0, y: 0, z: 0 };
@@ -42,7 +35,6 @@ const editIdsToUndo = [];
 const observedEditIds = new Set();
 const mutationCallIds = new Set();
 const editMutationPaths = new Set(['/v1/replace-region-blocks', '/v1/set-blocks']);
-const commandPaths = new Set(['/v1/run-minecraft-commands']);
 const inspectionPaths = new Set([
   '/v1/count-region-block-states',
   '/v1/get-player-context',
@@ -108,7 +100,7 @@ function materializeBridgeRequest(path, body) {
 
 function bridgeTimeoutMilliseconds(path) {
   if (editMutationPaths.has(path) || path === '/v1/undo-edits') return 300_000;
-  if (commandPaths.has(path)) return 120_000;
+  if (path === '/v1/run-minecraft-commands') return 120_000;
   return inspectionPaths.has(path) ? 30_000 : 3_000;
 }
 

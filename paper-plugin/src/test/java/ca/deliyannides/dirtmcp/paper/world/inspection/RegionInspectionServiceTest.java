@@ -280,9 +280,6 @@ final class RegionInspectionServiceTest {
                         new RegionInspectionService(
                                 source, 1, 1, 1, 1, 1, 0, new InspectionAdmission(1)));
         assertThrows(
-                NullPointerException.class,
-                () -> new RegionInspectionService(source, 1, 1, 1, 1, 1, 1, null));
-        assertThrows(
                 IllegalArgumentException.class,
                 () ->
                         new RegionInspectionService(

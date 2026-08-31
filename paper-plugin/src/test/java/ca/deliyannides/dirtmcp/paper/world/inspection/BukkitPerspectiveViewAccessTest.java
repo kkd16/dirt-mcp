@@ -1,5 +1,7 @@
 package ca.deliyannides.dirtmcp.paper.world.inspection;
 
+import static ca.deliyannides.dirtmcp.paper.world.inspection.TestProxies.defaultValue;
+import static ca.deliyannides.dirtmcp.paper.world.inspection.TestProxies.proxy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -15,9 +17,6 @@ import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.PlayerS
 import ca.deliyannides.dirtmcp.paper.world.inspection.GetPerspectiveView.ViewRequest;
 import ca.deliyannides.dirtmcp.paper.world.model.ExactPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Rotation;
-import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -108,7 +107,7 @@ final class BukkitPerspectiveViewAccessTest {
     void rejectsSpectatorTargetsAndUnloadedSyntheticChunksBeforeTracing() {
         AtomicInteger playerRayCalls = new AtomicInteger();
         World loadedWorld = world(null, playerRayCalls, true);
-        Entity target = proxy(Entity.class, BukkitPerspectiveViewAccessTest::defaultValue);
+        Entity target = proxy(Entity.class, (ignored, method, arguments) -> defaultValue(method));
         PaperPerspectiveViewService playerService =
                 service(server(player(loadedWorld, target), loadedWorld));
 
@@ -249,50 +248,5 @@ final class BukkitPerspectiveViewAccessTest {
                             case "getWorld" -> world;
                             default -> defaultValue(method);
                         });
-    }
-
-    @SuppressWarnings("unchecked")
-    private static <T> T proxy(Class<T> type, InvocationHandler handler) {
-        return (T)
-                Proxy.newProxyInstance(
-                        type.getClassLoader(), new Class<?>[] {type}, objectMethods(handler));
-    }
-
-    private static InvocationHandler objectMethods(InvocationHandler delegate) {
-        return (proxy, method, arguments) ->
-                switch (method.getName()) {
-                    case "toString" ->
-                            proxy.getClass().getInterfaces()[0].getSimpleName() + "Proxy";
-                    case "hashCode" -> System.identityHashCode(proxy);
-                    case "equals" -> proxy == arguments[0];
-                    default -> delegate.invoke(proxy, method, arguments);
-                };
-    }
-
-    private static Object defaultValue(Object proxy, Method method, Object[] arguments) {
-        return defaultValue(method);
-    }
-
-    private static Object defaultValue(Method method) {
-        Class<?> type = method.getReturnType();
-        if (!type.isPrimitive()) {
-            return null;
-        }
-        if (type == boolean.class) {
-            return false;
-        }
-        if (type == char.class) {
-            return '\0';
-        }
-        if (type == float.class) {
-            return 0F;
-        }
-        if (type == double.class) {
-            return 0D;
-        }
-        if (type == long.class) {
-            return 0L;
-        }
-        return 0;
     }
 }

@@ -41,7 +41,7 @@ const edit = {
   status: 'committed',
 } as const;
 
-test('capability snapshots map one-to-one to the stable MCP tool catalog', () => {
+test('capability snapshots map one-to-one to the MCP tool catalog', () => {
   const none = toolConfigurationFromCapabilities({ operations: [] });
   assert.deepEqual(Object.keys(none), Object.keys(MCP_TOOL_OPERATIONS));
   assert.equal(
@@ -55,7 +55,7 @@ test('capability snapshots map one-to-one to the stable MCP tool catalog', () =>
   assert.equal(selected.get_blocks, false);
 });
 
-test('status input and output use the hard-cut projected contract', () => {
+test('status schemas validate defaults, ordering, limits, and requested sections', () => {
   const input = GetServerStatusInputSchema.parse({});
   assert.deepEqual(input, { include: { players: false, worlds: true, configuration: false } });
 
@@ -212,7 +212,7 @@ test('edit input schemas validate MCP arguments and materialize dryRun', () => {
   );
 });
 
-test('edit responses are structural and follow the new response projection', () => {
+test('edit response schemas enforce outcome-specific invariants', () => {
   assert.equal(EditRecordSchema.safeParse(edit).success, true);
   const replace = {
     world: 'world',
@@ -224,7 +224,6 @@ test('edit responses are structural and follow the new response projection', () 
     changedBlockCount: 2,
   };
   assert.equal(ReplaceRegionBlocksOutputSchema.safeParse(replace).success, true);
-  assert.equal(ReplaceRegionBlocksOutputSchema.safeParse({ ...replace, destinationPalette: [] }).success, false);
   assert.equal(ReplaceRegionBlocksOutputSchema.safeParse({ ...replace, matchedBlockCount: 0 }).success, false);
 
   const set = {
@@ -238,7 +237,6 @@ test('edit responses are structural and follow the new response projection', () 
     unchangedBlockCount: 0,
   };
   assert.equal(SetBlocksOutputSchema.safeParse(set).success, true);
-  assert.equal(SetBlocksOutputSchema.safeParse({ ...set, palettes: [] }).success, false);
   assert.equal(SetBlocksOutputSchema.safeParse({ ...set, bounds: null }).success, false);
   assert.equal(SetBlocksOutputSchema.safeParse({ ...set, blockCount: 0 }).success, false);
   assert.equal(

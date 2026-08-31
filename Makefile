@@ -2,19 +2,16 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 .DEFAULT_GOAL := help
 
-MC_PORT ?= 25566
-BRIDGE_PORT ?= 8765
 DEV_BRIDGE_TOKEN_FILE := paper-plugin/run/.dirt-bridge-token
 DEV_CONTROL_TOKEN_FILE := paper-plugin/run/.dirt-control-token
 DEV_AUTH_SECRET_FILE := paper-plugin/run/.dirt-auth-secret
 DEV_DATABASE_FILE := mcp-server/data/dirt.sqlite3
 DEV_PUBLIC_ORIGIN ?= http://localhost:3000
 
-.PHONY: help doctor install node-deps build build-java build-web dev-build paper-runtime check verify ci format dev-secrets web up reload down status logs console command smoke health clean
+.PHONY: help doctor install node-deps build build-java build-web check verify ci format dev-secrets web up reload down status logs console command smoke health clean
 
 help: ## Show the available development commands.
 	@awk 'BEGIN { FS = ":.*## "; printf "Dirt MCP development commands:\n\n" } /^[a-zA-Z_-]+:.*## / { printf "  %-14s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
-	@printf '\nNew managed-server ports: MC_PORT=%s BRIDGE_PORT=%s; existing and reloaded servers keep saved ports.\n' "$(MC_PORT)" "$(BRIDGE_PORT)"
 
 doctor: ## Verify the required Java, Node.js, pnpm, Gradle, curl, tmux, and lint tools.
 	@command -v java >/dev/null || { printf 'Java 25 is required.\n' >&2; exit 1; }
@@ -57,19 +54,12 @@ node-deps:
 
 build: build-java build-web ## Build the Paper plugin and web service.
 
-build-java: ## Compile and test the Paper plugin.
-	./gradlew build
+build-java: ## Compile the Paper plugin.
+	./gradlew :paper-plugin:jar
 	@scripts/validate-paper-jar
 
 build-web: node-deps ## Compile the dashboard and HTTP MCP service.
 	pnpm run build
-
-dev-build: node-deps paper-runtime ## Incrementally compile the Paper plugin and web service without tests.
-	pnpm run build
-
-paper-runtime:
-	./gradlew :paper-plugin:jar
-	@scripts/validate-paper-jar
 
 check: node-deps ## Run every offline build, test, lint, format, and validation gate.
 	./gradlew build
@@ -116,14 +106,14 @@ up: ## Start the managed Paper development server and wait until it is ready.
 	@if scripts/dev-paper status >/dev/null 2>&1; then \
 	  scripts/dev-paper status; \
 	else \
-	  $(MAKE) --no-print-directory paper-runtime; \
-	  scripts/dev-paper up "$(MC_PORT)" "$(BRIDGE_PORT)"; \
+	  $(MAKE) --no-print-directory build-java; \
+	  scripts/dev-paper up; \
 	fi
 
 reload: ## Rebuild and gracefully restart the managed development server.
 	@$(MAKE) --no-print-directory dev-secrets
-	@$(MAKE) --no-print-directory paper-runtime
-	@scripts/dev-paper restart "$(MC_PORT)" "$(BRIDGE_PORT)"
+	@$(MAKE) --no-print-directory build-java
+	@scripts/dev-paper restart
 
 down: ## Stop the managed development server cleanly.
 	@scripts/dev-paper down
@@ -144,8 +134,8 @@ command: ## Send one Paper console command with CMD='...'.
 
 smoke: ## Restart Paper and run the complete managed-server integration gate.
 	@$(MAKE) --no-print-directory dev-secrets
-	@$(MAKE) --no-print-directory paper-runtime
-	@scripts/dev-paper restart "$(MC_PORT)" "$(BRIDGE_PORT)"
+	@$(MAKE) --no-print-directory build-java
+	@scripts/dev-paper restart
 	@node scripts/smoke-managed-server.mjs || { \
 	  scripts/dev-paper logs 120 >&2; \
 	  exit 1; \

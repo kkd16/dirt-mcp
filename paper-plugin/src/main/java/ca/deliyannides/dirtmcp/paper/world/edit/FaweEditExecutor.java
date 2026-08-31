@@ -8,7 +8,6 @@ import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
 import ca.deliyannides.dirtmcp.paper.world.model.Cuboid;
 import com.sk89q.worldedit.EditSession;
-import com.sk89q.worldedit.MaxChangedBlocksException;
 import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.function.mask.BlockMask;
 import com.sk89q.worldedit.function.operation.ChangeSetExecutor;
@@ -18,6 +17,7 @@ import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldedit.regions.CuboidRegion;
 import com.sk89q.worldedit.util.SideEffect;
 import com.sk89q.worldedit.util.SideEffectSet;
+import com.sk89q.worldedit.world.block.BaseBlock;
 import com.sk89q.worldedit.world.block.BlockState;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -54,10 +54,12 @@ final class FaweEditExecutor {
         long expectedChanges = 0;
         long changes;
         StoredUndo undo = null;
+        List<PendingBlock> changedBlocks = dryRun ? List.of() : new ArrayList<>();
         try {
             try (session) {
                 BlockMask sourceMask = new BlockMask(session);
                 sourceMask.add(edit.sources().blockStates().toArray(BlockState[]::new));
+                Pattern destination = edit.palette().pattern();
                 for (BlockVector3 position : selection) {
                     requireNotInterrupted();
                     BlockState current = session.getBlock(position);
@@ -65,29 +67,28 @@ final class FaweEditExecutor {
                         continue;
                     }
                     matches++;
-                    if (!current.equals(
-                            edit.palette().pattern().applyBlock(position).toBlockState())) {
+                    BaseBlock replacement = destination.applyBlock(position);
+                    if (!current.equals(replacement.toBlockState())) {
                         expectedChanges++;
+                        enforceChangeLimit(expectedChanges, checkedMaxChangedBlocks);
+                        if (!dryRun) {
+                            changedBlocks.add(PendingBlock.snapshot(position, replacement));
+                        }
                     }
                 }
-                enforceChangeLimit(expectedChanges, checkedMaxChangedBlocks);
                 if (!dryRun && expectedChanges > 0) {
                     requireNotInterrupted();
                     admission.beforeMutation();
                     requireNotInterrupted();
-                    session.replaceBlocks(selection, sourceMask, edit.palette().pattern());
-                    requireNotInterrupted();
+                    applyChanges(session, changedBlocks);
                 }
             }
-            changes = dryRun ? expectedChanges : session.getChangeSet().longSize();
-            if (!dryRun && changes > 0) {
-                undo = retainedUndo(session, edit.chunks());
-                changes = undo.changedBlockCount();
+            if (dryRun) {
+                changes = expectedChanges;
+            } else {
+                undo = finalizedUndoOrNull(session, edit.chunks());
+                changes = undo == null ? 0 : undo.changedBlockCount();
             }
-        } catch (MaxChangedBlocksException exception) {
-            OperationException failure = changeLimit(checkedMaxChangedBlocks, exception);
-            rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, failure);
-            throw failure;
         } catch (OperationException | RuntimeException exception) {
             rollbackAfterFailure(edit.paperWorld(), session, edit.chunks(), dryRun, exception);
             throw exception;
@@ -109,8 +110,7 @@ final class FaweEditExecutor {
         var palettes = edit.preparedPalettes();
         List<ChunkPosition> chunks = geometry.chunks();
         EditSession session = newEditSession(world, !dryRun, checkedMaxChangedBlocks);
-        List<SetBlockGeometry.ResolvedPlacement> changedPlacements = new ArrayList<>();
-        List<SetBlockGeometry.ResolvedRun> changedRuns = new ArrayList<>();
+        List<PendingBlock> changedBlocks = dryRun ? List.of() : new ArrayList<>();
         long expectedChanges = 0;
         long changes;
         StoredUndo undo = null;
@@ -120,56 +120,42 @@ final class FaweEditExecutor {
                     requireNotInterrupted();
                     BlockVector3 position = vector(placement.position());
                     Pattern pattern = palettes.get(placement.paletteIndex()).pattern();
-                    if (!session.getBlock(position)
-                            .equals(pattern.applyBlock(position).toBlockState())) {
-                        changedPlacements.add(placement);
+                    BaseBlock replacement = pattern.applyBlock(position);
+                    if (!session.getBlock(position).equals(replacement.toBlockState())) {
                         expectedChanges++;
+                        enforceChangeLimit(expectedChanges, checkedMaxChangedBlocks);
+                        if (!dryRun) {
+                            changedBlocks.add(PendingBlock.snapshot(position, replacement));
+                        }
                     }
                 }
                 for (SetBlockGeometry.ResolvedRun run : geometry.runs()) {
                     Pattern pattern = palettes.get(run.paletteIndex()).pattern();
-                    boolean changed = false;
                     for (BlockVector3 position : selection(world, run.region())) {
                         requireNotInterrupted();
-                        if (!session.getBlock(position)
-                                .equals(pattern.applyBlock(position).toBlockState())) {
-                            changed = true;
+                        BaseBlock replacement = pattern.applyBlock(position);
+                        if (!session.getBlock(position).equals(replacement.toBlockState())) {
                             expectedChanges++;
+                            enforceChangeLimit(expectedChanges, checkedMaxChangedBlocks);
+                            if (!dryRun) {
+                                changedBlocks.add(PendingBlock.snapshot(position, replacement));
+                            }
                         }
                     }
-                    if (changed) {
-                        changedRuns.add(run);
-                    }
                 }
-                enforceChangeLimit(expectedChanges, checkedMaxChangedBlocks);
                 if (!dryRun && expectedChanges > 0) {
                     requireNotInterrupted();
                     admission.beforeMutation();
                     requireNotInterrupted();
-                    for (SetBlockGeometry.ResolvedPlacement placement : changedPlacements) {
-                        requireNotInterrupted();
-                        session.setBlock(
-                                vector(placement.position()),
-                                palettes.get(placement.paletteIndex()).pattern());
-                    }
-                    for (SetBlockGeometry.ResolvedRun run : changedRuns) {
-                        requireNotInterrupted();
-                        session.setBlocks(
-                                (com.sk89q.worldedit.regions.Region) selection(world, run.region()),
-                                palettes.get(run.paletteIndex()).pattern());
-                    }
-                    requireNotInterrupted();
+                    applyChanges(session, changedBlocks);
                 }
             }
-            changes = dryRun ? expectedChanges : session.getChangeSet().longSize();
-            if (!dryRun && changes > 0) {
-                undo = retainedUndo(session, chunks);
-                changes = undo.changedBlockCount();
+            if (dryRun) {
+                changes = expectedChanges;
+            } else {
+                undo = finalizedUndoOrNull(session, chunks);
+                changes = undo == null ? 0 : undo.changedBlockCount();
             }
-        } catch (MaxChangedBlocksException exception) {
-            OperationException failure = changeLimit(checkedMaxChangedBlocks, exception);
-            rollbackAfterFailure(paperWorld, session, chunks, dryRun, failure);
-            throw failure;
         } catch (OperationException | RuntimeException exception) {
             rollbackAfterFailure(paperWorld, session, chunks, dryRun, exception);
             throw exception;
@@ -214,26 +200,33 @@ final class FaweEditExecutor {
             boolean dryRun,
             Throwable failure)
             throws EditRecoveryException {
-        long changes = dryRun ? 0 : failedSession.getChangeSet().longSize();
-        if (changes == 0) {
+        if (dryRun) {
             return;
-        }
-        StoredUndo recovery;
-        try {
-            recovery = retainedUndo(failedSession, chunks);
-        } catch (RuntimeException finalizationFailure) {
-            if (failure != finalizationFailure) {
-                failure.addSuppressed(finalizationFailure);
-            }
-            recovery = StoredUndo.pending(failedSession.getChangeSet(), changes, chunks, this.log);
-            throw new EditRecoveryException(
-                    "World edit failed and its undo data could not be finalized",
-                    new ErrorDetails.WorldUnavailable.OperationFailed(),
-                    failure,
-                    recovery);
         }
         boolean interrupted = Thread.interrupted();
         try {
+            StoredUndo recovery;
+            try {
+                recovery = finalizedUndoOrNull(failedSession, chunks);
+                if (recovery == null) {
+                    return;
+                }
+            } catch (RuntimeException finalizationFailure) {
+                if (failure != finalizationFailure) {
+                    failure.addSuppressed(finalizationFailure);
+                }
+                long changes = failedSession.getChangeSet().longSize();
+                if (changes == 0) {
+                    return;
+                }
+                recovery =
+                        StoredUndo.pending(failedSession.getChangeSet(), changes, chunks, this.log);
+                throw new EditRecoveryException(
+                        "World edit failed and its undo data could not be finalized",
+                        new ErrorDetails.WorldUnavailable.OperationFailed(),
+                        failure,
+                        recovery);
+            }
             try (EditSession rollback =
                     newEditSession(world.worldEditWorld(), false, this.maxChangedBlocks)) {
                 rollback.setBlocks(recovery.changeSet(), ChangeSetExecutor.Type.UNDO);
@@ -263,14 +256,15 @@ final class FaweEditExecutor {
                         .allowedRegionsEverywhere()
                         .setSideEffectSet(SideEffectSet.api().without(SideEffect.NEIGHBORS));
         if (recordHistory) {
-            return builder.fastMode(false).combineStages(true).changeSet(false, null).build();
+            // Rollback data must be recorded synchronously with each world change.
+            return builder.fastMode(false).combineStages(false).changeSet(false, null).build();
         }
         return builder.fastMode(true).changeSetNull().build();
     }
 
     private void enforceChangeLimit(long changes, int maxChangedBlocks) throws OperationException {
         if (changes > maxChangedBlocks) {
-            throw changeLimit(maxChangedBlocks, null);
+            throw changeLimit(maxChangedBlocks);
         }
     }
 
@@ -290,18 +284,11 @@ final class FaweEditExecutor {
         }
     }
 
-    private static OperationException changeLimit(int maximum, Throwable cause) {
-        String message = "Edit exceeds the maximum of " + maximum + " changed blocks";
-        return cause == null
-                ? new OperationException(
-                        OperationFailure.CHANGE_LIMIT_EXCEEDED,
-                        message,
-                        new ErrorDetails.ChangeLimitExceeded(maximum))
-                : new OperationException(
-                        OperationFailure.CHANGE_LIMIT_EXCEEDED,
-                        message,
-                        new ErrorDetails.ChangeLimitExceeded(maximum),
-                        cause);
+    private static OperationException changeLimit(int maximum) {
+        return new OperationException(
+                OperationFailure.CHANGE_LIMIT_EXCEEDED,
+                "Edit exceeds the maximum of " + maximum + " changed blocks",
+                new ErrorDetails.ChangeLimitExceeded(maximum));
     }
 
     private static CuboidRegion selection(com.sk89q.worldedit.world.World world, Cuboid region) {
@@ -312,9 +299,24 @@ final class FaweEditExecutor {
         return BlockVector3.at(position.x(), position.y(), position.z());
     }
 
-    private StoredUndo retainedUndo(EditSession session, List<ChunkPosition> chunks) {
+    private static void applyChanges(EditSession session, List<PendingBlock> changes)
+            throws OperationException {
+        for (PendingBlock change : changes) {
+            requireNotInterrupted();
+            session.setBlock(change.x(), change.y(), change.z(), change.block());
+        }
+        requireNotInterrupted();
+    }
+
+    private record PendingBlock(int x, int y, int z, BaseBlock block) {
+        private static PendingBlock snapshot(BlockVector3 position, BaseBlock block) {
+            return new PendingBlock(position.x(), position.y(), position.z(), block);
+        }
+    }
+
+    private StoredUndo finalizedUndoOrNull(EditSession session, List<ChunkPosition> chunks) {
         ChangeSet changeSet = Objects.requireNonNull(session.getChangeSet(), "changeSet");
-        return new StoredUndo(changeSet, chunks, this.log);
+        return StoredUndo.finalizedOrNull(changeSet, chunks, this.log);
     }
 
     static final class StoredUndo implements EditPlatform.UndoToken {
@@ -324,28 +326,32 @@ final class FaweEditExecutor {
         private final DirtLog log;
         private boolean finalized;
 
-        StoredUndo(ChangeSet changeSet, List<ChunkPosition> chunks, DirtLog log) {
-            ChangeSet retained = Objects.requireNonNull(changeSet, "changeSet");
-            finalizeChangeSet(retained);
-            long changedBlockCount = retained.longSize();
-            requirePositiveCount(changedBlockCount);
-            this.changeSet = new AtomicReference<>(retained);
-            this.changedBlockCount = changedBlockCount;
-            this.chunks = List.copyOf(chunks);
-            this.log = Objects.requireNonNull(log, "log");
-            this.finalized = true;
-        }
-
         private StoredUndo(
                 ChangeSet changeSet,
                 long changedBlockCount,
                 List<ChunkPosition> chunks,
-                DirtLog log) {
+                DirtLog log,
+                boolean finalized) {
             requirePositiveCount(changedBlockCount);
             this.changeSet = new AtomicReference<>(Objects.requireNonNull(changeSet, "changeSet"));
             this.changedBlockCount = changedBlockCount;
             this.chunks = List.copyOf(chunks);
             this.log = Objects.requireNonNull(log, "log");
+            this.finalized = finalized;
+        }
+
+        static StoredUndo finalizedOrNull(
+                ChangeSet changeSet, List<ChunkPosition> chunks, DirtLog log) {
+            ChangeSet retained = Objects.requireNonNull(changeSet, "changeSet");
+            Objects.requireNonNull(chunks, "chunks");
+            DirtLog retainedLog = Objects.requireNonNull(log, "log");
+            finalizeChangeSet(retained);
+            long changedBlockCount = retained.longSize();
+            if (changedBlockCount == 0) {
+                disposeChangeSet(retained, changedBlockCount, chunks, retainedLog);
+                return null;
+            }
+            return new StoredUndo(retained, changedBlockCount, chunks, retainedLog, true);
         }
 
         static StoredUndo pending(
@@ -353,7 +359,7 @@ final class FaweEditExecutor {
                 long changedBlockCount,
                 List<ChunkPosition> chunks,
                 DirtLog log) {
-            return new StoredUndo(changeSet, changedBlockCount, chunks, log);
+            return new StoredUndo(changeSet, changedBlockCount, chunks, log, false);
         }
 
         synchronized void finalizeForUse() {
@@ -390,23 +396,31 @@ final class FaweEditExecutor {
         public void close() {
             ChangeSet retained = this.changeSet.getAndSet(null);
             if (retained != null) {
+                disposeChangeSet(retained, this.changedBlockCount, this.chunks, this.log);
+            }
+        }
+
+        private static void disposeChangeSet(
+                ChangeSet changeSet,
+                long changedBlockCount,
+                List<ChunkPosition> chunks,
+                DirtLog log) {
+            try {
+                changeSet.delete();
+            } catch (RuntimeException failure) {
+                LogContext context =
+                        LogContext.of("changed_block_count", changedBlockCount)
+                                .with("chunk_count", chunks.size());
                 try {
-                    retained.delete();
-                } catch (RuntimeException failure) {
-                    LogContext context =
-                            LogContext.of("changed_block_count", this.changedBlockCount)
-                                    .with("chunk_count", this.chunks.size());
-                    try {
-                        this.log.warning(
-                                "edit",
-                                "edit.undo_data_disposal_failed",
-                                "Dirt MCP could not dispose retained FAWE undo data",
-                                context,
-                                failure);
-                    } catch (RuntimeException loggingFailure) {
-                        if (failure != loggingFailure) {
-                            failure.addSuppressed(loggingFailure);
-                        }
+                    log.warning(
+                            "edit",
+                            "edit.undo_data_disposal_failed",
+                            "Dirt MCP could not dispose retained FAWE undo data",
+                            context,
+                            failure);
+                } catch (RuntimeException loggingFailure) {
+                    if (failure != loggingFailure) {
+                        failure.addSuppressed(loggingFailure);
                     }
                 }
             }

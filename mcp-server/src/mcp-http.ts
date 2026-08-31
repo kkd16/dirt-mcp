@@ -20,6 +20,7 @@ import { toolConfigurationFromCapabilities } from './tools/configuration.ts';
 
 const MAX_MCP_BODY_BYTES = 4 * 1_024 * 1_024;
 const REQUIRED_SCOPE = 'dirt:mcp';
+const ACCESS_TOKEN_PATTERN = /^(?:Bearer|DPoP) +([-A-Za-z0-9._~+/]+=*)$/iu;
 
 export interface DirtMcpHandler {
   readonly fetch: (request: Request) => Promise<Response>;
@@ -126,7 +127,7 @@ function parseScopes(value: unknown): string[] {
 
 export function extractAccessToken(value: string | null): string | null {
   if (value === null) return null;
-  const match = /^(?:Bearer|DPoP)[\t ]+(\S+)$/iu.exec(value);
+  const match = ACCESS_TOKEN_PATTERN.exec(value);
   return match?.[1] ?? null;
 }
 

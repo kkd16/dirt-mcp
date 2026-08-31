@@ -2,6 +2,8 @@ package ca.deliyannides.dirtmcp.paper.world.edit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -56,12 +58,13 @@ final class FaweEditExecutorTest {
         AtomicInteger deletes = new AtomicInteger();
         ChangeSet changeSet = changeSet(2, closes, deletes, false);
         FaweEditExecutor.StoredUndo undo =
-                new FaweEditExecutor.StoredUndo(
+                FaweEditExecutor.StoredUndo.finalizedOrNull(
                         changeSet,
                         List.of(new ChunkPosition(1, 2)),
                         DirtLog.consoleOnly(
                                 NOPLogger.NOP_LOGGER, DirtConfig.ConsoleLogLevel.ERROR));
 
+        assertNotNull(undo);
         assertEquals(2, undo.changedBlockCount());
         assertEquals(List.of(new ChunkPosition(1, 2)), undo.chunks());
         assertSame(changeSet, undo.changeSet());
@@ -97,9 +100,10 @@ final class FaweEditExecutorTest {
                 DirtLog.withDetailHandler(
                         NOPLogger.NOP_LOGGER, DirtConfig.ConsoleLogLevel.ERROR, handler);
         FaweEditExecutor.StoredUndo undo =
-                new FaweEditExecutor.StoredUndo(
+                FaweEditExecutor.StoredUndo.finalizedOrNull(
                         changeSet(1, closes, deletes, true), List.of(new ChunkPosition(0, 0)), log);
 
+        assertNotNull(undo);
         undo.close();
         undo.close();
 
@@ -130,7 +134,7 @@ final class FaweEditExecutorTest {
                 assertThrows(
                         IllegalStateException.class,
                         () ->
-                                new FaweEditExecutor.StoredUndo(
+                                FaweEditExecutor.StoredUndo.finalizedOrNull(
                                         changeSet,
                                         List.of(),
                                         DirtLog.consoleOnly(
@@ -138,6 +142,64 @@ final class FaweEditExecutorTest {
                                                 DirtConfig.ConsoleLogLevel.ERROR)));
 
         assertTrue(failure.getCause() instanceof IOException);
+    }
+
+    @Test
+    void finalizedUndoDrainsHistoryBeforeReadingItsSize() {
+        AtomicInteger closes = new AtomicInteger();
+        AtomicInteger deletes = new AtomicInteger();
+        ChangeSet changeSet =
+                (ChangeSet)
+                        Proxy.newProxyInstance(
+                                ChangeSet.class.getClassLoader(),
+                                new Class<?>[] {ChangeSet.class},
+                                (proxy, method, arguments) -> {
+                                    if (method.getName().equals("close")) {
+                                        closes.incrementAndGet();
+                                        return null;
+                                    }
+                                    if (method.getName().equals("longSize")) {
+                                        return closes.get() == 0 ? 0L : 2L;
+                                    }
+                                    if (method.getName().equals("delete")) {
+                                        deletes.incrementAndGet();
+                                        return null;
+                                    }
+                                    if (method.getName().equals("toString")) {
+                                        return "delayed change set";
+                                    }
+                                    throw new UnsupportedOperationException(method.getName());
+                                });
+
+        FaweEditExecutor.StoredUndo undo =
+                FaweEditExecutor.StoredUndo.finalizedOrNull(
+                        changeSet,
+                        List.of(new ChunkPosition(1, 2)),
+                        DirtLog.consoleOnly(
+                                NOPLogger.NOP_LOGGER, DirtConfig.ConsoleLogLevel.ERROR));
+
+        assertNotNull(undo);
+        assertEquals(1, closes.get());
+        assertEquals(2, undo.changedBlockCount());
+        undo.close();
+        assertEquals(1, deletes.get());
+    }
+
+    @Test
+    void finalizedUndoDisposesEmptyChangeSets() {
+        AtomicInteger closes = new AtomicInteger();
+        AtomicInteger deletes = new AtomicInteger();
+
+        FaweEditExecutor.StoredUndo undo =
+                FaweEditExecutor.StoredUndo.finalizedOrNull(
+                        changeSet(0, closes, deletes, false),
+                        List.of(new ChunkPosition(1, 2)),
+                        DirtLog.consoleOnly(
+                                NOPLogger.NOP_LOGGER, DirtConfig.ConsoleLogLevel.ERROR));
+
+        assertNull(undo);
+        assertEquals(1, closes.get());
+        assertEquals(1, deletes.get());
     }
 
     @Test

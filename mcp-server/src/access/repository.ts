@@ -510,8 +510,7 @@ function toRfc3339(value: number | string): string {
 }
 
 function toEpochMilliseconds(value: number | string): number {
-  const milliseconds =
-    typeof value === 'number' ? value : /^-?\d+(?:\.\d+)?$/u.test(value) ? Number(value) : new Date(value).getTime();
+  const milliseconds = typeof value === 'number' ? value : new Date(value).getTime();
   if (!Number.isFinite(milliseconds) || Number.isNaN(new Date(milliseconds).getTime())) {
     throw new Error('The Dirt database contains an invalid timestamp.');
   }

@@ -4,13 +4,14 @@ set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 run_dir="${repo_root}/paper-plugin/run"
 token_file="${run_dir}/.dirt-bridge-token"
-state_file="${run_dir}/.dirt-mcp-dev-state"
 session_name="dirt-mcp-$(printf '%s' "${repo_root}" | cksum | awk '{ print $1 }')"
+minecraft_port=25566
+bridge_port=8765
 startup_timeout=120
 shutdown_timeout=120
 
 usage() {
-  printf 'Usage: %s {up MC_PORT BRIDGE_PORT|restart MC_PORT BRIDGE_PORT|down|status|health|logs [LINES]|console|command COMMAND}\n' "$0" >&2
+  printf 'Usage: %s {up|restart|down|status|health|logs [LINES]|console|command COMMAND}\n' "$0" >&2
   exit 2
 }
 
@@ -45,61 +46,6 @@ require_bridge_runtime() {
   require_token
 }
 
-invalid_state() {
-  printf 'Invalid development server state in %s. Run make down, then make up to recreate it.\n' \
-    "${state_file}" >&2
-  exit 1
-}
-
-validate_port() {
-  local name="$1"
-  local value="$2"
-  if [[ ! "${value}" =~ ^[0-9]+$ ]] \
-    || (( 10#${value} < 1 || 10#${value} > 65535 )); then
-    printf '%s must be an integer between 1 and 65535.\n' "${name}" >&2
-    exit 1
-  fi
-}
-
-write_state() {
-  local mc_port="$1"
-  local bridge_port="$2"
-  mkdir -p "${run_dir}"
-  umask 077
-  printf 'MC_PORT=%s\nBRIDGE_PORT=%s\n' "${mc_port}" "${bridge_port}" > "${state_file}"
-}
-
-read_state() {
-  local mc_port_seen=false
-  local bridge_port_seen=false
-
-  [[ -f "${state_file}" ]] || {
-    printf 'Development server state not found. Run make up first.\n' >&2
-    exit 1
-  }
-
-  state_mc_port=''
-  state_bridge_port=''
-  while IFS='=' read -r key value || [[ -n "${key}" || -n "${value}" ]]; do
-    case "${key}" in
-      MC_PORT)
-        [[ "${mc_port_seen}" == false ]] || invalid_state
-        mc_port_seen=true
-        state_mc_port="${value}"
-        ;;
-      BRIDGE_PORT)
-        [[ "${bridge_port_seen}" == false ]] || invalid_state
-        bridge_port_seen=true
-        state_bridge_port="${value}"
-        ;;
-      *) invalid_state ;;
-    esac
-  done < "${state_file}"
-
-  validate_port MC_PORT "${state_mc_port}"
-  validate_port BRIDGE_PORT "${state_bridge_port}"
-}
-
 session_exists() {
   command -v tmux >/dev/null && tmux has-session -t "${session_name}" 2>/dev/null
 }
@@ -123,7 +69,6 @@ curl_bridge_request() {
 }
 
 bridge_healthy() {
-  local bridge_port="$1"
   local call_id
   local token
   call_id="$(node --input-type=module --eval 'process.stdout.write(crypto.randomUUID())')"
@@ -146,37 +91,30 @@ recent_logs() {
 }
 
 start_server() {
-  local mc_port="$1"
-  local bridge_port="$2"
-  validate_port MC_PORT "${mc_port}"
-  validate_port BRIDGE_PORT "${bridge_port}"
-
   if session_exists; then
-    read_state
-    if bridge_healthy "${state_bridge_port}"; then
+    if bridge_healthy; then
       printf 'Dirt MCP development server is already ready on Minecraft port %s and bridge port %s.\n' \
-        "${state_mc_port}" "${state_bridge_port}"
+        "${minecraft_port}" "${bridge_port}"
       return
     fi
     printf 'The managed tmux session exists but its bridge is unhealthy. Run make logs.\n' >&2
     exit 1
   fi
 
-  if bridge_healthy "${bridge_port}"; then
+  if bridge_healthy; then
     printf 'Bridge port %s is already served by an unmanaged process.\n' "${bridge_port}" >&2
     exit 1
   fi
 
-  write_state "${mc_port}" "${bridge_port}"
   tmux new-session -d -x 200 -y 50 -s "${session_name}" -c "${repo_root}" \
-    "exec bash scripts/run-paper-dev ${mc_port} ${bridge_port}"
+    'exec bash scripts/run-paper-dev'
   tmux set-option -t "${session_name}" history-limit 10000 >/dev/null
 
   local deadline=$((SECONDS + startup_timeout))
   while (( SECONDS < deadline )); do
-    if bridge_healthy "${bridge_port}"; then
+    if bridge_healthy; then
       printf 'Dirt MCP development server is ready on Minecraft port %s and bridge port %s.\n' \
-        "${mc_port}" "${bridge_port}"
+        "${minecraft_port}" "${bridge_port}"
       return
     fi
     if ! session_exists; then
@@ -237,51 +175,27 @@ stop_server() {
 }
 
 restart_server() {
-  local default_mc_port="$1"
-  local default_bridge_port="$2"
-  local mc_port="${default_mc_port}"
-  local bridge_port="${default_bridge_port}"
-
-  validate_port MC_PORT "${default_mc_port}"
-  validate_port BRIDGE_PORT "${default_bridge_port}"
-  if [[ -f "${state_file}" ]]; then
-    read_state
-    mc_port="${state_mc_port}"
-    bridge_port="${state_bridge_port}"
-  fi
-
   stop_server 'kick @a Server restarting for a Dirt MCP update. Please reconnect in a moment.'
-  start_server "${mc_port}" "${bridge_port}"
+  start_server
 }
 
 status_server() {
-  if [[ ! -f "${state_file}" ]]; then
-    if session_exists; then
-      printf 'The managed tmux session exists but its development state is missing. Run make down, then make up.\n' >&2
-      return 1
-    fi
-    printf 'Dirt MCP development server is stopped (no saved ports).\n'
-    return 1
-  fi
-  read_state
   if ! session_exists; then
-    printf 'Dirt MCP development server is stopped (Minecraft %s, bridge %s).\n' \
-      "${state_mc_port}" "${state_bridge_port}"
+    printf 'Dirt MCP development server is stopped.\n'
     return 1
   fi
   require_curl
   require_token
-  if ! bridge_healthy "${state_bridge_port}"; then
+  if ! bridge_healthy; then
     printf 'Dirt MCP development server is running but unhealthy (Minecraft %s, bridge %s).\n' \
-      "${state_mc_port}" "${state_bridge_port}"
+      "${minecraft_port}" "${bridge_port}"
     return 1
   fi
   printf 'Dirt MCP development server is ready (Minecraft %s, bridge %s, tmux %s).\n' \
-    "${state_mc_port}" "${state_bridge_port}" "${session_name}"
+    "${minecraft_port}" "${bridge_port}" "${session_name}"
 }
 
 health_server() {
-  read_state
   local call_id
   local token
   call_id="$(node --input-type=module --eval 'process.stdout.write(crypto.randomUUID())')"
@@ -289,20 +203,20 @@ health_server() {
   curl_bridge_request "${token}" "${call_id}" --fail --silent --show-error \
     --connect-timeout 1 \
     --max-time 2 \
-    "http://127.0.0.1:${state_bridge_port}/v1/ping"
+    "http://127.0.0.1:${bridge_port}/v1/ping"
   printf '\n'
 }
 
 case "${1:-}" in
   up)
-    [[ $# -eq 3 ]] || usage
+    [[ $# -eq 1 ]] || usage
     require_bridge_runtime
-    start_server "$2" "$3"
+    start_server
     ;;
   restart)
-    [[ $# -eq 3 ]] || usage
+    [[ $# -eq 1 ]] || usage
     require_bridge_runtime
-    restart_server "$2" "$3"
+    restart_server
     ;;
   down)
     [[ $# -eq 1 ]] || usage
