@@ -13,7 +13,7 @@ final class BearerAuthenticator {
     BearerAuthenticator(String token) {
         if (token == null || !TOKEN_PATTERN.matcher(token).matches()) {
             throw new IllegalArgumentException(
-                    "DIRT_MCP_BRIDGE_TOKEN must contain exactly 64 lowercase hexadecimal "
+                    "DIRT_BRIDGE_TOKEN must contain exactly 64 lowercase hexadecimal "
                             + "characters");
         }
         this.expectedToken = token.getBytes(StandardCharsets.UTF_8);

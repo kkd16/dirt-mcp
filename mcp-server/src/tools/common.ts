@@ -1,7 +1,7 @@
 import type { ToolAnnotations } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 
-export const INT32_MIN = -2_147_483_648;
+const INT32_MIN = -2_147_483_648;
 export const INT32_MAX = 2_147_483_647;
 export const MAX_BLOCK_STATE_PATTERNS = 64;
 export const MAX_PALETTE_ENTRIES = 256;
@@ -10,16 +10,14 @@ const CANONICAL_UUID = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f
 export const SignedInt32Schema = z.number().int().min(INT32_MIN).max(INT32_MAX);
 export const NonnegativeInt32Schema = SignedInt32Schema.nonnegative();
 export const PositiveInt32Schema = SignedInt32Schema.positive();
-const PaletteIndexSchema = NonnegativeInt32Schema;
-
 export const PalettePlacementSchema = z
-  .tuple([PaletteIndexSchema, SignedInt32Schema, SignedInt32Schema, SignedInt32Schema])
+  .tuple([NonnegativeInt32Schema, SignedInt32Schema, SignedInt32Schema, SignedInt32Schema])
   .meta({ minItems: 4, maxItems: 4, items: false })
   .describe('Exact [paletteIndex, x, y, z] tuple with origin-relative coordinates.');
 
 export const PaletteRunSchema = z
   .tuple([
-    PaletteIndexSchema,
+    NonnegativeInt32Schema,
     SignedInt32Schema,
     SignedInt32Schema,
     SignedInt32Schema,
@@ -39,7 +37,7 @@ export const NonBlankStringSchema = z
   .refine((value) => value.trim().length > 0, 'Must contain a non-whitespace character.')
   .meta({ pattern: '.*\\S.*' });
 
-export const CanonicalUuidSchema = z.string().regex(CANONICAL_UUID);
+const CanonicalUuidSchema = z.string().regex(CANONICAL_UUID);
 
 export const PlayerIdentitySchema = z.object({ name: NonBlankStringSchema, uuid: CanonicalUuidSchema }).strict();
 
@@ -81,7 +79,7 @@ export const BoundsSchema = z
   )
   .describe('Normalized inclusive region bounds.');
 
-export type BlockPosition = z.infer<typeof BlockPositionSchema>;
+type BlockPosition = z.infer<typeof BlockPositionSchema>;
 export type Bounds = z.infer<typeof BoundsSchema>;
 
 export function sameBlockPosition(left: BlockPosition, right: BlockPosition): boolean {

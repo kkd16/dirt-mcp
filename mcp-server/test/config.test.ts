@@ -1,38 +1,36 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  BridgeConfigurationError,
-  readBridgeConfig,
-  readRuntimeConfig,
-  RuntimeConfigurationError,
-} from '../dist/config.js';
+import { readAuthConfig, readRuntimeConfig, RuntimeConfigurationError } from '../dist/config.js';
 
 const TOKEN = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const CONTROL_TOKEN = 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
 const AUTH_SECRET = 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
+const BASE_ENVIRONMENT = {
+  DIRT_AUTH_SECRET: AUTH_SECRET,
+  DIRT_BRIDGE_TOKEN: TOKEN,
+  DIRT_CONTROL_TOKEN: CONTROL_TOKEN,
+  DIRT_DATABASE_PATH: './data/dirt.sqlite',
+  DIRT_PUBLIC_ORIGIN: 'https://dirt.example',
+};
 
 test('reads the default and normalized loopback bridge origins', () => {
-  assert.deepEqual(readBridgeConfig({ DIRT_MCP_BRIDGE_TOKEN: TOKEN }), {
+  assert.deepEqual(readRuntimeConfig(BASE_ENVIRONMENT).bridge, {
     origin: 'http://127.0.0.1:8765',
     token: TOKEN,
   });
-  assert.deepEqual(
-    readBridgeConfig({
-      DIRT_MCP_BRIDGE_TOKEN: TOKEN,
-      DIRT_MCP_BRIDGE_URL: 'http://127.0.0.1:9876/',
-    }),
-    { origin: 'http://127.0.0.1:9876', token: TOKEN },
-  );
+  assert.deepEqual(readRuntimeConfig({ ...BASE_ENVIRONMENT, DIRT_BRIDGE_URL: 'http://127.0.0.1:9876/' }).bridge, {
+    origin: 'http://127.0.0.1:9876',
+    token: TOKEN,
+  });
 });
 
 test('requires a nonempty bridge token', () => {
-  assert.throws(() => readBridgeConfig({}), /DIRT_MCP_BRIDGE_TOKEN is required/);
-  assert.throws(() => readBridgeConfig({ DIRT_MCP_BRIDGE_TOKEN: '' }), /DIRT_MCP_BRIDGE_TOKEN is required/);
-  assert.throws(() => readBridgeConfig({ DIRT_MCP_BRIDGE_TOKEN: ' '.repeat(32) }), /DIRT_MCP_BRIDGE_TOKEN is required/);
-  assert.throws(
-    () => readBridgeConfig({}),
-    (error) => error instanceof BridgeConfigurationError && error.code === 'bridge_token_required',
-  );
+  for (const token of [undefined, '', ' '.repeat(32)]) {
+    assert.throws(
+      () => readRuntimeConfig({ ...BASE_ENVIRONMENT, DIRT_BRIDGE_TOKEN: token }),
+      (error) => error instanceof RuntimeConfigurationError && error.code === 'bridge_token_required',
+    );
+  }
 });
 
 test('requires exactly 64 lowercase hexadecimal token characters', () => {
@@ -45,8 +43,8 @@ test('requires exactly 64 lowercase hexadecimal token characters', () => {
     `${TOKEN}\n`,
   ]) {
     assert.throws(
-      () => readBridgeConfig({ DIRT_MCP_BRIDGE_TOKEN: token }),
-      (error) => error instanceof BridgeConfigurationError && error.code === 'bridge_token_invalid',
+      () => readRuntimeConfig({ ...BASE_ENVIRONMENT, DIRT_BRIDGE_TOKEN: token }),
+      (error) => error instanceof RuntimeConfigurationError && error.code === 'bridge_token_invalid',
     );
   }
 });
@@ -70,14 +68,10 @@ test('rejects bridge URLs that are not a bare HTTP IPv4 loopback origin', () => 
   ];
   for (const url of invalidUrls) {
     assert.throws(
-      () => readBridgeConfig({ DIRT_MCP_BRIDGE_TOKEN: TOKEN, DIRT_MCP_BRIDGE_URL: url }),
-      /DIRT_MCP_BRIDGE_URL must be an HTTP 127\.0\.0\.1 origin/,
+      () => readRuntimeConfig({ ...BASE_ENVIRONMENT, DIRT_BRIDGE_URL: url }),
+      (error) => error instanceof RuntimeConfigurationError && error.code === 'bridge_url_invalid',
     );
   }
-  assert.throws(
-    () => readBridgeConfig({ DIRT_MCP_BRIDGE_TOKEN: TOKEN, DIRT_MCP_BRIDGE_URL: invalidUrls[0] }),
-    (error) => error instanceof BridgeConfigurationError && error.code === 'bridge_url_invalid',
-  );
 });
 
 test('runtime config prefers secret files and requires pairwise-distinct trust secrets', () => {
@@ -91,7 +85,7 @@ test('runtime config prefers secret files and requires pairwise-distinct trust s
       DIRT_BRIDGE_TOKEN_FILE: '/bridge',
       DIRT_CONTROL_TOKEN_FILE: '/control',
       DIRT_AUTH_SECRET_FILE: '/auth',
-      DIRT_MCP_BRIDGE_TOKEN: CONTROL_TOKEN,
+      DIRT_BRIDGE_TOKEN: CONTROL_TOKEN,
       DIRT_CONTROL_TOKEN: TOKEN,
       DIRT_PUBLIC_ORIGIN: 'http://localhost:3000',
       DIRT_DATABASE_PATH: './data/dirt.sqlite',
@@ -106,7 +100,6 @@ test('runtime config prefers secret files and requires pairwise-distinct trust s
   assert.equal(config.controlToken, CONTROL_TOKEN);
   assert.equal(config.authSecret, AUTH_SECRET);
   assert.equal(config.port, 3000);
-  assert.equal(config.rpId, 'localhost');
 
   for (const [bridge, control, auth] of [
     [TOKEN, TOKEN, AUTH_SECRET],
@@ -116,11 +109,10 @@ test('runtime config prefers secret files and requires pairwise-distinct trust s
     assert.throws(
       () =>
         readRuntimeConfig({
-          DIRT_MCP_BRIDGE_TOKEN: bridge,
+          ...BASE_ENVIRONMENT,
+          DIRT_BRIDGE_TOKEN: bridge,
           DIRT_CONTROL_TOKEN: control,
           DIRT_AUTH_SECRET: auth,
-          DIRT_PUBLIC_ORIGIN: 'https://dirt.example',
-          DIRT_DATABASE_PATH: './data/dirt.sqlite',
         }),
       (error) => error instanceof RuntimeConfigurationError && error.code === 'secrets_not_distinct',
     );
@@ -128,19 +120,17 @@ test('runtime config prefers secret files and requires pairwise-distinct trust s
 });
 
 test('public origin is a WebAuthn-compatible domain origin', () => {
-  const base = {
-    DIRT_MCP_BRIDGE_TOKEN: TOKEN,
-    DIRT_CONTROL_TOKEN: CONTROL_TOKEN,
-    DIRT_AUTH_SECRET: AUTH_SECRET,
-    DIRT_DATABASE_PATH: './data/dirt.sqlite',
-  };
-  assert.equal(readRuntimeConfig({ ...base, DIRT_PUBLIC_ORIGIN: 'https://dirt.example' }).rpId, 'dirt.example');
-  assert.equal(readRuntimeConfig({ ...base, DIRT_PUBLIC_ORIGIN: 'http://localhost:3000' }).rpId, 'localhost');
-  assert.equal(readRuntimeConfig({ ...base, DIRT_PUBLIC_ORIGIN: 'https://dirt.internal' }).rpId, 'dirt.internal');
-  assert.equal(
-    readRuntimeConfig({ ...base, DIRT_PUBLIC_ORIGIN: 'https://xn--bcher-kva.example' }).rpId,
-    'xn--bcher-kva.example',
-  );
+  for (const publicOrigin of [
+    'https://dirt.example',
+    'http://localhost:3000',
+    'https://dirt.internal',
+    'https://xn--bcher-kva.example',
+  ]) {
+    assert.equal(
+      readRuntimeConfig({ ...BASE_ENVIRONMENT, DIRT_PUBLIC_ORIGIN: publicOrigin }).publicOrigin,
+      publicOrigin,
+    );
+  }
 
   for (const publicOrigin of [
     'http://127.0.0.1:3000',
@@ -154,8 +144,23 @@ test('public origin is a WebAuthn-compatible domain origin', () => {
     `https://${`${'a'.repeat(63)}.`.repeat(4)}example`,
   ]) {
     assert.throws(
-      () => readRuntimeConfig({ ...base, DIRT_PUBLIC_ORIGIN: publicOrigin }),
+      () => readRuntimeConfig({ ...BASE_ENVIRONMENT, DIRT_PUBLIC_ORIGIN: publicOrigin }),
       (error) => error instanceof RuntimeConfigurationError && error.code === 'public_origin_invalid',
     );
   }
+});
+
+test('auth configuration is independent of bridge and control credentials', () => {
+  assert.deepEqual(
+    readAuthConfig({
+      DIRT_AUTH_SECRET: AUTH_SECRET,
+      DIRT_DATABASE_PATH: './data/dirt.sqlite',
+      DIRT_PUBLIC_ORIGIN: 'https://dirt.example',
+    }),
+    {
+      authSecret: AUTH_SECRET,
+      databasePath: new URL('../data/dirt.sqlite', import.meta.url).pathname,
+      publicOrigin: 'https://dirt.example',
+    },
+  );
 });

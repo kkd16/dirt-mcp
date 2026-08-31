@@ -2,9 +2,6 @@
 
 FROM node:24.20.0-trixie@sha256:f7d34e58713740f9eef9092c0bd6ff10369d132f7238399a4b270f16d47fa608 AS build
 
-ENV PNPM_HOME=/pnpm
-ENV PATH=${PNPM_HOME}:${PATH}
-
 RUN npm install --global pnpm@11.24.0
 
 WORKDIR /workspace
@@ -33,8 +30,6 @@ COPY --chown=node:node LICENSE ./LICENSE
 RUN mkdir --parents /var/lib/dirt-mcp && chown node:node /var/lib/dirt-mcp
 
 USER node
-
-STOPSIGNAL SIGTERM
 
 ENTRYPOINT ["node"]
 CMD ["dist/index.js"]

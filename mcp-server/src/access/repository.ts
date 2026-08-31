@@ -6,7 +6,7 @@ const INVITATION_TTL_MS = 24 * 60 * 60 * 1_000;
 const RECOVERY_TTL_MS = 15 * 60 * 1_000;
 const LINK_TTL_MS = 10 * 60 * 1_000;
 
-export type UserStatus = 'active' | 'disabled';
+type UserStatus = 'active' | 'disabled';
 
 export interface UserSummary {
   readonly id: string;
@@ -16,14 +16,14 @@ export interface UserSummary {
   readonly createdAt: string;
 }
 
-export interface InvitationSummary {
+interface InvitationSummary {
   readonly id: string;
   readonly status: 'pending' | 'accepted' | 'revoked' | 'expired';
   readonly createdAt: string;
   readonly expiresAt: string;
 }
 
-export interface Page<T> {
+interface Page<T> {
   readonly page: number;
   readonly pageSize: number;
   readonly totalItems: number;
@@ -31,18 +31,18 @@ export interface Page<T> {
   readonly items: readonly T[];
 }
 
-export interface SecretInvitation {
+interface SecretInvitation {
   readonly invitation: InvitationSummary;
   readonly secret: string;
 }
 
-export interface SecretRecovery {
+interface SecretRecovery {
   readonly user: UserSummary;
   readonly secret: string;
   readonly expiresAt: string;
 }
 
-export interface LinkChallenge {
+interface LinkChallenge {
   readonly code: string;
   readonly expiresAt: string;
 }
@@ -53,7 +53,7 @@ export interface OnboardingClaim {
   readonly handle: string;
 }
 
-export interface McpUser {
+interface McpUser {
   readonly id: string;
   readonly minecraftUuid: string;
 }
@@ -93,12 +93,9 @@ type RecoveryClaimRow = {
 };
 
 export class AccessError extends Error {
-  readonly code: 'conflict' | 'expired' | 'invalid' | 'not_found' | 'recent_authentication_required';
+  readonly code: 'conflict' | 'expired' | 'invalid' | 'not_found';
 
-  constructor(
-    code: 'conflict' | 'expired' | 'invalid' | 'not_found' | 'recent_authentication_required',
-    message: string,
-  ) {
+  constructor(code: 'conflict' | 'expired' | 'invalid' | 'not_found', message: string) {
     super(message);
     this.code = code;
     this.name = 'AccessError';
@@ -142,26 +139,24 @@ export class AccessRepository {
   }
 
   listUsers(page: number): Page<UserSummary> {
-    const normalizedPage = normalizePage(page);
     const totalItems = scalarCount(this.database, 'SELECT COUNT(*) AS count FROM "user"');
     const rows = this.database
       .prepare<[number, number], UserRow>(
         'SELECT id, handle, status, minecraftUuid, minecraftName, createdAt FROM "user" ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?',
       )
-      .all(PAGE_SIZE, (normalizedPage - 1) * PAGE_SIZE);
-    return pageEnvelope(normalizedPage, totalItems, rows.map(toUserSummary));
+      .all(PAGE_SIZE, (page - 1) * PAGE_SIZE);
+    return pageEnvelope(page, totalItems, rows.map(toUserSummary));
   }
 
   listInvitations(page: number, now = new Date()): Page<InvitationSummary> {
-    const normalizedPage = normalizePage(page);
     const totalItems = scalarCount(this.database, 'SELECT COUNT(*) AS count FROM invitation');
     const rows = this.database
       .prepare<[number, number], InvitationRow>(
         'SELECT id, createdAt, expiresAt, acceptedAt, revokedAt FROM invitation ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?',
       )
-      .all(PAGE_SIZE, (normalizedPage - 1) * PAGE_SIZE);
+      .all(PAGE_SIZE, (page - 1) * PAGE_SIZE);
     return pageEnvelope(
-      normalizedPage,
+      page,
       totalItems,
       rows.map((row) => toInvitationSummary(row, now)),
     );
@@ -388,14 +383,6 @@ export class AccessRepository {
     return toUserSummary(row);
   }
 
-  hasPasskey(userId: string): boolean {
-    return (
-      this.database
-        .prepare<[string], { found: number }>('SELECT 1 AS found FROM passkey WHERE userId = ? LIMIT 1')
-        .get(userId) !== undefined
-    );
-  }
-
   isHandleAvailable(handle: string): boolean {
     return (
       this.database
@@ -459,7 +446,7 @@ export function configureDatabase(database: Database.Database, readonly = false)
   }
 }
 
-export function hashSecret(secret: string): string {
+function hashSecret(secret: string): string {
   return createHash('sha256').update(secret, 'utf8').digest('hex');
 }
 
@@ -475,10 +462,6 @@ function humanCode(): string {
 
 function normalizeCode(code: string): string {
   return code.replaceAll('-', '').trim().toUpperCase();
-}
-
-function normalizePage(page: number): number {
-  return Number.isSafeInteger(page) && page > 0 ? page : 1;
 }
 
 function pageEnvelope<T>(page: number, totalItems: number, items: readonly T[]): Page<T> {

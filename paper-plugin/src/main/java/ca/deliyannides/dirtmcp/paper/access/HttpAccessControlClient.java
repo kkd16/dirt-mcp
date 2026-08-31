@@ -66,7 +66,7 @@ public final class HttpAccessControlClient implements AccessControl {
         Objects.requireNonNull(config, "config");
         if (bearerToken == null || !TOKEN_PATTERN.matcher(bearerToken).matches()) {
             throw new IllegalArgumentException(
-                    "DIRT_MCP_CONTROL_TOKEN must contain exactly 64 lowercase hexadecimal characters");
+                    "DIRT_CONTROL_TOKEN must contain exactly 64 lowercase hexadecimal characters");
         }
         this.origin = URI.create(config.origin());
         this.bearerToken = bearerToken;
@@ -283,16 +283,10 @@ public final class HttpAccessControlClient implements AccessControl {
         byte[] bytes = readBody(response);
         requireJsonContentType(response);
         JsonObject body = strictObject(bytes);
-        if (response.statusCode() == 200) {
-            try {
-                return decoder.decode(body, callId);
-            } catch (AccessControlException exception) {
-                throw exception;
-            } catch (RuntimeException exception) {
-                throw protocolFailure(exception);
-            }
-        }
         try {
+            if (response.statusCode() == 200) {
+                return decoder.decode(body, callId);
+            }
             throw decodeError(response.statusCode(), body, callId);
         } catch (AccessControlException exception) {
             throw exception;
@@ -373,11 +367,7 @@ public final class HttpAccessControlClient implements AccessControl {
         int pageSize = integer(body, "pageSize");
         long totalItems = longInteger(body, "totalItems");
         int totalPages = integer(body, "totalPages");
-        if (page != requestedPage
-                || pageSize < 1
-                || pageSize > 50
-                || totalItems < 0
-                || totalPages < 0) {
+        if (page != requestedPage) {
             throw protocolFailure();
         }
         return new PageValues(page, pageSize, totalItems, totalPages);
@@ -394,7 +384,7 @@ public final class HttpAccessControlClient implements AccessControl {
             }
             users.add(user(element.getAsJsonObject()));
         }
-        return List.copyOf(users);
+        return users;
     }
 
     private static List<InvitationSummary> invitationItems(JsonArray array, int pageSize) {
@@ -408,7 +398,7 @@ public final class HttpAccessControlClient implements AccessControl {
             }
             invitations.add(invitation(element.getAsJsonObject()));
         }
-        return List.copyOf(invitations);
+        return invitations;
     }
 
     private static UserSummary user(JsonObject object) {

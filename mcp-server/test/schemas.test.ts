@@ -17,7 +17,7 @@ import {
   setBlocksBridgeOutputSchema,
   undoEditsBridgeOutputSchema,
 } from '../dist/tools/editing.js';
-import { MCP_TOOL_NAMES, toolConfigurationFromCapabilities } from '../dist/tools/configuration.js';
+import { MCP_TOOL_OPERATIONS, toolConfigurationFromCapabilities } from '../dist/tools/configuration.js';
 import {
   GetServerStatusInputSchema,
   GetServerStatusOutputSchema,
@@ -43,7 +43,7 @@ const edit = {
 
 test('capability snapshots map one-to-one to the stable MCP tool catalog', () => {
   const none = toolConfigurationFromCapabilities({ operations: [] });
-  assert.deepEqual(Object.keys(none), [...MCP_TOOL_NAMES]);
+  assert.deepEqual(Object.keys(none), Object.keys(MCP_TOOL_OPERATIONS));
   assert.equal(
     Object.values(none).every((enabled) => !enabled),
     true,

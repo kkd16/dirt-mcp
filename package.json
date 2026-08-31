@@ -21,7 +21,7 @@
     "test": "pnpm --filter @dirt-mcp/server run test",
     "generate:openapi-types": "openapi-typescript --immutable",
     "check:openapi-types": "openapi-typescript --immutable --check",
-    "validate:openapi": "redocly lint --lint-config=error && pnpm run check:openapi-types"
+    "validate:openapi": "redocly lint protocol/openapi.yaml protocol/access-control.openapi.yaml --lint-config=error && pnpm run check:openapi-types"
   },
   "devDependencies": {
     "@redocly/cli": "2.49.0",
@@ -39,6 +39,6 @@
     }
   },
   "engines": {
-    "node": ">=24"
+    "node": ">=24.20.0 <25"
   }
 }

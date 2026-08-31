@@ -10,10 +10,10 @@ import java.util.regex.Pattern;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class DirtMcpPlugin extends JavaPlugin {
-    private static final String PORT_ENVIRONMENT_VARIABLE = "DIRT_MCP_BRIDGE_PORT";
-    private static final String BRIDGE_TOKEN_ENVIRONMENT_VARIABLE = "DIRT_MCP_BRIDGE_TOKEN";
-    private static final String CONTROL_TOKEN_ENVIRONMENT_VARIABLE = "DIRT_MCP_CONTROL_TOKEN";
-    private static final String CONTROL_URL_ENVIRONMENT_VARIABLE = "DIRT_MCP_CONTROL_URL";
+    private static final String PORT_ENVIRONMENT_VARIABLE = "DIRT_BRIDGE_PORT";
+    private static final String BRIDGE_TOKEN_ENVIRONMENT_VARIABLE = "DIRT_BRIDGE_TOKEN";
+    private static final String CONTROL_TOKEN_ENVIRONMENT_VARIABLE = "DIRT_CONTROL_TOKEN";
+    private static final String CONTROL_URL_ENVIRONMENT_VARIABLE = "DIRT_CONTROL_URL";
     private static final Pattern TOKEN_PATTERN = Pattern.compile("[0-9a-f]{64}");
 
     private DirtRuntime runtime;
@@ -114,7 +114,7 @@ public final class DirtMcpPlugin extends JavaPlugin {
         requireToken(CONTROL_TOKEN_ENVIRONMENT_VARIABLE, controlToken);
         if (bridgeToken.equals(controlToken)) {
             throw new IllegalStateException(
-                    "DIRT_MCP_BRIDGE_TOKEN and DIRT_MCP_CONTROL_TOKEN must be distinct");
+                    "DIRT_BRIDGE_TOKEN and DIRT_CONTROL_TOKEN must be distinct");
         }
         return new ControlCredentials(bridgeToken, controlToken);
     }

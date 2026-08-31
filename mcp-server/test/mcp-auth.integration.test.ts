@@ -40,15 +40,13 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
     databasePath,
     port: address.port,
     publicOrigin: 'https://dirt.example',
-    rpId: 'dirt.example',
   };
   const database = openDatabase(databasePath);
   let mcp: ReturnType<typeof createDirtMcpHandler> | undefined;
 
   try {
     const repository = new AccessRepository(database);
-    const migration = await getMigrations(createAuthOptions(config, database, repository), { throwOnUnsafe: false });
-    assert.deepEqual(migration.unsafeChanges, []);
+    const migration = await getMigrations(createAuthOptions(config, database, repository));
     await migration.runMigrations();
     const auth = createAuth(config, database, repository);
     await auth.$context;
@@ -188,6 +186,19 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
       assert.match(rejected.headers.get('WWW-Authenticate') ?? '', /error="invalid_token"/u);
       assert.equal(bridgeRequests, 0);
     }
+
+    const missingVersion = mcpRequest(resource, issued.token);
+    missingVersion.headers.delete('MCP-Protocol-Version');
+    assert.equal((await mcp.fetch(missingVersion)).status, 400);
+
+    const legacy = new Request(mcpRequest(resource, issued.token), {
+      method: 'POST',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
+    legacy.headers.delete('MCP-Protocol-Version');
+    legacy.headers.delete('Mcp-Method');
+    assert.equal((await mcp.fetch(legacy)).status, 400);
+    assert.equal(bridgeRequests, 0);
 
     const authorized = await mcp.fetch(mcpRequest(resource, issued.token));
     assert.equal(authorized.status, 200);

@@ -32,7 +32,7 @@ if grep -Eq '^(com/sk89q|com/fastasyncworldedit|org/bukkit|io/papermc)/' <<<"${e
   printf 'Built Paper JAR must not bundle Paper, Bukkit, WorldEdit, or FAWE classes.\n' >&2
   exit 1
 fi
-if grep -Eq '(^|/)(\.dirt-mcp-token|\.dirt-mcp-dev-state)$|^paper-plugin/run/' <<<"${entries}"; then
+if grep -Eq '(^|/)\.dirt-|^paper-plugin/run/' <<<"${entries}"; then
   printf 'Built Paper JAR contains development runtime state or credentials.\n' >&2
   exit 1
 fi

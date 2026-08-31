@@ -127,7 +127,7 @@ export const EditRecordSchema = z
   components['schemas']['EditRecord']
 >;
 
-const EditOutcomeSchema = z.enum(['preview', 'no_change', 'committed']);
+type EditOutcome = 'preview' | 'no_change' | 'committed';
 
 export const ReplaceRegionBlocksInputSchema = z
   .object({
@@ -357,7 +357,7 @@ interface EditResponseCorrelation {
   readonly world: string;
   readonly bounds: Bounds | null;
   readonly seed: number;
-  readonly outcome: z.infer<typeof EditOutcomeSchema>;
+  readonly outcome: EditOutcome;
   readonly edit: EditRecord | null;
   readonly changedBlockCount: number;
 }
@@ -561,9 +561,9 @@ const UndoEditsPartialToolResultSchema = z
   .strict();
 
 function editSummary(result: {
-  readonly outcome: z.infer<typeof EditOutcomeSchema>;
+  readonly outcome: EditOutcome;
   readonly changedBlockCount: number;
-  readonly edit: z.infer<typeof EditRecordSchema> | null;
+  readonly edit: EditRecord | null;
   readonly world: string;
 }): string {
   const verb = result.outcome === 'preview' ? 'Would change' : 'Changed';

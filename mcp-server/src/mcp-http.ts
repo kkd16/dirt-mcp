@@ -13,7 +13,8 @@ import type { DirtAuth } from './auth.ts';
 import type { BridgeClient } from './bridge/client.ts';
 import { BRIDGE_ROUTES, BridgeCapabilitiesSchema } from './bridge/contract.ts';
 import type { RuntimeConfig } from './config.ts';
-import type { DirtLogger } from './logging.ts';
+import { BodyTooLargeError, readBoundedText } from './http-body.ts';
+import { safeErrorFields, type DirtLogger } from './logging.ts';
 import { createDirtServer } from './server.ts';
 import { toolConfigurationFromCapabilities } from './tools/configuration.ts';
 
@@ -40,11 +41,10 @@ export function createDirtMcpHandler(
     },
     {
       legacy: 'reject',
-      responseMode: 'auto',
       onerror(error) {
-        logger.child({ component: 'mcp_http' }).error('mcp.transport_error', 'MCP transport error.', {
-          error_type: error.name,
-        });
+        logger
+          .child({ component: 'mcp_http' })
+          .error('mcp.transport_error', 'MCP transport error.', safeErrorFields(error));
       },
     },
   );
@@ -52,22 +52,19 @@ export function createDirtMcpHandler(
   const authenticated = requireMcpAuth(
     auth,
     async (request, claims) => {
-      const userId = typeof claims.sub === 'string' ? claims.sub : undefined;
-      const clientId = typeof claims.azp === 'string' ? claims.azp : undefined;
       const authorizationVersion = claims.dirt_auth_version;
-      const scopes = parseScopes(claims.scope);
-      if (userId === undefined || !isAuthorizationVersion(authorizationVersion)) {
-        return mcpAuthorizationError(401, 'The access token is not a valid Dirt authorization.', resource);
+      if (typeof claims.sub !== 'string' || !isAuthorizationVersion(authorizationVersion)) {
+        return mcpAuthorizationError('The access token is not a valid Dirt authorization.', resource);
       }
-      const user = repository.findMcpUser(userId, authorizationVersion);
+      const user = repository.findMcpUser(claims.sub, authorizationVersion);
       if (user === null) {
         return jsonRpcError(403, -32_000, 'The Dirt account must be active and linked to a Minecraft account.');
       }
-      if (clientId === undefined) {
-        return mcpAuthorizationError(401, 'The access token does not identify its OAuth client.', resource);
+      if (typeof claims.azp !== 'string') {
+        return mcpAuthorizationError('The access token does not identify its OAuth client.', resource);
       }
       const accessToken = extractAccessToken(request.headers.get('Authorization'));
-      if (accessToken === null) return mcpAuthorizationError(401, 'Authentication is required.', resource);
+      if (accessToken === null) return mcpAuthorizationError('Authentication is required.', resource);
       if (request.method !== 'POST') {
         return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'POST' } });
       }
@@ -94,13 +91,13 @@ export function createDirtMcpHandler(
       if (mcpMethodHeader !== null) inbound.mcpMethodHeader = mcpMethodHeader;
       if (mcpNameHeader !== null) inbound.mcpNameHeader = mcpNameHeader;
       const classification = classifyInboundRequest(inbound);
-      if (classification.kind === 'modern' && request.headers.get('MCP-Protocol-Version') === null) {
+      if (classification.kind === 'modern' && protocolVersionHeader === null) {
         return jsonRpcError(400, -32_600, 'MCP-Protocol-Version is required for 2026-07-28 requests.');
       }
       const authInfo: AuthInfo = {
         token: accessToken,
-        clientId,
-        scopes,
+        clientId: claims.azp,
+        scopes: parseScopes(claims.scope),
         ...(typeof claims.exp === 'number' ? { expiresAt: claims.exp } : {}),
         resource: new URL(resource),
         extra: { userId: user.id, minecraftUuid: user.minecraftUuid },
@@ -125,8 +122,7 @@ function isAuthorizationVersion(value: unknown): value is number {
 }
 
 function parseScopes(value: unknown): string[] {
-  if (typeof value === 'string') return value.split(' ').filter((scope) => scope.length > 0);
-  return Array.isArray(value) ? value.filter((scope): scope is string => typeof scope === 'string') : [];
+  return typeof value === 'string' ? value.split(' ').filter((scope) => scope.length > 0) : [];
 }
 
 export function extractAccessToken(value: string | null): string | null {
@@ -135,16 +131,14 @@ export function extractAccessToken(value: string | null): string | null {
   return match?.[1] ?? null;
 }
 
-function mcpAuthorizationError(status: 401 | 403, message: string, resource: string): Response {
+function mcpAuthorizationError(message: string, resource: string): Response {
   const metadata = new URL('/.well-known/oauth-protected-resource/mcp', resource).toString();
-  const error = status === 401 ? 'invalid_token' : 'insufficient_scope';
-  return new Response(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32_000, message } }), {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-      'WWW-Authenticate': `Bearer error="${error}", resource_metadata="${metadata}", scope="${REQUIRED_SCOPE}"`,
-    },
-  });
+  const response = jsonRpcError(401, -32_000, message);
+  response.headers.set(
+    'WWW-Authenticate',
+    `Bearer error="invalid_token", resource_metadata="${metadata}", scope="${REQUIRED_SCOPE}"`,
+  );
+  return response;
 }
 
 function jsonRpcError(status: number, code: number, message: string): Response {
@@ -152,46 +146,4 @@ function jsonRpcError(status: number, code: number, message: string): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
-}
-
-class BodyTooLargeError extends Error {}
-
-async function readBoundedText(request: Request, maximumBytes: number): Promise<string> {
-  const contentLength = request.headers.get('Content-Length');
-  if (contentLength !== null && /^\d+$/u.test(contentLength) && Number(contentLength) > maximumBytes) {
-    await cancelRequestBody(request);
-    throw new BodyTooLargeError();
-  }
-  if (request.body === null) return '';
-  let output = new Uint8Array(Math.min(maximumBytes, 8_192));
-  let size = 0;
-  try {
-    await request.body.pipeTo(
-      new WritableStream<Uint8Array>({
-        write(chunk) {
-          const nextSize = size + chunk.byteLength;
-          if (nextSize > maximumBytes) throw new BodyTooLargeError();
-          if (nextSize > output.byteLength) {
-            const grown = new Uint8Array(Math.min(maximumBytes, Math.max(nextSize, output.byteLength * 2)));
-            grown.set(output.subarray(0, size));
-            output = grown;
-          }
-          output.set(chunk, size);
-          size = nextSize;
-        },
-      }),
-    );
-  } catch (error: unknown) {
-    if (error instanceof BodyTooLargeError) await cancelRequestBody(request);
-    throw error;
-  }
-  return new TextDecoder('utf-8', { fatal: true }).decode(output.subarray(0, size));
-}
-
-async function cancelRequestBody(request: Request): Promise<void> {
-  try {
-    await request.body?.cancel();
-  } catch {
-    // The stream may already have been canceled by pipeTo.
-  }
 }

@@ -1,14 +1,20 @@
 import { cimd } from '@better-auth/cimd';
 import { fetchClientMetadataResource } from '@better-auth/cimd/node';
-import { getCurrentAdapter } from '@better-auth/core/context';
-import { APIError } from 'better-auth/api';
-import { betterAuth, type Auth, type BetterAuthOptions, type BetterAuthPlugin } from 'better-auth';
+import {
+  APIError,
+  betterAuth,
+  getCurrentAdapter,
+  type Auth,
+  type BetterAuthOptions,
+  type BetterAuthPlugin,
+} from 'better-auth';
 import { mcp } from '@better-auth/mcp';
 import { passkey } from '@better-auth/passkey';
 import { jwt } from 'better-auth/plugins';
 import type Database from 'better-sqlite3';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import type { RuntimeConfig } from './config.ts';
+import * as z from 'zod/v4';
+import type { AuthConfig } from './config.ts';
 import { AccessError, type AccessRepository, type OnboardingClaim } from './access/repository.ts';
 import { dirtAccessSchema } from './access/schema.ts';
 
@@ -16,18 +22,22 @@ const ONBOARDING_TTL_SECONDS = 10 * 60;
 export const SESSION_FRESH_AGE_SECONDS = 5 * 60;
 const HANDLE_PATTERN = /^[a-z0-9][a-z0-9_-]{1,30}[a-z0-9]$/u;
 
-type TicketPayload = OnboardingClaim & { readonly exp: number };
+const ticketPayloadSchema = z
+  .object({
+    kind: z.enum(['invitation', 'recovery']),
+    recordId: z.string().min(1),
+    handle: z.string().regex(HANDLE_PATTERN),
+    exp: z.number().int().safe(),
+  })
+  .strict();
+type TicketPayload = z.infer<typeof ticketPayloadSchema>;
 
-export function createAuth(
-  config: RuntimeConfig,
-  database: Database.Database,
-  repository: AccessRepository,
-): Auth<any> {
+export function createAuth(config: AuthConfig, database: Database.Database, repository: AccessRepository): Auth {
   return betterAuth(createAuthOptions(config, database, repository));
 }
 
 export function createAuthOptions(
-  config: RuntimeConfig,
+  config: AuthConfig,
   database: Database.Database,
   repository: AccessRepository,
 ): BetterAuthOptions {
@@ -100,7 +110,7 @@ export function createAuthOptions(
     plugins: [
       jwt({ disableSettingJwtHeader: true }),
       passkey({
-        rpID: config.rpId,
+        rpID: new URL(config.publicOrigin).hostname,
         rpName: 'Dirt',
         origin: config.publicOrigin,
         authenticatorSelection: {
@@ -247,10 +257,10 @@ export function createAuthOptions(
       }),
       dirtAccessSchema,
     ],
-  } satisfies BetterAuthOptions;
+  };
 }
 
-export type DirtAuth = Auth<any>;
+export type DirtAuth = ReturnType<typeof createAuth>;
 
 export function normalizeHandle(input: string): string {
   const handle = input.trim().toLowerCase();
@@ -292,7 +302,7 @@ function requireTicket(headers: Headers | undefined, secret: string, publicOrigi
     ?.split(';')
     .map((part) => part.trim())
     .find((part) => part.startsWith(`${expectedName}=`));
-  const value = match?.slice((match.indexOf('=') ?? -1) + 1);
+  const value = match?.slice(expectedName.length + 1);
   if (value === undefined)
     throw new APIError('UNAUTHORIZED', { message: 'A valid invitation or recovery link is required.' });
   const separator = value.lastIndexOf('.');
@@ -302,8 +312,8 @@ function requireTicket(headers: Headers | undefined, secret: string, publicOrigi
   const expected = sign(encoded, secret);
   if (!safeEqual(signature, expected)) throw new APIError('UNAUTHORIZED', { message: 'Invalid onboarding ticket.' });
   try {
-    const parsed: unknown = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
-    if (!isTicketPayload(parsed) || parsed.exp <= Math.floor(Date.now() / 1_000)) {
+    const parsed = ticketPayloadSchema.parse(JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')));
+    if (parsed.exp <= Math.floor(Date.now() / 1_000)) {
       throw new Error('invalid ticket');
     }
     return parsed;
@@ -312,28 +322,10 @@ function requireTicket(headers: Headers | undefined, secret: string, publicOrigi
   }
 }
 
-function isTicketPayload(value: unknown): value is TicketPayload {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'kind' in value &&
-    (value.kind === 'invitation' || value.kind === 'recovery') &&
-    'recordId' in value &&
-    typeof value.recordId === 'string' &&
-    value.recordId.length > 0 &&
-    'handle' in value &&
-    typeof value.handle === 'string' &&
-    HANDLE_PATTERN.test(value.handle) &&
-    'exp' in value &&
-    typeof value.exp === 'number' &&
-    Number.isSafeInteger(value.exp)
-  );
-}
-
+// The OAuth provider's endpoint metadata is more specific than Better Auth's
+// plugin type. Validate the runtime boundary instead of weakening type checks.
 function requireBetterAuthPlugin(value: unknown): BetterAuthPlugin {
-  if (!isBetterAuthPlugin(value)) {
-    throw new TypeError('The MCP OAuth provider returned an invalid Better Auth plugin.');
-  }
+  if (!isBetterAuthPlugin(value)) throw new TypeError('The MCP OAuth provider returned an invalid plugin.');
   return value;
 }
 

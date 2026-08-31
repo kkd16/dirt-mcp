@@ -23,12 +23,7 @@ export function createLogger(component: string, sink: LogSink = stderrSink): Dir
 }
 
 export function safeErrorFields(error: unknown): LogFields {
-  const errorType = safeErrorType(error);
-  const stackLocations = error instanceof Error ? safeStackLocations(error) : undefined;
-  return {
-    error_type: errorType,
-    ...(stackLocations === undefined ? {} : { stack_locations: stackLocations }),
-  };
+  return { error_type: safeErrorType(error) };
 }
 
 function loggerWithContext(sink: LogSink, context: LogFields): DirtLogger {
@@ -91,28 +86,6 @@ function safeErrorType(error: unknown): string {
   if (error instanceof TypeError) return 'TypeError';
   if (error instanceof URIError) return 'URIError';
   return error instanceof Error ? 'Error' : typeof error;
-}
-
-function safeStackLocations(error: Error): string | undefined {
-  let stack: string | undefined;
-  let renderedHeader: string;
-  try {
-    stack = error.stack;
-    renderedHeader = Error.prototype.toString.call(error);
-  } catch {
-    return undefined;
-  }
-  if (stack === undefined) return undefined;
-  if (!stack.startsWith(renderedHeader)) return undefined;
-  const locations = stack
-    .slice(renderedHeader.length)
-    .split(/\r?\n/u)
-    .flatMap((line) => {
-      const match = /^at (?:.+? \()?((?:file:\/\/|node:|\/)[^()\s]+:\d+:\d+)\)?$/u.exec(line.trim());
-      return match?.[1] === undefined ? [] : [match[1]];
-    })
-    .slice(0, 8);
-  return locations.length === 0 ? undefined : locations.join(';');
 }
 
 function bounded(value: string): string {

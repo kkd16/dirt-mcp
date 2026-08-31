@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 run_dir="${repo_root}/paper-plugin/run"
-token_file="${run_dir}/.dirt-mcp-token"
+token_file="${run_dir}/.dirt-bridge-token"
 state_file="${run_dir}/.dirt-mcp-dev-state"
 session_name="dirt-mcp-$(printf '%s' "${repo_root}" | cksum | awk '{ print $1 }')"
 startup_timeout=120

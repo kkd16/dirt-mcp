@@ -357,7 +357,7 @@ export const BridgeErrorSchema = z.union([
   MutationWorldUnavailableErrorSchema,
 ]);
 
-export type BridgeError = z.infer<typeof BridgeErrorSchema>;
+type BridgeError = z.infer<typeof BridgeErrorSchema>;
 
 const BRIDGE_ERROR_HTTP_STATUS = {
   bridge_busy: 503,

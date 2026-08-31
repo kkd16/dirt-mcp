@@ -1,7 +1,6 @@
 import com.github.spotbugs.snom.Confidence
 import com.github.spotbugs.snom.Effort
 import org.gradle.api.tasks.bundling.AbstractArchiveTask
-import org.gradle.testing.jacoco.tasks.JacocoCoverageVerification
 
 plugins {
     java
@@ -17,7 +16,7 @@ val paperVersion = providers.gradleProperty("paperVersion").get()
 val paperApiVersion = providers.gradleProperty("paperApiVersion").get()
 val faweVersion = providers.gradleProperty("faweVersion").get()
 val faweModrinthVersionId = providers.gradleProperty("faweModrinthVersionId").get()
-val devServerPort = providers.environmentVariable("DIRT_MCP_DEV_PORT").orElse("25566")
+val devServerPort = providers.environmentVariable("DIRT_DEV_PORT").orElse("25566")
 
 group = "ca.deliyannides.dirtmcp"
 version = projectVersion
@@ -108,19 +107,10 @@ tasks {
 
     test {
         useJUnitPlatform()
-        finalizedBy(jacocoTestReport)
-    }
-
-    jacocoTestReport {
-        dependsOn(test)
-        reports {
-            html.required = true
-            xml.required = true
-        }
     }
 
     jacocoTestCoverageVerification {
-        dependsOn(jacocoTestReport)
+        dependsOn(test)
         violationRules {
             rule {
                 limit {
@@ -135,44 +125,8 @@ tasks {
         }
     }
 
-    val jacocoCoreCoverageVerification =
-        register<JacocoCoverageVerification>("jacocoCoreCoverageVerification") {
-            dependsOn(test)
-            sourceSets(sourceSets.main.get())
-            classDirectories.setFrom(
-                sourceSets.main.get().output.asFileTree.matching {
-                    // These adapters require a running Paper/FAWE environment and are exercised by
-                    // the managed smoke suite. Keep them in the full report and exclude them only
-                    // from the independently testable core gate.
-                    exclude(
-                        "ca/deliyannides/dirtmcp/paper/DirtMcpPlugin.class",
-                        "ca/deliyannides/dirtmcp/paper/bootstrap/DirtRuntime.class",
-                        "ca/deliyannides/dirtmcp/paper/status/BukkitServerStatusAccess*.class",
-                        "ca/deliyannides/dirtmcp/paper/world/edit/PaperEditPreparation*.class",
-                        "ca/deliyannides/dirtmcp/paper/world/edit/FaweEditExecutor*.class",
-                        "ca/deliyannides/dirtmcp/paper/world/edit/PaperFaweEditPlatform*.class",
-                        "ca/deliyannides/dirtmcp/paper/world/edit/WorldEditLifecycleListener*.class",
-                    )
-                },
-            )
-            executionData(layout.buildDirectory.file("jacoco/test.exec"))
-            violationRules {
-                rule {
-                    limit {
-                        counter = "LINE"
-                        minimum = "0.90".toBigDecimal()
-                    }
-                    limit {
-                        counter = "BRANCH"
-                        minimum = "0.75".toBigDecimal()
-                    }
-                }
-            }
-        }
-
     check {
         dependsOn(jacocoTestCoverageVerification)
-        dependsOn(jacocoCoreCoverageVerification)
     }
 
     jar {

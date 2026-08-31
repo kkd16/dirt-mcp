@@ -169,38 +169,22 @@ public final class DirtRuntime implements AutoCloseable {
                     mainThread, worldEditor, worldLifecycle, bridge, accessControl, log);
         } catch (IOException | RuntimeException | Error failure) {
             if (bridge != null) {
-                try {
-                    bridge.close();
-                } catch (RuntimeException | Error cleanupFailure) {
-                    failure.addSuppressed(cleanupFailure);
-                }
+                BridgeServer startedBridge = bridge;
+                cleanup(failure, startedBridge::close);
             }
             if (worldLifecycle != null) {
-                try {
-                    HandlerList.unregisterAll(worldLifecycle);
-                } catch (RuntimeException | Error cleanupFailure) {
-                    failure.addSuppressed(cleanupFailure);
-                }
+                WorldEditLifecycleListener registeredLifecycle = worldLifecycle;
+                cleanup(failure, () -> HandlerList.unregisterAll(registeredLifecycle));
             }
             if (worldEditor != null) {
-                try {
-                    worldEditor.close();
-                } catch (RuntimeException | Error cleanupFailure) {
-                    failure.addSuppressed(cleanupFailure);
-                }
+                WorldEditService startedWorldEditor = worldEditor;
+                cleanup(failure, startedWorldEditor::close);
             }
             if (accessControl != null) {
-                try {
-                    accessControl.close();
-                } catch (RuntimeException | Error cleanupFailure) {
-                    failure.addSuppressed(cleanupFailure);
-                }
+                AccessControl startedAccessControl = accessControl;
+                cleanup(failure, startedAccessControl::close);
             }
-            try {
-                mainThread.close();
-            } catch (RuntimeException | Error cleanupFailure) {
-                failure.addSuppressed(cleanupFailure);
-            }
+            cleanup(failure, mainThread::close);
             throw failure;
         }
     }

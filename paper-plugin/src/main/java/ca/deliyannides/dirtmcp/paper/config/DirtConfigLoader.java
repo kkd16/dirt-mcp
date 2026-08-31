@@ -2,7 +2,6 @@ package ca.deliyannides.dirtmcp.paper.config;
 
 import ca.deliyannides.dirtmcp.paper.bridge.BridgeOperation;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -113,7 +112,6 @@ public final class DirtConfigLoader {
             throw new IllegalArgumentException(path + " must be a list of operationIds");
         }
         List<BridgeOperation> operations = new ArrayList<>(values.size());
-        Set<BridgeOperation> unique = new HashSet<>();
         for (int index = 0; index < values.size(); index++) {
             Object value = values.get(index);
             if (!(value instanceof String operationId) || operationId.isBlank()) {
@@ -121,13 +119,9 @@ public final class DirtConfigLoader {
                         path + "[" + index + "] must be a non-empty operationId");
             }
             BridgeOperation operation = BridgeOperation.parse(operationId);
-            if (!unique.add(operation)) {
-                throw new IllegalArgumentException(
-                        path + " contains duplicate operationId: " + operationId);
-            }
             operations.add(operation);
         }
-        return List.copyOf(operations);
+        return operations;
     }
 
     private static int parsePortOverride(String override, int configuredPort) {
@@ -137,13 +131,11 @@ public final class DirtConfigLoader {
         try {
             int port = Integer.parseInt(override.trim());
             if (port < 1 || port > 65_535) {
-                throw new IllegalArgumentException(
-                        "DIRT_MCP_BRIDGE_PORT must be between 1 and 65535");
+                throw new IllegalArgumentException("DIRT_BRIDGE_PORT must be between 1 and 65535");
             }
             return port;
         } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException(
-                    "DIRT_MCP_BRIDGE_PORT must be an integer", exception);
+            throw new IllegalArgumentException("DIRT_BRIDGE_PORT must be an integer", exception);
         }
     }
 

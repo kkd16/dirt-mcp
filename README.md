@@ -59,14 +59,14 @@ global operation allowlist.
 Dirt follows the latest stable Paper release and does not support older server
 generations.
 
-| Dependency                                                          | Version                                 |
-| ------------------------------------------------------------------- | --------------------------------------- |
-| [Paper](https://papermc.io/downloads/paper/)                        | 26.2, API build 121 stable              |
-| [Java](https://docs.papermc.io/paper/getting-started/#requirements) | 25                                      |
-| [FAWE](https://modrinth.com/plugin/fastasyncworldedit)              | 2.15.4                                  |
-| Node.js                                                             | 24 or newer (24.20.0 LTS in production) |
-| pnpm                                                                | 11.24.0 or newer 11.x                   |
-| Docker Engine / Compose                                             | current Linux releases                  |
+| Dependency                                                          | Version                    |
+| ------------------------------------------------------------------- | -------------------------- |
+| [Paper](https://papermc.io/downloads/paper/)                        | 26.2, API build 121 stable |
+| [Java](https://docs.papermc.io/paper/getting-started/#requirements) | 25                         |
+| [FAWE](https://modrinth.com/plugin/fastasyncworldedit)              | 2.15.4                     |
+| Node.js                                                             | 24.20.0 LTS                |
+| pnpm                                                                | 11.24.0 or newer 11.x      |
+| Docker Engine / Compose                                             | current Linux releases     |
 
 The production Compose topology uses Linux host networking so the containerized
 web service can reach the native Paper bridge at `127.0.0.1`. A real DNS name
@@ -105,7 +105,7 @@ done
 ```
 
 Supply the bridge and control values to Paper as
-`DIRT_MCP_BRIDGE_TOKEN` and `DIRT_MCP_CONTROL_TOKEN`. Configure the web service
+`DIRT_BRIDGE_TOKEN` and `DIRT_CONTROL_TOKEN`. Configure the web service
 with the same values through its corresponding mounted secret files. Never
 reuse either value as the web authentication secret.
 

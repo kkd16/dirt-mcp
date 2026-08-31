@@ -15,44 +15,27 @@ async function main(): Promise<void> {
   try {
     const config = readRuntimeConfig(process.env);
     const database = openDatabase(config.databasePath);
-    let initialized: Awaited<ReturnType<typeof initializeApplication>>;
-    try {
-      initialized = await initializeApplication(config, database, logger);
-    } catch (error: unknown) {
-      try {
-        database.close();
-      } catch (cleanupError: unknown) {
-        throw new AggregateError([error, cleanupError], 'Dirt initialization and cleanup both failed.', {
-          cause: cleanupError,
-        });
-      }
-      throw error;
-    }
-    const { app, mcp } = initialized;
+    const { app, mcp } = await initializeApplication(config, database, logger).catch((error: unknown) =>
+      cleanupAndThrow(error, () => database.close(), 'Dirt initialization and cleanup both failed.'),
+    );
     let httpServer: ReturnType<typeof serve>;
     try {
       httpServer = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: config.port });
     } catch (error: unknown) {
-      try {
-        await closeApplication(mcp, database);
-      } catch (cleanupError: unknown) {
-        throw new AggregateError([error, cleanupError], 'Dirt startup and cleanup both failed.', {
-          cause: cleanupError,
-        });
-      }
-      throw error;
+      return await cleanupAndThrow(
+        error,
+        () => closeApplication(mcp, database),
+        'Dirt startup and cleanup both failed.',
+      );
     }
     try {
       await waitForListening(httpServer);
     } catch (error: unknown) {
-      try {
-        await closeRuntime(httpServer, mcp, database);
-      } catch (cleanupError: unknown) {
-        throw new AggregateError([error, cleanupError], 'Dirt startup and cleanup both failed.', {
-          cause: cleanupError,
-        });
-      }
-      throw error;
+      await cleanupAndThrow(
+        error,
+        () => closeRuntime(httpServer, mcp, database),
+        'Dirt startup and cleanup both failed.',
+      );
     }
     let closing = false;
     const shutdown = async (reason: NodeJS.Signals | 'HTTP_ERROR'): Promise<void> => {
@@ -98,15 +81,17 @@ async function initializeApplication(config: RuntimeConfig, database: Database.D
     const app = createWebApp({ auth, config, logger, mcp, repository });
     return { app, mcp };
   } catch (error: unknown) {
-    try {
-      await mcp.close();
-    } catch (cleanupError: unknown) {
-      throw new AggregateError([error, cleanupError], 'Dirt application initialization and cleanup both failed.', {
-        cause: cleanupError,
-      });
-    }
-    throw error;
+    return cleanupAndThrow(error, () => mcp.close(), 'Dirt application initialization and cleanup both failed.');
   }
+}
+
+async function cleanupAndThrow(error: unknown, cleanup: () => unknown, message: string): Promise<never> {
+  try {
+    await cleanup();
+  } catch (cleanupError: unknown) {
+    throw new AggregateError([error, cleanupError], message, { cause: cleanupError });
+  }
+  throw error;
 }
 
 await main();

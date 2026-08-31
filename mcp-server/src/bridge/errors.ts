@@ -38,8 +38,8 @@ const LocalToolFailureSchema = z.discriminatedUnion('code', [
   localFailure('dirt_internal_error'),
 ]);
 
-export const ToolFailureDataSchema = z.union([BridgeErrorSchema, LocalToolFailureSchema]);
-export type ToolFailureData = z.infer<typeof ToolFailureDataSchema>;
+const ToolFailureDataSchema = z.union([BridgeErrorSchema, LocalToolFailureSchema]);
+type ToolFailureData = z.infer<typeof ToolFailureDataSchema>;
 type ToolFailureCode = ToolFailureData['code'];
 
 export const ToolFailureResultSchema = z

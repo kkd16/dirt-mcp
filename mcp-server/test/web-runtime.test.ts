@@ -29,12 +29,10 @@ const config: RuntimeConfig = {
   databasePath: join(directory, 'dirt.sqlite'),
   port: 3000,
   publicOrigin: 'http://localhost:3000',
-  rpId: 'localhost',
 };
 const database = openDatabase(config.databasePath);
 const repository = new AccessRepository(database);
-const migration = await getMigrations(createAuthOptions(config, database, repository), { throwOnUnsafe: false });
-assert.deepEqual(migration.unsafeChanges, []);
+const migration = await getMigrations(createAuthOptions(config, database, repository));
 await migration.runMigrations();
 repository.assertSchema();
 const auth = createAuth(config, database, repository);
@@ -121,11 +119,7 @@ test('Better Auth is passkey-only and MCP OAuth uses the fixed narrow policy', a
     (error) => error instanceof Error && /does not match this link/u.test(error.message),
   );
 
-  const publicAuth = createAuth(
-    { ...config, publicOrigin: 'https://dirt.example', rpId: 'dirt.example' },
-    database,
-    repository,
-  );
+  const publicAuth = createAuth({ ...config, publicOrigin: 'https://dirt.example' }, database, repository);
   await publicAuth.$context;
   const publicPasskey = (publicAuth.options.plugins ?? []).find((plugin: { id: string }) => plugin.id === 'passkey') as
     | { options?: Record<string, unknown> }
@@ -147,7 +141,7 @@ test('Better Auth is passkey-only and MCP OAuth uses the fixed narrow policy', a
 });
 
 test('migration is deterministic and idempotent', async () => {
-  const second = await getMigrations(auth.options, { throwOnUnsafe: false });
+  const second = await getMigrations(auth.options);
   assert.deepEqual(second.unsafeChanges, []);
   assert.deepEqual(second.toBeCreated, []);
   assert.deepEqual(second.toBeAdded, []);
@@ -319,12 +313,12 @@ test('invite, recovery, account status, and link transitions are atomic and boun
 
   insertAuthorizationArtifacts('user-one', 'disable', now);
   assert.equal(repository.requireAuthorizationVersion('user-one'), 1);
-  assert.equal(repository.hasPasskey('user-one'), true);
+  assert.equal(hasPasskey('user-one'), true);
   repository.disableUser('builder');
   assert.equal(repository.findMcpUser('user-one', 1), null);
   assert.equal(repository.requireAuthorizationVersion('user-one'), 2);
   assert.equal(authorizationArtifactCount('user-one'), 0);
-  assert.equal(repository.hasPasskey('user-one'), true);
+  assert.equal(hasPasskey('user-one'), true);
   repository.enableUser('builder');
   assert.equal(repository.requireAuthorizationVersion('user-one'), 3);
   assert.equal(repository.findMcpUser('user-one', 2), null);
@@ -337,7 +331,7 @@ test('invite, recovery, account status, and link transitions are atomic and boun
   repository.unlinkUser('builder');
   assert.equal(repository.requireAuthorizationVersion('user-one'), 4);
   assert.equal(authorizationArtifactCount('user-one'), 0);
-  assert.equal(repository.hasPasskey('user-one'), true);
+  assert.equal(hasPasskey('user-one'), true);
   assert.equal(repository.findMcpUser('user-one', 3), null);
   database.prepare('UPDATE "user" SET status = ? WHERE id = ?').run('unexpected', 'user-one');
   assert.throws(() => repository.requireUserById('user-one'), /invalid user status/u);
@@ -471,7 +465,6 @@ test('internal routes enforce loopback, UUIDv4 calls, exact envelopes, and bound
     assert.equal(internalErrors[0]?.event, 'access_control.request_failed');
     assert.equal(internalErrors[0]?.fields?.route, '/internal/v1/access/users/:handle/disable');
     assert.equal(internalErrors[0]?.fields?.error_type, 'Error');
-    assert.match(String(internalErrors[0]?.fields?.stack_locations), /web-runtime\.test/u);
     assert.doesNotMatch(JSON.stringify(internalErrors), /secret database detail/u);
     assert.doesNotMatch(JSON.stringify(internalErrors), /private-handle/u);
   } finally {
@@ -496,6 +489,15 @@ test('web shell exposes a loopback health check and hardened consent copy', asyn
   assert.equal(invite.status, 200);
   assert.match(await invite.text(), /Create your Dirt account/u);
   assert.equal(invite.headers.get('Cache-Control'), 'no-store');
+  assert.equal(invite.headers.get('Content-Security-Policy')?.includes("frame-ancestors 'none'"), true);
+  assert.equal(
+    invite.headers.get('Permissions-Policy'),
+    'camera=(), geolocation=(), microphone=(), payment=(), publickey-credentials-get=(self), usb=()',
+  );
+  assert.equal(invite.headers.get('Referrer-Policy'), 'no-referrer');
+  assert.equal(invite.headers.get('Strict-Transport-Security'), null);
+  assert.equal(invite.headers.get('X-Content-Type-Options'), null);
+  assert.equal(invite.headers.get('X-Frame-Options'), 'DENY');
 
   const asset = await app.request('/assets/app.js', { headers: { Host: 'localhost:3000' } });
   assert.equal(asset.status, 200);
@@ -555,7 +557,7 @@ test('web shell exposes a loopback health check and hardened consent copy', asyn
   assert.equal(oversizedBrowserStream.status, 400);
   assert.equal(streamedBrowserBodyCanceled, true);
 
-  const publicConfig = { ...config, publicOrigin: 'https://dirt.example', rpId: 'dirt.example' };
+  const publicConfig = { ...config, publicOrigin: 'https://dirt.example' };
   const publicApp = createWebApp({
     auth,
     config: publicConfig,
@@ -569,6 +571,7 @@ test('web shell exposes a loopback health check and hardened consent copy', asyn
     headers: { Host: '127.0.0.1:3000' },
   });
   assert.equal(loopbackJwks.status, 200);
+  assert.equal(loopbackJwks.headers.get('Strict-Transport-Security'), null);
   const rejectedLoopbackAuth = await publicApp.request('/api/auth/get-session', {
     headers: { Host: '127.0.0.1:3000' },
   });
@@ -782,7 +785,7 @@ function insertAuthorizationArtifacts(userId: string, suffix: string, now: Date)
       now.getTime(),
       JSON.stringify(['dirt:mcp']),
     );
-  if (!repository.hasPasskey(userId)) {
+  if (!hasPasskey(userId)) {
     database
       .prepare(
         'INSERT INTO passkey (id, name, publicKey, userId, credentialID, counter, deviceType, backedUp, createdAt) VALUES (?, ?, ?, ?, ?, 0, ?, 0, ?)',
@@ -797,6 +800,14 @@ function insertAuthorizationArtifacts(userId: string, suffix: string, now: Date)
         now.getTime(),
       );
   }
+}
+
+function hasPasskey(userId: string): boolean {
+  return (
+    database
+      .prepare<[string], { found: number }>('SELECT 1 AS found FROM passkey WHERE userId = ? LIMIT 1')
+      .get(userId) !== undefined
+  );
 }
 
 function authorizationArtifactCount(userId: string): number {

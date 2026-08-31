@@ -226,10 +226,11 @@ codes.
 
 The Node service also binds to `127.0.0.1`. Caddy is the only internet-facing
 HTTP process, terminates HTTPS, rejects `/internal/*` before proxying, and adds
-the public response security headers. Paper may expose its Minecraft game port
-separately. The application requires its exact canonical origin, uses secure
-host-only cookies, validates mutation origins, sends a restrictive content
-security policy, and exposes no cross-origin API.
+transport-wide security headers. Paper may expose its Minecraft game port
+separately. The application adds content-specific security headers, requires
+its exact canonical origin, uses secure host-only cookies, validates mutation
+origins, sends a restrictive content security policy, and exposes no
+cross-origin API.
 
 Paper writes concise lifecycle, mutation, undo, warning, and failure events to
 its console and bounded structured detail events to rotating JSON Lines files.

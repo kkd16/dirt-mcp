@@ -86,32 +86,11 @@ test('emits canonical levels and does not expose unexpected error messages', () 
     ['info', 'warning', 'error'],
   );
 
-  const fields = safeErrorFields(new Error('sensitive implementation detail'));
-  assert.equal(fields.error_type, 'Error');
-  assert.equal(JSON.stringify(fields).includes('sensitive implementation detail'), false);
-  assert.match(fields.stack_locations as string, /logging\.test/);
-});
-
-test('does not trust mutable error names or multiline messages as stack locations', () => {
-  const error = new Error('first line\nsensitive-value:12:34');
+  const error = new Error('sensitive implementation detail');
   error.name = 'sensitive custom name';
-
   const fields = safeErrorFields(error);
-
-  assert.equal(fields.error_type, 'Error');
-  assert.equal(JSON.stringify(fields).includes('sensitive'), false);
-  assert.match(fields.stack_locations as string, /logging\.test/);
-});
-
-test('handles an error whose stack metadata cannot be read', () => {
-  const error = new Error('hidden');
-  Object.defineProperty(error, 'stack', {
-    get() {
-      throw new Error('sensitive stack getter');
-    },
-  });
-
-  assert.deepEqual(safeErrorFields(error), { error_type: 'Error' });
+  assert.deepEqual(fields, { error_type: 'Error' });
+  assert.equal(JSON.stringify(fields).includes('sensitive implementation detail'), false);
 });
 
 test('bounds free-form fields including the truncation marker', () => {

@@ -3,10 +3,5 @@ apis:
     root: protocol/openapi.yaml
     x-openapi-ts:
       output: mcp-server/src/generated/openapi.ts
-  dirt-access-control@v1:
-    root: protocol/access-control.openapi.yaml
-    x-openapi-ts:
-      output: mcp-server/src/generated/access-control-openapi.ts
-
 extends:
   - recommended-strict

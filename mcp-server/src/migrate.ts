@@ -1,18 +1,15 @@
 import { getMigrations } from 'better-auth/db/migration';
 import { AccessRepository } from './access/repository.ts';
 import { createAuth, createAuthOptions } from './auth.ts';
-import { readRuntimeConfig } from './config.ts';
+import { readAuthConfig } from './config.ts';
 import { openDatabase } from './storage.ts';
 
 async function main(): Promise<void> {
-  const config = readRuntimeConfig(process.env);
+  const config = readAuthConfig(process.env);
   const database = openDatabase(config.databasePath);
   try {
     const repository = new AccessRepository(database);
-    const migrations = await getMigrations(createAuthOptions(config, database, repository), { throwOnUnsafe: false });
-    if (migrations.unsafeChanges.length > 0) {
-      throw new Error(`Unsafe database migration refused:\n${migrations.unsafeChanges.join('\n')}`);
-    }
+    const migrations = await getMigrations(createAuthOptions(config, database, repository));
     await migrations.runMigrations();
     repository.assertSchema();
     // OAuth Provider seeds the configured MCP resource during Better Auth

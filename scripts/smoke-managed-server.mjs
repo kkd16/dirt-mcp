@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 const runDirectory = `${repositoryRoot}/paper-plugin/run`;
 const detailLogDirectory = `${runDirectory}/plugins/DirtMCP/logs`;
-const token = (await readFile(`${runDirectory}/.dirt-mcp-token`, 'utf8')).trim();
+const token = (await readFile(`${runDirectory}/.dirt-bridge-token`, 'utf8')).trim();
 const runtimeState = Object.fromEntries(
   (await readFile(`${runDirectory}/.dirt-mcp-dev-state`, 'utf8'))
     .trim()

@@ -5,10 +5,11 @@ import { routePath } from 'hono/route';
 import { secureHeaders } from 'hono/secure-headers';
 import * as z from 'zod/v4';
 import { AccessError, type AccessRepository, type UserSummary } from '../access/repository.ts';
-import { internalError, registerInternalRoutes } from '../access/routes.ts';
+import { internalError, readJsonBody, registerInternalRoutes, validCallIdOrNull } from '../access/routes.ts';
 import {
   createOnboardingTicket,
   normalizeHandle,
+  onboardingCookieName,
   onboardingCookieHeader,
   SESSION_FRESH_AGE_SECONDS,
   type DirtAuth,
@@ -26,7 +27,6 @@ const onboardingExchangeSchema = z
   })
   .strict();
 const linkSchema = z.object({ code: z.string().trim().min(8).max(24) }).strict();
-const MAX_BROWSER_BODY_BYTES = 16_384;
 const RECENT_AUTHENTICATION_MS = SESSION_FRESH_AGE_SECONDS * 1_000;
 const SENSITIVE_OAUTH_PATHS = new Set([
   '/api/auth/oauth2/authorize',
@@ -45,7 +45,7 @@ type WebAuth = Pick<DirtAuth, 'handler'> & {
   };
 };
 
-export interface WebAppDependencies {
+interface WebAppDependencies {
   readonly auth: WebAuth;
   readonly config: RuntimeConfig;
   readonly logger: DirtLogger;
@@ -78,7 +78,17 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
         frameAncestors: ["'none'"],
       },
       referrerPolicy: 'no-referrer',
-      strictTransportSecurity: config.publicOrigin.startsWith('https:') ? 'max-age=63072000; includeSubDomains' : false,
+      permissionsPolicy: {
+        camera: false,
+        geolocation: false,
+        microphone: false,
+        payment: false,
+        publickeyCredentialsGet: ['self'],
+        usb: false,
+      },
+      strictTransportSecurity: false,
+      xContentTypeOptions: false,
+      xFrameOptions: 'DENY',
     }),
   );
 
@@ -100,21 +110,15 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
   });
 
   app.use('*', async (context, next) => {
+    const path = context.req.path;
     if (
-      context.req.method === 'GET' &&
-      ['/', '/sign-in', '/invite', '/recover', '/dashboard', '/link', '/consent'].includes(context.req.path)
+      path.startsWith('/api/') ||
+      path === '/mcp' ||
+      (context.req.method === 'GET' &&
+        ['/', '/sign-in', '/invite', '/recover', '/dashboard', '/link', '/consent'].includes(path))
     ) {
       context.header('Cache-Control', 'no-store');
     }
-    return next();
-  });
-
-  app.use('/api/*', async (context, next) => {
-    context.header('Cache-Control', 'no-store');
-    return next();
-  });
-  app.use('/mcp', async (context, next) => {
-    context.header('Cache-Control', 'no-store');
     return next();
   });
 
@@ -169,7 +173,7 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
 
   app.post('/api/onboarding/exchange', async (context) => {
     requireSameOrigin(context, config.publicOrigin);
-    const body = onboardingExchangeSchema.parse(await readSmallJson(context.req.raw));
+    const body = await readJsonBody(context.req.raw, onboardingExchangeSchema);
     const claim =
       body.kind === 'invitation' ? repository.resolveInvitation(body.token) : repository.resolveRecovery(body.token);
     const handle = body.kind === 'invitation' ? normalizeHandle(body.handle ?? '') : claim.handle;
@@ -184,7 +188,7 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
 
   app.post('/api/access/minecraft-link', async (context) => {
     requireSameOrigin(context, config.publicOrigin);
-    const body = linkSchema.parse(await readSmallJson(context.req.raw));
+    const body = await readJsonBody(context.req.raw, linkSchema);
     const sessionUser = await currentSessionUser(auth, repository, context.req.raw.headers);
     if (sessionUser === null) return context.json({ error: 'Sign in again before linking Minecraft.' }, 401);
     if (!isRecentlyAuthenticated(sessionUser.sessionCreatedAt)) {
@@ -209,7 +213,7 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
     const user = await currentUser(auth, repository, context.req.raw.headers);
     if (user === null) return context.redirect('/sign-in', 303);
     context.header('Set-Cookie', expiredOnboardingCookie(config.publicOrigin));
-    return context.html(dashboardPage(user, repository.hasPasskey(user.id)));
+    return context.html(dashboardPage(user));
   });
   app.get('/link', async (context) => {
     const user = await currentUser(auth, repository, context.req.raw.headers);
@@ -260,7 +264,8 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
       }
       return context.json({ callId, error: { code: failure.code, message: failure.message } }, failure.status);
     }
-    if (context.req.path.startsWith('/api/')) {
+    const apiRequest = context.req.path.startsWith('/api/');
+    if (apiRequest) {
       if (error instanceof AccessError) {
         const status = error.code === 'conflict' ? 409 : error.code === 'not_found' ? 404 : 400;
         return context.json({ error: error.message }, status);
@@ -268,14 +273,11 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
       if (error instanceof z.ZodError || error instanceof SyntaxError) {
         return context.json({ error: 'The request is invalid.' }, 400);
       }
-      dependencies.logger
-        .child({ component: 'web' })
-        .error('web.request_failed', 'Web request failed unexpectedly.', { path: context.req.path });
-      return context.json({ error: 'An internal error occurred.' }, 500);
     }
     dependencies.logger
       .child({ component: 'web' })
       .error('web.request_failed', 'Web request failed unexpectedly.', { path: context.req.path });
+    if (apiRequest) return context.json({ error: 'An internal error occurred.' }, 500);
     context.header('Cache-Control', 'no-store');
     return context.html(errorPage('Something went wrong', 'Please try again.'), 500);
   });
@@ -285,8 +287,7 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
 
 function expiredOnboardingCookie(publicOrigin: string): string {
   const secure = publicOrigin.startsWith('https://');
-  const name = secure ? '__Host-dirt-onboarding' : 'dirt-onboarding';
-  return `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? '; Secure' : ''}`;
+  return `${onboardingCookieName(publicOrigin)}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? '; Secure' : ''}`;
 }
 
 function withNoStore(response: Response): Response {
@@ -306,12 +307,6 @@ function canonicalPublicRequest(request: Request, publicOrigin: string): Request
     init.duplex = 'half';
   }
   return new Request(`${publicOrigin}${incoming.pathname}${incoming.search}`, init);
-}
-
-function validCallIdOrNull(value: string | undefined): string | null {
-  return value !== undefined && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value)
-    ? value
-    : null;
 }
 
 async function currentUser(auth: WebAuth, repository: AccessRepository, headers: Headers): Promise<UserSummary | null> {
@@ -349,48 +344,5 @@ function isLoopbackConnection(context: Context): boolean {
 function requireSameOrigin(context: Context, origin: string): void {
   if (context.req.header('Origin') !== origin || context.req.header('Sec-Fetch-Site') === 'cross-site') {
     throw new AccessError('invalid', 'Same-origin request required.');
-  }
-}
-
-async function readSmallJson(request: Request): Promise<unknown> {
-  if (request.headers.get('Content-Type')?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') {
-    throw new AccessError('invalid', 'Content-Type must be application/json.');
-  }
-  const length = request.headers.get('Content-Length');
-  if (length !== null && (!/^\d+$/u.test(length) || Number(length) > MAX_BROWSER_BODY_BYTES)) {
-    await cancelRequestBody(request);
-    throw new AccessError('invalid', 'Request body is too large.');
-  }
-  if (request.body === null) throw new SyntaxError('missing body');
-  let bytes = new Uint8Array(8_192);
-  let total = 0;
-  try {
-    await request.body.pipeTo(
-      new WritableStream<Uint8Array>({
-        write(chunk) {
-          const nextTotal = total + chunk.byteLength;
-          if (nextTotal > MAX_BROWSER_BODY_BYTES) throw new AccessError('invalid', 'Request body is too large.');
-          if (nextTotal > bytes.byteLength) {
-            const grown = new Uint8Array(Math.min(MAX_BROWSER_BODY_BYTES, Math.max(nextTotal, bytes.byteLength * 2)));
-            grown.set(bytes.subarray(0, total));
-            bytes = grown;
-          }
-          bytes.set(chunk, total);
-          total = nextTotal;
-        },
-      }),
-    );
-    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, total)));
-  } catch (error: unknown) {
-    if (error instanceof SyntaxError || error instanceof AccessError) throw error;
-    throw new AccessError('invalid', 'Request body must be valid UTF-8 JSON.');
-  }
-}
-
-async function cancelRequestBody(request: Request): Promise<void> {
-  try {
-    await request.body?.cancel();
-  } catch {
-    // The stream may already have been canceled by pipeTo.
   }
 }

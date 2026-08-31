@@ -2,8 +2,8 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-token_file="${repo_root}/paper-plugin/run/.dirt-mcp-token"
-control_token_file="${repo_root}/paper-plugin/run/.dirt-mcp-control-token"
+token_file="${repo_root}/paper-plugin/run/.dirt-bridge-token"
+control_token_file="${repo_root}/paper-plugin/run/.dirt-control-token"
 managed_config_dir="${repo_root}/paper-plugin/run/plugins/DirtMCP"
 managed_fawe_config_dir="${repo_root}/paper-plugin/run/plugins/FastAsyncWorldEdit"
 managed_paper_config_dir="${repo_root}/paper-plugin/run/config"
@@ -12,28 +12,28 @@ if [[ $# -ne 2 ]]; then
   printf 'Usage: %s MC_PORT BRIDGE_PORT\n' "$0" >&2
   exit 2
 fi
-DIRT_MCP_BRIDGE_TOKEN=''
+DIRT_BRIDGE_TOKEN=''
 if [[ -f "${token_file}" ]]; then
-  DIRT_MCP_BRIDGE_TOKEN="$(<"${token_file}")"
+  DIRT_BRIDGE_TOKEN="$(<"${token_file}")"
 fi
-if [[ ! "${DIRT_MCP_BRIDGE_TOKEN}" =~ ^[0-9a-f]{64}$ ]]; then
+if [[ ! "${DIRT_BRIDGE_TOKEN}" =~ ^[0-9a-f]{64}$ ]]; then
   printf 'Dirt bridge token not found or invalid. Run make reload to create the development credentials.\n' >&2
   exit 1
 fi
-DIRT_MCP_CONTROL_TOKEN=''
+DIRT_CONTROL_TOKEN=''
 if [[ -f "${control_token_file}" ]]; then
-  DIRT_MCP_CONTROL_TOKEN="$(<"${control_token_file}")"
+  DIRT_CONTROL_TOKEN="$(<"${control_token_file}")"
 fi
-if [[ ! "${DIRT_MCP_CONTROL_TOKEN}" =~ ^[0-9a-f]{64}$ ]]; then
+if [[ ! "${DIRT_CONTROL_TOKEN}" =~ ^[0-9a-f]{64}$ ]]; then
   printf 'Dirt control token not found or invalid. Run make reload to create the development credentials.\n' >&2
   exit 1
 fi
 
 export PAPER_EULA=true
-export DIRT_MCP_DEV_PORT="$1"
-export DIRT_MCP_BRIDGE_PORT="$2"
-export DIRT_MCP_BRIDGE_TOKEN
-export DIRT_MCP_CONTROL_TOKEN
+export DIRT_DEV_PORT="$1"
+export DIRT_BRIDGE_PORT="$2"
+export DIRT_BRIDGE_TOKEN
+export DIRT_CONTROL_TOKEN
 
 # The managed server is disposable and always runs against this checkout's
 # complete strict Dirt configuration schema and pinned dependency test settings.

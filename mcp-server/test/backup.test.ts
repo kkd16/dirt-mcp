@@ -15,10 +15,6 @@ database.close();
 
 const environment = {
   ...process.env,
-  DIRT_MCP_BRIDGE_TOKEN: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-  DIRT_CONTROL_TOKEN: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-  DIRT_AUTH_SECRET: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
-  DIRT_PUBLIC_ORIGIN: 'http://127.0.0.1:3000',
   DIRT_DATABASE_PATH: source,
 };
 

@@ -95,17 +95,10 @@ public final class BridgeServer implements AutoCloseable {
             newServer.start();
         } catch (IOException | RuntimeException | Error failure) {
             if (newServer != null) {
-                try {
-                    newServer.stop(0);
-                } catch (RuntimeException | Error cleanupFailure) {
-                    failure.addSuppressed(cleanupFailure);
-                }
+                HttpServer failedServer = newServer;
+                cleanup(failure, () -> failedServer.stop(0));
             }
-            try {
-                newExecutor.shutdownNow();
-            } catch (RuntimeException | Error cleanupFailure) {
-                failure.addSuppressed(cleanupFailure);
-            }
+            cleanup(failure, newExecutor::shutdownNow);
             throw failure;
         }
 

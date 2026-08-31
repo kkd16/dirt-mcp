@@ -41,20 +41,22 @@ export async function executeToolCall(
     success = result.isError !== true;
     return result;
   } catch (error: unknown) {
-    failure = toolFailure(error);
+    failure =
+      error instanceof ToolFailure
+        ? error
+        : new ToolFailure({ code: 'dirt_internal_error', message: INTERNAL_ERROR_MESSAGE });
     if (!(error instanceof ToolFailure)) {
       callLogger.error('tool.unexpected_failure', 'Tool call failed unexpectedly.', safeErrorFields(error));
     }
-    const baseStructuredContent = ToolFailureResultSchema.parse({
+    const structuredContent = ToolFailureResultSchema.parse({
       callId,
       error: failure.data,
     });
-    const result: CallToolResult = {
+    return {
       content: [{ type: 'text', text: `${details.failureContext}: ${failure.message}` }],
-      structuredContent: baseStructuredContent,
+      structuredContent,
       isError: true,
     };
-    return result;
   } finally {
     const failureFields: LogFields =
       failure === undefined
@@ -69,24 +71,8 @@ export async function executeToolCall(
       ...failureFields,
     };
     const level = failure === undefined ? (success ? 'info' : 'warning') : toolFailureLogLevel(failure);
-    switch (level) {
-      case 'error':
-        callLogger.error('tool.completed', 'Tool call completed.', completionFields);
-        break;
-      case 'warning':
-        callLogger.warning('tool.completed', 'Tool call completed.', completionFields);
-        break;
-      case 'info':
-        callLogger.info('tool.completed', 'Tool call completed.', completionFields);
-        break;
-    }
+    callLogger[level]('tool.completed', 'Tool call completed.', completionFields);
   }
-}
-
-function toolFailure(error: unknown): ToolFailure {
-  return error instanceof ToolFailure
-    ? error
-    : new ToolFailure({ code: 'dirt_internal_error', message: INTERNAL_ERROR_MESSAGE });
 }
 
 function clientLabel(context: ToolExecutionContext): string {

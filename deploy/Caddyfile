@@ -1,5 +1,6 @@
 {
 	admin off
+	persist_config off
 	servers {
 		# MCP POST requests can mutate world state, so reject replayable TLS early data.
 		0rtt off
@@ -27,9 +28,6 @@ http:// {
 		-Server
 		Strict-Transport-Security "max-age=63072000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
-		Referrer-Policy "no-referrer"
-		Permissions-Policy "camera=(), geolocation=(), microphone=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), usb=()"
 	}
 
 	route {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { BRIDGE_ERROR_CODES, BRIDGE_OPERATION_IDS, BRIDGE_ROUTES } from '../dist/bridge/contract.js';
-import { MCP_TOOL_NAMES, MCP_TOOL_OPERATIONS } from '../dist/tools/configuration.js';
+import { MCP_TOOL_OPERATIONS } from '../dist/tools/configuration.js';
 
 const openApi = readFileSync(new URL('../../protocol/openapi.yaml', import.meta.url), 'utf8');
 const generated = readFileSync(new URL('../src/generated/openapi.ts', import.meta.url), 'utf8');
@@ -36,8 +36,7 @@ test('every MCP bridge route exists in the authoritative OpenAPI contract', () =
 });
 
 test('the twelve public tools map exactly to configurable OpenAPI operation IDs', () => {
-  assert.equal(MCP_TOOL_NAMES.length, 12);
-  assert.deepEqual(Object.keys(MCP_TOOL_OPERATIONS), [...MCP_TOOL_NAMES]);
+  assert.equal(Object.keys(MCP_TOOL_OPERATIONS).length, 12);
   assert.deepEqual(Object.values(MCP_TOOL_OPERATIONS), [...BRIDGE_OPERATION_IDS]);
   assert.deepEqual(generatedStringUnion('BridgeOperationId'), [...BRIDGE_OPERATION_IDS]);
   for (const operationId of BRIDGE_OPERATION_IDS) {

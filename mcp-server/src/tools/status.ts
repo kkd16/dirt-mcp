@@ -89,7 +89,7 @@ const LimitConfigurationSchema = z
   .strict()
   .describe('Active limits that constrain Dirt inspection, mutation, and command tools.');
 
-export const EditHistoryConfigurationSchema = z
+const EditHistoryConfigurationSchema = z
   .object({
     maxEntriesPerWorld: PositiveInt32Schema.describe('Maximum retained undoable edits in one loaded world.'),
     maxEntriesTotal: PositiveInt32Schema.describe('Maximum retained undoable edits across all loaded worlds.'),
@@ -173,13 +173,8 @@ const WorldsSchema = z
   )
   .describe('All currently loaded worlds in Paper order.');
 
-const ServerConfigurationShape = {
-  limits: LimitConfigurationSchema,
-  editHistory: EditHistoryConfigurationSchema,
-};
-
 const ServerConfigurationSchema = z
-  .object(ServerConfigurationShape)
+  .object({ limits: LimitConfigurationSchema, editHistory: EditHistoryConfigurationSchema })
   .strict()
   .superRefine(({ limits, editHistory }, context) => {
     const limitUpperBounds = [

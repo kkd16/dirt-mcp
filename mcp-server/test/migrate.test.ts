@@ -11,8 +11,6 @@ test('migration awaits OAuth initialization before closing SQLite and is repeata
   const databasePath = join(directory, 'dirt.sqlite');
   const environment = {
     ...process.env,
-    DIRT_MCP_BRIDGE_TOKEN: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-    DIRT_CONTROL_TOKEN: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
     DIRT_AUTH_SECRET: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
     DIRT_PUBLIC_ORIGIN: 'http://localhost:3000',
     DIRT_DATABASE_PATH: databasePath,

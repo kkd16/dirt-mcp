@@ -4,8 +4,8 @@ SHELL := /bin/bash
 
 MC_PORT ?= 25566
 BRIDGE_PORT ?= 8765
-DEV_BRIDGE_TOKEN_FILE := paper-plugin/run/.dirt-mcp-token
-DEV_CONTROL_TOKEN_FILE := paper-plugin/run/.dirt-mcp-control-token
+DEV_BRIDGE_TOKEN_FILE := paper-plugin/run/.dirt-bridge-token
+DEV_CONTROL_TOKEN_FILE := paper-plugin/run/.dirt-control-token
 DEV_AUTH_SECRET_FILE := paper-plugin/run/.dirt-auth-secret
 DEV_DATABASE_FILE := mcp-server/data/dirt.sqlite3
 DEV_PUBLIC_ORIGIN ?= http://localhost:3000
@@ -19,7 +19,7 @@ help: ## Show the available development commands.
 doctor: ## Verify the required Java, Node.js, pnpm, Gradle, curl, tmux, and lint tools.
 	@command -v java >/dev/null || { printf 'Java 25 is required.\n' >&2; exit 1; }
 	@command -v jar >/dev/null || { printf 'The Java 25 JDK jar tool is required.\n' >&2; exit 1; }
-	@command -v node >/dev/null || { printf 'Node.js 24 or newer is required.\n' >&2; exit 1; }
+	@command -v node >/dev/null || { printf 'Node.js 24.20.0 LTS is required.\n' >&2; exit 1; }
 	@command -v pnpm >/dev/null || { printf 'pnpm 11.24.0 or a newer 11.x release is required.\n' >&2; exit 1; }
 	@command -v curl >/dev/null || { printf 'curl is required.\n' >&2; exit 1; }
 	@command -v tmux >/dev/null || { printf 'tmux is required for the managed development server.\n' >&2; exit 1; }
@@ -27,8 +27,7 @@ doctor: ## Verify the required Java, Node.js, pnpm, Gradle, curl, tmux, and lint
 	@command -v actionlint >/dev/null || { printf 'actionlint 1.7.12 or newer is required.\n' >&2; exit 1; }
 	@if ! ./gradlew -q javaToolchains | grep -Eq 'Language Version:[[:space:]]+25'; then \
 	  printf 'Gradle could not resolve the Java 25 toolchain required by Paper 26.2.\n' >&2; exit 1; fi
-	@node_major="$$(node -p "process.versions.node.split('.')[0]")"; \
-	  if (( node_major < 24 )); then printf 'Expected Node.js 24 or newer, found Node.js %s.\n' "$$(node --version)" >&2; exit 1; fi
+	@node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major !== 24 || minor < 20) { console.error(`Expected Node.js 24.20.0 or newer 24.x, found $${process.version}.`); process.exit(1); }'
 	@pnpm_version="$$(pnpm --version)"; \
 	  if [[ "$$pnpm_version" =~ ^11\.([0-9]+)\.([0-9]+)$$ ]]; then \
 	    pnpm_minor="$${BASH_REMATCH[1]}"; \
@@ -138,10 +137,10 @@ logs: ## Print recent managed Paper console output (override with LINES=...).
 console: ## Attach to the managed Paper console; detach with Ctrl-b d.
 	@scripts/dev-paper console
 
-command: export DIRT_MCP_DEV_COMMAND := $(value CMD)
+command: export DIRT_DEV_COMMAND := $(value CMD)
 command: ## Send one Paper console command with CMD='...'.
-	@test -n "$$DIRT_MCP_DEV_COMMAND" || { printf 'Usage: make command CMD='\''version'\''\n' >&2; exit 2; }
-	@scripts/dev-paper command "$$DIRT_MCP_DEV_COMMAND"
+	@test -n "$$DIRT_DEV_COMMAND" || { printf 'Usage: make command CMD='\''version'\''\n' >&2; exit 2; }
+	@scripts/dev-paper command "$$DIRT_DEV_COMMAND"
 
 smoke: ## Restart Paper and run the complete managed-server integration gate.
 	@$(MAKE) --no-print-directory dev-secrets

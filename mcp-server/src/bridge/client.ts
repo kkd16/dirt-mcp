@@ -1,5 +1,6 @@
-import type { BridgeConfig } from '../config.ts';
 import * as z from 'zod/v4';
+import type { BridgeConfig } from '../config.ts';
+import { BodyTooLargeError, InvalidBodyEncodingError, readBoundedText } from '../http-body.ts';
 import { BridgeErrorResponseSchema, bridgeErrorMatchesHttpStatus, type BridgeRoute } from './contract.ts';
 import { ToolFailure } from './errors.ts';
 
@@ -124,58 +125,22 @@ async function readResponseJson(
   cancellationSignal: AbortSignal | undefined,
   timeoutSignal: AbortSignal,
 ): Promise<ResponseJson> {
+  if (response.body === null) return { valid: false };
+
+  let text: string;
   try {
-    const text = await readBoundedResponseText(response);
-    return text === null ? { valid: false } : { valid: true, value: JSON.parse(text) };
+    text = await readBoundedText(response, MAX_BRIDGE_RESPONSE_BYTES);
   } catch (error: unknown) {
-    if (error instanceof SyntaxError) return { valid: false };
+    if (error instanceof BodyTooLargeError || error instanceof InvalidBodyEncodingError) {
+      return { valid: false };
+    }
     throw bridgeUnavailable(error, cancellationSignal, timeoutSignal);
   }
-}
 
-async function readBoundedResponseText(response: Response): Promise<string | null> {
-  const contentLength = response.headers.get('Content-Length');
-  if (contentLength !== null && /^\d+$/u.test(contentLength) && Number(contentLength) > MAX_BRIDGE_RESPONSE_BYTES) {
-    await discardResponseBody(response);
-    return null;
-  }
-  if (response.body === null) return null;
-
-  let bytes = new Uint8Array(8_192);
-  let total = 0;
-  let exceededLimit = false;
   try {
-    await response.body.pipeTo(
-      new WritableStream<Uint8Array>({
-        write(chunk) {
-          const nextTotal = total + chunk.byteLength;
-          if (nextTotal > MAX_BRIDGE_RESPONSE_BYTES) {
-            exceededLimit = true;
-            throw new RangeError('Paper bridge response exceeded the byte limit.');
-          }
-          if (nextTotal > bytes.byteLength) {
-            const grown = new Uint8Array(
-              Math.min(MAX_BRIDGE_RESPONSE_BYTES, Math.max(nextTotal, bytes.byteLength * 2)),
-            );
-            grown.set(bytes.subarray(0, total));
-            bytes = grown;
-          }
-          bytes.set(chunk, total);
-          total = nextTotal;
-        },
-      }),
-    );
-  } catch (error: unknown) {
-    if (!exceededLimit) throw error;
-    // pipeTo cancels and unlocks its source when the sink rejects. A second
-    // best-effort cancel also covers non-conforming fetch implementations.
-    await discardResponseBody(response);
-    return null;
-  }
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, total));
+    return { valid: true, value: JSON.parse(text) };
   } catch {
-    return null;
+    return { valid: false };
   }
 }
 

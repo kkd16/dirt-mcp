@@ -3,7 +3,7 @@ import type { UserSummary } from '../access/repository.ts';
 const STYLESHEET = '/assets/app.css';
 const SCRIPT = '/assets/app.js';
 
-export function page(title: string, body: string, pageName: string): string {
+function page(title: string, body: string, pageName: string): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -57,7 +57,7 @@ export function onboardingPage(kind: 'invitation' | 'recovery'): string {
   );
 }
 
-export function dashboardPage(user: UserSummary, passkeyPresent: boolean): string {
+export function dashboardPage(user: UserSummary): string {
   const minecraft = user.minecraftAccount;
   return page(
     'Dashboard',
@@ -76,7 +76,7 @@ export function dashboardPage(user: UserSummary, passkeyPresent: boolean): strin
       </section>
       <section class="card">
         <h2>Authentication</h2>
-        <p class="state success">${passkeyPresent ? 'Passkey ready' : 'Passkey setup incomplete'}</p>
+        <p class="state success">Passkey ready</p>
         <p>Dirt requires user verification for every passkey sign-in. Self-service passkey changes are intentionally disabled; an operator-issued recovery link replaces the credential and revokes existing sessions.</p>
       </section>
       <section class="card">

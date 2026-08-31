@@ -5,10 +5,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: runtime
     image: dirt-mcp-web:local
     network_mode: host
-    init: true
     restart: unless-stopped
     stop_grace_period: 5m15s
     cap_drop:
@@ -17,7 +15,6 @@ services:
       DIRT_PUBLIC_ORIGIN: https://${DIRT_PUBLIC_HOST:?DIRT_PUBLIC_HOST is required}
       DIRT_DATABASE_PATH: /var/lib/dirt-mcp/dirt.sqlite3
       DIRT_WEB_PORT: '3000'
-      DIRT_MCP_BRIDGE_URL: http://127.0.0.1:8765
       DIRT_AUTH_SECRET_FILE: /run/secrets/auth-secret
       DIRT_BRIDGE_TOKEN_FILE: /run/secrets/bridge-token
       DIRT_CONTROL_TOKEN_FILE: /run/secrets/control-token
@@ -52,28 +49,16 @@ services:
   migrate:
     profiles:
       - operations
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: runtime
     image: dirt-mcp-web:local
     network_mode: none
-    init: true
-    restart: 'no'
     cap_drop:
       - ALL
     environment:
       DIRT_PUBLIC_ORIGIN: https://${DIRT_PUBLIC_HOST:?DIRT_PUBLIC_HOST is required}
       DIRT_DATABASE_PATH: /var/lib/dirt-mcp/dirt.sqlite3
-      DIRT_WEB_PORT: '3000'
-      DIRT_MCP_BRIDGE_URL: http://127.0.0.1:8765
       DIRT_AUTH_SECRET_FILE: /run/secrets/auth-secret
-      DIRT_BRIDGE_TOKEN_FILE: /run/secrets/bridge-token
-      DIRT_CONTROL_TOKEN_FILE: /run/secrets/control-token
     secrets:
       - auth-secret
-      - bridge-token
-      - control-token
     volumes:
       - dirt-data:/var/lib/dirt-mcp
     read_only: true
@@ -87,14 +72,8 @@ services:
   backup:
     profiles:
       - operations
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: runtime
     image: dirt-mcp-web:local
     network_mode: none
-    init: true
-    restart: 'no'
     cap_drop:
       - ALL
     environment:
@@ -129,7 +108,6 @@ services:
   caddy:
     image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     network_mode: host
-    init: true
     restart: unless-stopped
     stop_grace_period: 5m15s
     cap_drop:
@@ -144,7 +122,6 @@ services:
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
-      - caddy-config:/config
     read_only: true
     tmpfs:
       - /tmp
@@ -166,5 +143,4 @@ secrets:
 
 volumes:
   dirt-data:
-  caddy-config:
   caddy-data:

@@ -2,6 +2,7 @@ import type { Context, Hono } from 'hono';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import * as z from 'zod/v4';
 import type { RuntimeConfig } from '../config.ts';
+import { BodyTooLargeError, InvalidBodyEncodingError, readBoundedText } from '../http-body.ts';
 import { AccessError, type AccessRepository } from './repository.ts';
 
 const emptyBodySchema = z.object({}).strict();
@@ -13,7 +14,7 @@ const linkChallengeSchema = z
   .strict();
 const CALL_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
-export interface InternalRouteDependencies {
+interface InternalRouteDependencies {
   readonly config: RuntimeConfig;
   readonly repository: AccessRepository;
   readonly isLoopback: (context: Context) => boolean;
@@ -24,8 +25,8 @@ export function registerInternalRoutes(app: Hono, dependencies: InternalRouteDep
 
   app.use('/internal/v1/access/*', async (context, next) => {
     context.header('Cache-Control', 'no-store');
-    const callId = context.req.header('X-Dirt-Call-Id');
-    if (callId === undefined || !CALL_ID_PATTERN.test(callId)) {
+    const callId = validCallIdOrNull(context.req.header('X-Dirt-Call-Id'));
+    if (callId === null) {
       return context.json(
         { callId: null, error: { code: 'invalid_request', message: 'X-Dirt-Call-Id must be a UUIDv4.' } },
         400,
@@ -55,7 +56,7 @@ export function registerInternalRoutes(app: Hono, dependencies: InternalRouteDep
 
   app.post('/internal/v1/access/invitations', async (context) => {
     const callId = requireCallId(context.req.header('X-Dirt-Call-Id'));
-    await requireBody(context.req.raw, emptyBodySchema);
+    await readJsonBody(context.req.raw, emptyBodySchema);
     const result = repository.createInvitation();
     return context.json({
       callId,
@@ -66,7 +67,7 @@ export function registerInternalRoutes(app: Hono, dependencies: InternalRouteDep
 
   app.post('/internal/v1/access/invitations/:id/revoke', async (context) => {
     const callId = requireCallId(context.req.header('X-Dirt-Call-Id'));
-    await requireBody(context.req.raw, emptyBodySchema);
+    await readJsonBody(context.req.raw, emptyBodySchema);
     return context.json({ callId, invitation: repository.revokeInvitation(requirePathValue(context.req.param('id'))) });
   });
 
@@ -76,7 +77,7 @@ export function registerInternalRoutes(app: Hono, dependencies: InternalRouteDep
 
   app.post('/internal/v1/access/users/:handle/recovery', async (context) => {
     const callId = requireCallId(context.req.header('X-Dirt-Call-Id'));
-    await requireBody(context.req.raw, emptyBodySchema);
+    await readJsonBody(context.req.raw, emptyBodySchema);
     const result = repository.createRecovery(requirePathValue(context.req.param('handle')));
     return context.json({
       callId,
@@ -88,7 +89,7 @@ export function registerInternalRoutes(app: Hono, dependencies: InternalRouteDep
 
   app.post('/internal/v1/access/minecraft-links/challenges', async (context) => {
     const callId = requireCallId(context.req.header('X-Dirt-Call-Id'));
-    const body = await requireBody(context.req.raw, linkChallengeSchema);
+    const body = await readJsonBody(context.req.raw, linkChallengeSchema);
     const result = repository.createMinecraftLinkChallenge(body.minecraftUuid, body.minecraftName);
     return context.json({
       callId,
@@ -105,7 +106,7 @@ export function registerInternalRoutes(app: Hono, dependencies: InternalRouteDep
   ): void {
     target.post(`/internal/v1/access/users/:handle/${action}`, async (context) => {
       const callId = requireCallId(context.req.header('X-Dirt-Call-Id'));
-      await requireBody(context.req.raw, emptyBodySchema);
+      await readJsonBody(context.req.raw, emptyBodySchema);
       return context.json({ callId, user: mutate(repository, requirePathValue(context.req.param('handle'))) });
     });
   }
@@ -130,54 +131,26 @@ function requirePathValue(value: string): string {
 }
 
 function requireCallId(value: string | undefined): string {
-  if (value === undefined) throw new AccessError('invalid', 'X-Dirt-Call-Id is required.');
-  return value;
+  const callId = validCallIdOrNull(value);
+  if (callId === null) throw new AccessError('invalid', 'X-Dirt-Call-Id is required.');
+  return callId;
 }
 
-async function requireBody<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
+export function validCallIdOrNull(value: string | undefined): string | null {
+  return value !== undefined && CALL_ID_PATTERN.test(value) ? value : null;
+}
+
+export async function readJsonBody<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
   const contentType = request.headers.get('Content-Type')?.split(';', 1)[0]?.trim().toLowerCase();
   if (contentType !== 'application/json') throw new AccessError('invalid', 'Content-Type must be application/json.');
-  const contentLength = request.headers.get('Content-Length');
-  if (contentLength !== null && (!/^\d+$/u.test(contentLength) || Number(contentLength) > 16_384)) {
-    await cancelRequestBody(request);
-    throw new AccessError('invalid', 'Request body is too large.');
-  }
-  const text = await readBoundedText(request, 16_384);
-  return schema.parse(JSON.parse(text));
-}
-
-async function readBoundedText(request: Request, maximumBytes: number): Promise<string> {
-  if (request.body === null) return '';
-  let combined = new Uint8Array(Math.min(maximumBytes, 8_192));
-  let size = 0;
   try {
-    await request.body.pipeTo(
-      new WritableStream<Uint8Array>({
-        write(chunk) {
-          const nextSize = size + chunk.byteLength;
-          if (nextSize > maximumBytes) throw new AccessError('invalid', 'Request body is too large.');
-          if (nextSize > combined.byteLength) {
-            const grown = new Uint8Array(Math.min(maximumBytes, Math.max(nextSize, combined.byteLength * 2)));
-            grown.set(combined.subarray(0, size));
-            combined = grown;
-          }
-          combined.set(chunk, size);
-          size = nextSize;
-        },
-      }),
-    );
-    return new TextDecoder('utf-8', { fatal: true }).decode(combined.subarray(0, size));
+    return schema.parse(JSON.parse(await readBoundedText(request, 16_384)));
   } catch (error: unknown) {
-    if (error instanceof AccessError) throw error;
-    throw new AccessError('invalid', 'Request body must be valid UTF-8 JSON.');
-  }
-}
-
-async function cancelRequestBody(request: Request): Promise<void> {
-  try {
-    await request.body?.cancel();
-  } catch {
-    // The stream may already have been canceled by pipeTo.
+    if (error instanceof BodyTooLargeError) throw new AccessError('invalid', 'Request body is too large.');
+    if (error instanceof InvalidBodyEncodingError) {
+      throw new AccessError('invalid', 'Request body must be valid UTF-8 JSON.');
+    }
+    throw error;
   }
 }
 

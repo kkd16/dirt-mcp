@@ -12,24 +12,23 @@ export interface BridgeConfig {
   readonly token: string;
 }
 
-export interface RuntimeConfig {
+export interface AuthConfig {
   readonly authSecret: string;
-  readonly bridge: BridgeConfig;
-  readonly controlToken: string;
   readonly databasePath: string;
-  readonly port: number;
   readonly publicOrigin: string;
-  readonly rpId: string;
 }
 
-type BridgeConfigurationErrorCode =
+export interface RuntimeConfig extends AuthConfig {
+  readonly bridge: BridgeConfig;
+  readonly controlToken: string;
+  readonly port: number;
+}
+
+type RuntimeConfigurationErrorCode =
   | 'bridge_token_required'
   | 'bridge_token_invalid'
   | 'bridge_token_file_invalid'
-  | 'bridge_url_invalid';
-
-type RuntimeConfigurationErrorCode =
-  | BridgeConfigurationErrorCode
+  | 'bridge_url_invalid'
   | 'auth_secret_required'
   | 'auth_secret_invalid'
   | 'auth_secret_file_invalid'
@@ -44,16 +43,6 @@ type RuntimeConfigurationErrorCode =
 
 type ServiceTokenErrorReason = 'file_invalid' | 'invalid' | 'required';
 
-export class BridgeConfigurationError extends Error {
-  readonly code: BridgeConfigurationErrorCode;
-
-  constructor(code: BridgeConfigurationErrorCode, message: string) {
-    super(message);
-    this.code = code;
-    this.name = 'BridgeConfigurationError';
-  }
-}
-
 export class RuntimeConfigurationError extends Error {
   readonly code: RuntimeConfigurationErrorCode;
 
@@ -67,25 +56,19 @@ export class RuntimeConfigurationError extends Error {
 type SecretFileReader = (path: string) => string;
 const defaultSecretFileReader: SecretFileReader = (path) => readFileSync(path, 'utf8');
 
-export function readBridgeConfig(
+function readBridgeConfig(
   environment: Readonly<Record<string, string | undefined>>,
   readSecretFile: SecretFileReader = defaultSecretFileReader,
 ): BridgeConfig {
-  const token = readServiceToken(
-    environment,
-    'DIRT_BRIDGE_TOKEN_FILE',
-    'DIRT_MCP_BRIDGE_TOKEN',
-    'bridge',
-    readSecretFile,
-  );
-  const rawUrl = environment.DIRT_MCP_BRIDGE_URL ?? DEFAULT_BRIDGE_URL;
+  const token = readServiceToken(environment, 'DIRT_BRIDGE_TOKEN_FILE', 'DIRT_BRIDGE_TOKEN', 'bridge', readSecretFile);
+  const rawUrl = environment.DIRT_BRIDGE_URL ?? DEFAULT_BRIDGE_URL;
   if (!/^http:\/\/127\.0\.0\.1(?::[1-9]\d{0,4})?\/?$/.test(rawUrl)) {
-    throw new BridgeConfigurationError('bridge_url_invalid', 'DIRT_MCP_BRIDGE_URL must be an HTTP 127.0.0.1 origin');
+    throw new RuntimeConfigurationError('bridge_url_invalid', 'DIRT_BRIDGE_URL must be an HTTP 127.0.0.1 origin');
   }
   try {
     return { origin: new URL(rawUrl).origin, token };
   } catch {
-    throw new BridgeConfigurationError('bridge_url_invalid', 'DIRT_MCP_BRIDGE_URL must be an HTTP 127.0.0.1 origin');
+    throw new RuntimeConfigurationError('bridge_url_invalid', 'DIRT_BRIDGE_URL must be an HTTP 127.0.0.1 origin');
   }
 }
 
@@ -93,6 +76,7 @@ export function readRuntimeConfig(
   environment: Readonly<Record<string, string | undefined>>,
   readSecretFile: SecretFileReader = defaultSecretFileReader,
 ): RuntimeConfig {
+  const auth = readAuthConfig(environment, readSecretFile);
   const bridge = readBridgeConfig(environment, readSecretFile);
   const controlToken = readServiceToken(
     environment,
@@ -101,23 +85,28 @@ export function readRuntimeConfig(
     'control',
     readSecretFile,
   );
-  const authSecret = readAuthSecret(environment, readSecretFile);
-  if (bridge.token === controlToken || bridge.token === authSecret || controlToken === authSecret) {
+  if (bridge.token === controlToken || bridge.token === auth.authSecret || controlToken === auth.authSecret) {
     throw new RuntimeConfigurationError(
       'secrets_not_distinct',
       'Bridge, control, and authentication secrets must be pairwise distinct',
     );
   }
-  const publicOrigin = readPublicOrigin(environment.DIRT_PUBLIC_ORIGIN);
-
   return {
-    authSecret,
+    ...auth,
     bridge,
     controlToken,
-    databasePath: readDatabasePath(environment.DIRT_DATABASE_PATH),
     port: readPort(environment.DIRT_WEB_PORT),
-    publicOrigin,
-    rpId: new URL(publicOrigin).hostname,
+  };
+}
+
+export function readAuthConfig(
+  environment: Readonly<Record<string, string | undefined>>,
+  readSecretFile: SecretFileReader = defaultSecretFileReader,
+): AuthConfig {
+  return {
+    authSecret: readAuthSecret(environment, readSecretFile),
+    databasePath: readDatabasePath(environment.DIRT_DATABASE_PATH),
+    publicOrigin: readPublicOrigin(environment.DIRT_PUBLIC_ORIGIN),
   };
 }
 
@@ -164,30 +153,15 @@ function configurationError(
   kind: 'bridge' | 'control',
   reason: ServiceTokenErrorReason,
   message: string,
-): BridgeConfigurationError | RuntimeConfigurationError {
-  if (kind === 'bridge') {
-    const code: BridgeConfigurationErrorCode =
-      reason === 'file_invalid'
-        ? 'bridge_token_file_invalid'
-        : reason === 'invalid'
-          ? 'bridge_token_invalid'
-          : 'bridge_token_required';
-    return new BridgeConfigurationError(code, message);
-  }
-  const code: RuntimeConfigurationErrorCode =
-    reason === 'file_invalid'
-      ? 'control_token_file_invalid'
-      : reason === 'invalid'
-        ? 'control_token_invalid'
-        : 'control_token_required';
-  return new RuntimeConfigurationError(code, message);
+): RuntimeConfigurationError {
+  return new RuntimeConfigurationError(`${kind}_token_${reason}`, message);
 }
 
 function readAuthSecret(
   environment: Readonly<Record<string, string | undefined>>,
   readSecretFile: SecretFileReader,
 ): string {
-  let secret = environment.DIRT_AUTH_SECRET ?? environment.BETTER_AUTH_SECRET;
+  let secret = environment.DIRT_AUTH_SECRET;
   const secretFile = environment.DIRT_AUTH_SECRET_FILE;
   if (secretFile !== undefined) {
     if (secretFile.trim().length === 0) {
@@ -208,7 +182,7 @@ function readAuthSecret(
   if (secret === undefined || secret.length === 0) {
     throw new RuntimeConfigurationError(
       'auth_secret_required',
-      'DIRT_AUTH_SECRET_FILE, DIRT_AUTH_SECRET, or BETTER_AUTH_SECRET is required',
+      'DIRT_AUTH_SECRET_FILE or DIRT_AUTH_SECRET is required',
     );
   }
   if (secret.length < 32 || secret.length > 4_096 || /\s/u.test(secret)) {
