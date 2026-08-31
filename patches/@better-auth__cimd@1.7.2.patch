@@ -1,0 +1,34 @@
+diff --git a/dist/node.mjs b/dist/node.mjs
+index a12d50e19d1fa726246f9a2fbe6f76d07471c0ee..8c32579c2c0ad40bc785b540cd0c9a6871dca9b5 100644
+--- a/dist/node.mjs
++++ b/dist/node.mjs
+@@ -46,8 +46,27 @@ const fetchClientMetadataResource = async (input, init) => {
+ 			method: webRequest.method,
+ 			servername: isIP(url.hostname.replace(/^\[|\]$/g, "")) === 0 ? url.hostname : void 0,
+ 			signal,
+-			lookup: (_hostname, _options, callback) => {
+-				callback(null, pinnedAddress.address, pinnedAddress.family);
++			/**
++			 * Dirt temporary patch for @better-auth/cimd 1.7.2.
++			 *
++			 * What/why: Node enables network-family autoselection and asks custom
++			 * lookup functions for `all: true`; that callback must receive an address
++			 * array. The published transport always returns one address as a string,
++			 * so Node fails every Codex CIMD fetch with ERR_INVALID_IP_ADDRESS.
++			 *
++			 * Sources:
++			 * - Node lookup contract: https://nodejs.org/api/dns.html#dnslookuphostname-options-callback
++			 * - Upstream bug: https://github.com/better-auth/better-auth/issues/10810
++			 * - Upstream fix: https://github.com/better-auth/better-auth/pull/10730
++			 * - Codex CIMD behavior: https://developers.openai.com/codex/mcp#oauth-client-registration
++			 *
++			 * Remove this pnpm patch only after upgrading to a published
++			 * @better-auth/cimd release containing PR #10730 and confirming its
++			 * dist/node.mjs returns `[pinnedAddress]` when `options.all` is true.
++			 */
++			lookup: (_hostname, options, callback) => {
++				if (options.all) callback(null, [pinnedAddress]);
++				else callback(null, pinnedAddress.address, pinnedAddress.family);
+ 			}
+ 		}, (response) => {
+ 			const status = response.statusCode ?? 500;

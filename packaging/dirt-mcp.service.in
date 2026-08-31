@@ -6,7 +6,7 @@ StartLimitIntervalSec=60
 StartLimitBurst=5
 
 [Service]
-Type=simple
+Type=exec
 User=dirt-mcp
 Group=dirt-mcp
 WorkingDirectory=/opt/dirt-mcp/app
