@@ -53,14 +53,8 @@ export class RuntimeConfigurationError extends Error {
   }
 }
 
-type SecretFileReader = (path: string) => string;
-const defaultSecretFileReader: SecretFileReader = (path) => readFileSync(path, 'utf8');
-
-function readBridgeConfig(
-  environment: Readonly<Record<string, string | undefined>>,
-  readSecretFile: SecretFileReader,
-): BridgeConfig {
-  const token = readServiceToken(environment, 'DIRT_BRIDGE_TOKEN_FILE', 'DIRT_BRIDGE_TOKEN', 'bridge', readSecretFile);
+function readBridgeConfig(environment: Readonly<Record<string, string | undefined>>): BridgeConfig {
+  const token = readServiceToken(environment, 'DIRT_BRIDGE_TOKEN_FILE', 'bridge');
   const rawUrl = environment.DIRT_BRIDGE_URL ?? DEFAULT_BRIDGE_URL;
   const url = /^http:\/\/127\.0\.0\.1(?::[1-9]\d{0,4})?\/?$/u.test(rawUrl) ? URL.parse(rawUrl) : null;
   if (url === null) {
@@ -69,19 +63,10 @@ function readBridgeConfig(
   return { origin: url.origin, token };
 }
 
-export function readRuntimeConfig(
-  environment: Readonly<Record<string, string | undefined>>,
-  readSecretFile: SecretFileReader = defaultSecretFileReader,
-): RuntimeConfig {
-  const auth = readAuthConfig(environment, readSecretFile);
-  const bridge = readBridgeConfig(environment, readSecretFile);
-  const controlToken = readServiceToken(
-    environment,
-    'DIRT_CONTROL_TOKEN_FILE',
-    'DIRT_CONTROL_TOKEN',
-    'control',
-    readSecretFile,
-  );
+export function readRuntimeConfig(environment: Readonly<Record<string, string | undefined>>): RuntimeConfig {
+  const auth = readAuthConfig(environment);
+  const bridge = readBridgeConfig(environment);
+  const controlToken = readServiceToken(environment, 'DIRT_CONTROL_TOKEN_FILE', 'control');
   if (bridge.token === controlToken || bridge.token === auth.authSecret || controlToken === auth.authSecret) {
     throw new RuntimeConfigurationError(
       'secrets_not_distinct',
@@ -96,12 +81,9 @@ export function readRuntimeConfig(
   };
 }
 
-export function readAuthConfig(
-  environment: Readonly<Record<string, string | undefined>>,
-  readSecretFile: SecretFileReader = defaultSecretFileReader,
-): AuthConfig {
+export function readAuthConfig(environment: Readonly<Record<string, string | undefined>>): AuthConfig {
   return {
-    authSecret: readAuthSecret(environment, readSecretFile),
+    authSecret: readAuthSecret(environment),
     databasePath: readDatabasePath(environment.DIRT_DATABASE_PATH),
     publicOrigin: readPublicOrigin(environment.DIRT_PUBLIC_ORIGIN),
   };
@@ -117,25 +99,17 @@ export function readDatabasePath(value: string | undefined): string {
 function readServiceToken(
   environment: Readonly<Record<string, string | undefined>>,
   fileVariable: string,
-  directVariable: string,
   kind: 'bridge' | 'control',
-  readSecretFile: SecretFileReader,
 ): string {
-  const token = readSecretValue(
-    environment,
-    fileVariable,
-    directVariable,
-    `${kind}_token_file_invalid`,
-    readSecretFile,
-  );
+  const token = readSecretValue(environment, fileVariable, `${kind}_token_file_invalid`);
   if (token === undefined || token.trim().length === 0) {
-    throw configurationError(kind, 'required', `${fileVariable} or ${directVariable} is required`);
+    throw configurationError(kind, 'required', `${fileVariable} is required`);
   }
   if (!SERVICE_TOKEN_PATTERN.test(token)) {
     throw configurationError(
       kind,
       'invalid',
-      `${directVariable} must contain exactly 64 lowercase hexadecimal characters`,
+      `${fileVariable} must point to a file containing exactly 64 lowercase hexadecimal characters`,
     );
   }
   return token;
@@ -149,27 +123,15 @@ function configurationError(
   return new RuntimeConfigurationError(`${kind}_token_${reason}`, message);
 }
 
-function readAuthSecret(
-  environment: Readonly<Record<string, string | undefined>>,
-  readSecretFile: SecretFileReader,
-): string {
-  const secret = readSecretValue(
-    environment,
-    'DIRT_AUTH_SECRET_FILE',
-    'DIRT_AUTH_SECRET',
-    'auth_secret_file_invalid',
-    readSecretFile,
-  );
+function readAuthSecret(environment: Readonly<Record<string, string | undefined>>): string {
+  const secret = readSecretValue(environment, 'DIRT_AUTH_SECRET_FILE', 'auth_secret_file_invalid');
   if (secret === undefined || secret.length === 0) {
-    throw new RuntimeConfigurationError(
-      'auth_secret_required',
-      'DIRT_AUTH_SECRET_FILE or DIRT_AUTH_SECRET is required',
-    );
+    throw new RuntimeConfigurationError('auth_secret_required', 'DIRT_AUTH_SECRET_FILE is required');
   }
   if (secret.length < 32 || secret.length > 4_096 || /\s/u.test(secret)) {
     throw new RuntimeConfigurationError(
       'auth_secret_invalid',
-      'The authentication secret must contain 32 to 4096 non-whitespace characters',
+      'DIRT_AUTH_SECRET_FILE must point to a file containing 32 to 4096 non-whitespace characters',
     );
   }
   return secret;
@@ -225,17 +187,15 @@ function readPort(value: string | undefined): number {
 function readSecretValue(
   environment: Readonly<Record<string, string | undefined>>,
   fileVariable: string,
-  directVariable: string,
   fileErrorCode: 'auth_secret_file_invalid' | 'bridge_token_file_invalid' | 'control_token_file_invalid',
-  readSecretFile: SecretFileReader,
 ): string | undefined {
   const secretFile = environment[fileVariable];
-  if (secretFile === undefined) return environment[directVariable];
+  if (secretFile === undefined) return undefined;
   if (secretFile.trim().length === 0) {
     throw new RuntimeConfigurationError(fileErrorCode, `${fileVariable} must name a readable secret file`);
   }
   try {
-    return stripSingleLineEnding(readSecretFile(secretFile));
+    return stripSingleLineEnding(readFileSync(secretFile, 'utf8'));
   } catch {
     throw new RuntimeConfigurationError(fileErrorCode, `${fileVariable} must name a readable secret file`);
   }

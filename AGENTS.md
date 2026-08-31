@@ -55,21 +55,38 @@ boundaries.
 Use the root commands:
 
 ```text
-make doctor   Check required development tools
-make build    Build Java and TypeScript
-make check    Run offline Java and MCP checks
-make verify   Run the complete local gate, including live smoke tests
-make ci       Run the clean complete CI gate, including live smoke tests
-make format   Apply all repository formatters
-make up       Start or reuse the managed Paper server
-make reload   Rebuild and restart the managed server
-make down     Stop the managed server
+make help             List the supported root commands
+make doctor           Check required development tools
+make install          Install locked Node dependencies
+make build            Build Paper and the web/MCP service
+make build-paper      Build only the Paper plugin
+make build-web        Build only the web/MCP service
+make check            Run offline Java and MCP checks
+make check-production Validate the production deployment
+make verify           Run the complete local gate, including live smoke tests
+make ci               Run the clean complete CI gate, including live smoke tests
+make format           Apply all repository formatters
+make up               Start or reuse the complete managed stack
+make restart          Rebuild and restart Paper and web
+make restart-paper    Rebuild Paper, safely draining and restoring web/MCP
+make restart-web      Rebuild, migrate, and restart only web/MCP
+make down             Stop the complete managed stack
+make status           Report both managed processes
+make health           Check authenticated bridge and web health
+make logs             Print both live panes or the stopped Paper log
+make console          Connect to the Paper console
+make command          Send one stdin line to the Paper console
+make smoke            Run the managed live integration gate
+make clean            Remove build outputs while preserving runtime state
 ```
 
-The managed server uses `paper-plugin/run/`, Minecraft port `25566`, and bridge
-port `8765`. Reuse it for live tests; its world is disposable. Do not commit or
-hand-edit generated runtime files. Paper plugin reload is unsupported, so use
-`make reload` after plugin changes.
+The root Procfile and Overmind manage Paper plus the single Node web/MCP service.
+Runtime state lives under `.dev/`; its world is disposable. The stack uses
+Minecraft port `25565`, bridge port `8765`, and web port `3000`. Do not commit or
+hand-edit generated runtime files or secrets. Keep secrets only in the managed
+files under `.dev/secrets/`, never in `.env` or `.overmind.env`. Paper plugin
+reload is unsupported, so use `make restart-paper` after plugin changes. Use
+`printf '%s\n' 'version' | make command` to send one Paper console command.
 
 - During iteration, run only the smallest relevant test, lint, or type-check target.
 - Before handing off code or contract changes, run `make verify` once. It already

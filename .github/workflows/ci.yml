@@ -27,7 +27,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Java
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
           distribution: temurin
           java-version: '25'
@@ -35,19 +35,28 @@ jobs:
       - name: Set up pnpm and Node.js
         uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
         with:
-          runtime: node@24.20.0
-          cache: false
+          cache: true
           install: false
 
-      - name: Validate Gradle Wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
-      - name: Install tmux and actionlint
+      - name: Install tmux, Overmind, and actionlint
         env:
           ACTIONLINT_VERSION: 1.7.12
+          OVERMIND_VERSION: 2.5.1
         run: |
           sudo apt-get install --no-install-recommends --yes tmux
           ci_tool_dir="$(mktemp -d)"
+
+          curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
+            --connect-timeout 15 --max-time 60 \
+            --output "${ci_tool_dir}/overmind.gz" \
+            "https://github.com/DarthSim/overmind/releases/download/v${OVERMIND_VERSION}/overmind-v${OVERMIND_VERSION}-linux-amd64.gz"
+          echo "a17159b8e97d13f3679a4e8fbc9d4747f82d5af9f6d32597b72821378b5d0b6f  ${ci_tool_dir}/overmind.gz" \
+            | sha256sum --check
+          gzip --decompress --stdout "${ci_tool_dir}/overmind.gz" > "${ci_tool_dir}/overmind"
+          sudo install --mode 0755 "${ci_tool_dir}/overmind" /usr/local/bin/overmind
 
           curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
             --connect-timeout 15 --max-time 60 \
@@ -58,22 +67,9 @@ jobs:
           tar --extract --gzip --file "${ci_tool_dir}/actionlint.tar.gz" --directory "${ci_tool_dir}" actionlint
           sudo install --mode 0755 "${ci_tool_dir}/actionlint" /usr/local/bin/actionlint
 
-      - name: Validate the production deployment
-        env:
-          DIRT_AUTH_SECRET_FILE: /dev/null
-          DIRT_BRIDGE_TOKEN_FILE: /dev/null
-          DIRT_CONTROL_TOKEN_FILE: /dev/null
-          DIRT_PUBLIC_HOST: dirt.example.com
-        run: |
-          docker compose config --quiet
-          docker build --pull --tag dirt-mcp-web:ci .
-          docker run --rm --entrypoint /bin/sh dirt-mcp-web:ci -c 'test -r /app/LICENSE'
-          docker compose run --rm --no-deps caddy \
-            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-
       - name: Verify every component
         run: make ci
 
-      - name: Stop the managed Paper server
+      - name: Stop the managed development stack
         if: always()
         run: make down

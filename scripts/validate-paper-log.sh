@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-log_file="${repo_root}/paper-plugin/run/logs/latest.log"
+log_file="${repo_root}/.dev/paper/logs/latest.log"
 
 usage() {
   printf 'Usage: %s {running|shutdown START_LINE}\n' "$0" >&2

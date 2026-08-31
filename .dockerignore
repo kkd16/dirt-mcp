@@ -2,6 +2,7 @@
 .github/
 .env
 .env.*
+.dev/
 backups/
 data/
 deploy/
@@ -17,5 +18,4 @@ node_modules/
 **/build/
 .gradle/
 mcp-server/test/
-mcp-server/data/
 *.log

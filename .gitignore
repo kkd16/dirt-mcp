@@ -13,8 +13,8 @@ replay_pid*
 node_modules/
 **/dist/
 
-# Local Paper runtime
-paper-plugin/run/
+# Managed development runtime
+/.dev/
 
 # Local configuration and secrets
 .env
@@ -22,7 +22,6 @@ paper-plugin/run/
 !.env.example
 /secrets/
 /backups/
-/mcp-server/data/
 
 # Editors and operating systems
 .idea/

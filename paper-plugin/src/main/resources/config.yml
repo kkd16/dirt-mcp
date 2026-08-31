@@ -3,7 +3,7 @@
 # active values but never reports the bearer token.
 # The bridge always listens on 127.0.0.1 while the plugin is enabled.
 bridge:
-  # HTTP port on 127.0.0.1. DIRT_BRIDGE_PORT overrides this value.
+  # HTTP port on 127.0.0.1.
   port: 8765
   # Seconds to wait for interrupted bridge request workers during shutdown (1-30).
   shutdown-delay-seconds: 5
@@ -32,7 +32,7 @@ bridge:
     - runMinecraftCommands
 
 access-control:
-  # Loopback origin of the Dirt web service. DIRT_CONTROL_URL overrides this value.
+  # Loopback origin of the Dirt web service.
   url: http://127.0.0.1:3000
   # Connection and complete-request deadlines for Paper administrative calls.
   connect-timeout-millis: 2000

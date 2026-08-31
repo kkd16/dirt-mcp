@@ -65,7 +65,9 @@ generations.
 | [Java](https://docs.papermc.io/paper/getting-started/#requirements) | 25                         |
 | [FAWE](https://modrinth.com/plugin/fastasyncworldedit)              | 2.15.4                     |
 | Node.js                                                             | 24.20.0 LTS                |
-| pnpm                                                                | 11.24.0 or newer 11.x      |
+| pnpm                                                                | 11.24.0                    |
+| [Overmind](https://github.com/DarthSim/overmind)                    | 2.5.1                      |
+| tmux                                                                | current                    |
 | Docker Engine / Compose                                             | current Linux releases     |
 
 The production Compose topology uses Linux host networking so the containerized
@@ -104,9 +106,9 @@ for name in auth-secret bridge-token control-token; do
 done
 ```
 
-Supply the bridge and control values to Paper as
-`DIRT_BRIDGE_TOKEN` and `DIRT_CONTROL_TOKEN`. Configure the web service
-with the same values through its corresponding mounted secret files. Never
+Supply the bridge and control file paths to Paper as
+`DIRT_BRIDGE_TOKEN_FILE` and `DIRT_CONTROL_TOKEN_FILE`. Configure the web
+service with the same files through its corresponding Compose secrets. Never
 reuse either value as the web authentication secret.
 
 On first start, Paper creates `plugins/DirtMCP/config.yml`. The shipped
@@ -121,7 +123,7 @@ cp .env.example .env
 # Set the permanent public hostname and secret-file paths in your local deployment.
 docker compose build
 docker compose run --rm migrate
-docker compose up -d web caddy
+docker compose up --detach --wait
 ```
 
 The deployment uses a non-root Node image, digest-pinned Node and Caddy images,
@@ -131,8 +133,7 @@ migration or upgrade; do not copy only the main database file while WAL mode is
 active.
 
 ```bash
-DIRT_BACKUP_DESTINATION="dirt-$(date +%Y%m%d-%H%M%S).sqlite3" \
-  docker compose run --rm backup
+docker compose run --rm backup "dirt-$(date +%Y%m%d-%H%M%S).sqlite3"
 ```
 
 The destination must be a new filename inside the pre-created `backups/`
@@ -154,7 +155,7 @@ operation before either can be killed during shutdown.
 docker compose down
 docker compose build
 docker compose run --rm migrate
-docker compose up -d web caddy
+docker compose up --detach --wait
 ```
 
 Keep copies of backups off-host and test restoration periodically. To restore,
@@ -172,7 +173,7 @@ docker compose run --rm --no-deps \
     mv -f /var/lib/dirt-mcp/dirt.sqlite3.restore /var/lib/dirt-mcp/dirt.sqlite3
   '
 docker compose run --rm migrate
-docker compose up -d web caddy
+docker compose up --detach --wait
 ```
 
 ### 4. Create and link the first account
@@ -241,23 +242,50 @@ private loopback APIs.
 
 ## Development
 
-The repository includes a disposable managed Paper world under the ignored
-`paper-plugin/run/` directory. Running it means accepting the
+The root `Procfile` runs Paper and the single Node web/MCP service together
+through Overmind. Disposable runtime state lives under ignored `.dev/`: the
+Paper world is in `.dev/paper/`, SQLite is `.dev/dirt.sqlite3`, and distinct
+credentials are files in `.dev/secrets/`. Secrets never belong in `.env` or
+`.overmind.env`; the former is production configuration and the latter contains
+only tracked, non-secret development settings and secret-file paths. Starting Paper means accepting the
 [Minecraft EULA](https://aka.ms/MinecraftEULA).
 
-| Command       | Purpose                                                  |
-| ------------- | -------------------------------------------------------- |
-| `make doctor` | Check the development toolchain.                         |
-| `make up`     | Start the managed native Paper server.                   |
-| `make reload` | Rebuild and safely restart Paper after plugin changes.   |
-| `make web`    | Migrate and run the local dashboard at `localhost:3000`. |
-| `make build`  | Build the Paper plugin and web service.                  |
-| `make verify` | Run the complete local gate and live Paper smoke tests.  |
-| `make down`   | Stop the managed Paper server.                           |
+| Command                 | Purpose                                                       |
+| ----------------------- | ------------------------------------------------------------- |
+| `make help`             | List the supported root commands.                             |
+| `make doctor`           | Check the complete development toolchain.                     |
+| `make install`          | Install locked Node dependencies.                             |
+| `make build`            | Build Paper and the web/MCP service.                          |
+| `make build-paper`      | Build only the Paper plugin.                                  |
+| `make build-web`        | Build only the web/MCP service.                               |
+| `make check`            | Run every offline build, test, lint, and validation gate.     |
+| `make check-production` | Validate Compose, the production image, and Caddy.            |
+| `make verify`           | Run the complete local gate, including live smoke tests.      |
+| `make ci`               | Run the clean complete CI gate.                               |
+| `make format`           | Apply every repository formatter.                             |
+| `make up`               | Build and start or reuse the complete managed stack.          |
+| `make restart`          | Rebuild and restart Paper and web together.                   |
+| `make restart-paper`    | Rebuild Paper, safely draining and restoring web/MCP.         |
+| `make restart-web`      | Rebuild, migrate, and restart only web/MCP.                   |
+| `make down`             | Stop the complete managed stack cleanly.                      |
+| `make status`           | Show both managed process states.                             |
+| `make health`           | Check the authenticated bridge and web health endpoint.       |
+| `make logs`             | Print both live panes, or Paper's persisted log when stopped. |
+| `make console`          | Connect interactively to the Paper console.                   |
+| `make command`          | Send one stdin line to the Paper console.                     |
+| `make smoke`            | Run the managed live integration gate.                        |
+| `make clean`            | Remove build outputs while preserving `.dev/`.                |
 
-The managed server uses Minecraft port `25566` and bridge port `8765`. Paper
-does not support plugin hot reload. Use `make reload` after Java or plugin
-configuration changes.
+The managed stack uses Minecraft port `25565`, bridge port `8765`, and web port
+`3000`. `make up` waits for both services to become healthy. Paper does not
+support plugin hot reload, so use `make restart-paper` after Java or plugin
+configuration changes; use `make restart-web` for web-only work or
+`make restart` when both sides changed. Send a console command without exposing
+it as a process argument:
+
+```bash
+printf '%s\n' 'version' | make command
+```
 
 Run the smallest relevant check while working. Before handing off code or
 contract changes, run `make verify` once. Do not hand-edit generated runtime

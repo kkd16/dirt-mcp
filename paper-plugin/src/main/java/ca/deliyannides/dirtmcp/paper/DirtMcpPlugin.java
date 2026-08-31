@@ -5,16 +5,17 @@ import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfigLoader;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.logging.LogContext;
+import ca.deliyannides.dirtmcp.paper.validation.ServiceToken;
 import java.io.IOException;
-import java.util.regex.Pattern;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class DirtMcpPlugin extends JavaPlugin {
-    private static final String PORT_ENVIRONMENT_VARIABLE = "DIRT_BRIDGE_PORT";
-    private static final String BRIDGE_TOKEN_ENVIRONMENT_VARIABLE = "DIRT_BRIDGE_TOKEN";
-    private static final String CONTROL_TOKEN_ENVIRONMENT_VARIABLE = "DIRT_CONTROL_TOKEN";
-    private static final String CONTROL_URL_ENVIRONMENT_VARIABLE = "DIRT_CONTROL_URL";
-    private static final Pattern TOKEN_PATTERN = Pattern.compile("[0-9a-f]{64}");
+    private static final String BRIDGE_TOKEN_FILE_ENVIRONMENT_VARIABLE = "DIRT_BRIDGE_TOKEN_FILE";
+    private static final String CONTROL_TOKEN_FILE_ENVIRONMENT_VARIABLE = "DIRT_CONTROL_TOKEN_FILE";
 
     private DirtRuntime runtime;
 
@@ -70,11 +71,7 @@ public final class DirtMcpPlugin extends JavaPlugin {
                 DirtLog.consoleOnly(getSLF4JLogger(), DirtConfig.ConsoleLogLevel.ERROR);
         try {
             saveDefaultConfig();
-            DirtConfig config =
-                    DirtConfigLoader.load(
-                            getConfig(),
-                            System.getenv(PORT_ENVIRONMENT_VARIABLE),
-                            System.getenv(CONTROL_URL_ENVIRONMENT_VARIABLE));
+            DirtConfig config = DirtConfigLoader.load(getConfig());
             bootstrapLog.close();
             return config;
         } catch (RuntimeException | Error failure) {
@@ -110,25 +107,65 @@ public final class DirtMcpPlugin extends JavaPlugin {
     }
 
     static ControlCredentials validateControlCredentials(String bridgeToken, String controlToken) {
-        requireToken(BRIDGE_TOKEN_ENVIRONMENT_VARIABLE, bridgeToken);
-        requireToken(CONTROL_TOKEN_ENVIRONMENT_VARIABLE, controlToken);
+        requireToken(BRIDGE_TOKEN_FILE_ENVIRONMENT_VARIABLE, bridgeToken);
+        requireToken(CONTROL_TOKEN_FILE_ENVIRONMENT_VARIABLE, controlToken);
         if (bridgeToken.equals(controlToken)) {
             throw new IllegalStateException(
-                    "DIRT_BRIDGE_TOKEN and DIRT_CONTROL_TOKEN must be distinct");
+                    "DIRT_BRIDGE_TOKEN_FILE and DIRT_CONTROL_TOKEN_FILE contents must be distinct");
         }
         return new ControlCredentials(bridgeToken, controlToken);
     }
 
-    private static ControlCredentials controlCredentials() {
+    static ControlCredentials readControlCredentials(
+            String bridgeTokenFile, String controlTokenFile) {
         return validateControlCredentials(
-                System.getenv(BRIDGE_TOKEN_ENVIRONMENT_VARIABLE),
-                System.getenv(CONTROL_TOKEN_ENVIRONMENT_VARIABLE));
+                readTokenFile(BRIDGE_TOKEN_FILE_ENVIRONMENT_VARIABLE, bridgeTokenFile),
+                readTokenFile(CONTROL_TOKEN_FILE_ENVIRONMENT_VARIABLE, controlTokenFile));
+    }
+
+    private static ControlCredentials controlCredentials() {
+        return readControlCredentials(
+                System.getenv(BRIDGE_TOKEN_FILE_ENVIRONMENT_VARIABLE),
+                System.getenv(CONTROL_TOKEN_FILE_ENVIRONMENT_VARIABLE));
+    }
+
+    private static String readTokenFile(String name, String pathValue) {
+        if (pathValue == null || pathValue.isBlank()) {
+            throw new IllegalStateException(name + " is required");
+        }
+        final Path path;
+        try {
+            path = Path.of(pathValue);
+        } catch (InvalidPathException exception) {
+            throw new IllegalStateException(
+                    name + " must reference a readable UTF-8 regular file", exception);
+        }
+        try {
+            if (!Files.isRegularFile(path)) {
+                throw new IllegalStateException(
+                        name + " must reference a readable UTF-8 regular file");
+            }
+            return stripFinalLineEnding(Files.readString(path, StandardCharsets.UTF_8));
+        } catch (IOException | SecurityException exception) {
+            throw new IllegalStateException(
+                    name + " must reference a readable UTF-8 regular file", exception);
+        }
+    }
+
+    private static String stripFinalLineEnding(String value) {
+        if (value.endsWith("\r\n")) {
+            return value.substring(0, value.length() - 2);
+        }
+        if (value.endsWith("\n")) {
+            return value.substring(0, value.length() - 1);
+        }
+        return value;
     }
 
     private static void requireToken(String name, String token) {
-        if (token == null || !TOKEN_PATTERN.matcher(token).matches()) {
+        if (!ServiceToken.isValid(token)) {
             throw new IllegalStateException(
-                    name + " must contain exactly 64 lowercase hexadecimal characters");
+                    name + " contents must contain exactly 64 lowercase hexadecimal characters");
         }
     }
 

@@ -2,37 +2,29 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 .DEFAULT_GOAL := help
 
-DEV_BRIDGE_TOKEN_FILE := paper-plugin/run/.dirt-bridge-token
-DEV_CONTROL_TOKEN_FILE := paper-plugin/run/.dirt-control-token
-DEV_AUTH_SECRET_FILE := paper-plugin/run/.dirt-auth-secret
-DEV_DATABASE_FILE := mcp-server/data/dirt.sqlite3
-DEV_PUBLIC_ORIGIN ?= http://localhost:3000
-
-.PHONY: help doctor install node-deps build build-java build-web check verify ci format dev-secrets web up reload down status logs console command smoke health clean
+.PHONY: help doctor install build build-paper build-web check check-production verify ci format up restart restart-paper restart-web down status health logs console command smoke clean
+.NOTPARALLEL: verify ci smoke restart restart-paper restart-web
 
 help: ## Show the available development commands.
-	@awk 'BEGIN { FS = ":.*## "; printf "Dirt MCP development commands:\n\n" } /^[a-zA-Z_-]+:.*## / { printf "  %-14s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@awk 'BEGIN { FS = ":.*## "; printf "Dirt MCP development commands:\n\n" } /^[a-zA-Z_-]+:.*## / { printf "  %-20s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
-doctor: ## Verify the required Java, Node.js, pnpm, Gradle, curl, tmux, and lint tools.
-	@command -v java >/dev/null || { printf 'Java 25 is required.\n' >&2; exit 1; }
-	@command -v jar >/dev/null || { printf 'The Java 25 JDK jar tool is required.\n' >&2; exit 1; }
-	@command -v node >/dev/null || { printf 'Node.js 24.20.0 LTS is required.\n' >&2; exit 1; }
-	@command -v pnpm >/dev/null || { printf 'pnpm 11.24.0 or a newer 11.x release is required.\n' >&2; exit 1; }
-	@command -v curl >/dev/null || { printf 'curl is required.\n' >&2; exit 1; }
-	@command -v tmux >/dev/null || { printf 'tmux is required for the managed development server.\n' >&2; exit 1; }
+doctor: ## Verify every tool required by development and CI.
+	@command -v java >/dev/null || { printf 'A Java launcher is required.\n' >&2; exit 1; }
+	@command -v node >/dev/null || { printf 'Node.js is required.\n' >&2; exit 1; }
+	@command -v pnpm >/dev/null || { printf 'pnpm is required.\n' >&2; exit 1; }
+	@command -v overmind >/dev/null || { printf 'Overmind 2.5.1 is required.\n' >&2; exit 1; }
+	@command -v tmux >/dev/null || { printf 'tmux is required by Overmind.\n' >&2; exit 1; }
+	@command -v docker >/dev/null || { printf 'Docker with Compose is required.\n' >&2; exit 1; }
 	@command -v shellcheck >/dev/null || { printf 'ShellCheck 0.9.0 or newer is required.\n' >&2; exit 1; }
 	@command -v actionlint >/dev/null || { printf 'actionlint 1.7.12 or newer is required.\n' >&2; exit 1; }
+	@docker compose version >/dev/null || { printf 'The Docker Compose plugin is required.\n' >&2; exit 1; }
+	@docker info >/dev/null 2>&1 || { printf 'The Docker daemon is not available.\n' >&2; exit 1; }
 	@if ! ./gradlew -q javaToolchains | grep -Eq 'Language Version:[[:space:]]+25'; then \
-	  printf 'Gradle could not resolve the Java 25 toolchain required by Paper 26.2.\n' >&2; exit 1; fi
-	@node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major !== 24 || minor < 20) { console.error(`Expected Node.js 24.20.0 or newer 24.x, found $${process.version}.`); process.exit(1); }'
-	@pnpm_version="$$(pnpm --version)"; \
-	  if [[ "$$pnpm_version" =~ ^11\.([0-9]+)\.([0-9]+)$$ ]]; then \
-	    pnpm_minor="$${BASH_REMATCH[1]}"; \
-	  else \
-	    pnpm_minor=-1; \
-	  fi; \
-	  if (( pnpm_minor < 24 )); then \
-	    printf 'Expected pnpm 11.24.0 or a newer 11.x release, found pnpm %s.\n' "$$pnpm_version" >&2; exit 1; fi
+	  printf 'Gradle could not resolve the Java 25 toolchain required by Paper.\n' >&2; exit 1; fi
+	@node -e 'const manifest = require("./package.json"); const expected = manifest.devEngines.runtime.version; if (process.versions.node !== expected) { console.error(`Expected Node.js $${expected}, found $${process.version}.`); process.exit(1); }'
+	@expected="$$(node -p 'require("./package.json").devEngines.packageManager.version')"; actual="$$(pnpm --version)"; \
+	  [[ "$$actual" == "$$expected" ]] || { printf 'Expected pnpm %s, found %s.\n' "$$expected" "$$actual" >&2; exit 1; }
+	@[[ "$$(overmind --version)" == 'Overmind version 2.5.1' ]] || { overmind --version >&2; printf 'Overmind 2.5.1 is required.\n' >&2; exit 1; }
 	@shellcheck_version="$$(shellcheck --version | awk '/^version:/ { print $$2 }')"; \
 	  if [[ "$$(printf '%s\n%s\n' 0.9.0 "$$shellcheck_version" | sort -V | head -n 1)" != 0.9.0 ]]; then \
 	    printf 'Expected ShellCheck 0.9.0 or newer, found %s.\n' "$$shellcheck_version" >&2; exit 1; fi
@@ -44,107 +36,80 @@ doctor: ## Verify the required Java, Node.js, pnpm, Gradle, curl, tmux, and lint
 	@printf 'Node.js: %s\n' "$$(node --version)"
 	@printf 'pnpm: %s\n' "$$(pnpm --version)"
 	@printf 'Gradle: '; ./gradlew --version | awk '/^Gradle / { print $$2; exit }'
+	@printf 'Overmind: %s\n' "$$(overmind --version | awk '{ print $$3 }')"
+	@printf 'tmux: %s\n' "$$(tmux -V | awk '{ print $$2 }')"
+	@printf 'Docker Compose: %s\n' "$$(docker compose version --short)"
 	@printf 'ShellCheck: %s\n' "$$(shellcheck --version | awk '/^version:/ { print $$2 }')"
 	@printf 'actionlint: %s\n' "$$(actionlint -version | awk 'NR == 1 { print $$1 }')"
 
-install: node-deps ## Install the locked Node.js dependencies.
-
-node-deps:
+install: ## Install the locked Node.js dependencies.
 	pnpm install --frozen-lockfile
 
-build: build-java build-web ## Build the Paper plugin and web service.
+build: build-paper build-web ## Build the Paper plugin and web/MCP service.
 
-build-java: ## Compile the Paper plugin.
-	./gradlew :paper-plugin:jar
-	@scripts/validate-paper-jar
+build-paper: ## Build and validate the Paper plugin artifact.
+	./gradlew :paper-plugin:assemble
 
-build-web: node-deps ## Compile the dashboard and HTTP MCP service.
+build-web: install ## Build the dashboard and web/MCP service.
 	pnpm run build
 
-check: node-deps ## Run every offline build, test, lint, format, and validation gate.
+check: install ## Run every offline build, test, lint, format, and contract gate.
 	./gradlew build
-	@scripts/validate-paper-jar
 	pnpm run check
 
-verify: ## Run the complete incremental local gate, including managed Paper smoke coverage.
-	@$(MAKE) --no-print-directory check
-	@$(MAKE) --no-print-directory smoke
+check-production: export DIRT_AUTH_SECRET_FILE := /dev/null
+check-production: export DIRT_BRIDGE_TOKEN_FILE := /dev/null
+check-production: export DIRT_CONTROL_TOKEN_FILE := /dev/null
+check-production: export DIRT_PUBLIC_HOST := dirt.example.com
+check-production: ## Validate every production Compose profile and image.
+	docker compose --profile '*' config --quiet
+	docker compose build --pull
+	docker run --rm --entrypoint /bin/sh dirt-mcp-web:local -c 'test -r /app/LICENSE'
+	docker compose run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
-ci: doctor ## Run the clean complete gate used by continuous integration.
-	@$(MAKE) --no-print-directory clean
-	@$(MAKE) --no-print-directory verify
+verify: check smoke ## Run the complete incremental local gate, including live smoke coverage.
 
-format: node-deps ## Apply the repository's Java, TypeScript, and configuration formatters.
+ci: doctor clean verify check-production ## Run the clean complete gate used by continuous integration.
+	@node scripts/dev.mjs down
+
+format: install ## Apply every repository formatter.
 	./gradlew spotlessApply
 	pnpm run format
 
-dev-secrets: ## Create or repair the ignored, distinct local service credentials.
-	@mkdir -p "$(dir $(DEV_BRIDGE_TOKEN_FILE))"
-	@for token_file in "$(DEV_BRIDGE_TOKEN_FILE)" "$(DEV_CONTROL_TOKEN_FILE)" "$(DEV_AUTH_SECRET_FILE)"; do \
-	  token=''; \
-	  if [[ -f "$$token_file" ]]; then token="$$(<"$$token_file")"; fi; \
-	  if [[ ! "$$token" =~ ^[0-9a-f]{64}$$ ]]; then \
-	    umask 077; \
-	    node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))" > "$$token_file"; \
-	    printf 'Generated local Dirt credential at %s.\n' "$$token_file" >&2; \
-	  fi; \
-	  chmod 600 "$$token_file"; \
-	done
+up: ## Start or reuse the complete Paper and web/MCP development stack.
+	@node scripts/dev.mjs up
 
-web: export DIRT_PUBLIC_ORIGIN := $(DEV_PUBLIC_ORIGIN)
-web: export DIRT_DATABASE_PATH := $(abspath $(DEV_DATABASE_FILE))
-web: export DIRT_AUTH_SECRET_FILE := $(abspath $(DEV_AUTH_SECRET_FILE))
-web: export DIRT_BRIDGE_TOKEN_FILE := $(abspath $(DEV_BRIDGE_TOKEN_FILE))
-web: export DIRT_CONTROL_TOKEN_FILE := $(abspath $(DEV_CONTROL_TOKEN_FILE))
-web: build-web dev-secrets ## Migrate and run the local dashboard and MCP HTTP service.
-	@mkdir -p "$(dir $(DEV_DATABASE_FILE))"
-	pnpm --filter @dirt-mcp/server run migrate
-	pnpm --filter @dirt-mcp/server run start
+restart: build ## Build, then gracefully restart the complete development stack.
+	@node scripts/dev.mjs restart
 
-up: ## Start the managed Paper development server and wait until it is ready.
-	@$(MAKE) --no-print-directory dev-secrets
-	@if scripts/dev-paper status >/dev/null 2>&1; then \
-	  scripts/dev-paper status; \
-	else \
-	  $(MAKE) --no-print-directory build-java; \
-	  scripts/dev-paper up; \
-	fi
+restart-paper: build-paper ## Build and safely restart Paper, draining web/MCP first.
+	@node scripts/dev.mjs restart-paper
 
-reload: ## Rebuild and gracefully restart the managed development server.
-	@$(MAKE) --no-print-directory dev-secrets
-	@$(MAKE) --no-print-directory build-java
-	@scripts/dev-paper restart
+restart-web: build-web ## Build, migrate, and restart only the web/MCP service.
+	@node scripts/dev.mjs restart-web
 
-down: ## Stop the managed development server cleanly.
-	@scripts/dev-paper down
+down: ## Stop the complete development stack cleanly.
+	@node scripts/dev.mjs down
 
-status: ## Report managed Paper process and bridge health.
-	@scripts/dev-paper status
+status: ## Show managed process state and aggregate readiness.
+	@node scripts/dev.mjs status
 
-logs: ## Print recent managed Paper console output (override with LINES=...).
-	@scripts/dev-paper logs "$(or $(LINES),100)"
+health: ## Run authenticated web, control, Paper, and FAWE readiness checks.
+	@node scripts/dev.mjs health
+
+logs: ## Print both live panes or the stopped Paper log.
+	@node scripts/dev.mjs logs
 
 console: ## Attach to the managed Paper console; detach with Ctrl-b d.
-	@scripts/dev-paper console
+	@node scripts/dev.mjs console
 
-command: export DIRT_DEV_COMMAND := $(value CMD)
-command: ## Send one Paper console command with CMD='...'.
-	@test -n "$$DIRT_DEV_COMMAND" || { printf 'Usage: make command CMD='\''version'\''\n' >&2; exit 2; }
-	@scripts/dev-paper command "$$DIRT_DEV_COMMAND"
+command: ## Prompt for or read one Paper console command from standard input.
+	@node scripts/dev.mjs command
 
-smoke: ## Restart Paper and run the complete managed-server integration gate.
-	@$(MAKE) --no-print-directory dev-secrets
-	@$(MAKE) --no-print-directory build-java
-	@scripts/dev-paper restart
-	@node scripts/smoke-managed-server.mjs || { \
-	  scripts/dev-paper logs 120 >&2; \
-	  exit 1; \
-	}
-	@scripts/validate-paper-log running
+smoke: restart ## Run the complete managed-server integration gate.
+	@node scripts/smoke-managed-server.mjs || { node scripts/dev.mjs logs >&2; exit 1; }
+	@scripts/validate-paper-log.sh running
 
-health: ## Run the authenticated end-to-end Dirt/Paper/FAWE ping.
-	@scripts/dev-paper health
-
-clean: ## Remove generated build outputs; preserve the local Paper world.
+clean: down ## Stop services and remove build outputs while preserving .dev data.
 	./gradlew clean
-	pnpm --filter @dirt-mcp/server run clean
+	pnpm run clean

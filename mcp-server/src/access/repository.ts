@@ -134,7 +134,7 @@ export class AccessRepository {
       )
       .all(...required);
     if (rows.length !== required.length) {
-      throw new Error('The Dirt database is not migrated; run `pnpm --filter @dirt-mcp/server migrate`.');
+      throw new Error('The Dirt database is not migrated; run `pnpm migrate`.');
     }
   }
 

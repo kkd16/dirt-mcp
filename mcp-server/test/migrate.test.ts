@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -9,9 +9,13 @@ import Database from 'better-sqlite3';
 test('migration awaits OAuth initialization before closing SQLite and is repeatable', () => {
   const directory = mkdtempSync(join(tmpdir(), 'dirt-migrate-test-'));
   const databasePath = join(directory, 'dirt.sqlite');
+  const authSecretPath = join(directory, 'auth-secret');
+  writeFileSync(authSecretPath, 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n', {
+    mode: 0o600,
+  });
   const environment = {
     ...process.env,
-    DIRT_AUTH_SECRET: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+    DIRT_AUTH_SECRET_FILE: authSecretPath,
     DIRT_PUBLIC_ORIGIN: 'http://localhost:3000',
     DIRT_DATABASE_PATH: databasePath,
   };

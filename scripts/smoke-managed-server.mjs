@@ -3,14 +3,14 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readdir, readFile } from 'node:fs/promises';
+import { open, readdir, readFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
-const runDirectory = `${repositoryRoot}/paper-plugin/run`;
+const runDirectory = `${repositoryRoot}/.dev/paper`;
 const detailLogDirectory = `${runDirectory}/plugins/DirtMCP/logs`;
-const token = (await readFile(`${runDirectory}/.dirt-bridge-token`, 'utf8')).trim();
+const token = (await readFile(`${repositoryRoot}/.dev/secrets/bridge-token`, 'utf8')).trim();
 const bridgePort = 8_765;
 
 const world = 'world';
@@ -34,6 +34,7 @@ const uuidV4Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[
 const editIdsToUndo = [];
 const observedEditIds = new Set();
 const mutationCallIds = new Set();
+const detailedLogSnapshots = new Map();
 const editMutationPaths = new Set(['/v1/replace-region-blocks', '/v1/set-blocks']);
 const inspectionPaths = new Set([
   '/v1/count-region-block-states',
@@ -170,34 +171,87 @@ async function bridgeRequest(path, body) {
 async function readDetailedLogRecords() {
   let fileNames;
   try {
-    fileNames = (await readdir(detailLogDirectory)).filter((name) => /^dirt-detail\.\d+\.jsonl$/.test(name));
+    fileNames = (await readdir(detailLogDirectory)).filter((name) => /^dirt-detail\.\d+\.jsonl$/.test(name)).toSorted();
   } catch (error) {
     if (error?.code === 'ENOENT') return [];
     throw error;
   }
 
+  const activeFileNames = new Set(fileNames);
+  for (const fileName of detailedLogSnapshots.keys()) {
+    if (!activeFileNames.has(fileName)) detailedLogSnapshots.delete(fileName);
+  }
+
   const records = [];
   for (const fileName of fileNames) {
-    let content;
-    try {
-      // Rotation can retire a generation between listing and reading it.
-      // oxlint-disable-next-line eslint/no-await-in-loop
-      content = await readFile(`${detailLogDirectory}/${fileName}`, 'utf8');
-    } catch (error) {
-      if (error?.code === 'ENOENT') continue;
-      throw error;
-    }
-    assert.equal(content.includes(token), false, `${fileName} contains the bridge bearer token`);
-
-    const lines = content.split('\n');
-    if (!content.endsWith('\n')) lines.pop();
-    for (const line of lines.filter((entry) => entry.length > 0)) {
-      const record = JSON.parse(line);
-      assert.ok(record !== null && typeof record === 'object' && !Array.isArray(record));
-      records.push(record);
-    }
+    // Rotation can retire a generation between listing and opening it.
+    // oxlint-disable-next-line eslint/no-await-in-loop
+    const fileRecords = await readDetailedLogFile(fileName);
+    if (fileRecords) records.push(...fileRecords);
   }
   return records;
+}
+
+async function readDetailedLogFile(fileName) {
+  let logFile;
+  try {
+    logFile = await open(`${detailLogDirectory}/${fileName}`, 'r');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return undefined;
+    throw error;
+  }
+
+  try {
+    const stats = await logFile.stat();
+    let snapshot = detailedLogSnapshots.get(fileName);
+    if (!snapshot || snapshot.device !== stats.dev || snapshot.inode !== stats.ino || stats.size < snapshot.offset) {
+      snapshot = {
+        device: stats.dev,
+        inode: stats.ino,
+        offset: 0,
+        pending: Buffer.alloc(0),
+        records: [],
+      };
+    }
+
+    const appendedLength = stats.size - snapshot.offset;
+    if (appendedLength === 0) {
+      detailedLogSnapshots.set(fileName, snapshot);
+      return snapshot.records;
+    }
+
+    const appended = Buffer.alloc(appendedLength);
+    let bytesRead = 0;
+    while (bytesRead < appended.length) {
+      // Positional reads are serial so a short read resumes at the correct byte.
+      // oxlint-disable-next-line eslint/no-await-in-loop
+      const result = await logFile.read(appended, bytesRead, appended.length - bytesRead, snapshot.offset + bytesRead);
+      if (result.bytesRead === 0) break;
+      bytesRead += result.bytesRead;
+    }
+
+    const content = Buffer.concat([snapshot.pending, appended.subarray(0, bytesRead)]);
+    assert.equal(content.includes(token), false, `${fileName} contains the bridge bearer token`);
+
+    const finalLineBreak = content.lastIndexOf(0x0a);
+    const newRecords = [];
+    if (finalLineBreak !== -1) {
+      const completeContent = content.subarray(0, finalLineBreak).toString('utf8');
+      for (const line of completeContent.split('\n').filter((entry) => entry.length > 0)) {
+        const record = JSON.parse(line);
+        assert.ok(record !== null && typeof record === 'object' && !Array.isArray(record));
+        newRecords.push(record);
+      }
+    }
+
+    snapshot.offset += bytesRead;
+    snapshot.pending = finalLineBreak === -1 ? content : Buffer.from(content.subarray(finalLineBreak + 1));
+    snapshot.records.push(...newRecords);
+    detailedLogSnapshots.set(fileName, snapshot);
+    return snapshot.records;
+  } finally {
+    await logFile.close();
+  }
 }
 
 async function waitForDetailedLogRecord(predicate, failureMessage) {
@@ -267,18 +321,21 @@ async function assertDetailedCommandLog(callId, commandMarker, expectedResultCou
 
 async function paperCommand(command) {
   await new Promise((resolve, reject) => {
-    const child = spawn(`${repositoryRoot}/scripts/dev-paper`, ['command', command], {
-      stdio: 'inherit',
+    const child = spawn(process.execPath, [`${repositoryRoot}/scripts/dev.mjs`, 'command'], {
+      cwd: repositoryRoot,
+      stdio: ['pipe', 'inherit', 'inherit'],
       signal: AbortSignal.timeout(30_000),
     });
     child.once('error', reject);
+    child.stdin.once('error', reject);
     child.once('exit', (code) => {
       if (code === 0) {
         resolve();
       } else {
-        reject(new Error(`Paper command ${JSON.stringify(command)} exited with status ${code}`));
+        reject(new Error(`Managed Paper command exited with status ${code}`));
       }
     });
+    child.stdin.end(`${command}\n`);
   });
 }
 
@@ -569,10 +626,10 @@ try {
     'players',
     'worlds',
   ]);
-  assert.ok(serverStatus.builds.minecraft.length > 0);
-  assert.ok(serverStatus.builds.paper.length > 0);
-  assert.ok(serverStatus.builds.dirtPlugin.length > 0);
-  assert.ok(serverStatus.builds.fawe.length > 0);
+  assert.equal(serverStatus.builds.minecraft, '26.2');
+  assert.match(serverStatus.builds.paper, /^26\.2-121-/u);
+  assert.equal(serverStatus.builds.dirtPlugin, '0.1.0-SNAPSHOT');
+  assert.match(serverStatus.builds.fawe, /^2\.15\.4(?:[+.-]|$)/u);
   assert.ok(serverStatus.performance.tpsOneMinute >= 0);
   assert.equal(serverStatus.players.online, serverStatus.players.entries.length);
   assert.ok(serverStatus.worlds.some((entry) => entry.name === world));

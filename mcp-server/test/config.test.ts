@@ -1,33 +1,52 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, test } from 'node:test';
 import { readAuthConfig, readRuntimeConfig, RuntimeConfigurationError } from '../dist/config.js';
 
 const TOKEN = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const CONTROL_TOKEN = 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
 const AUTH_SECRET = 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
+const directory = mkdtempSync(join(tmpdir(), 'dirt-config-test-'));
+let fileNumber = 0;
+
+function secretFile(value: string): string {
+  const path = join(directory, `secret-${fileNumber}`);
+  fileNumber += 1;
+  writeFileSync(path, value, { mode: 0o600 });
+  return path;
+}
+
 const BASE_ENVIRONMENT = {
-  DIRT_AUTH_SECRET: AUTH_SECRET,
-  DIRT_BRIDGE_TOKEN: TOKEN,
-  DIRT_CONTROL_TOKEN: CONTROL_TOKEN,
+  DIRT_AUTH_SECRET_FILE: secretFile(`${AUTH_SECRET}\n`),
+  DIRT_BRIDGE_TOKEN_FILE: secretFile(`${TOKEN}\n`),
+  DIRT_CONTROL_TOKEN_FILE: secretFile(`${CONTROL_TOKEN}\r\n`),
   DIRT_DATABASE_PATH: './data/dirt.sqlite',
   DIRT_PUBLIC_ORIGIN: 'https://dirt.example',
 };
 
-test('reads the default and normalized loopback bridge origins', () => {
-  assert.deepEqual(readRuntimeConfig(BASE_ENVIRONMENT).bridge, {
+after(() => rmSync(directory, { recursive: true, force: true }));
+
+test('reads secret files and the default and normalized loopback bridge origins', () => {
+  const config = readRuntimeConfig(BASE_ENVIRONMENT);
+  assert.deepEqual(config.bridge, {
     origin: 'http://127.0.0.1:8765',
     token: TOKEN,
   });
+  assert.equal(config.controlToken, CONTROL_TOKEN);
+  assert.equal(config.authSecret, AUTH_SECRET);
+  assert.equal(config.port, 3000);
   assert.deepEqual(readRuntimeConfig({ ...BASE_ENVIRONMENT, DIRT_BRIDGE_URL: 'http://127.0.0.1:9876/' }).bridge, {
     origin: 'http://127.0.0.1:9876',
     token: TOKEN,
   });
 });
 
-test('requires a nonempty bridge token', () => {
-  for (const token of [undefined, '', ' '.repeat(32)]) {
+test('requires a nonempty bridge token file', () => {
+  for (const path of [undefined, secretFile(''), secretFile(' '.repeat(32))]) {
     assert.throws(
-      () => readRuntimeConfig({ ...BASE_ENVIRONMENT, DIRT_BRIDGE_TOKEN: token }),
+      () => readRuntimeConfig({ ...BASE_ENVIRONMENT, DIRT_BRIDGE_TOKEN_FILE: path }),
       (error) => error instanceof RuntimeConfigurationError && error.code === 'bridge_token_required',
     );
   }
@@ -40,10 +59,10 @@ test('requires exactly 64 lowercase hexadecimal token characters', () => {
     'A'.repeat(64),
     `${'a'.repeat(63)}g`,
     '🔒'.repeat(16),
-    `${TOKEN}\n`,
+    `${TOKEN}\n\n`,
   ]) {
     assert.throws(
-      () => readRuntimeConfig({ ...BASE_ENVIRONMENT, DIRT_BRIDGE_TOKEN: token }),
+      () => readRuntimeConfig({ ...BASE_ENVIRONMENT, DIRT_BRIDGE_TOKEN_FILE: secretFile(token) }),
       (error) => error instanceof RuntimeConfigurationError && error.code === 'bridge_token_invalid',
     );
   }
@@ -74,63 +93,34 @@ test('rejects bridge URLs that are not a bare HTTP IPv4 loopback origin', () => 
   }
 });
 
-test('runtime config prefers secret files and requires pairwise-distinct trust secrets', () => {
-  const files: Record<string, string> = {
-    '/bridge': `${TOKEN}\n`,
-    '/control': `${CONTROL_TOKEN}\r\n`,
-    '/auth': AUTH_SECRET,
-  };
-  const config = readRuntimeConfig(
-    {
-      DIRT_BRIDGE_TOKEN_FILE: '/bridge',
-      DIRT_CONTROL_TOKEN_FILE: '/control',
-      DIRT_AUTH_SECRET_FILE: '/auth',
-      DIRT_BRIDGE_TOKEN: CONTROL_TOKEN,
-      DIRT_CONTROL_TOKEN: TOKEN,
-      DIRT_PUBLIC_ORIGIN: 'http://localhost:3000',
-      DIRT_DATABASE_PATH: './data/dirt.sqlite',
-    },
-    (path) =>
-      files[path] ??
-      (() => {
-        throw new Error('missing');
-      })(),
-  );
-  assert.equal(config.bridge.token, TOKEN);
-  assert.equal(config.controlToken, CONTROL_TOKEN);
-  assert.equal(config.authSecret, AUTH_SECRET);
-  assert.equal(config.port, 3000);
-
+test('requires pairwise-distinct trust secrets', () => {
   for (const [bridge, control, auth] of [
     [TOKEN, TOKEN, AUTH_SECRET],
     [TOKEN, CONTROL_TOKEN, TOKEN],
     [TOKEN, CONTROL_TOKEN, CONTROL_TOKEN],
-  ]) {
+  ] as const) {
     assert.throws(
       () =>
         readRuntimeConfig({
           ...BASE_ENVIRONMENT,
-          DIRT_BRIDGE_TOKEN: bridge,
-          DIRT_CONTROL_TOKEN: control,
-          DIRT_AUTH_SECRET: auth,
+          DIRT_BRIDGE_TOKEN_FILE: secretFile(bridge),
+          DIRT_CONTROL_TOKEN_FILE: secretFile(control),
+          DIRT_AUTH_SECRET_FILE: secretFile(auth),
         }),
       (error) => error instanceof RuntimeConfigurationError && error.code === 'secrets_not_distinct',
     );
   }
 });
 
-test('reports invalid secret files at the correct trust boundary', () => {
+test('reports missing and unreadable secret files at the correct trust boundary', () => {
   for (const [variable, code] of [
     ['DIRT_AUTH_SECRET_FILE', 'auth_secret_file_invalid'],
     ['DIRT_BRIDGE_TOKEN_FILE', 'bridge_token_file_invalid'],
     ['DIRT_CONTROL_TOKEN_FILE', 'control_token_file_invalid'],
   ] as const) {
-    for (const path of ['', '/missing']) {
+    for (const path of ['', join(directory, 'missing'), directory]) {
       assert.throws(
-        () =>
-          readRuntimeConfig({ ...BASE_ENVIRONMENT, [variable]: path }, () => {
-            throw new Error('unreadable');
-          }),
+        () => readRuntimeConfig({ ...BASE_ENVIRONMENT, [variable]: path }),
         (error) => error instanceof RuntimeConfigurationError && error.code === code,
       );
     }
@@ -139,10 +129,10 @@ test('reports invalid secret files at the correct trust boundary', () => {
 
 test('rejects invalid control, authentication, database, and port settings', () => {
   for (const [override, code] of [
-    [{ DIRT_CONTROL_TOKEN: undefined }, 'control_token_required'],
-    [{ DIRT_CONTROL_TOKEN: 'a'.repeat(63) }, 'control_token_invalid'],
-    [{ DIRT_AUTH_SECRET: undefined }, 'auth_secret_required'],
-    [{ DIRT_AUTH_SECRET: 'a'.repeat(31) }, 'auth_secret_invalid'],
+    [{ DIRT_CONTROL_TOKEN_FILE: undefined }, 'control_token_required'],
+    [{ DIRT_CONTROL_TOKEN_FILE: secretFile('a'.repeat(63)) }, 'control_token_invalid'],
+    [{ DIRT_AUTH_SECRET_FILE: undefined }, 'auth_secret_required'],
+    [{ DIRT_AUTH_SECRET_FILE: secretFile('a'.repeat(31)) }, 'auth_secret_invalid'],
     [{ DIRT_DATABASE_PATH: '' }, 'database_path_required'],
     [{ DIRT_WEB_PORT: '65536' }, 'web_port_invalid'],
   ] as const) {
@@ -188,7 +178,7 @@ test('public origin is a WebAuthn-compatible domain origin', () => {
 test('auth configuration is independent of bridge and control credentials', () => {
   assert.deepEqual(
     readAuthConfig({
-      DIRT_AUTH_SECRET: AUTH_SECRET,
+      DIRT_AUTH_SECRET_FILE: BASE_ENVIRONMENT.DIRT_AUTH_SECRET_FILE,
       DIRT_DATABASE_PATH: './data/dirt.sqlite',
       DIRT_PUBLIC_ORIGIN: 'https://dirt.example',
     }),

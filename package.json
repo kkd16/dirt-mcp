@@ -9,16 +9,20 @@
     "url": "git+https://github.com/kkd16/dirt-mcp.git"
   },
   "scripts": {
-    "build": "pnpm --filter @dirt-mcp/server run build",
+    "build": "pnpm --filter @dirt-mcp/server build",
+    "backup": "pnpm --filter @dirt-mcp/server backup",
     "check": "pnpm run format:check && pnpm run lint && pnpm run validate:openapi && pnpm run test",
+    "clean": "pnpm --filter @dirt-mcp/server run clean",
     "format": "oxfmt --write . '!mcp-server/src/generated/**'",
     "format:check": "oxfmt --check . '!mcp-server/src/generated/**'",
     "lint": "pnpm run lint:code && pnpm run lint:shell && pnpm run lint:workflows && pnpm run lint:markdown",
-    "lint:code": "oxlint mcp-server/src --type-aware --ignore-pattern 'mcp-server/src/generated/**' && oxlint mcp-server/test scripts/*.mjs",
+    "lint:code": "oxlint mcp-server/src mcp-server/vite.config.ts --type-aware --ignore-pattern 'mcp-server/src/generated/**' && oxlint mcp-server/test scripts/*.mjs",
     "lint:markdown": "markdownlint-cli2",
-    "lint:shell": "shellcheck scripts/dev-paper scripts/run-paper-dev scripts/validate-paper-jar scripts/validate-paper-log",
+    "lint:shell": "shellcheck scripts/*.sh",
     "lint:workflows": "actionlint",
-    "test": "pnpm --filter @dirt-mcp/server run test",
+    "migrate": "pnpm --filter @dirt-mcp/server migrate",
+    "start": "pnpm --filter @dirt-mcp/server start",
+    "test": "pnpm --filter @dirt-mcp/server test",
     "generate:openapi-types": "openapi-typescript protocol/openapi.yaml --output mcp-server/src/generated/openapi.ts --immutable",
     "check:openapi-types": "openapi-typescript protocol/openapi.yaml --output mcp-server/src/generated/openapi.ts --immutable --check",
     "validate:openapi": "redocly lint protocol/openapi.yaml protocol/access-control.openapi.yaml --lint-config=error && pnpm run check:openapi-types"
@@ -35,6 +39,11 @@
     "packageManager": {
       "name": "pnpm",
       "version": "11.24.0",
+      "onFail": "download"
+    },
+    "runtime": {
+      "name": "node",
+      "version": "24.20.0",
       "onFail": "download"
     }
   },

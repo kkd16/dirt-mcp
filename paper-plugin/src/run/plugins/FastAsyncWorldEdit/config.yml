@@ -1,0 +1,4 @@
+enabled-components:
+  snapshot-update-notifications: false
+  release-update-notifications: false
+  notify-update-ingame: false

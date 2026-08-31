@@ -43,20 +43,12 @@ public final class DirtConfigLoader {
 
     private DirtConfigLoader() {}
 
-    public static DirtConfig load(
-            FileConfiguration config, String portOverride, String accessControlUrlOverride) {
+    public static DirtConfig load(FileConfiguration config) {
         validateKeys(config);
-        int configuredPort = requiredInteger(config, "bridge.port");
-        int port = parsePortOverride(portOverride, configuredPort);
-        String configuredAccessControlUrl = requiredString(config, "access-control.url");
-        String accessControlUrl =
-                accessControlUrlOverride == null || accessControlUrlOverride.isBlank()
-                        ? configuredAccessControlUrl
-                        : accessControlUrlOverride;
 
         return new DirtConfig(
                 new DirtConfig.Bridge(
-                        port,
+                        requiredInteger(config, "bridge.port"),
                         requiredInteger(config, "bridge.shutdown-delay-seconds"),
                         requiredInteger(config, "bridge.request-body-timeout-seconds"),
                         requiredInteger(config, "bridge.max-concurrent-requests"),
@@ -64,7 +56,7 @@ public final class DirtConfigLoader {
                         requiredInteger(config, "bridge.max-request-bytes"),
                         requiredOperations(config, "bridge.allowed-operations")),
                 new DirtConfig.AccessControl(
-                        accessControlUrl,
+                        requiredString(config, "access-control.url"),
                         requiredInteger(config, "access-control.connect-timeout-millis"),
                         requiredInteger(config, "access-control.request-timeout-millis")),
                 new DirtConfig.Logging(
@@ -122,21 +114,6 @@ public final class DirtConfigLoader {
             operations.add(operation);
         }
         return operations;
-    }
-
-    private static int parsePortOverride(String override, int configuredPort) {
-        if (override == null || override.isBlank()) {
-            return configuredPort;
-        }
-        try {
-            int port = Integer.parseInt(override.trim());
-            if (port < 1 || port > 65_535) {
-                throw new IllegalArgumentException("DIRT_BRIDGE_PORT must be between 1 and 65535");
-            }
-            return port;
-        } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException("DIRT_BRIDGE_PORT must be an integer", exception);
-        }
     }
 
     private static int requiredInteger(FileConfiguration config, String path) {

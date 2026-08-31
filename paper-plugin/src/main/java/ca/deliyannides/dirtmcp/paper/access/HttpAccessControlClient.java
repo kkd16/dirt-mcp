@@ -1,6 +1,7 @@
 package ca.deliyannides.dirtmcp.paper.access;
 
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
+import ca.deliyannides.dirtmcp.paper.validation.ServiceToken;
 import ca.deliyannides.dirtmcp.paper.validation.UuidV4;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -46,11 +47,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
-import java.util.regex.Pattern;
 
 /** Strict asynchronous client for the web service's authenticated loopback control API. */
 public final class HttpAccessControlClient implements AccessControl {
-    private static final Pattern TOKEN_PATTERN = Pattern.compile("[0-9a-f]{64}");
     private static final int MAXIMUM_RESPONSE_BYTES = 262_144;
     private static final int MAXIMUM_JSON_DEPTH = 32;
     private static final int MAXIMUM_SELECTOR_LENGTH = 128;
@@ -65,9 +64,10 @@ public final class HttpAccessControlClient implements AccessControl {
 
     public HttpAccessControlClient(DirtConfig.AccessControl config, String bearerToken) {
         Objects.requireNonNull(config, "config");
-        if (bearerToken == null || !TOKEN_PATTERN.matcher(bearerToken).matches()) {
+        if (!ServiceToken.isValid(bearerToken)) {
             throw new IllegalArgumentException(
-                    "DIRT_CONTROL_TOKEN must contain exactly 64 lowercase hexadecimal characters");
+                    "DIRT_CONTROL_TOKEN_FILE contents must contain exactly 64 lowercase "
+                            + "hexadecimal characters");
         }
         this.origin = URI.create(config.origin());
         this.bearerToken = bearerToken;

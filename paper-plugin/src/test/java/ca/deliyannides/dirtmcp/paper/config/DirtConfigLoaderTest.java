@@ -16,11 +16,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 final class DirtConfigLoaderTest {
     @Test
     void loadsTheCompleteShippedConfiguration() {
-        DirtConfig config = DirtConfigLoader.load(defaultConfiguration(), null, null);
+        DirtConfig config = DirtConfigLoader.load(defaultConfiguration());
 
         assertEquals(
                 new DirtConfig.Bridge(
@@ -45,11 +46,7 @@ final class DirtConfigLoaderTest {
         YamlConfiguration configuration = defaultConfiguration();
         configuration.set("bridge.allowed-operations", List.of());
 
-        assertTrue(
-                DirtConfigLoader.load(configuration, null, null)
-                        .bridge()
-                        .allowedOperations()
-                        .isEmpty());
+        assertTrue(DirtConfigLoader.load(configuration).bridge().allowedOperations().isEmpty());
     }
 
     @Test
@@ -58,10 +55,7 @@ final class DirtConfigLoaderTest {
         configuration.set("limits.max-inspection-touched-chunks", 513);
 
         assertEquals(
-                513,
-                DirtConfigLoader.load(configuration, null, null)
-                        .limits()
-                        .maxInspectionTouchedChunks());
+                513, DirtConfigLoader.load(configuration).limits().maxInspectionTouchedChunks());
     }
 
     @Test
@@ -73,44 +67,46 @@ final class DirtConfigLoaderTest {
 
         IllegalArgumentException error =
                 assertThrows(
-                        IllegalArgumentException.class,
-                        () -> DirtConfigLoader.load(configuration, null, null));
+                        IllegalArgumentException.class, () -> DirtConfigLoader.load(configuration));
 
         assertEquals("bridge.max-request-bytes is required", error.getMessage());
     }
 
     @ParameterizedTest
-    @MethodSource("validPortOverrides")
-    void acceptsValidPortOverrides(String override, int expected) {
-        assertEquals(
-                expected,
-                DirtConfigLoader.load(defaultConfiguration(), override, null).bridge().port());
+    @ValueSource(ints = {1, 65_535})
+    void acceptsValidConfiguredPorts(int port) {
+        YamlConfiguration configuration = defaultConfiguration();
+        configuration.set("bridge.port", port);
+
+        assertEquals(port, DirtConfigLoader.load(configuration).bridge().port());
     }
 
     @ParameterizedTest
-    @MethodSource("invalidPortOverrides")
-    void rejectsInvalidPortOverrides(String override) {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> DirtConfigLoader.load(defaultConfiguration(), override, null));
+    @MethodSource("validAccessControlOrigins")
+    void normalizesValidAccessControlOrigins(String configured, String expected) {
+        YamlConfiguration configuration = defaultConfiguration();
+        configuration.set("access-control.url", configured);
+
+        assertEquals(expected, DirtConfigLoader.load(configuration).accessControl().origin());
     }
 
     @ParameterizedTest
-    @MethodSource("validAccessControlOverrides")
-    void acceptsOnlyExplicitLoopbackAccessControlOverrides(String override, String expected) {
-        assertEquals(
-                expected,
-                DirtConfigLoader.load(defaultConfiguration(), null, override)
-                        .accessControl()
-                        .origin());
-    }
+    @ValueSource(
+            strings = {
+                "https://127.0.0.1:3000",
+                "http://localhost:3000",
+                "http://0.0.0.0:3000",
+                "http://127.0.0.1:0",
+                "http://127.0.0.1:65536",
+                "http://127.0.0.1:3000/path",
+                "http://127.0.0.1:3000?query=true",
+                "http://127.0.0.1:3000#fragment"
+            })
+    void rejectsUnsafeConfiguredAccessControlOrigins(String origin) {
+        YamlConfiguration configuration = defaultConfiguration();
+        configuration.set("access-control.url", origin);
 
-    @ParameterizedTest
-    @MethodSource("invalidAccessControlOverrides")
-    void rejectsUnsafeAccessControlOverrides(String override) {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> DirtConfigLoader.load(defaultConfiguration(), null, override));
+        assertThrows(IllegalArgumentException.class, () -> DirtConfigLoader.load(configuration));
     }
 
     @ParameterizedTest
@@ -119,42 +115,7 @@ final class DirtConfigLoaderTest {
         YamlConfiguration configuration = defaultConfiguration();
         configuration.set(path, value);
 
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> DirtConfigLoader.load(configuration, null, null));
-    }
-
-    private static Stream<Arguments> validPortOverrides() {
-        return Stream.of(
-                Arguments.of(null, 8_765),
-                Arguments.of("", 8_765),
-                Arguments.of(" 9876 ", 9_876),
-                Arguments.of("1", 1),
-                Arguments.of("65535", 65_535));
-    }
-
-    private static Stream<String> invalidPortOverrides() {
-        return Stream.of("0", "65536", "1.5", "paper");
-    }
-
-    private static Stream<Arguments> validAccessControlOverrides() {
-        return Stream.of(
-                Arguments.of(null, "http://127.0.0.1:3000"),
-                Arguments.of("", "http://127.0.0.1:3000"),
-                Arguments.of("http://127.0.0.1", "http://127.0.0.1"),
-                Arguments.of("http://127.0.0.1:4321/", "http://127.0.0.1:4321"));
-    }
-
-    private static Stream<String> invalidAccessControlOverrides() {
-        return Stream.of(
-                "https://127.0.0.1:3000",
-                "http://localhost:3000",
-                "http://0.0.0.0:3000",
-                "http://127.0.0.1:0",
-                "http://127.0.0.1:65536",
-                "http://127.0.0.1:3000/path",
-                "http://127.0.0.1:3000?query=true",
-                "http://127.0.0.1:3000#fragment");
+        assertThrows(IllegalArgumentException.class, () -> DirtConfigLoader.load(configuration));
     }
 
     private static Stream<Arguments> invalidConfigurationValues() {
@@ -171,6 +132,9 @@ final class DirtConfigLoaderTest {
                 Arguments.of("logging.detail-file-retained-files", 1),
                 Arguments.of("logging.detail-file-retained-files", 101),
                 Arguments.of("bridge.port", 0),
+                Arguments.of("bridge.port", 65_536),
+                Arguments.of("bridge.port", 1.5),
+                Arguments.of("bridge.port", "paper"),
                 Arguments.of("bridge.shutdown-delay-seconds", 0),
                 Arguments.of("bridge.shutdown-delay-seconds", 31),
                 Arguments.of("bridge.request-body-timeout-seconds", 0),
@@ -204,6 +168,12 @@ final class DirtConfigLoaderTest {
                 Arguments.of("edit-history.max-entries-total", 49),
                 Arguments.of("edit-history.max-retained-changed-blocks", 262_143),
                 Arguments.of("limits.not-a-limit", 20));
+    }
+
+    private static Stream<Arguments> validAccessControlOrigins() {
+        return Stream.of(
+                Arguments.of("http://127.0.0.1", "http://127.0.0.1"),
+                Arguments.of("http://127.0.0.1:4321/", "http://127.0.0.1:4321"));
     }
 
     private static YamlConfiguration defaultConfiguration() {
