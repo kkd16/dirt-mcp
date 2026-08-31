@@ -49,30 +49,20 @@ final class SetBlocksRequestDecoder {
 
     private static List<List<DestinationPaletteEntry>> palettes(JsonElement element)
             throws OperationException {
-        if (element == null || !element.isJsonArray()) {
-            throw RequestJson.invalid(
-                    "palettes must be an array",
-                    new ErrorDetails.InvalidRequest.InvalidValue("palettes"));
-        }
-        List<List<DestinationPaletteEntry>> palettes =
-                new ArrayList<>(element.getAsJsonArray().size());
-        for (int index = 0; index < element.getAsJsonArray().size(); index++) {
+        JsonArray array = RequestJson.array(element, "palettes");
+        List<List<DestinationPaletteEntry>> palettes = new ArrayList<>(array.size());
+        for (int index = 0; index < array.size(); index++) {
             palettes.add(
-                    DestinationPaletteDecoder.decode(
-                            element.getAsJsonArray().get(index), "palettes[" + index + "]"));
+                    DestinationPaletteDecoder.decode(array.get(index), "palettes[" + index + "]"));
         }
         return List.copyOf(palettes);
     }
 
     private static List<Placement> placements(JsonElement element) throws OperationException {
-        if (element == null || !element.isJsonArray()) {
-            throw RequestJson.invalid(
-                    "placements must be an array",
-                    new ErrorDetails.InvalidRequest.InvalidValue("placements"));
-        }
-        List<Placement> placements = new ArrayList<>(element.getAsJsonArray().size());
-        for (int index = 0; index < element.getAsJsonArray().size(); index++) {
-            JsonElement entry = element.getAsJsonArray().get(index);
+        JsonArray array = RequestJson.array(element, "placements");
+        List<Placement> placements = new ArrayList<>(array.size());
+        for (int index = 0; index < array.size(); index++) {
+            JsonElement entry = array.get(index);
             String name = "placements[" + index + "]";
             if (!entry.isJsonArray() || entry.getAsJsonArray().size() != 4) {
                 throw RequestJson.invalid(
@@ -91,13 +81,10 @@ final class SetBlocksRequestDecoder {
     }
 
     private static List<Run> runs(JsonElement element) throws OperationException {
-        if (element == null || !element.isJsonArray()) {
-            throw RequestJson.invalid(
-                    "runs must be an array", new ErrorDetails.InvalidRequest.InvalidValue("runs"));
-        }
-        List<Run> runs = new ArrayList<>(element.getAsJsonArray().size());
-        for (int index = 0; index < element.getAsJsonArray().size(); index++) {
-            JsonElement entry = element.getAsJsonArray().get(index);
+        JsonArray array = RequestJson.array(element, "runs");
+        List<Run> runs = new ArrayList<>(array.size());
+        for (int index = 0; index < array.size(); index++) {
+            JsonElement entry = array.get(index);
             String name = "runs[" + index + "]";
             if (!entry.isJsonArray() || entry.getAsJsonArray().size() != 7) {
                 throw RequestJson.invalid(

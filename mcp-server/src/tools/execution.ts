@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { CLIENT_INFO_META_KEY, type AuthInfo, type CallToolResult } from '@modelcontextprotocol/server';
 import { ToolFailure, ToolFailureResultSchema, toolFailureLogLevel } from '../bridge/errors.ts';
 import { safeErrorFields, type DirtLogger, type LogFields } from '../logging.ts';
+import type { McpToolName } from './configuration.ts';
 
 const INTERNAL_ERROR_MESSAGE = 'Dirt MCP encountered an unexpected internal error.';
 interface ToolExecutionContext {
@@ -11,7 +12,7 @@ interface ToolExecutionContext {
 interface ToolCallDetails {
   readonly context: ToolExecutionContext;
   readonly failureContext: string;
-  readonly operation: string;
+  readonly operation: McpToolName;
   readonly world?: string;
 }
 

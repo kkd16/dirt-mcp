@@ -34,6 +34,7 @@ export function createDirtMcpHandler(
   logger: DirtLogger,
 ): DirtMcpHandler {
   const resource = `${config.publicOrigin}/mcp`;
+  const httpLogger = logger.child({ component: 'mcp_http' });
   const sdkHandler: McpHttpHandler = createMcpHandler(
     async () => {
       const capabilities = await bridge.request(BRIDGE_ROUTES.capabilities, randomUUID(), BridgeCapabilitiesSchema);
@@ -42,9 +43,7 @@ export function createDirtMcpHandler(
     {
       legacy: 'reject',
       onerror(error) {
-        logger
-          .child({ component: 'mcp_http' })
-          .error('mcp.transport_error', 'MCP transport error.', safeErrorFields(error));
+        httpLogger.error('mcp.transport_error', 'MCP transport error.', safeErrorFields(error));
       },
     },
   );

@@ -15,7 +15,7 @@ export const MCP_TOOL_OPERATIONS = {
   run_minecraft_commands: 'runMinecraftCommands',
 } as const satisfies Record<string, BridgeOperationId>;
 
-type McpToolName = keyof typeof MCP_TOOL_OPERATIONS;
+export type McpToolName = keyof typeof MCP_TOOL_OPERATIONS;
 export type McpToolConfiguration = Readonly<Record<McpToolName, boolean>>;
 
 export function toolConfigurationFromCapabilities(capabilities: BridgeCapabilities): McpToolConfiguration {

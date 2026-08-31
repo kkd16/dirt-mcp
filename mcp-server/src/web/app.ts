@@ -19,13 +19,11 @@ import { safeErrorFields, type DirtLogger } from '../logging.ts';
 import type { DirtMcpHandler } from '../mcp-http.ts';
 import { consentPage, dashboardPage, errorPage, linkPage, onboardingPage, signInPage, stylesheet } from './pages.ts';
 
-const onboardingExchangeSchema = z
-  .object({
-    kind: z.enum(['invitation', 'recovery']),
-    token: z.string().min(20).max(256),
-    handle: z.string().max(64).optional(),
-  })
-  .strict();
+const onboardingTokenSchema = z.string().min(20).max(256);
+const onboardingExchangeSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('invitation'), token: onboardingTokenSchema, handle: z.string().max(64) }).strict(),
+  z.object({ kind: z.literal('recovery'), token: onboardingTokenSchema }).strict(),
+]);
 const linkSchema = z.object({ code: z.string().trim().min(8).max(24) }).strict();
 const RECENT_AUTHENTICATION_MS = SESSION_FRESH_AGE_SECONDS * 1_000;
 const SENSITIVE_OAUTH_PATHS = new Set([
@@ -176,7 +174,7 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
     const body = await readJsonBody(context.req.raw, onboardingExchangeSchema);
     const claim =
       body.kind === 'invitation' ? repository.resolveInvitation(body.token) : repository.resolveRecovery(body.token);
-    const handle = body.kind === 'invitation' ? normalizeHandle(body.handle ?? '') : claim.handle;
+    const handle = body.kind === 'invitation' ? normalizeHandle(body.handle) : claim.handle;
     if (body.kind === 'invitation' && !repository.isHandleAvailable(handle)) {
       throw new AccessError('conflict', 'That handle is already in use.');
     }

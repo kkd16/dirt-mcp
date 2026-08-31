@@ -4,7 +4,6 @@ import * as z from 'zod/v4';
 import { BridgeClient } from '../dist/bridge/client.js';
 import {
   BRIDGE_ERROR_CODES,
-  BRIDGE_OPERATION_IDS,
   BRIDGE_ROUTES,
   BridgeCapabilitiesSchema,
   BridgeErrorResponseSchema,
@@ -32,7 +31,6 @@ test('defines the mandatory capability route and stable operation IDs', () => {
   assert.equal(BRIDGE_ROUTES.serverStatus.method, 'POST');
   assert.equal(BRIDGE_ROUTES.replaceRegionBlocks.timeoutMilliseconds, 300_000);
   assert.equal(BRIDGE_ROUTES.runMinecraftCommands.timeoutMilliseconds, 120_000);
-  assert.equal(BRIDGE_OPERATION_IDS.length, 12);
   assert.equal(BridgeCapabilitiesSchema.safeParse({ operations: ['pingServer', 'getBlocks'] }).success, true);
   assert.equal(BridgeCapabilitiesSchema.safeParse({ operations: [] }).success, true);
   assert.equal(BridgeCapabilitiesSchema.safeParse({ operations: ['pingServer', 'pingServer'] }).success, false);

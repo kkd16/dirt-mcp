@@ -19,8 +19,8 @@
     "lint:shell": "shellcheck scripts/dev-paper scripts/run-paper-dev scripts/validate-paper-jar scripts/validate-paper-log",
     "lint:workflows": "actionlint",
     "test": "pnpm --filter @dirt-mcp/server run test",
-    "generate:openapi-types": "openapi-typescript --immutable",
-    "check:openapi-types": "openapi-typescript --immutable --check",
+    "generate:openapi-types": "openapi-typescript protocol/openapi.yaml --output mcp-server/src/generated/openapi.ts --immutable",
+    "check:openapi-types": "openapi-typescript protocol/openapi.yaml --output mcp-server/src/generated/openapi.ts --immutable --check",
     "validate:openapi": "redocly lint protocol/openapi.yaml protocol/access-control.openapi.yaml --lint-config=error && pnpm run check:openapi-types"
   },
   "devDependencies": {

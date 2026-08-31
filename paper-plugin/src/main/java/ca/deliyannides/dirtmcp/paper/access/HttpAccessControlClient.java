@@ -45,6 +45,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 /** Strict asynchronous client for the web service's authenticated loopback control API. */
@@ -152,28 +153,29 @@ public final class HttpAccessControlClient implements AccessControl {
 
     @Override
     public void close() {
-        if (this.closed.compareAndSet(false, true)) {
-            Throwable failure = null;
-            try {
-                this.http.shutdownNow();
-            } catch (RuntimeException | Error shutdownFailure) {
+        if (!this.closed.compareAndSet(false, true)) {
+            return;
+        }
+        Throwable failure = null;
+        try {
+            this.http.shutdownNow();
+        } catch (RuntimeException | Error shutdownFailure) {
+            failure = shutdownFailure;
+        }
+        try {
+            this.executor.shutdownNow();
+        } catch (RuntimeException | Error shutdownFailure) {
+            if (failure == null) {
                 failure = shutdownFailure;
+            } else if (failure != shutdownFailure) {
+                failure.addSuppressed(shutdownFailure);
             }
-            try {
-                this.executor.shutdownNow();
-            } catch (RuntimeException | Error shutdownFailure) {
-                if (failure == null) {
-                    failure = shutdownFailure;
-                } else if (failure != shutdownFailure) {
-                    failure.addSuppressed(shutdownFailure);
-                }
-            }
-            if (failure instanceof RuntimeException runtimeFailure) {
-                throw runtimeFailure;
-            }
-            if (failure instanceof Error error) {
-                throw error;
-            }
+        }
+        if (failure instanceof RuntimeException runtimeFailure) {
+            throw runtimeFailure;
+        }
+        if (failure instanceof Error error) {
+            throw error;
         }
     }
 
@@ -300,7 +302,8 @@ public final class HttpAccessControlClient implements AccessControl {
                 body, Set.of("callId", "page", "pageSize", "totalItems", "totalPages", "items"));
         UUID responseCallId = verifiedCallId(body, callId);
         PageValues page = pageValues(body, requestedPage);
-        List<UserSummary> items = userItems(array(body, "items"), page.pageSize());
+        List<UserSummary> items =
+                decodeItems(array(body, "items"), page.pageSize(), HttpAccessControlClient::user);
         return new UserPage(
                 responseCallId,
                 page.page(),
@@ -315,7 +318,9 @@ public final class HttpAccessControlClient implements AccessControl {
                 body, Set.of("callId", "page", "pageSize", "totalItems", "totalPages", "items"));
         UUID responseCallId = verifiedCallId(body, callId);
         PageValues page = pageValues(body, requestedPage);
-        List<InvitationSummary> items = invitationItems(array(body, "items"), page.pageSize());
+        List<InvitationSummary> items =
+                decodeItems(
+                        array(body, "items"), page.pageSize(), HttpAccessControlClient::invitation);
         return new InvitationPage(
                 responseCallId,
                 page.page(),
@@ -373,32 +378,19 @@ public final class HttpAccessControlClient implements AccessControl {
         return new PageValues(page, pageSize, totalItems, totalPages);
     }
 
-    private static List<UserSummary> userItems(JsonArray array, int pageSize) {
+    private static <T> List<T> decodeItems(
+            JsonArray array, int pageSize, Function<JsonObject, T> decoder) {
         if (array.size() > pageSize) {
             throw protocolFailure();
         }
-        List<UserSummary> users = new ArrayList<>(array.size());
+        List<T> items = new ArrayList<>(array.size());
         for (JsonElement element : array) {
             if (!element.isJsonObject()) {
                 throw protocolFailure();
             }
-            users.add(user(element.getAsJsonObject()));
+            items.add(decoder.apply(element.getAsJsonObject()));
         }
-        return users;
-    }
-
-    private static List<InvitationSummary> invitationItems(JsonArray array, int pageSize) {
-        if (array.size() > pageSize) {
-            throw protocolFailure();
-        }
-        List<InvitationSummary> invitations = new ArrayList<>(array.size());
-        for (JsonElement element : array) {
-            if (!element.isJsonObject()) {
-                throw protocolFailure();
-            }
-            invitations.add(invitation(element.getAsJsonObject()));
-        }
-        return invitations;
+        return items;
     }
 
     private static UserSummary user(JsonObject object) {

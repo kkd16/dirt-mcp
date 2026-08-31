@@ -41,7 +41,7 @@ type RuntimeConfigurationErrorCode =
   | 'public_origin_required'
   | 'web_port_invalid';
 
-type ServiceTokenErrorReason = 'file_invalid' | 'invalid' | 'required';
+type ServiceTokenErrorReason = 'invalid' | 'required';
 
 export class RuntimeConfigurationError extends Error {
   readonly code: RuntimeConfigurationErrorCode;
@@ -58,18 +58,15 @@ const defaultSecretFileReader: SecretFileReader = (path) => readFileSync(path, '
 
 function readBridgeConfig(
   environment: Readonly<Record<string, string | undefined>>,
-  readSecretFile: SecretFileReader = defaultSecretFileReader,
+  readSecretFile: SecretFileReader,
 ): BridgeConfig {
   const token = readServiceToken(environment, 'DIRT_BRIDGE_TOKEN_FILE', 'DIRT_BRIDGE_TOKEN', 'bridge', readSecretFile);
   const rawUrl = environment.DIRT_BRIDGE_URL ?? DEFAULT_BRIDGE_URL;
-  if (!/^http:\/\/127\.0\.0\.1(?::[1-9]\d{0,4})?\/?$/.test(rawUrl)) {
+  const url = /^http:\/\/127\.0\.0\.1(?::[1-9]\d{0,4})?\/?$/u.test(rawUrl) ? URL.parse(rawUrl) : null;
+  if (url === null) {
     throw new RuntimeConfigurationError('bridge_url_invalid', 'DIRT_BRIDGE_URL must be an HTTP 127.0.0.1 origin');
   }
-  try {
-    return { origin: new URL(rawUrl).origin, token };
-  } catch {
-    throw new RuntimeConfigurationError('bridge_url_invalid', 'DIRT_BRIDGE_URL must be an HTTP 127.0.0.1 origin');
-  }
+  return { origin: url.origin, token };
 }
 
 export function readRuntimeConfig(
@@ -124,18 +121,13 @@ function readServiceToken(
   kind: 'bridge' | 'control',
   readSecretFile: SecretFileReader,
 ): string {
-  let token = environment[directVariable];
-  const tokenFile = environment[fileVariable];
-  if (tokenFile !== undefined) {
-    if (tokenFile.trim().length === 0) {
-      throw configurationError(kind, 'file_invalid', `${fileVariable} must name a readable secret file`);
-    }
-    try {
-      token = stripSingleLineEnding(readSecretFile(tokenFile));
-    } catch {
-      throw configurationError(kind, 'file_invalid', `${fileVariable} must name a readable secret file`);
-    }
-  }
+  const token = readSecretValue(
+    environment,
+    fileVariable,
+    directVariable,
+    `${kind}_token_file_invalid`,
+    readSecretFile,
+  );
   if (token === undefined || token.trim().length === 0) {
     throw configurationError(kind, 'required', `${fileVariable} or ${directVariable} is required`);
   }
@@ -143,7 +135,7 @@ function readServiceToken(
     throw configurationError(
       kind,
       'invalid',
-      `${kind === 'bridge' ? directVariable : 'The control token'} must contain exactly 64 lowercase hexadecimal characters`,
+      `${directVariable} must contain exactly 64 lowercase hexadecimal characters`,
     );
   }
   return token;
@@ -161,24 +153,13 @@ function readAuthSecret(
   environment: Readonly<Record<string, string | undefined>>,
   readSecretFile: SecretFileReader,
 ): string {
-  let secret = environment.DIRT_AUTH_SECRET;
-  const secretFile = environment.DIRT_AUTH_SECRET_FILE;
-  if (secretFile !== undefined) {
-    if (secretFile.trim().length === 0) {
-      throw new RuntimeConfigurationError(
-        'auth_secret_file_invalid',
-        'DIRT_AUTH_SECRET_FILE must name a readable secret file',
-      );
-    }
-    try {
-      secret = stripSingleLineEnding(readSecretFile(secretFile));
-    } catch {
-      throw new RuntimeConfigurationError(
-        'auth_secret_file_invalid',
-        'DIRT_AUTH_SECRET_FILE must name a readable secret file',
-      );
-    }
-  }
+  const secret = readSecretValue(
+    environment,
+    'DIRT_AUTH_SECRET_FILE',
+    'DIRT_AUTH_SECRET',
+    'auth_secret_file_invalid',
+    readSecretFile,
+  );
   if (secret === undefined || secret.length === 0) {
     throw new RuntimeConfigurationError(
       'auth_secret_required',
@@ -198,30 +179,31 @@ function readPublicOrigin(value: string | undefined): string {
   if (value === undefined || value.trim().length === 0) {
     throw new RuntimeConfigurationError('public_origin_required', 'DIRT_PUBLIC_ORIGIN is required');
   }
-  try {
-    const url = new URL(value);
-    const localDevelopment = url.protocol === 'http:' && url.hostname === 'localhost';
-    const hostIsIpLiteral = isIP(url.hostname.replace(/^\[|\]$/gu, '')) !== 0;
-    if (
-      (url.protocol !== 'https:' && !localDevelopment) ||
-      hostIsIpLiteral ||
-      !isDnsDomainName(url.hostname) ||
-      url.username.length > 0 ||
-      url.password.length > 0 ||
-      url.pathname !== '/' ||
-      url.search.length > 0 ||
-      url.hash.length > 0 ||
-      value !== url.origin
-    ) {
-      throw new Error('invalid origin');
-    }
-    return url.origin;
-  } catch {
-    throw new RuntimeConfigurationError(
-      'public_origin_invalid',
-      'DIRT_PUBLIC_ORIGIN must be a bare HTTPS origin with a domain host (HTTP localhost is allowed for development)',
-    );
+  const url = URL.parse(value);
+  if (url === null) throw invalidPublicOrigin();
+  const localDevelopment = url.protocol === 'http:' && url.hostname === 'localhost';
+  const hostIsIpLiteral = isIP(url.hostname.replace(/^\[|\]$/gu, '')) !== 0;
+  if (
+    (url.protocol !== 'https:' && !localDevelopment) ||
+    hostIsIpLiteral ||
+    !isDnsDomainName(url.hostname) ||
+    url.username.length > 0 ||
+    url.password.length > 0 ||
+    url.pathname !== '/' ||
+    url.search.length > 0 ||
+    url.hash.length > 0 ||
+    value !== url.origin
+  ) {
+    throw invalidPublicOrigin();
   }
+  return url.origin;
+}
+
+function invalidPublicOrigin(): RuntimeConfigurationError {
+  return new RuntimeConfigurationError(
+    'public_origin_invalid',
+    'DIRT_PUBLIC_ORIGIN must be a bare HTTPS origin with a domain host (HTTP localhost is allowed for development)',
+  );
 }
 
 function isDnsDomainName(hostname: string): boolean {
@@ -238,6 +220,25 @@ function readPort(value: string | undefined): number {
     throw new RuntimeConfigurationError('web_port_invalid', 'DIRT_WEB_PORT must be an integer from 1 to 65535');
   }
   return Number(value);
+}
+
+function readSecretValue(
+  environment: Readonly<Record<string, string | undefined>>,
+  fileVariable: string,
+  directVariable: string,
+  fileErrorCode: 'auth_secret_file_invalid' | 'bridge_token_file_invalid' | 'control_token_file_invalid',
+  readSecretFile: SecretFileReader,
+): string | undefined {
+  const secretFile = environment[fileVariable];
+  if (secretFile === undefined) return environment[directVariable];
+  if (secretFile.trim().length === 0) {
+    throw new RuntimeConfigurationError(fileErrorCode, `${fileVariable} must name a readable secret file`);
+  }
+  try {
+    return stripSingleLineEnding(readSecretFile(secretFile));
+  } catch {
+    throw new RuntimeConfigurationError(fileErrorCode, `${fileVariable} must name a readable secret file`);
+  }
 }
 
 function stripSingleLineEnding(value: string): string {

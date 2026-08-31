@@ -35,8 +35,7 @@ test('every MCP bridge route exists in the authoritative OpenAPI contract', () =
   assert.equal(BRIDGE_ROUTES.serverStatus.method, 'POST');
 });
 
-test('the twelve public tools map exactly to configurable OpenAPI operation IDs', () => {
-  assert.equal(Object.keys(MCP_TOOL_OPERATIONS).length, 12);
+test('public tools map exactly to configurable OpenAPI operation IDs', () => {
   assert.deepEqual(Object.values(MCP_TOOL_OPERATIONS), [...BRIDGE_OPERATION_IDS]);
   assert.deepEqual(generatedStringUnion('BridgeOperationId'), [...BRIDGE_OPERATION_IDS]);
   for (const operationId of BRIDGE_OPERATION_IDS) {

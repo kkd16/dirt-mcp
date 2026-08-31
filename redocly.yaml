@@ -1,7 +1,2 @@
-apis:
-  dirt@v1:
-    root: protocol/openapi.yaml
-    x-openapi-ts:
-      output: mcp-server/src/generated/openapi.ts
 extends:
   - recommended-strict

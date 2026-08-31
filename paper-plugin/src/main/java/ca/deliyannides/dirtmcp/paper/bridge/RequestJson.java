@@ -4,6 +4,7 @@ import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.operation.OperationFailure;
 import ca.deliyannides.dirtmcp.paper.world.model.BlockPosition;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
@@ -57,14 +58,26 @@ public final class RequestJson {
         return element.isJsonNull() ? null : integer(element, name);
     }
 
-    public static BlockPosition position(JsonElement element, String name)
-            throws OperationException {
+    public static JsonObject object(JsonElement element, String name) throws OperationException {
         if (element == null || !element.isJsonObject()) {
             throw invalid(
                     name + " must be an object",
                     new ErrorDetails.InvalidRequest.InvalidValue(name));
         }
-        JsonObject object = element.getAsJsonObject();
+        return element.getAsJsonObject();
+    }
+
+    public static JsonArray array(JsonElement element, String name) throws OperationException {
+        if (element == null || !element.isJsonArray()) {
+            throw invalid(
+                    name + " must be an array", new ErrorDetails.InvalidRequest.InvalidValue(name));
+        }
+        return element.getAsJsonArray();
+    }
+
+    public static BlockPosition position(JsonElement element, String name)
+            throws OperationException {
+        JsonObject object = object(element, name);
         requireExactFields(object, POSITION_FIELDS, name);
         return new BlockPosition(
                 integer(object.get("x"), name + ".x"),
@@ -106,7 +119,7 @@ public final class RequestJson {
             throws OperationException {
         if (!object.keySet().containsAll(required) || !allowed.containsAll(object.keySet())) {
             throw invalid(
-                    "Request contains missing or unknown fields",
+                    name + " contains missing or unknown fields",
                     fieldSetDetails(object, required, allowed, name));
         }
     }

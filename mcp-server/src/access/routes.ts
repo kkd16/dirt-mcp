@@ -3,7 +3,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import * as z from 'zod/v4';
 import type { RuntimeConfig } from '../config.ts';
 import { BodyTooLargeError, InvalidBodyEncodingError, readBoundedText } from '../http-body.ts';
-import { AccessError, type AccessRepository } from './repository.ts';
+import { AccessError, type AccessRepository, type UserSummary } from './repository.ts';
 
 const emptyBodySchema = z.object({}).strict();
 const linkChallengeSchema = z
@@ -102,7 +102,7 @@ export function registerInternalRoutes(app: Hono, dependencies: InternalRouteDep
   function registerUserMutation(
     target: Hono,
     action: 'disable' | 'enable' | 'unlink',
-    mutate: (repository: AccessRepository, handle: string) => ReturnType<AccessRepository['requireUserById']>,
+    mutate: (repository: AccessRepository, handle: string) => UserSummary,
   ): void {
     target.post(`/internal/v1/access/users/:handle/${action}`, async (context) => {
       const callId = requireCallId(context.req.header('X-Dirt-Call-Id'));
@@ -113,8 +113,10 @@ export function registerInternalRoutes(app: Hono, dependencies: InternalRouteDep
 }
 
 function validBearer(header: string | undefined, token: string): boolean {
-  if (header === undefined || !header.startsWith('Bearer ')) return false;
-  const supplied = createHash('sha256').update(header.slice(7), 'utf8').digest();
+  if (header === undefined) return false;
+  const suppliedToken = /^Bearer +(\S+)$/iu.exec(header)?.[1];
+  if (suppliedToken === undefined) return false;
+  const supplied = createHash('sha256').update(suppliedToken, 'utf8').digest();
   const expected = createHash('sha256').update(token, 'utf8').digest();
   return timingSafeEqual(supplied, expected);
 }

@@ -59,11 +59,15 @@ export const DestinationPaletteSchema = z
   .min(1)
   .max(MAX_PALETTE_ENTRIES)
   .superRefine((entries, context) => {
-    const weighted = entries.filter((entry) => entry.weight !== undefined);
-    if (weighted.length !== 0 && weighted.length !== entries.length) {
+    const weights = entries.map(({ weight }) => weight).filter((weight) => weight !== undefined);
+    if (weights.length !== 0 && weights.length !== entries.length) {
       context.addIssue({ code: 'custom', message: 'Supply weights for every destination or for none.' });
     }
-    if (weighted.length === entries.length && weighted.reduce((sum, entry) => sum + entry.weight!, 0) !== 100) {
+    if (
+      weights.length > 0 &&
+      weights.length === entries.length &&
+      weights.reduce((sum, weight) => sum + weight, 0) !== 100
+    ) {
       context.addIssue({ code: 'custom', message: 'Destination weights must total 100.' });
     }
     const states = entries.map((entry) => entry.blockState);

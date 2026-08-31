@@ -1,6 +1,5 @@
 import Database from 'better-sqlite3';
 import { chmodSync, closeSync, constants, openSync } from 'node:fs';
-import { configureDatabase } from './access/repository.ts';
 
 export function openDatabase(path: string, readonly = false): Database.Database {
   if (!readonly) {
@@ -18,6 +17,14 @@ export function openDatabase(path: string, readonly = false): Database.Database 
     database.close();
     throw error;
   }
+}
+
+function configureDatabase(database: Database.Database, readonly: boolean): void {
+  database.pragma('foreign_keys = ON');
+  database.pragma('busy_timeout = 5000');
+  if (readonly) return;
+  database.pragma('journal_mode = WAL');
+  database.pragma('synchronous = FULL');
 }
 
 function secureSidecars(path: string): void {

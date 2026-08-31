@@ -51,10 +51,11 @@ document.querySelector<HTMLFormElement>('[data-onboarding]')?.addEventListener('
     }
     const formData = new FormData(form);
     report('Checking the secure link…');
+    const body = kind === 'invitation' ? { kind, token, handle: formString(formData, 'handle') } : { kind, token };
     const exchange = await fetch('/api/onboarding/exchange', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kind, token, handle: formString(formData, 'handle') }),
+      body: JSON.stringify(body),
     });
     const exchangeBody = await responseObject(exchange);
     if (!exchange.ok) return report(optionalString(exchangeBody, 'error') ?? 'The link could not be accepted.');

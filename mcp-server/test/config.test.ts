@@ -119,6 +119,24 @@ test('runtime config prefers secret files and requires pairwise-distinct trust s
   }
 });
 
+test('reports invalid secret files at the correct trust boundary', () => {
+  for (const [variable, code] of [
+    ['DIRT_AUTH_SECRET_FILE', 'auth_secret_file_invalid'],
+    ['DIRT_BRIDGE_TOKEN_FILE', 'bridge_token_file_invalid'],
+    ['DIRT_CONTROL_TOKEN_FILE', 'control_token_file_invalid'],
+  ] as const) {
+    for (const path of ['', '/missing']) {
+      assert.throws(
+        () =>
+          readRuntimeConfig({ ...BASE_ENVIRONMENT, [variable]: path }, () => {
+            throw new Error('unreadable');
+          }),
+        (error) => error instanceof RuntimeConfigurationError && error.code === code,
+      );
+    }
+  }
+});
+
 test('public origin is a WebAuthn-compatible domain origin', () => {
   for (const publicOrigin of [
     'https://dirt.example',
@@ -133,6 +151,7 @@ test('public origin is a WebAuthn-compatible domain origin', () => {
   }
 
   for (const publicOrigin of [
+    'not a URL',
     'http://127.0.0.1:3000',
     'https://127.0.0.1',
     'https://[::1]',

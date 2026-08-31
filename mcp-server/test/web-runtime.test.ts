@@ -294,12 +294,15 @@ test('invite, recovery, account status, and link transitions are atomic and boun
   );
   assert.throws(() => repository.consumeMinecraftLinkChallenge('user-one', first.code, now), AccessError);
 
+  const replacementTime = new Date(now.getTime() + 10 * 60 * 1_000);
   const replacement = repository.createMinecraftLinkChallenge(
     'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     'Builder',
-    new Date(now.getTime() + 10 * 60 * 1_000),
+    replacementTime,
   );
   assert.equal(replacement.code.length, 12);
+  repository.consumeMinecraftLinkChallenge('user-one', replacement.code, replacementTime);
+  assert.equal(repository.requireAuthorizationVersion('user-one'), 1);
 
   const second = repository.createMinecraftLinkChallenge('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'OtherPlayer', now);
   assert.throws(
@@ -319,6 +322,10 @@ test('invite, recovery, account status, and link transitions are atomic and boun
   assert.equal(repository.requireAuthorizationVersion('user-one'), 2);
   assert.equal(authorizationArtifactCount('user-one'), 0);
   assert.equal(hasPasskey('user-one'), true);
+  repository.disableUser('builder');
+  assert.equal(repository.requireAuthorizationVersion('user-one'), 2);
+  repository.enableUser('builder');
+  assert.equal(repository.requireAuthorizationVersion('user-one'), 3);
   repository.enableUser('builder');
   assert.equal(repository.requireAuthorizationVersion('user-one'), 3);
   assert.equal(repository.findMcpUser('user-one', 2), null);
@@ -328,6 +335,8 @@ test('invite, recovery, account status, and link transitions are atomic and boun
   });
 
   insertAuthorizationArtifacts('user-one', 'unlink', now);
+  repository.unlinkUser('builder');
+  assert.equal(repository.requireAuthorizationVersion('user-one'), 4);
   repository.unlinkUser('builder');
   assert.equal(repository.requireAuthorizationVersion('user-one'), 4);
   assert.equal(authorizationArtifactCount('user-one'), 0);
@@ -383,6 +392,16 @@ test('internal routes enforce loopback, UUIDv4 calls, exact envelopes, and bound
   assert.equal((await unauthorized.json()).error.code, 'unauthorized');
   assert.equal(unauthorized.headers.get('WWW-Authenticate'), 'Bearer realm="dirt-mcp-control"');
   assert.equal(unauthorized.headers.get('Cache-Control'), 'no-store');
+
+  const standardBearer = await app.request('/internal/v1/access/users', {
+    headers: { ...baseHeaders, Authorization: `bEaReR  ${config.controlToken}` },
+  });
+  assert.equal(standardBearer.status, 200);
+
+  const nonStandardBearer = await app.request('/internal/v1/access/users', {
+    headers: { ...baseHeaders, Authorization: `Bearer\t${config.controlToken}` },
+  });
+  assert.equal(nonStandardBearer.status, 401);
 
   const create = await app.request('/internal/v1/access/invitations', {
     method: 'POST',
@@ -498,6 +517,28 @@ test('web shell exposes a loopback health check and hardened consent copy', asyn
   assert.equal(invite.headers.get('Strict-Transport-Security'), null);
   assert.equal(invite.headers.get('X-Content-Type-Options'), null);
   assert.equal(invite.headers.get('X-Frame-Options'), 'DENY');
+
+  const malformedFailures = await Promise.all(
+    [
+      { kind: 'invitation', token: 'x'.repeat(20) },
+      { kind: 'recovery', token: 'x'.repeat(20), handle: 'ignored' },
+    ].map(async (body) => {
+      const response = await app.request('/api/onboarding/exchange', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Host: 'localhost:3000',
+          Origin: config.publicOrigin,
+        },
+        body: JSON.stringify(body),
+      });
+      return { status: response.status, body: await response.json() };
+    }),
+  );
+  for (const failure of malformedFailures) {
+    assert.equal(failure.status, 400);
+    assert.deepEqual(failure.body, { error: 'The request is invalid.' });
+  }
 
   const asset = await app.request('/assets/app.js', { headers: { Host: 'localhost:3000' } });
   assert.equal(asset.status, 200);

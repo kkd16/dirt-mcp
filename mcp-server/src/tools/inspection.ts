@@ -352,6 +352,10 @@ export function scanOrthographicViewBridgeOutputSchema(request: components['sche
   });
 }
 
+function exactStructureSummary(result: z.infer<typeof ExactBlockStructureOutputSchema>): string {
+  return `Structure entries: ${result.placements.length + result.runs.length}; palettes: ${result.palettes.length}; world: ${result.world}.`;
+}
+
 export function registerInspectionTools(
   server: McpServer,
   bridge: BridgeClient,
@@ -418,10 +422,7 @@ export function registerInspectionTools(
               request,
               context.mcpReq.signal,
             );
-            return successResult(
-              result,
-              `Structure entries: ${result.placements.length + result.runs.length}; palettes: ${result.palettes.length}; world: ${result.world}.`,
-            );
+            return successResult(result, exactStructureSummary(result));
           },
         ),
     );
@@ -455,10 +456,7 @@ export function registerInspectionTools(
               request,
               context.mcpReq.signal,
             );
-            return successResult(
-              result,
-              `Structure entries: ${result.placements.length + result.runs.length}; palettes: ${result.palettes.length}; world: ${result.world}.`,
-            );
+            return successResult(result, exactStructureSummary(result));
           },
         ),
     );

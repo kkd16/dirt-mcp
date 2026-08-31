@@ -1,9 +1,9 @@
 package ca.deliyannides.dirtmcp.paper.bridge.endpoint;
 
 import ca.deliyannides.dirtmcp.paper.bridge.RequestJson;
-import ca.deliyannides.dirtmcp.paper.error.ErrorDetails;
 import ca.deliyannides.dirtmcp.paper.operation.OperationException;
 import ca.deliyannides.dirtmcp.paper.world.edit.DestinationPaletteEntry;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
@@ -18,32 +18,21 @@ final class DestinationPaletteDecoder {
 
     static List<DestinationPaletteEntry> decode(JsonElement element, String field)
             throws OperationException {
-        if (element == null || !element.isJsonArray()) {
-            throw RequestJson.invalid(
-                    field + " must be an array",
-                    new ErrorDetails.InvalidRequest.InvalidValue(field));
-        }
-        List<DestinationPaletteEntry> entries = new ArrayList<>(element.getAsJsonArray().size());
-        for (int index = 0; index < element.getAsJsonArray().size(); index++) {
-            JsonElement value = element.getAsJsonArray().get(index);
-            if (!value.isJsonObject()) {
-                String entryField = field + "[" + index + "]";
-                throw RequestJson.invalid(
-                        entryField + " must be an object",
-                        new ErrorDetails.InvalidRequest.InvalidValue(entryField));
-            }
-            JsonObject object = value.getAsJsonObject();
-            RequestJson.requireFields(
-                    object, REQUIRED_FIELDS, ALLOWED_FIELDS, field + "[" + index + "]");
+        JsonArray array = RequestJson.array(element, field);
+        List<DestinationPaletteEntry> entries = new ArrayList<>(array.size());
+        for (int index = 0; index < array.size(); index++) {
+            JsonElement value = array.get(index);
+            String entryField = field + "[" + index + "]";
+            JsonObject object = RequestJson.object(value, entryField);
+            RequestJson.requireFields(object, REQUIRED_FIELDS, ALLOWED_FIELDS, entryField);
             Integer weight = null;
             if (object.has("weight")) {
-                weight =
-                        RequestJson.integer(object.get("weight"), field + "[" + index + "].weight");
+                weight = RequestJson.integer(object.get("weight"), entryField + ".weight");
             }
             entries.add(
                     new DestinationPaletteEntry(
                             RequestJson.string(
-                                    object.get("blockState"), field + "[" + index + "].blockState"),
+                                    object.get("blockState"), entryField + ".blockState"),
                             weight));
         }
         return List.copyOf(entries);

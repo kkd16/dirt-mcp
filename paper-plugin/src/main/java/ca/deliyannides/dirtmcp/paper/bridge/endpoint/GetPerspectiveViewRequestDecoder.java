@@ -58,7 +58,7 @@ final class GetPerspectiveViewRequestDecoder {
     }
 
     private static Source source(JsonElement element) throws OperationException {
-        JsonObject object = object(element, "source");
+        JsonObject object = RequestJson.object(element, "source");
         String type = RequestJson.string(object.get("type"), "source.type");
         return switch (type) {
             case "player" -> playerSource(object);
@@ -78,9 +78,10 @@ final class GetPerspectiveViewRequestDecoder {
 
     private static LocationSource locationSource(JsonObject object) throws OperationException {
         RequestJson.requireExactFields(object, LOCATION_SOURCE_FIELDS, "source");
-        JsonObject position = object(object.get("cameraPosition"), "source.cameraPosition");
+        JsonObject position =
+                RequestJson.object(object.get("cameraPosition"), "source.cameraPosition");
         RequestJson.requireExactFields(position, POSITION_FIELDS, "source.cameraPosition");
-        JsonObject rotation = object(object.get("rotation"), "source.rotation");
+        JsonObject rotation = RequestJson.object(object.get("rotation"), "source.rotation");
         RequestJson.requireExactFields(rotation, ROTATION_FIELDS, "source.rotation");
         return new LocationSource(
                 RequestJson.string(object.get("world"), "source.world"),
@@ -91,15 +92,6 @@ final class GetPerspectiveViewRequestDecoder {
                 new Rotation(
                         number(rotation.get("yaw"), "source.rotation.yaw"),
                         number(rotation.get("pitch"), "source.rotation.pitch")));
-    }
-
-    private static JsonObject object(JsonElement element, String name) throws OperationException {
-        if (element == null || !element.isJsonObject()) {
-            throw RequestJson.invalid(
-                    name + " must be an object",
-                    new ErrorDetails.InvalidRequest.InvalidValue(name));
-        }
-        return element.getAsJsonObject();
     }
 
     private static double number(JsonElement element, String name) throws OperationException {

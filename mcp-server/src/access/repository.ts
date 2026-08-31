@@ -210,12 +210,10 @@ export class AccessRepository {
     const transaction = this.database.transaction(() => {
       const changed = this.database
         .prepare<[number, string], { id: string }>(
-          'UPDATE "user" SET minecraftUuid = NULL, minecraftName = NULL, updatedAt = ? WHERE handle = ? RETURNING id',
+          'UPDATE "user" SET minecraftUuid = NULL, minecraftName = NULL, updatedAt = ? WHERE handle = ? AND (minecraftUuid IS NOT NULL OR minecraftName IS NOT NULL) RETURNING id',
         )
         .get(now.getTime(), handle);
-      if (changed === undefined) throw new AccessError('not_found', 'User not found.');
-      this.revokeAuthorization(changed.id, now);
-      return this.requireUserByHandle(handle);
+      return this.completeEligibilityUpdate(handle, changed?.id, now);
     });
     return transaction.immediate();
   }
@@ -277,8 +275,8 @@ export class AccessRepository {
         throw new AccessError('expired', 'The link code has expired.');
       }
       const user = this.database
-        .prepare<[string], { status: string; minecraftUuid: string | null }>(
-          'SELECT status, minecraftUuid FROM "user" WHERE id = ?',
+        .prepare<[string], { status: string; minecraftUuid: string | null; minecraftName: string | null }>(
+          'SELECT status, minecraftUuid, minecraftName FROM "user" WHERE id = ?',
         )
         .get(userId);
       if (user === undefined) throw new AccessError('not_found', 'User not found.');
@@ -296,7 +294,7 @@ export class AccessRepository {
       // Rotate the OAuth generation on every authorization-eligibility
       // transition. Keep this fresh browser session so the user can continue
       // from linking into a new authorization ceremony.
-      this.rotateAuthorization(userId, now);
+      if (user.minecraftUuid === null || user.minecraftName === null) this.rotateAuthorization(userId, now);
       const consumed = this.database
         .prepare('UPDATE minecraftLinkChallenge SET usedAt = ?, usedByUserId = ? WHERE id = ? AND usedAt IS NULL')
         .run(now.getTime(), userId, challenge.id);
@@ -415,13 +413,11 @@ export class AccessRepository {
     const now = new Date();
     const transaction = this.database.transaction(() => {
       const changed = this.database
-        .prepare<[UserStatus, number, string], { id: string }>(
-          'UPDATE "user" SET status = ?, updatedAt = ? WHERE handle = ? RETURNING id',
+        .prepare<[UserStatus, number, string, UserStatus], { id: string }>(
+          'UPDATE "user" SET status = ?, updatedAt = ? WHERE handle = ? AND status <> ? RETURNING id',
         )
-        .get(status, now.getTime(), handle);
-      if (changed === undefined) throw new AccessError('not_found', 'User not found.');
-      this.revokeAuthorization(changed.id, now);
-      return this.requireUserByHandle(handle);
+        .get(status, now.getTime(), handle, status);
+      return this.completeEligibilityUpdate(handle, changed?.id, now);
     });
     return transaction.immediate();
   }
@@ -435,14 +431,10 @@ export class AccessRepository {
     if (row === undefined) throw new AccessError('not_found', 'User not found.');
     return toUserSummary(row);
   }
-}
 
-export function configureDatabase(database: Database.Database, readonly = false): void {
-  database.pragma('foreign_keys = ON');
-  database.pragma('busy_timeout = 5000');
-  if (!readonly) {
-    database.pragma('journal_mode = WAL');
-    database.pragma('synchronous = FULL');
+  private completeEligibilityUpdate(handle: string, updatedUserId: string | undefined, now: Date): UserSummary {
+    if (updatedUserId !== undefined) this.revokeAuthorization(updatedUserId, now);
+    return this.requireUserByHandle(handle);
   }
 }
 

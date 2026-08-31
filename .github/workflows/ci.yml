@@ -39,6 +39,9 @@ jobs:
           cache: false
           install: false
 
+      - name: Validate Gradle Wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
       - name: Install tmux and actionlint
         env:
           ACTIONLINT_VERSION: 1.7.12
