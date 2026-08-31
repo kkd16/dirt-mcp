@@ -319,7 +319,6 @@ prepare_downloads() {
 write_install_state() {
   [[ "${resume_installation}" == false ]] || return
   configuration_staging_directory=$(mktemp --directory --tmpdir=/etc '.dirt-mcp.install.XXXXXX')
-  install -d -o root -g root -m 0700 "${configuration_staging_directory}"
   printf '%s\n' "${release_version}" >"${configuration_staging_directory}/install-version"
   printf '%s\n' "${public_hostname}" >"${configuration_staging_directory}/hostname"
   printf '%s\n' "${paper_directory}" >"${configuration_staging_directory}/paper-directory"

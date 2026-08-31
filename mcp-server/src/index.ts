@@ -1,12 +1,13 @@
 import { serve } from '@hono/node-server';
 import type Database from 'better-sqlite3';
+import { once } from 'node:events';
 import { AccessRepository } from './access/repository.ts';
 import { createAuth } from './auth.ts';
 import { BridgeClient } from './bridge/client.ts';
 import { readRuntimeConfig, RuntimeConfigurationError, type RuntimeConfig } from './config.ts';
 import { createLogger, safeErrorFields, type DirtLogger } from './logging.ts';
 import { createDirtMcpHandler } from './mcp-http.ts';
-import { closeApplication, closeRuntime, waitForListening } from './runtime.ts';
+import { closeApplication, closeRuntime } from './runtime.ts';
 import { openDatabase } from './storage.ts';
 import { createWebApp } from './web/app.ts';
 
@@ -29,7 +30,7 @@ async function main(): Promise<void> {
       );
     }
     try {
-      await waitForListening(httpServer);
+      await once(httpServer, 'listening');
     } catch (error: unknown) {
       await cleanupAndThrow(
         error,

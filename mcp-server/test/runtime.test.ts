@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
 import test from 'node:test';
-import { closeApplication, closeRuntime, waitForListening } from '../dist/runtime.js';
+import { closeApplication, closeRuntime } from '../dist/runtime.js';
 
 test('runtime drains HTTP before closing MCP and SQLite', async () => {
   const events: string[] = [];
@@ -79,17 +78,4 @@ test('runtime preserves close callback errors and still runs every cleanup', asy
     ),
     (error) => error === databaseError,
   );
-});
-
-test('listening wait resolves on listen and rejects deterministic startup errors', async () => {
-  const listening = new EventEmitter();
-  const ready = waitForListening(listening);
-  listening.emit('listening');
-  await ready;
-
-  const failed = new EventEmitter();
-  const failure = new Error('address already in use');
-  const waiting = waitForListening(failed);
-  failed.emit('error', failure);
-  await assert.rejects(waiting, (error) => error === failure);
 });

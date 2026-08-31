@@ -497,9 +497,16 @@ test('web shell exposes a loopback health check and hardened consent copy', asyn
 
   const malformedFailures = await Promise.all(
     [
-      { kind: 'invitation', token: 'x'.repeat(20) },
-      { kind: 'recovery', token: 'x'.repeat(20), handle: 'ignored' },
-    ].map(async (body) => {
+      { body: { kind: 'invitation', token: 'x'.repeat(20) }, expectedError: 'The request is invalid.' },
+      {
+        body: { kind: 'recovery', token: 'x'.repeat(20), handle: 'ignored' },
+        expectedError: 'The request is invalid.',
+      },
+      {
+        body: { kind: 'invitation', token: 'x'.repeat(20), handle: 'builder' },
+        expectedError: 'Invalid invitation.',
+      },
+    ].map(async ({ body, expectedError }) => {
       const response = await app.request('/api/onboarding/exchange', {
         method: 'POST',
         headers: {
@@ -509,12 +516,12 @@ test('web shell exposes a loopback health check and hardened consent copy', asyn
         },
         body: JSON.stringify(body),
       });
-      return { status: response.status, body: await response.json() };
+      return { status: response.status, body: await response.json(), expectedError };
     }),
   );
   for (const failure of malformedFailures) {
     assert.equal(failure.status, 400);
-    assert.deepEqual(failure.body, { error: 'The request is invalid.' });
+    assert.deepEqual(failure.body, { error: failure.expectedError });
   }
 
   const asset = await app.request('/assets/app.js', { headers: { Host: 'localhost:3000' } });
@@ -656,6 +663,7 @@ test('onboarding exchanges invitation and recovery secrets, and fresh sessions l
     body: JSON.stringify({ kind: 'invitation', token: invitation.secret, handle: 'Route_User' }),
   });
   assert.equal(invitationExchange.status, 200);
+  assert.equal(invitationExchange.headers.get('Cache-Control'), 'no-store');
   assert.deepEqual(await invitationExchange.json(), { ok: true, handle: 'route_user' });
   assert.match(
     invitationExchange.headers.get('Set-Cookie') ?? '',

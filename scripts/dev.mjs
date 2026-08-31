@@ -425,14 +425,13 @@ async function stopStack() {
   return issues;
 }
 
-async function startFresh({ prepare }) {
+async function startFresh() {
   await mkdir(developmentDirectory, { recursive: true, mode: 0o700 });
   await chmod(developmentDirectory, 0o700);
   await removeStaleSocket();
   await assertPortsAvailable();
   await ensureCredentials();
-  if (prepare) await prepareFreshStack();
-  else await migrate();
+  await prepareFreshStack();
   await assertPortsAvailable();
   await run('overmind', ['start']);
   await waitForReady();
@@ -462,7 +461,7 @@ async function up() {
   }
 
   const issues = statuses === null ? [] : await stopStack();
-  await startFresh({ prepare: true });
+  await startFresh();
   throwIssues(issues);
   reportReady();
 }
@@ -470,13 +469,13 @@ async function up() {
 async function restart() {
   const statuses = await managedStatus({ retries: 5 });
   if (statuses === null) {
-    await startFresh({ prepare: true });
+    await startFresh();
     reportReady();
     return;
   }
   if (statuses.get('paper')?.status === 'running') await sendPaperCommand(restartMessage);
   const issues = await stopStack();
-  await startFresh({ prepare: true });
+  await startFresh();
   throwIssues(issues);
   reportReady();
 }
@@ -485,7 +484,7 @@ async function restartWeb() {
   const statuses = await managedStatus({ retries: 5 });
   if (statuses === null || statuses.get('paper')?.status !== 'running') {
     const issues = statuses === null ? [] : await stopStack();
-    await startFresh({ prepare: true });
+    await startFresh();
     throwIssues(issues);
     reportReady();
     return;
@@ -506,7 +505,7 @@ async function restartPaper() {
   const statuses = await managedStatus({ retries: 5 });
   if (statuses === null || statuses.get('paper')?.status !== 'running') {
     const issues = statuses === null ? [] : await stopStack();
-    await startFresh({ prepare: true });
+    await startFresh();
     throwIssues(issues);
     reportReady();
     return;

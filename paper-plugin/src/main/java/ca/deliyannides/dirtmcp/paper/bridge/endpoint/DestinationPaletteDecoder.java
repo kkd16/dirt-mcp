@@ -35,6 +35,6 @@ final class DestinationPaletteDecoder {
                                     object.get("blockState"), entryField + ".blockState"),
                             weight));
         }
-        return List.copyOf(entries);
+        return entries;
     }
 }

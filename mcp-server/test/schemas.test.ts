@@ -182,14 +182,16 @@ test('edit input schemas validate MCP arguments and materialize dryRun', () => {
     origin: { x: 0, y: 64, z: 0 },
     palettes: [[{ blockState: 'minecraft:stone' }]],
     placements: [[0, 0, 0, 0]],
-    runs: [],
+    runs: [[0, 1, 0, 0, 2, 0, 0]],
     label: 'Place stone',
   });
   assert.equal(set.dryRun, false);
+  assert.deepEqual(set.placements, [[0, 0, 0, 0]]);
+  assert.deepEqual(set.runs, [[0, 1, 0, 0, 2, 0, 0]]);
   assert.equal(SetBlocksInputSchema.safeParse({ ...set, placements: [[0, 0, 0]] }).success, false);
   assert.equal(SetBlocksInputSchema.safeParse({ ...set, placements: [[1, 0, 0, 0]] }).success, false);
   assert.equal(SetBlocksInputSchema.safeParse({ ...set, palettes: [] }).success, false);
-  assert.equal(SetBlocksInputSchema.safeParse({ ...set, palettes: [], placements: [] }).success, true);
+  assert.equal(SetBlocksInputSchema.safeParse({ ...set, palettes: [], placements: [], runs: [] }).success, true);
   assert.equal(
     SetBlocksInputSchema.safeParse({ ...set, placements: [], runs: [[1, 0, 0, 0, 0, 0, 0]] }).success,
     false,

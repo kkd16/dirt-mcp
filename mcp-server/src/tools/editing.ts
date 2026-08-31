@@ -673,10 +673,8 @@ export function registerEditingTools(
             const request = {
               ...input,
               palettes: input.palettes.map(bridgePalette),
-              placements: input.placements.map(([palette, x, y, blockZ]) => [palette, x, y, blockZ] as const),
-              runs: input.runs.map(
-                ([palette, x, y, blockZ, toX, toY, toZ]) => [palette, x, y, blockZ, toX, toY, toZ] as const,
-              ),
+              placements: input.placements,
+              runs: input.runs,
               seed: input.seed ?? generatedSeed(),
               maxChangedBlocks: input.maxChangedBlocks ?? null,
             } satisfies components['schemas']['SetBlocksRequest'];

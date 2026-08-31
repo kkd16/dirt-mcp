@@ -377,12 +377,11 @@ async function run(command, arguments_, options = {}) {
   });
 }
 
-async function capture(command, arguments_, options = {}) {
+async function capture(command, arguments_) {
   return await new Promise((resolve, reject) => {
     let stdout = '';
     let stderr = '';
     const child = spawn(command, arguments_, {
-      cwd: options.cwd,
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });

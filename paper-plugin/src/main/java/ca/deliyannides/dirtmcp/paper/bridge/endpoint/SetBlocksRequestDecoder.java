@@ -55,7 +55,7 @@ final class SetBlocksRequestDecoder {
             palettes.add(
                     DestinationPaletteDecoder.decode(array.get(index), "palettes[" + index + "]"));
         }
-        return List.copyOf(palettes);
+        return palettes;
     }
 
     private static List<Placement> placements(JsonElement element) throws OperationException {

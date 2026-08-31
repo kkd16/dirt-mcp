@@ -229,16 +229,6 @@ export const GetServerStatusOutputSchema = z
   components['schemas']['ServerStatusResponse']
 >;
 
-type GetServerStatusInput = z.infer<typeof GetServerStatusInputSchema>;
-
-function bridgeStatusRequest(input: GetServerStatusInput): components['schemas']['ServerStatusRequest'] {
-  return {
-    includePlayers: input.include.players,
-    includeWorlds: input.include.worlds,
-    includeConfiguration: input.include.configuration,
-  };
-}
-
 export function serverStatusBridgeOutputSchema(request: components['schemas']['ServerStatusRequest']) {
   return GetServerStatusOutputSchema.superRefine((response, context) => {
     const sections = [
@@ -317,7 +307,11 @@ export function registerStatusTools(
             failureContext: 'Could not get Dirt server status',
           },
           async (callId) => {
-            const request = bridgeStatusRequest(input);
+            const request: components['schemas']['ServerStatusRequest'] = {
+              includePlayers: input.include.players,
+              includeWorlds: input.include.worlds,
+              includeConfiguration: input.include.configuration,
+            };
             const result = await bridge.request(
               BRIDGE_ROUTES.serverStatus,
               callId,

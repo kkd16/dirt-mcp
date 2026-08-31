@@ -1,5 +1,3 @@
-import { once } from 'node:events';
-import type { EventEmitter } from 'node:events';
 import type { DirtMcpHandler } from './mcp-http.ts';
 
 interface RuntimeHttpServer {
@@ -8,10 +6,6 @@ interface RuntimeHttpServer {
 
 interface RuntimeDatabase {
   close(): void;
-}
-
-export async function waitForListening(server: EventEmitter): Promise<void> {
-  await once(server, 'listening');
 }
 
 export async function closeRuntime(

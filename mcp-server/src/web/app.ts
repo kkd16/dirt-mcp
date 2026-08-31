@@ -180,7 +180,6 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
     }
     const ticket = createOnboardingTicket({ ...claim, handle }, config.authSecret);
     context.header('Set-Cookie', onboardingCookieHeader(config.publicOrigin, ticket));
-    context.header('Cache-Control', 'no-store');
     return context.json({ ok: true, handle });
   });
 
@@ -264,12 +263,9 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
     }
     const apiRequest = context.req.path.startsWith('/api/');
     if (apiRequest) {
-      if (error instanceof AccessError) {
-        const status = error.code === 'conflict' ? 409 : error.code === 'not_found' ? 404 : 400;
-        return context.json({ error: error.message }, status);
-      }
-      if (error instanceof z.ZodError || error instanceof SyntaxError) {
-        return context.json({ error: 'The request is invalid.' }, 400);
+      const failure = internalError(error);
+      if (failure.code !== 'internal_error') {
+        return context.json({ error: failure.message }, failure.status);
       }
     }
     dependencies.logger

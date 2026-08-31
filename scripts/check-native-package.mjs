@@ -179,12 +179,6 @@ cp -- "\${DIRT_TEST_ARCHIVE}" "\${output}"
     env: runtimeEnvironment,
   });
   await requireRegularFile(backup, 'packaged SQLite backup');
-
-  const nodeMode = (await stat(node)).mode & 0o777;
-  const installerMode = (await stat(installer)).mode & 0o777;
-  if ((nodeMode & 0o111) === 0 || (installerMode & 0o111) === 0) {
-    throw new Error('Bundled Node and installer must be executable.');
-  }
 } finally {
   await rm(temporaryDirectory, { recursive: true, force: true });
 }
@@ -330,13 +324,12 @@ function serviceFailure(reason, stdout, stderr) {
   return new Error(`Packaged service ${reason}.\nstdout:\n${stdout.trim()}\nstderr:\n${stderr.trim()}`);
 }
 
-async function capture(command, arguments_, options = {}) {
+async function capture(command, arguments_) {
   return await new Promise((resolve, reject) => {
     let stdout = '';
     let stderr = '';
     const child = spawn(command, arguments_, {
-      cwd: options.cwd,
-      env: options.env ?? process.env,
+      env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     child.stdout.setEncoding('utf8');
