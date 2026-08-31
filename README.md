@@ -250,31 +250,31 @@ credentials are files in `.dev/secrets/`. Secrets never belong in `.env` or
 only tracked, non-secret development settings and secret-file paths. Starting Paper means accepting the
 [Minecraft EULA](https://aka.ms/MinecraftEULA).
 
-| Command                 | Purpose                                                       |
-| ----------------------- | ------------------------------------------------------------- |
-| `make help`             | List the supported root commands.                             |
-| `make doctor`           | Check the complete development toolchain.                     |
-| `make install`          | Install locked Node dependencies.                             |
-| `make build`            | Build Paper and the web/MCP service.                          |
-| `make build-paper`      | Build only the Paper plugin.                                  |
-| `make build-web`        | Build only the web/MCP service.                               |
-| `make check`            | Run every offline build, test, lint, and validation gate.     |
-| `make check-production` | Validate Compose, the production image, and Caddy.            |
-| `make verify`           | Run the complete local gate, including live smoke tests.      |
-| `make ci`               | Run the clean complete CI gate.                               |
-| `make format`           | Apply every repository formatter.                             |
-| `make up`               | Build and start or reuse the complete managed stack.          |
-| `make restart`          | Rebuild and restart Paper and web together.                   |
-| `make restart-paper`    | Rebuild Paper, safely draining and restoring web/MCP.         |
-| `make restart-web`      | Rebuild, migrate, and restart only web/MCP.                   |
-| `make down`             | Stop the complete managed stack cleanly.                      |
-| `make status`           | Show both managed process states.                             |
-| `make health`           | Check the authenticated bridge and web health endpoint.       |
-| `make logs`             | Print both live panes, or Paper's persisted log when stopped. |
-| `make console`          | Connect interactively to the Paper console.                   |
-| `make command`          | Send one stdin line to the Paper console.                     |
-| `make smoke`            | Run the managed live integration gate.                        |
-| `make clean`            | Remove build outputs while preserving `.dev/`.                |
+| Command                 | Purpose                                                      |
+| ----------------------- | ------------------------------------------------------------ |
+| `make help`             | List the supported root commands.                            |
+| `make doctor`           | Check the complete development toolchain.                    |
+| `make install`          | Install locked Node dependencies.                            |
+| `make build`            | Build Paper and the web/MCP service.                         |
+| `make build-paper`      | Build only the Paper plugin.                                 |
+| `make build-web`        | Build only the web/MCP service.                              |
+| `make check`            | Run every offline build, test, lint, and validation gate.    |
+| `make check-production` | Validate Compose, the production image, and Caddy.           |
+| `make verify`           | Run the complete local gate, including live smoke tests.     |
+| `make ci`               | Run the clean complete CI gate.                              |
+| `make format`           | Apply every repository formatter.                            |
+| `make up`               | Build and start or reuse the complete managed stack.         |
+| `make restart`          | Rebuild and restart Paper and web together.                  |
+| `make restart-paper`    | Rebuild Paper, safely draining and restoring web/MCP.        |
+| `make restart-web`      | Rebuild, migrate, and restart only web/MCP.                  |
+| `make down`             | Stop the complete managed stack cleanly.                     |
+| `make status`           | Show both managed process states.                            |
+| `make health`           | Check the authenticated bridge and web health endpoint.      |
+| `make logs`             | Print recent output from both panes, or Paper's stopped log. |
+| `make console`          | Connect interactively to the Paper console.                  |
+| `make command`          | Send one stdin line to the Paper console.                    |
+| `make smoke`            | Run the managed live integration gate.                       |
+| `make clean`            | Remove build outputs while preserving `.dev/`.               |
 
 The managed stack uses Minecraft port `25565`, bridge port `8765`, and web port
 `3000`. `make up` waits for both services to become healthy. Paper does not

@@ -73,7 +73,7 @@ make restart-web      Rebuild, migrate, and restart only web/MCP
 make down             Stop the complete managed stack
 make status           Report both managed processes
 make health           Check authenticated bridge and web health
-make logs             Print both live panes or the stopped Paper log
+make logs             Print recent output from both panes or the stopped Paper log
 make console          Connect to the Paper console
 make command          Send one stdin line to the Paper console
 make smoke            Run the managed live integration gate

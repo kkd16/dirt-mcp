@@ -97,7 +97,7 @@ status: ## Show managed process state and aggregate readiness.
 health: ## Run authenticated web, control, Paper, and FAWE readiness checks.
 	@node scripts/dev.mjs health
 
-logs: ## Print both live panes or the stopped Paper log.
+logs: ## Print recent output from both panes or the stopped Paper log.
 	@node scripts/dev.mjs logs
 
 console: ## Attach to the managed Paper console; detach with Ctrl-b d.

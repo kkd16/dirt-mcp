@@ -3,7 +3,7 @@ import { isIP } from 'node:net';
 import { resolve } from 'node:path';
 
 const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:8765';
-const DEFAULT_WEB_PORT = 3_000;
+const WEB_PORT = 3_000;
 const SERVICE_TOKEN_PATTERN = /^[0-9a-f]{64}$/u;
 const DNS_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 
@@ -38,8 +38,7 @@ type RuntimeConfigurationErrorCode =
   | 'database_path_required'
   | 'secrets_not_distinct'
   | 'public_origin_invalid'
-  | 'public_origin_required'
-  | 'web_port_invalid';
+  | 'public_origin_required';
 
 type ServiceTokenErrorReason = 'invalid' | 'required';
 
@@ -77,7 +76,7 @@ export function readRuntimeConfig(environment: Readonly<Record<string, string | 
     ...auth,
     bridge,
     controlToken,
-    port: readPort(environment.DIRT_WEB_PORT),
+    port: WEB_PORT,
   };
 }
 
@@ -174,14 +173,6 @@ function isDnsDomainName(hostname: string): boolean {
     !hostname.endsWith('.') &&
     hostname.split('.').every((label) => DNS_LABEL_PATTERN.test(label))
   );
-}
-
-function readPort(value: string | undefined): number {
-  if (value === undefined) return DEFAULT_WEB_PORT;
-  if (!/^[1-9]\d{0,4}$/u.test(value) || Number(value) > 65_535) {
-    throw new RuntimeConfigurationError('web_port_invalid', 'DIRT_WEB_PORT must be an integer from 1 to 65535');
-  }
-  return Number(value);
 }
 
 function readSecretValue(

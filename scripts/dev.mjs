@@ -39,9 +39,10 @@ function usage() {
 }
 
 async function run(executable, args, options = {}) {
-  const { capture = false, check = true, input } = options;
+  const { capture = false, check = true, environment, input } = options;
   const child = spawn(executable, args, {
     cwd: repositoryRoot,
+    env: environment,
     stdio: [input === undefined ? 'ignore' : 'pipe', capture ? 'pipe' : 'inherit', capture ? 'pipe' : 'inherit'],
   });
 
@@ -75,6 +76,11 @@ async function run(executable, args, options = {}) {
   return { code, stdout, stderr };
 }
 
+function runOvermind(args, options = {}) {
+  const environment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('OVERMIND_')));
+  return run('overmind', args, { ...options, environment });
+}
+
 async function socketMetadata() {
   try {
     return await lstat(overmindSocket);
@@ -98,7 +104,7 @@ async function managedStatus({ retries = 3 } = {}) {
   for (let attempt = 0; attempt < retries; attempt += 1) {
     // Overmind creates its socket immediately before its command center begins accepting clients.
     // oxlint-disable-next-line eslint/no-await-in-loop
-    const result = await run('overmind', ['status'], { capture: true, check: false });
+    const result = await runOvermind(['status'], { capture: true, check: false });
     if (result.code === 0) {
       const processStatus = parseStatus(result.stdout);
       if (processStatus !== null) return processStatus;
@@ -221,7 +227,7 @@ async function prepareFreshStack() {
 }
 
 async function migrate() {
-  await run('overmind', ['run', 'pnpm', 'migrate']);
+  await runOvermind(['run', 'pnpm', 'migrate']);
 }
 
 async function probeJson(url, options, accepts) {
@@ -270,17 +276,14 @@ function allRunning(statuses) {
   return statuses !== null && managedProcesses.every((name) => statuses.get(name)?.status === 'running');
 }
 
-async function waitForReady({ allowDead = false, paperOnly = false } = {}) {
+async function waitForReady({ paperOnly = false } = {}) {
   const deadline = Date.now() + startupTimeoutMilliseconds;
   while (Date.now() < deadline) {
     // Startup state and health are intentionally observed in order on each bounded retry.
     // oxlint-disable-next-line eslint/no-await-in-loop
     const statuses = await managedStatus();
     if (statuses !== null) {
-      if (
-        !allowDead &&
-        (statuses.get('paper')?.status === 'dead' || (!paperOnly && statuses.get('web')?.status === 'dead'))
-      ) {
+      if (statuses.get('paper')?.status === 'dead' || (!paperOnly && statuses.get('web')?.status === 'dead')) {
         throw new LifecycleError(
           'A managed process exited before the stack became ready. Run `make logs` for details.',
         );
@@ -357,13 +360,20 @@ async function waitForProcess(name, desiredStatus, timeoutMilliseconds) {
 async function stopProcess(name, timeoutMilliseconds) {
   const statuses = await managedStatus();
   if (statuses === null || statuses.get(name)?.status === 'dead') return false;
-  await run('overmind', ['stop', name]);
+  await runOvermind(['stop', name]);
   if (await waitForProcess(name, 'dead', timeoutMilliseconds)) return false;
-  await run('overmind', ['stop', name]);
+  await runOvermind(['stop', name]);
   if (!(await waitForProcess(name, 'dead', 10_000))) {
     throw new LifecycleError(`${name} did not stop after Overmind escalated to SIGKILL.`);
   }
   return true;
+}
+
+async function restartProcess(name) {
+  await runOvermind(['restart', name]);
+  if (!(await waitForProcess(name, 'running', 10_000))) {
+    throw new LifecycleError(`${name} did not start after Overmind restarted it.`);
+  }
 }
 
 async function waitForSupervisorExit() {
@@ -402,11 +412,11 @@ async function stopStack() {
     }
   }
 
-  const quit = await run('overmind', ['quit'], { capture: true, check: false });
+  const quit = await runOvermind(['quit'], { capture: true, check: false });
   if (quit.code !== 0) issues.push(quit.stderr.trim() || 'Overmind could not begin shutdown');
   if (!(await waitForSupervisorExit())) {
     issues.push('Overmind exceeded its graceful shutdown deadline');
-    await run('overmind', ['kill'], { capture: true, check: false });
+    await runOvermind(['kill'], { capture: true, check: false });
     await waitForSupervisorExit();
   }
   await removeStaleSocket();
@@ -427,7 +437,7 @@ async function stopStack() {
 async function startSupervisor() {
   await removeStaleSocket();
   await assertPortsAvailable();
-  await run('overmind', ['start']);
+  await runOvermind(['start']);
   await waitForReady();
   const validationFailure = await validatePaperLog('running');
   if (validationFailure !== null) throw new LifecycleError(validationFailure);
@@ -438,6 +448,7 @@ async function startSupervisor() {
 
 async function startFresh({ prepare }) {
   await mkdir(developmentDirectory, { recursive: true, mode: 0o700 });
+  await chmod(developmentDirectory, 0o700);
   await ensureCredentials();
   await assertPortsAvailable();
   if (prepare) await prepareFreshStack();
@@ -452,6 +463,8 @@ function throwIssues(issues) {
 async function up() {
   const statuses = await managedStatus({ retries: 5 });
   if (allRunning(statuses) && allHealthy(await healthChecks())) {
+    const validationFailure = await validatePaperLog('running');
+    if (validationFailure !== null) throw new LifecycleError(validationFailure);
     process.stdout.write(
       `Dirt MCP is already ready on Minecraft port ${String(ports.minecraft)} with dashboard and MCP on port ${String(ports.web)}.\n`,
     );
@@ -488,8 +501,8 @@ async function restartWeb() {
   const issues = [];
   if (await stopProcess('web', shutdownTimeoutMilliseconds)) issues.push('web required SIGKILL to stop');
   await migrate();
-  await run('overmind', ['restart', 'web']);
-  await waitForReady({ allowDead: true });
+  await restartProcess('web');
+  await waitForReady();
   process.stdout.write('The web/MCP service restarted; Paper stayed online.\n');
   throwIssues(issues);
 }
@@ -513,12 +526,12 @@ async function restartPaper() {
   const shutdownFailure = await validatePaperLog('shutdown', checkpoint);
   if (shutdownFailure !== null) issues.push(shutdownFailure);
 
-  await run('overmind', ['restart', 'paper']);
-  await waitForReady({ allowDead: true, paperOnly: true });
+  await restartProcess('paper');
+  await waitForReady({ paperOnly: true });
   const startupFailure = await validatePaperLog('running');
   if (startupFailure !== null) issues.push(startupFailure);
-  await run('overmind', ['restart', 'web']);
-  await waitForReady({ allowDead: true });
+  await restartProcess('web');
+  await waitForReady();
   process.stdout.write('Paper restarted safely; the web/MCP service was drained and restored.\n');
   throwIssues(issues);
 }
@@ -611,7 +624,7 @@ async function logs() {
 async function consoleAttach() {
   const statuses = await managedStatus({ retries: 5 });
   if (statuses?.get('paper')?.status !== 'running') throw new LifecycleError('Managed Paper is not running.');
-  await run('overmind', ['connect', 'paper']);
+  await runOvermind(['connect', 'paper']);
 }
 
 async function readPaperCommand() {

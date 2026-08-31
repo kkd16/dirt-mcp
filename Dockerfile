@@ -9,8 +9,8 @@ WORKDIR /workspace
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY mcp-server/package.json mcp-server/package.json
 
-RUN --mount=type=cache,id=dirt-pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=dirt-pnpm,target=/pnpm/project-store \
+    pnpm install --frozen-lockfile --store-dir /pnpm/project-store
 
 COPY mcp-server/ mcp-server/
 
