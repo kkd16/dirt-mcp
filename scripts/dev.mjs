@@ -104,7 +104,8 @@ async function managedStatus({ retries = 3 } = {}) {
     const result = await run('overmind', ['status'], { capture: true, check: false });
     if (result.code === 0) {
       const processStatus = parseStatus(result.stdout);
-      if (processStatus !== null) return processStatus;
+      // oxlint-disable-next-line eslint/no-await-in-loop
+      if (processStatus !== null && (await reconcileProcessStatus(processStatus))) return processStatus;
     }
     if (attempt + 1 < retries) {
       // oxlint-disable-next-line eslint/no-await-in-loop
@@ -112,6 +113,28 @@ async function managedStatus({ retries = 3 } = {}) {
     }
   }
   return null;
+}
+
+async function reconcileProcessStatus(statuses) {
+  try {
+    await Promise.all(
+      managedProcesses.map(async (name) => {
+        const processStatus = statuses.get(name);
+        if (processStatus?.status !== 'running') return;
+        const connection = await overmindConnection(name);
+        const pane = await run(
+          'tmux',
+          ['-L', connection.socket, 'display-message', '-p', '-t', connection.target, '#{pane_dead}'],
+          { capture: true, check: false },
+        );
+        if (pane.code !== 0) throw new Error(`Could not inspect the managed ${name} pane.`);
+        if (pane.stdout.trim() === '1') statuses.set(name, { pid: processStatus.pid, status: 'dead' });
+      }),
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function removeStaleSocket() {
@@ -367,20 +390,31 @@ async function restartProcess(name) {
   }
 }
 
-async function waitForSupervisorExit() {
-  const deadline = Date.now() + shutdownTimeoutMilliseconds + 10_000;
+async function waitForSupervisorExit(timeoutMilliseconds = shutdownTimeoutMilliseconds + 10_000) {
+  const deadline = Date.now() + timeoutMilliseconds;
   let unreachableChecks = 0;
   while (Date.now() < deadline) {
     // Supervisor shutdown polling is deliberately serial across time.
     // oxlint-disable-next-line eslint/no-await-in-loop
-    if ((await socketMetadata()) === null) return true;
+    if ((await socketMetadata()) === null) return 'exited';
     // oxlint-disable-next-line eslint/no-await-in-loop
-    unreachableChecks = (await managedStatus({ retries: 1 })) === null ? unreachableChecks + 1 : 0;
-    if (unreachableChecks >= 8) return true;
+    const statuses = await managedStatus({ retries: 1 });
+    unreachableChecks = statuses === null ? unreachableChecks + 1 : 0;
+    if (unreachableChecks >= 8) return 'exited';
+    if (managedProcesses.every((name) => statuses?.get(name)?.status === 'dead')) return 'processes-dead';
     // oxlint-disable-next-line eslint/no-await-in-loop
     await delay(pollIntervalMilliseconds);
   }
-  return false;
+  return 'timeout';
+}
+
+async function terminateSupervisor() {
+  const connection = await overmindConnection('paper');
+  // Overmind cannot exit when its kill(0) liveness check mistakes an exited pane's zombie for a live process.
+  await run('tmux', ['-L', connection.socket, 'kill-session', '-t', connection.target], {
+    capture: true,
+    check: false,
+  });
 }
 
 async function stopStack() {
@@ -405,10 +439,13 @@ async function stopStack() {
 
   const quit = await run('overmind', ['quit'], { capture: true, check: false });
   if (quit.code !== 0) issues.push(quit.stderr.trim() || 'Overmind could not begin shutdown');
-  if (!(await waitForSupervisorExit())) {
-    issues.push('Overmind exceeded its graceful shutdown deadline');
-    await run('overmind', ['kill'], { capture: true, check: false });
-    await waitForSupervisorExit();
+  const supervisorExit = await waitForSupervisorExit();
+  if (supervisorExit !== 'exited') {
+    if (supervisorExit === 'timeout') issues.push('Overmind exceeded its graceful shutdown deadline');
+    await terminateSupervisor().catch(() => {});
+    if ((await waitForSupervisorExit(10_000)) !== 'exited') {
+      issues.push('Overmind could not be terminated');
+    }
   }
   await removeStaleSocket();
 
