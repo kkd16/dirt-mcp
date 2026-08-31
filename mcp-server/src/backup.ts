@@ -6,7 +6,7 @@ import { openDatabase } from './storage.ts';
 async function main(): Promise<void> {
   const destinationArgument = process.argv[2];
   if (destinationArgument === undefined || destinationArgument.trim().length === 0) {
-    throw new Error('Usage: pnpm backup -- <destination>');
+    throw new Error('Usage: pnpm backup <destination>');
   }
   const databasePath = readDatabasePath(process.env.DIRT_DATABASE_PATH);
   const destination = resolve(destinationArgument);

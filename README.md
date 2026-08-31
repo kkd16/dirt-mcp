@@ -83,7 +83,7 @@ the relying-party domain.
 ```bash
 git clone https://github.com/kkd16/dirt-mcp.git
 cd dirt-mcp
-make build
+make build-paper
 ```
 
 Install `paper-plugin/build/libs/dirt-mcp-paper-<version>.jar` and FAWE in the

@@ -1,4 +1,4 @@
-import * as z from 'zod/v4';
+import * as z from 'zod';
 import { BridgeErrorSchema } from './contract.ts';
 
 const MessageSchema = z.string().min(1);

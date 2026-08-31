@@ -64,31 +64,31 @@ type UserRow = {
   status: string;
   minecraftUuid: string | null;
   minecraftName: string | null;
-  createdAt: number | string;
+  createdAt: string;
 };
 
 type InvitationRow = {
   id: string;
-  createdAt: number | string;
-  expiresAt: number | string;
-  acceptedAt: number | string | null;
-  revokedAt: number | string | null;
+  createdAt: string;
+  expiresAt: string;
+  acceptedAt: string | null;
+  revokedAt: string | null;
 };
 
 type LinkChallengeRow = {
   id: string;
   minecraftUuid: string;
   minecraftName: string;
-  expiresAt: number | string;
-  usedAt: number | string | null;
+  expiresAt: string;
+  usedAt: string | null;
 };
 
 type InvitationClaimRow = Pick<InvitationRow, 'id' | 'expiresAt' | 'acceptedAt' | 'revokedAt'>;
 
 type RecoveryClaimRow = {
   id: string;
-  expiresAt: number | string;
-  usedAt: number | string | null;
+  expiresAt: string;
+  usedAt: string | null;
   handle: string;
 };
 
@@ -170,7 +170,7 @@ export class AccessRepository {
       .prepare(
         'INSERT INTO invitation (id, tokenHash, createdAt, expiresAt, acceptedAt, revokedAt, acceptedByUserId) VALUES (?, ?, ?, ?, NULL, NULL, NULL)',
       )
-      .run(id, hashSecret(secret), now.getTime(), expiresAt.getTime());
+      .run(id, hashSecret(secret), now.toISOString(), expiresAt.toISOString());
     return {
       invitation: {
         id,
@@ -185,7 +185,7 @@ export class AccessRepository {
   revokeInvitation(id: string, now = new Date()): InvitationSummary {
     const changed = this.database
       .prepare('UPDATE invitation SET revokedAt = ? WHERE id = ? AND revokedAt IS NULL AND acceptedAt IS NULL')
-      .run(now.getTime(), id);
+      .run(now.toISOString(), id);
     if (changed.changes !== 1) {
       const existing = this.getInvitation(id, now);
       if (existing === null) throw new AccessError('not_found', 'Invitation not found.');
@@ -209,10 +209,10 @@ export class AccessRepository {
     const now = new Date();
     const transaction = this.database.transaction(() => {
       const changed = this.database
-        .prepare<[number, string], { id: string }>(
+        .prepare<[string, string], { id: string }>(
           'UPDATE "user" SET minecraftUuid = NULL, minecraftName = NULL, updatedAt = ? WHERE handle = ? AND (minecraftUuid IS NOT NULL OR minecraftName IS NOT NULL) RETURNING id',
         )
-        .get(now.getTime(), handle);
+        .get(now.toISOString(), handle);
       return this.completeEligibilityUpdate(handle, changed?.id, now);
     });
     return transaction.immediate();
@@ -223,15 +223,15 @@ export class AccessRepository {
     const secret = randomSecret();
     const expiresAt = new Date(now.getTime() + RECOVERY_TTL_MS);
     const transaction = this.database.transaction(() => {
-      this.database.prepare('DELETE FROM credentialRecovery WHERE expiresAt <= ?').run(now.getTime());
+      this.database.prepare('DELETE FROM credentialRecovery WHERE expiresAt <= ?').run(now.toISOString());
       this.database
         .prepare('UPDATE credentialRecovery SET usedAt = ? WHERE userId = ? AND usedAt IS NULL')
-        .run(now.getTime(), user.id);
+        .run(now.toISOString(), user.id);
       this.database
         .prepare(
           'INSERT INTO credentialRecovery (id, tokenHash, userId, createdAt, expiresAt, usedAt) VALUES (?, ?, ?, ?, ?, NULL)',
         )
-        .run(randomUUID(), hashSecret(secret), user.id, now.getTime(), expiresAt.getTime());
+        .run(randomUUID(), hashSecret(secret), user.id, now.toISOString(), expiresAt.toISOString());
     });
     transaction();
     return { user, secret, expiresAt: expiresAt.toISOString() };
@@ -241,7 +241,7 @@ export class AccessRepository {
     const code = humanCode();
     const expiresAt = new Date(now.getTime() + LINK_TTL_MS);
     const transaction = this.database.transaction(() => {
-      this.database.prepare('DELETE FROM minecraftLinkChallenge WHERE expiresAt <= ?').run(now.getTime());
+      this.database.prepare('DELETE FROM minecraftLinkChallenge WHERE expiresAt <= ?').run(now.toISOString());
       const pending = this.database
         .prepare<[string], { found: number }>(
           'SELECT 1 AS found FROM minecraftLinkChallenge WHERE minecraftUuid = ? LIMIT 1',
@@ -257,7 +257,7 @@ export class AccessRepository {
         .prepare(
           'INSERT INTO minecraftLinkChallenge (id, codeHash, minecraftUuid, minecraftName, createdAt, expiresAt, usedAt, usedByUserId) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)',
         )
-        .run(randomUUID(), hashSecret(code), minecraftUuid, minecraftName, now.getTime(), expiresAt.getTime());
+        .run(randomUUID(), hashSecret(code), minecraftUuid, minecraftName, now.toISOString(), expiresAt.toISOString());
     });
     transaction.immediate();
     return { code, expiresAt: expiresAt.toISOString() };
@@ -290,14 +290,14 @@ export class AccessRepository {
       if (linked !== undefined) throw new AccessError('conflict', 'That Minecraft account is already linked.');
       this.database
         .prepare('UPDATE "user" SET minecraftUuid = ?, minecraftName = ?, updatedAt = ? WHERE id = ?')
-        .run(challenge.minecraftUuid, challenge.minecraftName, now.getTime(), userId);
+        .run(challenge.minecraftUuid, challenge.minecraftName, now.toISOString(), userId);
       // Rotate the OAuth generation on every authorization-eligibility
       // transition. Keep this fresh browser session so the user can continue
       // from linking into a new authorization ceremony.
       if (user.minecraftUuid === null || user.minecraftName === null) this.rotateAuthorization(userId, now);
       const consumed = this.database
         .prepare('UPDATE minecraftLinkChallenge SET usedAt = ?, usedByUserId = ? WHERE id = ? AND usedAt IS NULL')
-        .run(now.getTime(), userId, challenge.id);
+        .run(now.toISOString(), userId, challenge.id);
       if (consumed.changes !== 1) throw new AccessError('conflict', 'The link code was already used.');
       return this.requireUserById(userId);
     });
@@ -356,7 +356,7 @@ export class AccessRepository {
   private rotateAuthorization(userId: string, now = new Date()): void {
     const updated = this.database
       .prepare('UPDATE "user" SET authorizationVersion = authorizationVersion + 1, updatedAt = ? WHERE id = ?')
-      .run(now.getTime(), userId);
+      .run(now.toISOString(), userId);
     if (updated.changes !== 1) throw new AccessError('not_found', 'User not found.');
     this.database
       .prepare(
@@ -413,10 +413,10 @@ export class AccessRepository {
     const now = new Date();
     const transaction = this.database.transaction(() => {
       const changed = this.database
-        .prepare<[UserStatus, number, string, UserStatus], { id: string }>(
+        .prepare<[UserStatus, string, string, UserStatus], { id: string }>(
           'UPDATE "user" SET status = ?, updatedAt = ? WHERE handle = ? AND status <> ? RETURNING id',
         )
-        .get(status, now.getTime(), handle, status);
+        .get(status, now.toISOString(), handle, status);
       return this.completeEligibilityUpdate(handle, changed?.id, now);
     });
     return transaction.immediate();
@@ -505,13 +505,13 @@ function toInvitationSummary(row: InvitationRow, now: Date): InvitationSummary {
   };
 }
 
-function toRfc3339(value: number | string): string {
+function toRfc3339(value: string): string {
   return new Date(toEpochMilliseconds(value)).toISOString();
 }
 
-function toEpochMilliseconds(value: number | string): number {
-  const milliseconds = typeof value === 'number' ? value : new Date(value).getTime();
-  if (!Number.isFinite(milliseconds) || Number.isNaN(new Date(milliseconds).getTime())) {
+function toEpochMilliseconds(value: string): number {
+  const milliseconds = Date.parse(value);
+  if (Number.isNaN(milliseconds)) {
     throw new Error('The Dirt database contains an invalid timestamp.');
   }
   return milliseconds;

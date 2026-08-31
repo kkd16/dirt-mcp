@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import * as z from 'zod/v4';
+import * as z from 'zod';
 import { BridgeClient } from '../dist/bridge/client.js';
 import {
   BRIDGE_ERROR_CODES,

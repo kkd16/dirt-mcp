@@ -1,5 +1,5 @@
 import type { ToolAnnotations } from '@modelcontextprotocol/server';
-import * as z from 'zod/v4';
+import * as z from 'zod';
 
 const INT32_MIN = -2_147_483_648;
 export const INT32_MAX = 2_147_483_647;

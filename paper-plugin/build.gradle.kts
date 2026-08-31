@@ -5,7 +5,6 @@ import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
-import org.gradle.api.tasks.bundling.AbstractArchiveTask
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.work.DisableCachingByDefault
 import java.util.zip.ZipFile
@@ -136,7 +135,6 @@ spotbugs {
     toolVersion = "4.10.4"
     effort = Effort.MAX
     reportLevel = Confidence.HIGH
-    ignoreFailures = false
 }
 
 jacoco {
@@ -149,7 +147,6 @@ tasks {
             group = LifecycleBasePlugin.VERIFICATION_GROUP
             description = "Verify the contents of the distributable Paper plugin JAR."
             archiveFile.set(named<Jar>("jar").flatMap { it.archiveFile })
-            dependsOn(named("jar"))
         }
 
     val stageRunServer =
@@ -216,11 +213,6 @@ tasks {
         from(rootProject.file("LICENSE")) {
             into("META-INF")
         }
-    }
-
-    withType<AbstractArchiveTask>().configureEach {
-        isPreserveFileTimestamps = false
-        isReproducibleFileOrder = true
     }
 
     runServer {

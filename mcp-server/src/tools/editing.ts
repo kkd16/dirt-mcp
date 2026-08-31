@@ -1,6 +1,6 @@
 import type { CallToolResult, McpServer } from '@modelcontextprotocol/server';
 import { randomBytes } from 'node:crypto';
-import * as z from 'zod/v4';
+import * as z from 'zod';
 import type { BridgeClient } from '../bridge/client.ts';
 import { BRIDGE_ROUTES, MutationBridgeErrorSchema } from '../bridge/contract.ts';
 import type { components } from '../generated/openapi.ts';

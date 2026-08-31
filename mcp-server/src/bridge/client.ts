@@ -1,4 +1,4 @@
-import * as z from 'zod/v4';
+import * as z from 'zod';
 import type { BridgeConfig } from '../config.ts';
 import { BodyTooLargeError, InvalidBodyEncodingError, readBoundedText } from '../http-body.ts';
 import { BridgeErrorResponseSchema, bridgeErrorMatchesHttpStatus, type BridgeRoute } from './contract.ts';

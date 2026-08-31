@@ -4,12 +4,11 @@ import { spawn } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createConnection } from 'node:net';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { setTimeout as delay } from 'node:timers/promises';
-import { fileURLToPath } from 'node:url';
 
-const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
+const repositoryRoot = dirname(import.meta.dirname);
 const developmentDirectory = join(repositoryRoot, '.dev');
 const paperDirectory = join(developmentDirectory, 'paper');
 const paperLog = join(paperDirectory, 'logs', 'latest.log');
@@ -29,8 +28,6 @@ const pollIntervalMilliseconds = 250;
 const tokenPattern = /^[0-9a-f]{64}$/u;
 const restartMessage = 'kick @a Server restarting for a Dirt MCP update. Please reconnect in a moment.';
 
-class LifecycleError extends Error {}
-
 function usage() {
   process.stderr.write(
     'Usage: node scripts/dev.mjs {up|restart|restart-paper|restart-web|down|status|health|logs|console|command}\n',
@@ -39,11 +36,15 @@ function usage() {
 }
 
 async function run(executable, args, options = {}) {
-  const { capture = false, check = true, environment, input } = options;
+  const { capture = false, check = true, input, interactive = false } = options;
   const child = spawn(executable, args, {
     cwd: repositoryRoot,
-    env: environment,
-    stdio: [input === undefined ? 'ignore' : 'pipe', capture ? 'pipe' : 'inherit', capture ? 'pipe' : 'inherit'],
+    env: { ...process.env, PWD: repositoryRoot },
+    stdio: [
+      interactive ? 'inherit' : input === undefined ? 'ignore' : 'pipe',
+      capture ? 'pipe' : 'inherit',
+      capture ? 'pipe' : 'inherit',
+    ],
   });
 
   let stdout = '';
@@ -66,19 +67,14 @@ async function run(executable, args, options = {}) {
   }
 
   const code = await new Promise((resolve, reject) => {
-    child.once('error', (error) => reject(new LifecycleError(`${executable} could not be started: ${error.message}`)));
+    child.once('error', (error) => reject(new Error(`${executable} could not be started: ${error.message}`)));
     child.once('close', resolve);
   });
   if (check && code !== 0) {
     const detail = capture && stderr.trim().length > 0 ? `: ${stderr.trim()}` : '';
-    throw new LifecycleError(`${executable} exited with status ${String(code)}${detail}`);
+    throw new Error(`${executable} exited with status ${String(code)}${detail}`);
   }
   return { code, stdout, stderr };
-}
-
-function runOvermind(args, options = {}) {
-  const environment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('OVERMIND_')));
-  return run('overmind', args, { ...options, environment });
 }
 
 async function socketMetadata() {
@@ -104,7 +100,7 @@ async function managedStatus({ retries = 3 } = {}) {
   for (let attempt = 0; attempt < retries; attempt += 1) {
     // Overmind creates its socket immediately before its command center begins accepting clients.
     // oxlint-disable-next-line eslint/no-await-in-loop
-    const result = await runOvermind(['status'], { capture: true, check: false });
+    const result = await run('overmind', ['status'], { capture: true, check: false });
     if (result.code === 0) {
       const processStatus = parseStatus(result.stdout);
       if (processStatus !== null) return processStatus;
@@ -121,7 +117,7 @@ async function removeStaleSocket() {
   const metadata = await socketMetadata();
   if (metadata === null) return;
   if (!metadata.isSocket()) {
-    throw new LifecycleError(`${overmindSocket} exists but is not an Overmind socket; remove it manually.`);
+    throw new Error(`${overmindSocket} exists but is not an Overmind socket; remove it manually.`);
   }
   if ((await managedStatus({ retries: 5 })) !== null) return;
   await rm(overmindSocket);
@@ -136,13 +132,13 @@ async function readCredentials() {
   const entries = await Promise.all(
     Object.entries(secretFiles).map(async ([name, path]) => {
       const value = stripSingleLineEnding(await readFile(path, 'utf8'));
-      if (!tokenPattern.test(value)) throw new LifecycleError(`The managed ${name} credential is invalid.`);
+      if (!tokenPattern.test(value)) throw new Error(`The managed ${name} credential is invalid.`);
       return [name, value];
     }),
   );
   const credentials = Object.fromEntries(entries);
   if (new Set(Object.values(credentials)).size !== entries.length) {
-    throw new LifecycleError('Managed development credentials must be pairwise distinct.');
+    throw new Error('Managed development credentials must be pairwise distinct.');
   }
   return credentials;
 }
@@ -201,7 +197,7 @@ async function assertPortsAvailable() {
   const results = await Promise.all(entries.map(async ([name, port]) => [name, port, await portIsOpen(port)]));
   const occupied = results.filter(([, , open]) => open).map(([name, port]) => `${name} (${String(port)})`);
   if (occupied.length > 0) {
-    throw new LifecycleError(`Required loopback ports are already in use: ${occupied.join(', ')}.`);
+    throw new Error(`Required loopback ports are already in use: ${occupied.join(', ')}.`);
   }
 }
 
@@ -227,7 +223,7 @@ async function prepareFreshStack() {
 }
 
 async function migrate() {
-  await runOvermind(['run', 'pnpm', 'migrate']);
+  await run('overmind', ['run', 'pnpm', 'migrate']);
 }
 
 async function probeJson(url, options, accepts) {
@@ -284,9 +280,7 @@ async function waitForReady({ paperOnly = false } = {}) {
     const statuses = await managedStatus();
     if (statuses !== null) {
       if (statuses.get('paper')?.status === 'dead' || (!paperOnly && statuses.get('web')?.status === 'dead')) {
-        throw new LifecycleError(
-          'A managed process exited before the stack became ready. Run `make logs` for details.',
-        );
+        throw new Error('A managed process exited before the stack became ready. Run `make logs` for details.');
       }
       // oxlint-disable-next-line eslint/no-await-in-loop
       const checks = await healthChecks();
@@ -301,7 +295,7 @@ async function waitForReady({ paperOnly = false } = {}) {
     // oxlint-disable-next-line eslint/no-await-in-loop
     await delay(pollIntervalMilliseconds);
   }
-  throw new LifecycleError(
+  throw new Error(
     `The managed stack did not become ready within ${String(startupTimeoutMilliseconds / 1_000)} seconds.`,
   );
 }
@@ -317,7 +311,7 @@ async function validatePaperLog(mode, checkpoint) {
   return null;
 }
 
-async function logCheckpoint() {
+async function paperLogPosition() {
   try {
     const [metadata, content] = await Promise.all([stat(paperLog), readFile(paperLog, 'utf8')]);
     return {
@@ -332,15 +326,10 @@ async function logCheckpoint() {
 
 async function shutdownLogStart(checkpoint) {
   if (checkpoint === null) return 0;
-  try {
-    const [metadata, content] = await Promise.all([stat(paperLog), readFile(paperLog, 'utf8')]);
-    const identity = `${String(metadata.dev)}:${String(metadata.ino)}`;
-    const lines = content.split('\n').length - 1;
-    return identity === checkpoint.identity && lines >= checkpoint.lines ? checkpoint.lines : 0;
-  } catch (error) {
-    if (error?.code === 'ENOENT') return 0;
-    throw error;
-  }
+  const current = await paperLogPosition();
+  return current !== null && current.identity === checkpoint.identity && current.lines >= checkpoint.lines
+    ? checkpoint.lines
+    : 0;
 }
 
 async function waitForProcess(name, desiredStatus, timeoutMilliseconds) {
@@ -360,19 +349,19 @@ async function waitForProcess(name, desiredStatus, timeoutMilliseconds) {
 async function stopProcess(name, timeoutMilliseconds) {
   const statuses = await managedStatus();
   if (statuses === null || statuses.get(name)?.status === 'dead') return false;
-  await runOvermind(['stop', name]);
+  await run('overmind', ['stop', name]);
   if (await waitForProcess(name, 'dead', timeoutMilliseconds)) return false;
-  await runOvermind(['stop', name]);
+  await run('overmind', ['stop', name]);
   if (!(await waitForProcess(name, 'dead', 10_000))) {
-    throw new LifecycleError(`${name} did not stop after Overmind escalated to SIGKILL.`);
+    throw new Error(`${name} did not stop after Overmind escalated to SIGKILL.`);
   }
   return true;
 }
 
 async function restartProcess(name) {
-  await runOvermind(['restart', name]);
+  await run('overmind', ['restart', name]);
   if (!(await waitForProcess(name, 'running', 10_000))) {
-    throw new LifecycleError(`${name} did not start after Overmind restarted it.`);
+    throw new Error(`${name} did not start after Overmind restarted it.`);
   }
 }
 
@@ -402,7 +391,7 @@ async function stopStack() {
 
   process.stdout.write('Stopping the managed development stack...\n');
   const paperWasRunning = statuses.get('paper')?.status === 'running';
-  const checkpoint = paperWasRunning ? await logCheckpoint() : null;
+  const checkpoint = paperWasRunning ? await paperLogPosition() : null;
 
   if (statuses.get('web')?.status === 'running') {
     try {
@@ -412,11 +401,11 @@ async function stopStack() {
     }
   }
 
-  const quit = await runOvermind(['quit'], { capture: true, check: false });
+  const quit = await run('overmind', ['quit'], { capture: true, check: false });
   if (quit.code !== 0) issues.push(quit.stderr.trim() || 'Overmind could not begin shutdown');
   if (!(await waitForSupervisorExit())) {
     issues.push('Overmind exceeded its graceful shutdown deadline');
-    await runOvermind(['kill'], { capture: true, check: false });
+    await run('overmind', ['kill'], { capture: true, check: false });
     await waitForSupervisorExit();
   }
   await removeStaleSocket();
@@ -434,37 +423,33 @@ async function stopStack() {
   return issues;
 }
 
-async function startSupervisor() {
+async function startFresh({ prepare }) {
+  await mkdir(developmentDirectory, { recursive: true, mode: 0o700 });
+  await chmod(developmentDirectory, 0o700);
   await removeStaleSocket();
+  await ensureCredentials();
   await assertPortsAvailable();
-  await runOvermind(['start']);
+  if (prepare) await prepareFreshStack();
+  else await migrate();
+  await assertPortsAvailable();
+  await run('overmind', ['start']);
   await waitForReady();
   const validationFailure = await validatePaperLog('running');
-  if (validationFailure !== null) throw new LifecycleError(validationFailure);
+  if (validationFailure !== null) throw new Error(validationFailure);
   process.stdout.write(
     `Dirt MCP is ready: dashboard/MCP http://localhost:${String(ports.web)}, Minecraft 127.0.0.1:${String(ports.minecraft)}, bridge 127.0.0.1:${String(ports.bridge)}.\n`,
   );
 }
 
-async function startFresh({ prepare }) {
-  await mkdir(developmentDirectory, { recursive: true, mode: 0o700 });
-  await chmod(developmentDirectory, 0o700);
-  await ensureCredentials();
-  await assertPortsAvailable();
-  if (prepare) await prepareFreshStack();
-  else await migrate();
-  await startSupervisor();
-}
-
 function throwIssues(issues) {
-  if (issues.length > 0) throw new LifecycleError(`Lifecycle checks failed:\n- ${issues.join('\n- ')}`);
+  if (issues.length > 0) throw new Error(`Lifecycle checks failed:\n- ${issues.join('\n- ')}`);
 }
 
 async function up() {
   const statuses = await managedStatus({ retries: 5 });
   if (allRunning(statuses) && allHealthy(await healthChecks())) {
     const validationFailure = await validatePaperLog('running');
-    if (validationFailure !== null) throw new LifecycleError(validationFailure);
+    if (validationFailure !== null) throw new Error(validationFailure);
     process.stdout.write(
       `Dirt MCP is already ready on Minecraft port ${String(ports.minecraft)} with dashboard and MCP on port ${String(ports.web)}.\n`,
     );
@@ -472,7 +457,6 @@ async function up() {
   }
 
   const issues = statuses === null ? [] : await stopStack();
-  await removeStaleSocket();
   await startFresh({ prepare: true });
   throwIssues(issues);
 }
@@ -521,7 +505,7 @@ async function restartPaper() {
   if (statuses.get('web')?.status === 'running' && (await stopProcess('web', shutdownTimeoutMilliseconds))) {
     issues.push('web required SIGKILL to stop');
   }
-  const checkpoint = await logCheckpoint();
+  const checkpoint = await paperLogPosition();
   if (await stopProcess('paper', shutdownTimeoutMilliseconds)) issues.push('Paper required SIGKILL to stop');
   const shutdownFailure = await validatePaperLog('shutdown', checkpoint);
   if (shutdownFailure !== null) issues.push(shutdownFailure);
@@ -574,7 +558,7 @@ async function overmindConnection(processName) {
     let response = '';
     const fail = (error) => {
       client.destroy();
-      reject(new LifecycleError(`Could not resolve the managed ${processName} console: ${error.message}`));
+      reject(new Error(`Could not resolve the managed ${processName} console: ${error.message}`));
     };
     client.setEncoding('utf8');
     client.setTimeout(2_000, () => fail(new Error('Overmind did not respond')));
@@ -586,7 +570,7 @@ async function overmindConnection(processName) {
       client.end();
       const parts = response.slice(0, newline).trim().split(' ');
       if (parts.length < 2) {
-        reject(new LifecycleError(`Overmind does not have a ${processName} process.`));
+        reject(new Error(`Overmind does not have a ${processName} process.`));
         return;
       }
       resolve({ socket: parts[0], target: parts[1] });
@@ -623,8 +607,8 @@ async function logs() {
 
 async function consoleAttach() {
   const statuses = await managedStatus({ retries: 5 });
-  if (statuses?.get('paper')?.status !== 'running') throw new LifecycleError('Managed Paper is not running.');
-  await runOvermind(['connect', 'paper']);
+  if (statuses?.get('paper')?.status !== 'running') throw new Error('Managed Paper is not running.');
+  await run('overmind', ['connect', 'paper'], { interactive: true });
 }
 
 async function readPaperCommand() {
@@ -642,16 +626,16 @@ async function readPaperCommand() {
     for await (const chunk of process.stdin) commandText += chunk;
     commandText = stripSingleLineEnding(commandText);
   }
-  if (commandText.length === 0) throw new LifecycleError('Paper command must not be empty.');
+  if (commandText.length === 0) throw new Error('Paper command must not be empty.');
   if (commandText.includes('\n') || commandText.includes('\r')) {
-    throw new LifecycleError('Paper command must be exactly one line.');
+    throw new Error('Paper command must be exactly one line.');
   }
   return commandText;
 }
 
 async function sendPaperCommand(commandText) {
   const statuses = await managedStatus({ retries: 5 });
-  if (statuses?.get('paper')?.status !== 'running') throw new LifecycleError('Managed Paper is not running.');
+  if (statuses?.get('paper')?.status !== 'running') throw new Error('Managed Paper is not running.');
   const connection = await overmindConnection('paper');
   const buffer = `dirt-command-${randomUUID()}`;
   try {
@@ -660,13 +644,12 @@ async function sendPaperCommand(commandText) {
       check: false,
       input: commandText,
     });
-    if (loaded.code !== 0) throw new LifecycleError('Paper command could not be queued.');
-    const pasted = await run(
-      'tmux',
-      ['-L', connection.socket, 'paste-buffer', '-b', buffer, '-d', '-t', connection.target],
-      { capture: true, check: false },
-    );
-    if (pasted.code !== 0) throw new LifecycleError('Paper command could not be queued.');
+    if (loaded.code !== 0) throw new Error('Paper command could not be queued.');
+    const pasted = await run('tmux', ['-L', connection.socket, 'paste-buffer', '-b', buffer, '-t', connection.target], {
+      capture: true,
+      check: false,
+    });
+    if (pasted.code !== 0) throw new Error('Paper command could not be queued.');
   } finally {
     await run('tmux', ['-L', connection.socket, 'delete-buffer', '-b', buffer], {
       capture: true,
@@ -677,7 +660,7 @@ async function sendPaperCommand(commandText) {
     capture: true,
     check: false,
   });
-  if (submitted.code !== 0) throw new LifecycleError('Paper command could not be queued.');
+  if (submitted.code !== 0) throw new Error('Paper command could not be queued.');
 }
 
 async function queueCommand() {

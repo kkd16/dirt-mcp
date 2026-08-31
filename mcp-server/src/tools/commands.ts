@@ -1,5 +1,5 @@
 import type { CallToolResult, McpServer } from '@modelcontextprotocol/server';
-import * as z from 'zod/v4';
+import * as z from 'zod';
 import type { BridgeClient } from '../bridge/client.ts';
 import { BRIDGE_ROUTES } from '../bridge/contract.ts';
 import type { components } from '../generated/openapi.ts';

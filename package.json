@@ -1,6 +1,5 @@
 {
   "name": "dirt-mcp",
-  "version": "0.1.0",
   "private": true,
   "description": "Self-hosted passkey dashboard and authenticated MCP access to live Minecraft worlds",
   "license": "Apache-2.0",
@@ -24,7 +23,7 @@
     "start": "pnpm --filter @dirt-mcp/server start",
     "test": "pnpm --filter @dirt-mcp/server test",
     "generate:openapi-types": "openapi-typescript protocol/openapi.yaml --output mcp-server/src/generated/openapi.ts --immutable",
-    "check:openapi-types": "openapi-typescript protocol/openapi.yaml --output mcp-server/src/generated/openapi.ts --immutable --check",
+    "check:openapi-types": "pnpm run generate:openapi-types --check",
     "validate:openapi": "redocly lint protocol/openapi.yaml protocol/access-control.openapi.yaml --lint-config=error && pnpm run check:openapi-types"
   },
   "devDependencies": {
@@ -36,11 +35,6 @@
     "oxlint-tsgolint": "7.0.2001"
   },
   "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "11.24.0",
-      "onFail": "download"
-    },
     "runtime": {
       "name": "node",
       "version": "24.20.0",
@@ -48,6 +42,7 @@
     }
   },
   "engines": {
-    "node": ">=24.20.0 <25"
+    "node": ">=24.20.0 <25",
+    "pnpm": "11.24.0"
   }
 }

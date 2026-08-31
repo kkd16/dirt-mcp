@@ -1,19 +1,12 @@
 import { cimd } from '@better-auth/cimd';
 import { fetchClientMetadataResource } from '@better-auth/cimd/node';
-import {
-  APIError,
-  betterAuth,
-  getCurrentAdapter,
-  type Auth,
-  type BetterAuthOptions,
-  type BetterAuthPlugin,
-} from 'better-auth';
+import { APIError, betterAuth, getCurrentAdapter, type Auth, type BetterAuthOptions } from 'better-auth';
 import { mcp } from '@better-auth/mcp';
 import { passkey } from '@better-auth/passkey';
 import { jwt } from 'better-auth/plugins';
 import type Database from 'better-sqlite3';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import * as z from 'zod/v4';
+import * as z from 'zod';
 import type { AuthConfig } from './config.ts';
 import { AccessError, type AccessRepository, type OnboardingClaim } from './access/repository.ts';
 import { dirtAccessSchema } from './access/schema.ts';
@@ -229,28 +222,27 @@ export function createAuthOptions(
           },
         },
       }),
-      requireBetterAuthPlugin(
-        mcp({
-          loginPage: '/sign-in',
-          consentPage: '/consent',
-          resource,
-          scopes: ['dirt:mcp', 'offline_access'],
-          grantTypes: ['authorization_code', 'refresh_token'],
-          accessTokenExpiresIn: 300,
-          codeExpiresIn: 300,
-          refreshTokenExpiresIn: 2_592_000,
-          allowDynamicClientRegistration: false,
-          allowUnauthenticatedClientRegistration: false,
-          clientRegistrationRequirePKCE: true,
-          clientPrivileges: () => false,
-          resourcePrivileges: () => false,
-          customAccessTokenClaims({ user }) {
-            return user === null || user === undefined
-              ? {}
-              : { dirt_auth_version: repository.requireAuthorizationVersion(user.id) };
-          },
-        }),
-      ),
+      // @ts-expect-error -- https://github.com/better-auth/better-auth/issues/10213
+      mcp({
+        loginPage: '/sign-in',
+        consentPage: '/consent',
+        resource,
+        scopes: ['dirt:mcp', 'offline_access'],
+        grantTypes: ['authorization_code', 'refresh_token'],
+        accessTokenExpiresIn: 300,
+        codeExpiresIn: 300,
+        refreshTokenExpiresIn: 2_592_000,
+        allowDynamicClientRegistration: false,
+        allowUnauthenticatedClientRegistration: false,
+        clientRegistrationRequirePKCE: true,
+        clientPrivileges: () => false,
+        resourcePrivileges: () => false,
+        customAccessTokenClaims({ user }) {
+          return user === null || user === undefined
+            ? {}
+            : { dirt_auth_version: repository.requireAuthorizationVersion(user.id) };
+        },
+      }),
       cimd({
         fetchClientMetadataResource,
         metadataProfile: 'mcp-2026-07-28',
@@ -320,36 +312,6 @@ function requireTicket(headers: Headers | undefined, secret: string, publicOrigi
   } catch {
     throw new APIError('UNAUTHORIZED', { message: 'Invalid or expired onboarding ticket.' });
   }
-}
-
-// The OAuth provider's endpoint metadata is more specific than Better Auth's
-// plugin type. Validate the runtime boundary instead of weakening type checks.
-function requireBetterAuthPlugin(value: unknown): BetterAuthPlugin {
-  if (!isBetterAuthPlugin(value)) throw new TypeError('The MCP OAuth provider returned an invalid plugin.');
-  return value;
-}
-
-function isBetterAuthPlugin(value: unknown): value is BetterAuthPlugin {
-  if (
-    typeof value !== 'object' ||
-    value === null ||
-    !('id' in value) ||
-    value.id !== 'oauth-provider' ||
-    !('endpoints' in value) ||
-    typeof value.endpoints !== 'object' ||
-    value.endpoints === null
-  ) {
-    return false;
-  }
-  return Object.values(value.endpoints).every(
-    (endpoint) =>
-      typeof endpoint === 'function' &&
-      'path' in endpoint &&
-      typeof endpoint.path === 'string' &&
-      'options' in endpoint &&
-      typeof endpoint.options === 'object' &&
-      endpoint.options !== null,
-  );
 }
 
 function sign(value: string, secret: string): string {

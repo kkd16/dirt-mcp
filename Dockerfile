@@ -9,6 +9,7 @@ WORKDIR /workspace
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY mcp-server/package.json mcp-server/package.json
 
+# Keep the dependency cache separate from pnpm's managed Node runtime.
 RUN --mount=type=cache,id=dirt-pnpm,target=/pnpm/project-store \
     pnpm install --frozen-lockfile --store-dir /pnpm/project-store
 

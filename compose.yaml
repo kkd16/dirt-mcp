@@ -9,15 +9,11 @@ x-hardened: &hardened
   security_opt:
     - no-new-privileges:true
 
-x-app-image: &app-image dirt-mcp-web:local
-
 services:
   web:
     <<: *hardened
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: *app-image
+    build: .
+    image: &app-image dirt-mcp-web:local
     network_mode: host
     restart: unless-stopped
     stop_grace_period: 5m15s

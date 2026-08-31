@@ -16,10 +16,14 @@ function formString(form: FormData, name: string): string {
 async function responseObject(response: Response): Promise<Record<string, unknown>> {
   try {
     const value: unknown = await response.json();
-    return typeof value === 'object' && value !== null && !Array.isArray(value) ? value : {};
+    return isRecord(value) ? value : {};
   } catch {
     return {};
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function optionalString(object: Record<string, unknown>, name: string): string | undefined {
@@ -41,9 +45,10 @@ document.querySelector('[data-action="sign-in"]')?.addEventListener('click', () 
 });
 
 document.querySelector<HTMLFormElement>('[data-onboarding]')?.addEventListener('submit', (event) => {
+  const form = event.currentTarget;
+  if (!(form instanceof HTMLFormElement)) return;
   event.preventDefault();
   runUserAction(async () => {
-    const form = event.currentTarget;
     const kind = form.dataset.onboarding;
     const token = new URLSearchParams(location.hash.slice(1)).get('token');
     if ((kind !== 'invitation' && kind !== 'recovery') || token === null) {
@@ -81,9 +86,11 @@ document.querySelector('[data-action="sign-out"]')?.addEventListener('click', ()
 });
 
 document.querySelector<HTMLFormElement>('[data-link]')?.addEventListener('submit', (event) => {
+  const formElement = event.currentTarget;
+  if (!(formElement instanceof HTMLFormElement)) return;
   event.preventDefault();
   runUserAction(async () => {
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(formElement);
     const fragmentCode = new URLSearchParams(location.hash.slice(1)).get('code');
     const formCode = formString(form, 'code');
     const code = formCode.length > 0 ? formCode : (fragmentCode ?? '');

@@ -4,7 +4,6 @@
 .env.*
 .dev/
 backups/
-data/
 deploy/
 docs/
 gradle/
@@ -12,7 +11,6 @@ paper-plugin/
 protocol/
 scripts/
 secrets/
-node_modules/
 **/node_modules/
 **/dist/
 **/build/

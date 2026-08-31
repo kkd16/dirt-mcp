@@ -51,7 +51,7 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
     const auth = createAuth(config, database, repository);
     await auth.$context;
 
-    const now = Date.now();
+    const now = new Date().toISOString();
     database
       .prepare(
         'INSERT INTO "user" (id, name, email, emailVerified, image, createdAt, updatedAt, handle, status, minecraftUuid, minecraftName, authorizationVersion) VALUES (?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, 0)',

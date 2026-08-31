@@ -3,7 +3,8 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 .PHONY: help doctor install build build-paper build-web check check-production verify ci format up restart restart-paper restart-web down status health logs console command smoke clean
-.NOTPARALLEL: verify ci smoke restart restart-paper restart-web
+# Aggregate gates share build outputs and one managed development stack.
+.NOTPARALLEL: verify ci
 
 help: ## Show the available development commands.
 	@awk 'BEGIN { FS = ":.*## "; printf "Dirt MCP development commands:\n\n" } /^[a-zA-Z_-]+:.*## / { printf "  %-20s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -15,22 +16,16 @@ doctor: ## Verify every tool required by development and CI.
 	@command -v overmind >/dev/null || { printf 'Overmind 2.5.1 is required.\n' >&2; exit 1; }
 	@command -v tmux >/dev/null || { printf 'tmux is required by Overmind.\n' >&2; exit 1; }
 	@command -v docker >/dev/null || { printf 'Docker with Compose is required.\n' >&2; exit 1; }
-	@command -v shellcheck >/dev/null || { printf 'ShellCheck 0.9.0 or newer is required.\n' >&2; exit 1; }
-	@command -v actionlint >/dev/null || { printf 'actionlint 1.7.12 or newer is required.\n' >&2; exit 1; }
+	@command -v shellcheck >/dev/null || { printf 'ShellCheck is required.\n' >&2; exit 1; }
+	@command -v actionlint >/dev/null || { printf 'actionlint is required.\n' >&2; exit 1; }
 	@docker compose version >/dev/null || { printf 'The Docker Compose plugin is required.\n' >&2; exit 1; }
 	@docker info >/dev/null 2>&1 || { printf 'The Docker daemon is not available.\n' >&2; exit 1; }
 	@if ! ./gradlew -q javaToolchains | grep -Eq 'Language Version:[[:space:]]+25'; then \
 	  printf 'Gradle could not resolve the Java 25 toolchain required by Paper.\n' >&2; exit 1; fi
 	@node -e 'const manifest = require("./package.json"); const expected = manifest.devEngines.runtime.version; if (process.versions.node !== expected) { console.error(`Expected Node.js $${expected}, found $${process.version}.`); process.exit(1); }'
-	@expected="$$(node -p 'require("./package.json").devEngines.packageManager.version')"; actual="$$(pnpm --version)"; \
+	@expected="$$(node -p 'require("./package.json").engines.pnpm')"; actual="$$(pnpm --version)"; \
 	  [[ "$$actual" == "$$expected" ]] || { printf 'Expected pnpm %s, found %s.\n' "$$expected" "$$actual" >&2; exit 1; }
 	@[[ "$$(overmind --version)" == 'Overmind version 2.5.1' ]] || { overmind --version >&2; printf 'Overmind 2.5.1 is required.\n' >&2; exit 1; }
-	@shellcheck_version="$$(shellcheck --version | awk '/^version:/ { print $$2 }')"; \
-	  if [[ "$$(printf '%s\n%s\n' 0.9.0 "$$shellcheck_version" | sort -V | head -n 1)" != 0.9.0 ]]; then \
-	    printf 'Expected ShellCheck 0.9.0 or newer, found %s.\n' "$$shellcheck_version" >&2; exit 1; fi
-	@actionlint_version="$$(actionlint -version | awk 'NR == 1 { print $$1 }')"; \
-	  if [[ "$$(printf '%s\n%s\n' 1.7.12 "$$actionlint_version" | sort -V | head -n 1)" != 1.7.12 ]]; then \
-	    printf 'Expected actionlint 1.7.12 or newer, found %s.\n' "$$actionlint_version" >&2; exit 1; fi
 	@printf 'Java launcher: '; java -version 2>&1 | head -n 1
 	@printf 'Paper toolchain: Java 25\n'
 	@printf 'Node.js: %s\n' "$$(node --version)"
@@ -63,9 +58,9 @@ check-production: export DIRT_CONTROL_TOKEN_FILE := /dev/null
 check-production: export DIRT_PUBLIC_HOST := dirt.example.com
 check-production: ## Validate every production Compose profile and image.
 	docker compose --profile '*' config --quiet
-	docker compose build --pull
+	docker compose build
 	docker run --rm --entrypoint /bin/sh dirt-mcp-web:local -c 'test -r /app/LICENSE'
-	docker compose run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+	docker compose run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile
 
 verify: check smoke ## Run the complete incremental local gate, including live smoke coverage.
 

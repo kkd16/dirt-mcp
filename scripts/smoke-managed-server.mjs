@@ -4,10 +4,10 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { open, readdir, readFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { fileURLToPath } from 'node:url';
 
-const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
+const repositoryRoot = dirname(import.meta.dirname);
 const runDirectory = `${repositoryRoot}/.dev/paper`;
 const detailLogDirectory = `${runDirectory}/plugins/DirtMCP/logs`;
 const token = (await readFile(`${repositoryRoot}/.dev/secrets/bridge-token`, 'utf8')).trim();

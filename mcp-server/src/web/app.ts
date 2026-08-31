@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { Hono, type Context } from 'hono';
 import { routePath } from 'hono/route';
 import { secureHeaders } from 'hono/secure-headers';
-import * as z from 'zod/v4';
+import * as z from 'zod';
 import { AccessError, type AccessRepository, type UserSummary } from '../access/repository.ts';
 import { internalError, readJsonBody, registerInternalRoutes, validCallIdOrNull } from '../access/routes.ts';
 import {

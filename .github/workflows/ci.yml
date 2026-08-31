@@ -37,6 +37,7 @@ jobs:
         with:
           cache: true
           install: false
+          version: '11.24.0'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0

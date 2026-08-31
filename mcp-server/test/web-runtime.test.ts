@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { getCurrentAdapter } from 'better-auth';
 import { getMigrations } from 'better-auth/db/migration';
 import { AccessError, AccessRepository } from '../dist/access/repository.js';
 import {
@@ -36,7 +37,8 @@ const migration = await getMigrations(createAuthOptions(config, database, reposi
 await migration.runMigrations();
 repository.assertSchema();
 const auth = createAuth(config, database, repository);
-await auth.$context;
+const authContext = await auth.$context;
+const authAdapter = await getCurrentAdapter(authContext.adapter);
 
 after(() => {
   database.close();
@@ -199,10 +201,24 @@ test('unexpected auth transport failures use the sanitized web error boundary', 
   assert.doesNotMatch(JSON.stringify(errors), /private aborted-body detail/u);
 });
 
-test('invite, recovery, account status, and link transitions are atomic and bounded', () => {
+test('invite, recovery, account status, and link transitions are atomic and bounded', async () => {
   const now = new Date('2026-08-30T12:00:00.000Z');
   const invitation = repository.createInvitation(now);
   assert.equal(invitation.invitation.status, 'pending');
+  assert.deepEqual(
+    database
+      .prepare<[string], { createdAt: string; expiresAt: string }>(
+        'SELECT typeof(createdAt) AS createdAt, typeof(expiresAt) AS expiresAt FROM invitation WHERE id = ?',
+      )
+      .get(invitation.invitation.id),
+    { createdAt: 'text', expiresAt: 'text' },
+  );
+  const adaptedInvitation = await authAdapter.findOne<{ createdAt: Date; expiresAt: Date }>({
+    model: 'invitation',
+    where: [{ field: 'id', value: invitation.invitation.id }],
+  });
+  assert.equal(adaptedInvitation?.createdAt.toISOString(), now.toISOString());
+  assert.equal(adaptedInvitation?.expiresAt.toISOString(), invitation.invitation.expiresAt);
   assert.equal(repository.resolveInvitation(invitation.secret, now).recordId, invitation.invitation.id);
   assert.ok(repository.listInvitations(1, now).items.some(({ id }) => id === invitation.invitation.id));
   assert.equal(repository.revokeInvitation(invitation.invitation.id, now).status, 'revoked');
@@ -219,10 +235,17 @@ test('invite, recovery, account status, and link transitions are atomic and boun
   assert.throws(() => repository.resolveRecovery(expiredRecovery.secret, now), AccessError);
   const recovery = repository.createRecovery('builder', now);
   assert.equal(new Date(recovery.expiresAt).getTime() - now.getTime(), 15 * 60 * 1_000);
-  assert.equal(repository.resolveRecovery(recovery.secret, now).handle, 'builder');
+  const recoveryClaim = repository.resolveRecovery(recovery.secret, now);
+  assert.equal(recoveryClaim.handle, 'builder');
+  const adaptedRecovery = await authAdapter.findOne<{ createdAt: Date; expiresAt: Date }>({
+    model: 'credentialRecovery',
+    where: [{ field: 'id', value: recoveryClaim.recordId }],
+  });
+  assert.equal(adaptedRecovery?.createdAt.toISOString(), now.toISOString());
+  assert.equal(adaptedRecovery?.expiresAt.toISOString(), recovery.expiresAt);
   const expiredRecoveryCount = database
-    .prepare<[number], { count: number }>('SELECT COUNT(*) AS count FROM credentialRecovery WHERE expiresAt <= ?')
-    .get(now.getTime());
+    .prepare<[string], { count: number }>('SELECT COUNT(*) AS count FROM credentialRecovery WHERE expiresAt <= ?')
+    .get(now.toISOString());
   assert.equal(expiredRecoveryCount?.count, 0);
 
   const first = repository.createMinecraftLinkChallenge('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Builder', now);
@@ -767,19 +790,21 @@ function insertUser(id: string, handle: string, now: Date): void {
     .prepare(
       'INSERT INTO "user" (id, name, email, emailVerified, image, createdAt, updatedAt, handle, status, minecraftUuid, minecraftName, authorizationVersion) VALUES (?, ?, ?, 0, NULL, ?, ?, ?, ?, NULL, NULL, 0)',
     )
-    .run(id, handle, `${id}@dirt.placeholder.invalid`, now.getTime(), now.getTime(), handle, 'active');
+    .run(id, handle, `${id}@dirt.placeholder.invalid`, now.toISOString(), now.toISOString(), handle, 'active');
 }
 
 function insertAuthorizationArtifacts(userId: string, suffix: string, now: Date): void {
   const clientId = `https://client-${suffix}.example/client.json`;
   const sessionId = `session-${suffix}`;
   const refreshId = `refresh-${suffix}`;
+  const createdAt = now.toISOString();
+  const expiresAt = new Date(now.getTime() + 60_000).toISOString();
   database
     .prepare('INSERT INTO oauthClient (id, clientId, redirectUris) VALUES (?, ?, ?)')
     .run(`client-row-${suffix}`, clientId, JSON.stringify([`https://client-${suffix}.example/callback`]));
   database
     .prepare('INSERT INTO session (id, expiresAt, token, createdAt, updatedAt, userId) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(sessionId, now.getTime() + 60_000, `session-token-${suffix}`, now.getTime(), now.getTime(), userId);
+    .run(sessionId, expiresAt, `session-token-${suffix}`, createdAt, createdAt, userId);
   database
     .prepare(
       'INSERT INTO verification (id, identifier, value, expiresAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
@@ -788,13 +813,13 @@ function insertAuthorizationArtifacts(userId: string, suffix: string, now: Date)
       `verification-${suffix}`,
       `authorization-code-${suffix}`,
       JSON.stringify({ type: 'authorization_code', userId }),
-      now.getTime() + 60_000,
-      now.getTime(),
-      now.getTime(),
+      expiresAt,
+      createdAt,
+      createdAt,
     );
   database
     .prepare('INSERT INTO oauthConsent (id, clientId, userId, scopes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(`consent-${suffix}`, clientId, userId, JSON.stringify(['dirt:mcp']), now.getTime(), now.getTime());
+    .run(`consent-${suffix}`, clientId, userId, JSON.stringify(['dirt:mcp']), createdAt, createdAt);
   database
     .prepare(
       'INSERT INTO oauthRefreshToken (id, token, clientId, sessionId, userId, expiresAt, createdAt, scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -805,8 +830,8 @@ function insertAuthorizationArtifacts(userId: string, suffix: string, now: Date)
       clientId,
       sessionId,
       userId,
-      now.getTime() + 60_000,
-      now.getTime(),
+      expiresAt,
+      createdAt,
       JSON.stringify(['dirt:mcp']),
     );
   database
@@ -820,8 +845,8 @@ function insertAuthorizationArtifacts(userId: string, suffix: string, now: Date)
       sessionId,
       userId,
       refreshId,
-      now.getTime() + 60_000,
-      now.getTime(),
+      expiresAt,
+      createdAt,
       JSON.stringify(['dirt:mcp']),
     );
   if (!hasPasskey(userId)) {
@@ -836,7 +861,7 @@ function insertAuthorizationArtifacts(userId: string, suffix: string, now: Date)
         userId,
         'credential-user-one',
         'singleDevice',
-        now.getTime(),
+        createdAt,
       );
   }
 }

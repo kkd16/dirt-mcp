@@ -1,6 +1,6 @@
 import type { Context, Hono } from 'hono';
 import { createHash, timingSafeEqual } from 'node:crypto';
-import * as z from 'zod/v4';
+import * as z from 'zod';
 import type { RuntimeConfig } from '../config.ts';
 import { BodyTooLargeError, InvalidBodyEncodingError, readBoundedText } from '../http-body.ts';
 import { AccessError, type AccessRepository, type UserSummary } from './repository.ts';
