@@ -10,8 +10,9 @@ readonly fawe_version='2.15.4'
 readonly fawe_filename='FastAsyncWorldEdit-Paper-2.15.4.jar'
 readonly fawe_url='https://cdn.modrinth.com/data/z4HZZnLr/versions/5TOYHuQr/FastAsyncWorldEdit-Paper-2.15.4.jar'
 readonly fawe_sha512='f623a5729aed386c5aec0cc5a51f01a6362d452b020851bd8e17bb9df66b9abaa217b07a4fbf3ee084ddea202824843390e02486f6eea5640624e6ab6bcc81b8'
-readonly caddy_key_url='https://dl.cloudsmith.io/public/caddy/stable/gpg.key'
-readonly caddy_repository_url='https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt'
+readonly caddy_key_url='https://dl.cloudsmith.io/public/caddy/stable/gpg.155B6D79CA56EA34.key'
+readonly caddy_key_fingerprint='65760C51EDEA2017CEA2CA15155B6D79CA56EA34'
+readonly caddy_repository_entry='deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main'
 readonly application_directory='/opt/dirt-mcp'
 readonly configuration_directory='/etc/dirt-mcp'
 readonly credentials_directory='/etc/dirt-mcp/credentials'
@@ -311,9 +312,7 @@ prepare_downloads() {
   curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
     --retry 3 --retry-all-errors --connect-timeout 15 --max-time 60 \
     --output "${temporary_directory}/caddy.gpg.key" "${caddy_key_url}"
-  curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
-    --retry 3 --retry-all-errors --connect-timeout 15 --max-time 60 \
-    --output "${temporary_directory}/caddy-stable.list" "${caddy_repository_url}"
+  printf '%s\n' "${caddy_repository_entry}" >"${temporary_directory}/caddy-stable.list"
 }
 
 write_install_state() {
@@ -553,11 +552,26 @@ render_templates() {
 }
 
 install_caddy() {
+  local key_fingerprint
+
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
     -o Dpkg::Options::=--force-confold \
     apt-transport-https ca-certificates curl debian-archive-keyring debian-keyring gpg
-  gpg --dearmor --batch --yes --output "${temporary_directory}/caddy-stable-archive-keyring.gpg" \
+  if ! key_fingerprint=$(
+    gpg --batch --quiet --no-options --no-default-keyring --show-keys --with-colons \
+      "${temporary_directory}/caddy.gpg.key" |
+      awk -F: '
+        $1 == "pub" { primary_key = 1; next }
+        primary_key && $1 == "fpr" { print $10; primary_key = 0 }
+      '
+  ); then
+    fail 'downloaded Caddy signing key is invalid'
+  fi
+  [[ "${key_fingerprint}" == "${caddy_key_fingerprint}" ]] ||
+    fail 'downloaded Caddy signing key fingerprint is invalid'
+  gpg --dearmor --batch --yes --no-options \
+    --output "${temporary_directory}/caddy-stable-archive-keyring.gpg" \
     "${temporary_directory}/caddy.gpg.key"
   install -o root -g root -m 0644 "${temporary_directory}/caddy-stable-archive-keyring.gpg" \
     /usr/share/keyrings/caddy-stable-archive-keyring.gpg
