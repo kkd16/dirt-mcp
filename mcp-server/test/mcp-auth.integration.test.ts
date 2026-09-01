@@ -187,21 +187,6 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
     }
     assert.equal(bridgeRequests, 0);
 
-    const missingVersion = mcpRequest(resource, issued.token);
-    missingVersion.headers.delete('MCP-Protocol-Version');
-    assert.equal((await mcp.fetch(missingVersion)).status, 400);
-
-    const withoutMcpHeaders = new Request(resource, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${issued.token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
-    });
-    assert.equal((await mcp.fetch(withoutMcpHeaders)).status, 400);
-    assert.equal(bridgeRequests, 0);
-
     const authorized = await mcp.fetch(mcpRequest(resource, issued.token));
     assert.equal(authorized.status, 200);
     const result = (await authorized.json()) as { result?: { tools?: unknown[]; resultType?: string } };
@@ -274,10 +259,30 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
     assert.equal(reauthorized.status, 200);
     assert.equal(bridgeRequests, 2);
 
+    const legacyInitialize = await mcp.fetch(legacyInitializeRequest(resource, current.token));
+    assert.equal(legacyInitialize.status, 200);
+    assert.match(await legacyInitialize.text(), /"protocolVersion":"2025-06-18"/u);
+
+    const legacyInitialized = await mcp.fetch(
+      legacyRequest(resource, current.token, {
+        jsonrpc: '2.0',
+        method: 'notifications/initialized',
+      }),
+    );
+    assert.equal(legacyInitialized.status, 202);
+
+    const legacyTools = await mcp.fetch(
+      legacyRequest(resource, current.token, { jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+    );
+    assert.equal(legacyTools.status, 200);
+    assert.match(await legacyTools.text(), /"tools":\[\]/u);
+    const bridgeRequestsAfterLegacyHandshake = bridgeRequests;
+    assert.ok(bridgeRequestsAfterLegacyHandshake > 2);
+
     repository.unlinkUser('linked');
     const supersededByUnlink = await mcp.fetch(mcpRequest(resource, current.token));
     assert.equal(supersededByUnlink.status, 403);
-    assert.equal(bridgeRequests, 2);
+    assert.equal(bridgeRequests, bridgeRequestsAfterLegacyHandshake);
   } finally {
     if (mcp !== undefined) await mcp.close();
     await new Promise<void>((resolve, reject) => {
@@ -309,6 +314,32 @@ function mcpRequest(resource: string, token: string): Request {
         },
       },
     }),
+  });
+}
+
+function legacyInitializeRequest(resource: string, token: string): Request {
+  return legacyRequest(resource, token, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'Dirt legacy compatibility test', version: '1' },
+    },
+  });
+}
+
+function legacyRequest(resource: string, token: string, body: object): Request {
+  return new Request(resource, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json, text/event-stream',
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'MCP-Protocol-Version': '2025-06-18',
+    },
+    body: JSON.stringify(body),
   });
 }
 

@@ -1,12 +1,5 @@
 import { requireMcpAuth } from '@better-auth/mcp';
-import {
-  classifyInboundRequest,
-  createMcpHandler,
-  isJsonContentType,
-  type AuthInfo,
-  type InboundHttpRequest,
-  type McpHttpHandler,
-} from '@modelcontextprotocol/server';
+import { createMcpHandler, isJsonContentType, type AuthInfo, type McpHttpHandler } from '@modelcontextprotocol/server';
 import { randomUUID } from 'node:crypto';
 import type { AccessRepository } from './access/repository.ts';
 import type { DirtAuth } from './auth.ts';
@@ -42,6 +35,8 @@ export function createDirtMcpHandler(
       return createDirtServer(bridge, toolConfigurationFromCapabilities(capabilities), logger);
     },
     {
+      // Keep 2025-06-18 compatibility alongside 2026-07-28.
+      legacy: 'stateless',
       onerror(error) {
         httpLogger.error('mcp.transport_error', 'MCP transport error.', safeErrorFields(error));
       },
@@ -78,20 +73,6 @@ export function createDirtMcpHandler(
           return jsonRpcError(413, -32_600, 'Request body is too large.');
         }
         return jsonRpcError(400, -32_700, 'Parse error.');
-      }
-      const inbound: InboundHttpRequest = {
-        httpMethod: request.method,
-        body: parsedBody,
-      };
-      const protocolVersionHeader = request.headers.get('MCP-Protocol-Version');
-      const mcpMethodHeader = request.headers.get('Mcp-Method');
-      const mcpNameHeader = request.headers.get('Mcp-Name');
-      if (protocolVersionHeader !== null) inbound.protocolVersionHeader = protocolVersionHeader;
-      if (mcpMethodHeader !== null) inbound.mcpMethodHeader = mcpMethodHeader;
-      if (mcpNameHeader !== null) inbound.mcpNameHeader = mcpNameHeader;
-      const classification = classifyInboundRequest(inbound);
-      if (classification.kind !== 'modern' || protocolVersionHeader === null) {
-        return jsonRpcError(400, -32_600, 'A complete MCP 2026-07-28 request envelope is required.');
       }
       const authInfo: AuthInfo = {
         token: accessToken,

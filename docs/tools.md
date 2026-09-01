@@ -16,17 +16,17 @@ tools. Operations that are not admitted do not appear in MCP discovery.
 
 Yes: MCP Streamable HTTP messages are JSON-RPC, and each tool's arguments and
 structured result are JSON objects. Dirt accepts independent authenticated
-`POST /mcp` requests; it does not expose legacy SSE, GET streams, or MCP
-sessions. During discovery, `tools/list` advertises an
-`inputSchema` and `outputSchema` in JSON Schema. Those live schemas, generated
-from Dirt's Zod schemas, define the machine-readable structure for inputs and
-non-error completions. Dirt also enforces documented cross-field refinements at
-runtime. Every input object is strict, so unknown fields are rejected. Results
-with `isError=true` instead use the common, command, or partial-undo failure
-shapes documented below.
+`POST /mcp` requests; it does not expose legacy SSE, GET streams, or persistent
+MCP sessions. The same endpoint supports `2025-06-18` and `2026-07-28`. During
+discovery, `tools/list` advertises an `inputSchema` and `outputSchema` in JSON
+Schema. Those live schemas, generated from Dirt's Zod schemas, define the
+machine-readable structure for inputs and non-error completions. Dirt also
+enforces documented cross-field refinements at runtime. Every input object is
+strict, so unknown fields are rejected. Results with `isError=true` instead use
+the common, command, or partial-undo failure shapes documented below.
 
 The agent chooses `name` and `arguments`. The MCP host adds the JSON-RPC
-envelope and protocol metadata. A complete call looks like this:
+envelope and protocol metadata. A complete 2026-era call looks like this:
 
 ```json
 {

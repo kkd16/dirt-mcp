@@ -97,11 +97,13 @@ web account to one Minecraft UUID.
 MCP authorization uses one fixed `dirt:mcp` scope. The service supports current
 client metadata discovery plus authorization code flow with PKCE S256; it does
 not support dynamic client registration, client credentials, legacy MCP
-transports, or compatibility endpoints. Every MCP request validates the token's
-issuer, audience, expiry, scope, and current authorization generation, then
-reloads the account's active and linked state. There are deliberately no roles or
-per-account capability records in v1: every active, linked account receives the
-same Paper-limited tool catalog.
+transports, or version-specific endpoints. The single Streamable HTTP endpoint
+intentionally serves both `2025-06-18` and `2026-07-28` through one server
+factory, with identical authentication and tools. Every MCP request validates
+the token's issuer, audience, expiry, scope, and current authorization
+generation, then reloads the account's active and linked state. There are
+deliberately no roles or per-account capability records in v1: every active,
+linked account receives the same Paper-limited tool catalog.
 
 ## Execution model
 
