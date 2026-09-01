@@ -57,14 +57,16 @@ function Shell({ title, pageName, children, signedIn = false }: ShellProperties)
             </span>
             <span>Dirt</span>
           </a>
-          <span class="header-note">Minecraft MCP</span>
           {signedIn ? (
-            <div class="header-action action-zone">
-              <span class="form-status compact-status" data-form-status role="status" aria-live="polite" />
-              <button class="quiet-button" type="button" data-action="sign-out">
-                Sign out
-              </button>
-            </div>
+            <>
+              <span class="header-note">Minecraft MCP</span>
+              <div class="header-action action-zone">
+                <span class="form-status compact-status" data-form-status role="status" aria-live="polite" />
+                <button class="quiet-button" type="button" data-action="sign-out">
+                  Sign out
+                </button>
+              </div>
+            </>
           ) : null}
         </header>
         <main id="main" tabindex={-1}>
@@ -76,65 +78,23 @@ function Shell({ title, pageName, children, signedIn = false }: ShellProperties)
   );
 }
 
-export function PublicPage({ continuation }: { readonly continuation?: 'minecraft-link' }): JSX.Element {
-  const linking = continuation === 'minecraft-link';
+export function SignInPage({ continueToDashboard = false }: { readonly continueToDashboard?: boolean }): JSX.Element {
   return (
-    <Shell title={linking ? 'Sign in to link Minecraft' : 'Minecraft MCP'} pageName="home">
-      <div class="landing-shell">
-        <section class="landing-hero" aria-labelledby="landing-title">
-          <div class="survey-coordinate" aria-hidden="true">
-            <span>N 64°</span>
-            <span>Y +00</span>
-          </div>
-          <p class="eyebrow">Self-hosted Minecraft MCP</p>
-          <h1 id="landing-title">
-            MCP for your
-            <span>Paper world.</span>
-          </h1>
-          <p class="lede">Inspect and edit a live Minecraft world from any compatible MCP client.</p>
-          <div class="action-zone landing-action">
+    <Shell title={continueToDashboard ? 'Sign in to continue' : 'Sign in'} pageName="sign-in">
+      <div class="sign-in-layout">
+        <section class="task-card action-zone" aria-labelledby="sign-in-title">
+          <p class="eyebrow">Invite-only access</p>
+          <h1 id="sign-in-title">{continueToDashboard ? 'Sign in to continue' : 'Sign in to Dirt'}</h1>
+          <p class="task-intro">Use your passkey to access the dashboard.</p>
+          <div class="sign-in-action">
             <button class="primary-button" type="button" data-action="sign-in">
-              {linking ? 'Sign in and continue' : 'Sign in with a passkey'}
+              {continueToDashboard ? 'Sign in and continue' : 'Sign in with a passkey'}
             </button>
             <p class="form-status" data-form-status role="status" aria-live="polite">
-              {linking ? 'The link code stays in this browser.' : ''}
+              {continueToDashboard ? 'The link code stays in this browser.' : ''}
             </p>
           </div>
-          <p class="invitation-note">Access is invite-only. Ask your server operator for an invitation.</p>
-        </section>
-
-        <aside class="survey-field" aria-label="Gateway availability">
-          <div class="contour contour-one" aria-hidden="true" />
-          <div class="contour contour-two" aria-hidden="true" />
-          <div class="field-reading">
-            <span class="status-dot" aria-hidden="true" />
-            <p class="reading-label">Gateway</p>
-            <p class="reading-value">Online</p>
-            <p class="reading-detail">Sign in for Paper status.</p>
-          </div>
-          <div class="field-axis" aria-hidden="true">
-            <span>bridge</span>
-            <span>oauth</span>
-            <span>mcp</span>
-          </div>
-        </aside>
-
-        <section class="landing-notes" aria-label="How Dirt works">
-          <article>
-            <p class="note-label">Observe</p>
-            <h2>Inspect the world.</h2>
-            <p>Read blocks, views, players, and server status.</p>
-          </article>
-          <article>
-            <p class="note-label">Shape</p>
-            <h2>Make bounded edits.</h2>
-            <p>FAWE-backed edits are serialized per world and recorded for undo.</p>
-          </article>
-          <article>
-            <p class="note-label">Control</p>
-            <h2>Keep it local.</h2>
-            <p>Passkeys and OAuth protect the public edge. Paper stays on loopback.</p>
-          </article>
+          <p class="sign-in-note">Need an account? Ask your server operator for an invitation.</p>
         </section>
       </div>
     </Shell>
@@ -265,7 +225,9 @@ export function DashboardPage({ model }: { readonly model: DashboardViewModel })
                 <span>of {readiness.totalTools} MCP tools enabled</span>
               </p>
               <p class="supporting-copy">
-                {readiness.bridgeAvailable ? 'Capabilities loaded from Paper.' : 'Account controls remain available.'}
+                {readiness.bridgeAvailable
+                  ? 'Inspect the live world and make bounded, undoable edits through an authorized MCP client.'
+                  : 'Account controls remain available.'}
               </p>
             </div>
           </section>

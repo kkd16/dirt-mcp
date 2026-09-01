@@ -505,9 +505,10 @@ test('web shell exposes a loopback health check and hardened consent copy', asyn
   assert.equal(home.status, 200);
   const homeHtml = await home.text();
   assert.match(homeHtml, /^<!DOCTYPE html>/u);
-  assert.match(homeHtml, /MCP for your/u);
-  assert.match(homeHtml, /Online/u);
+  assert.match(homeHtml, /Sign in to Dirt/u);
   assert.match(homeHtml, /Sign in with a passkey/u);
+  assert.match(homeHtml, /Ask your server operator for an invitation/u);
+  assert.doesNotMatch(homeHtml, /Inspect and edit|Gateway|How Dirt works|Paper world/u);
   assert.doesNotMatch(homeHtml, /Paper and FAWE online/u);
 
   const signedOutDashboard = await app.request('/dashboard', { headers: { Host: 'localhost:3000' } });
@@ -770,6 +771,7 @@ test('dashboard presents safe identity, readiness, client, and passkey summaries
   const html = await response.text();
   assert.match(html, /MCP ready/u);
   assert.match(html, /Paper and FAWE online/u);
+  assert.match(html, /Inspect the live world and make bounded, undoable edits/u);
   assert.match(html, />12<\/span>\s*<span>of 12 MCP tools enabled/u);
   assert.match(html, /FieldWorker/u);
   assert.match(html, /34343434-3434-4343-8343-343434343434/u);

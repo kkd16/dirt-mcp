@@ -28,7 +28,7 @@ import {
   DashboardPage,
   ErrorPage,
   OnboardingPage,
-  PublicPage,
+  SignInPage,
   type DashboardViewModel,
   type ReadinessSummary,
 } from './pages.tsx';
@@ -224,16 +224,16 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
       if (sessionUser !== null && isRecentlyAuthenticated(sessionUser.sessionCreatedAt)) {
         return context.redirect(`/api/auth/oauth2/authorize${requestUrl.search}`, 303);
       }
-      return context.render(PublicPage({}));
+      return context.render(SignInPage({}));
     }
     if (sessionUser !== null) return context.redirect('/dashboard', 303);
-    return context.render(PublicPage({}));
+    return context.render(SignInPage({}));
   });
   app.get('/invite', (context) => context.render(OnboardingPage({ kind: 'invitation' })));
   app.get('/recover', (context) => context.render(OnboardingPage({ kind: 'recovery' })));
   app.get('/dashboard', async (context) => {
     const sessionUser = await currentSessionUser(auth, repository, context.req.raw.headers);
-    if (sessionUser === null) return context.render(PublicPage({ continuation: 'minecraft-link' }));
+    if (sessionUser === null) return context.render(SignInPage({ continueToDashboard: true }));
     context.header('Set-Cookie', expiredOnboardingCookie(config.publicOrigin));
     const model = await dashboardViewModel(bridge, repository, sessionUser.user, config.publicOrigin);
     return context.render(DashboardPage({ model }));
