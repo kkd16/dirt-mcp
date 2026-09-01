@@ -11,7 +11,6 @@ import { AccessError, type AccessRepository, type UserSummary } from '../access/
 import { internalError, readJsonBody, registerInternalRoutes, validCallIdOrNull } from '../access/routes.ts';
 import {
   createOnboardingTicket,
-  onboardingCookieName,
   onboardingCookieHeader,
   readOnboardingClaim,
   SESSION_FRESH_AGE_SECONDS,
@@ -350,8 +349,7 @@ async function dashboardReadiness(bridge: Pick<BridgeClient, 'request'>): Promis
 }
 
 function expiredOnboardingCookie(publicOrigin: string): string {
-  const secure = publicOrigin.startsWith('https://');
-  return `${onboardingCookieName(publicOrigin)}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? '; Secure' : ''}`;
+  return onboardingCookieHeader(publicOrigin, { value: '', maxAge: 0 });
 }
 
 function currentOnboardingClaim(
@@ -361,7 +359,7 @@ function currentOnboardingClaim(
 ): { readonly username: string } | null {
   try {
     const claim = readOnboardingClaim(headers, config.authSecret, config.publicOrigin);
-    return claim.kind === kind ? { username: claim.username } : null;
+    return claim.kind === kind ? claim : null;
   } catch {
     return null;
   }

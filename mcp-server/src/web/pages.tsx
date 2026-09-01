@@ -495,7 +495,7 @@ function isLoopbackHostname(hostname: string): boolean {
 function dashboardTask(model: DashboardViewModel): {
   readonly title: string;
   readonly detail: string;
-  readonly action: string;
+  readonly action?: string;
   readonly label: string;
   readonly coordinate: string;
   readonly tone: string;
@@ -504,7 +504,6 @@ function dashboardTask(model: DashboardViewModel): {
     return {
       title: 'Link Minecraft again',
       detail: 'Your account needs a verified Minecraft identity before it can use MCP.',
-      action: '',
       label: 'Next step',
       coordinate: '01',
       tone: 'warning',
@@ -514,7 +513,6 @@ function dashboardTask(model: DashboardViewModel): {
     return {
       title: 'Connect your MCP client',
       detail: 'Minecraft and your passkey are ready. One connection step remains.',
-      action: '',
       label: 'Final setup step',
       coordinate: '03',
       tone: 'active',

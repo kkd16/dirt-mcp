@@ -9,7 +9,12 @@ async function main(): Promise<void> {
   const database = openDatabase(config.databasePath);
   try {
     const repository = new AccessRepository(database);
-    if (isFreshDatabase()) {
+    const existingTables = database
+      .prepare<[], { count: number }>(
+        "SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+      )
+      .get();
+    if (existingTables?.count === 0) {
       const freshSchema = await getMigrations(createAuthOptions(config, database, repository));
       await freshSchema.runMigrations();
     }
@@ -19,15 +24,6 @@ async function main(): Promise<void> {
     // externally owned SQLite connection.
     await createAuth(config, database, repository).$context;
     process.stdout.write('Dirt database schema is ready.\n');
-
-    function isFreshDatabase(): boolean {
-      const row = database
-        .prepare<[], { count: number }>(
-          "SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
-        )
-        .get();
-      return row?.count === 0;
-    }
   } finally {
     database.close();
   }
