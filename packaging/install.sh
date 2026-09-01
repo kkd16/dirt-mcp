@@ -559,7 +559,8 @@ install_caddy() {
     -o Dpkg::Options::=--force-confold \
     apt-transport-https ca-certificates curl debian-archive-keyring debian-keyring gpg
   if ! key_fingerprint=$(
-    gpg --batch --quiet --no-options --no-default-keyring --show-keys --with-colons \
+    gpg --homedir "${temporary_directory}" --batch --quiet --no-options --no-default-keyring \
+      --show-keys --with-colons \
       "${temporary_directory}/caddy.gpg.key" |
       awk -F: '
         $1 == "pub" { primary_key = 1; next }
