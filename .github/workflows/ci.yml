@@ -162,6 +162,7 @@ jobs:
             --resolve ci.dirt-mcp.internal:80:127.0.0.1 \
             http://ci.dirt-mcp.internal/)" == '400' ]]
           sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          set -x
           sudo systemd-analyze verify /etc/systemd/system/dirt-mcp.service
 
           for unused_port in 25565 8765; do
