@@ -132,7 +132,7 @@ web/MCP service without granting it access to the Paper tree.
 Join Minecraft as an operator and run:
 
 ```text
-/dirt access invite create
+/dirt invite create
 ```
 
 Open the private click-to-copy URL, choose a handle, and enroll a passkey. Then
@@ -142,14 +142,14 @@ while recently signed in. Dirt enforces one web account to one Minecraft UUID.
 Operators can list and administer access in game:
 
 ```text
-/dirt access users [page]
-/dirt access invitations [page]
-/dirt access invite create
-/dirt access invite revoke <id>
-/dirt access user disable <handle>
-/dirt access user enable <handle>
-/dirt access user recover <handle>
-/dirt access user unlink <handle>
+/dirt users [page]
+/dirt invites [page]
+/dirt invite create
+/dirt invite revoke <id>
+/dirt user disable <handle>
+/dirt user enable <handle>
+/dirt user recover <handle>
+/dirt user unlink <handle>
 ```
 
 Invite and recovery creation are in-game-only because they return secrets.

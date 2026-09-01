@@ -60,17 +60,22 @@ final class DirtAdminCommandTest {
                 fixture(new SenderAccess(false, false, false, false), status());
 
         assertEquals(
-                Set.of("access", "config", "help", "link", "status", "version"),
+                Set.of(
+                        "config", "help", "invite", "invites", "link", "status", "user", "users",
+                        "version"),
                 operator.suggestions("dirt "));
         assertEquals(1, operator.execute("dirt"));
         assertEquals(1, linker.execute("dirt help"));
         assertEquals(1, unprivileged.execute("dirt"));
-        assertTrue(operator.lastPlainMessage().contains("/dirt access users"));
+        assertTrue(operator.lastPlainMessage().contains("/dirt users"));
         assertTrue(operator.lastPlainMessage().contains("/dirt link"));
-        assertFalse(linker.lastPlainMessage().contains("/dirt access"));
+        assertFalse(linker.lastPlainMessage().contains("/dirt users"));
+        assertFalse(linker.lastPlainMessage().contains("/dirt invites"));
         assertTrue(linker.lastPlainMessage().contains("/dirt link"));
         assertFalse(unprivileged.lastPlainMessage().contains("/dirt link"));
         assertFalse(unprivileged.lastPlainMessage().contains("/dirt status"));
+        assertThrows(CommandSyntaxException.class, () -> operator.execute("dirt access users"));
+        assertThrows(CommandSyntaxException.class, () -> operator.execute("dirt invitations"));
     }
 
     @Test
@@ -78,7 +83,7 @@ final class DirtAdminCommandTest {
         CommandFixture nonOperator = fixture(new SenderAccess(false, true, false, false), status());
 
         assertThrows(CommandSyntaxException.class, () -> nonOperator.execute("dirt status"));
-        assertThrows(CommandSyntaxException.class, () -> nonOperator.execute("dirt access users"));
+        assertThrows(CommandSyntaxException.class, () -> nonOperator.execute("dirt users"));
     }
 
     @Test
@@ -153,11 +158,11 @@ final class DirtAdminCommandTest {
         CommandFixture fixture =
                 fixture(new SenderAccess(true, true, false, false), status(), access, mainThread);
 
-        assertEquals(1, fixture.execute("dirt access users 2"));
+        assertEquals(1, fixture.execute("dirt users 2"));
         assertEquals(2, access.requestedUsersPage);
         assertTrue(fixture.lastPlainMessage().contains("builder  active"));
         assertTrue(fixture.lastPlainMessage().contains("Builder (" + PLAYER_ID + ")"));
-        assertEquals(1, fixture.execute("dirt access invitations"));
+        assertEquals(1, fixture.execute("dirt invites"));
         assertEquals(1, access.requestedInvitationsPage);
         assertTrue(fixture.lastPlainMessage().contains("invite_1  pending"));
         assertTrue(hasCopyValue(fixture.lastMessage(), "invite_1"));
@@ -173,9 +178,9 @@ final class DirtAdminCommandTest {
         CommandFixture fixture =
                 fixture(new SenderAccess(true, true, false, false), status(), access);
 
-        assertEquals(1, fixture.execute("dirt access users 999"));
+        assertEquals(1, fixture.execute("dirt users 999"));
         assertTrue(fixture.lastPlainMessage().contains("‹ Last page"));
-        assertTrue(hasRunCommand(fixture.lastMessage(), "/dirt access users 2"));
+        assertTrue(hasRunCommand(fixture.lastMessage(), "/dirt users 2"));
     }
 
     @Test
@@ -184,13 +189,13 @@ final class DirtAdminCommandTest {
         CommandFixture fixture =
                 fixture(new SenderAccess(true, true, false, false), status(), access);
 
-        assertEquals(1, fixture.execute("dirt access invite revoke invite_7"));
+        assertEquals(1, fixture.execute("dirt invite revoke invite_7"));
         assertEquals("invite_7", access.revokedInvitation);
-        assertEquals(1, fixture.execute("dirt access user disable builder"));
+        assertEquals(1, fixture.execute("dirt user disable builder"));
         assertEquals("builder", access.disabledUser);
-        assertEquals(1, fixture.execute("dirt access user enable builder"));
+        assertEquals(1, fixture.execute("dirt user enable builder"));
         assertEquals("builder", access.enabledUser);
-        assertEquals(1, fixture.execute("dirt access user unlink builder"));
+        assertEquals(1, fixture.execute("dirt user unlink builder"));
         assertEquals("builder", access.unlinkedUser);
         assertTrue(fixture.lastPlainMessage().contains("builder was unlinked"));
     }
@@ -201,8 +206,8 @@ final class DirtAdminCommandTest {
         CommandFixture console =
                 fixture(new SenderAccess(true, true, false, false), status(), consoleAccess);
 
-        assertEquals(0, console.execute("dirt access invite create"));
-        assertEquals(0, console.execute("dirt access user recover builder"));
+        assertEquals(0, console.execute("dirt invite create"));
+        assertEquals(0, console.execute("dirt user recover builder"));
         assertEquals(0, consoleAccess.createdInvitations);
         assertEquals(null, consoleAccess.recoveredUser);
         assertTrue(console.lastPlainMessage().contains("run in-game by an operator"));
@@ -210,11 +215,11 @@ final class DirtAdminCommandTest {
         StubAccessControl playerAccess = new StubAccessControl();
         CommandFixture player =
                 fixture(new SenderAccess(true, true, false, true), status(), playerAccess);
-        assertEquals(1, player.execute("dirt access invite create"));
+        assertEquals(1, player.execute("dirt invite create"));
         assertEquals(1, playerAccess.createdInvitations);
         assertTrue(player.lastPlainMessage().contains("https://dashboard.example/invite/secret"));
         assertTrue(hasCopyValue(player.lastMessage(), "https://dashboard.example/invite/secret"));
-        assertEquals(1, player.execute("dirt access user recover builder"));
+        assertEquals(1, player.execute("dirt user recover builder"));
         assertEquals("builder", playerAccess.recoveredUser);
         assertTrue(player.lastPlainMessage().contains("https://dashboard.example/recover/secret"));
         assertTrue(hasCopyValue(player.lastMessage(), "https://dashboard.example/recover/secret"));
@@ -251,7 +256,7 @@ final class DirtAdminCommandTest {
         CommandFixture fixture =
                 fixture(new SenderAccess(true, true, false, false), status(), access);
 
-        assertEquals(1, fixture.execute("dirt access users"));
+        assertEquals(1, fixture.execute("dirt users"));
         assertTrue(fixture.lastPlainMessage().contains("dashboard access request failed"));
         assertFalse(fixture.lastPlainMessage().contains("private-server-detail"));
     }

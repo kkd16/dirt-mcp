@@ -85,7 +85,10 @@ public final class DirtAdminCommand {
                         Commands.literal("config")
                                 .requires(source -> hasAdminPermission(source.getSender()))
                                 .executes(context -> showConfig(context.getSource().getSender())))
-                .then(accessCommand())
+                .then(usersCommand())
+                .then(invitesCommand())
+                .then(inviteCommand())
+                .then(userCommand())
                 .then(
                         Commands.literal("link")
                                 .requires(source -> hasLinkPermission(source.getSender()))
@@ -93,68 +96,60 @@ public final class DirtAdminCommand {
                 .build();
     }
 
-    private LiteralArgumentBuilder<CommandSourceStack> accessCommand() {
-        return Commands.literal("access")
+    private LiteralArgumentBuilder<CommandSourceStack> usersCommand() {
+        return Commands.literal("users")
                 .requires(source -> hasAdminPermission(source.getSender()))
                 .then(
-                        Commands.literal("users")
-                                .executes(context -> listUsers(context.getSource().getSender(), 1))
-                                .then(
-                                        Commands.argument("page", IntegerArgumentType.integer(1))
-                                                .executes(
-                                                        context ->
-                                                                listUsers(
-                                                                        context.getSource()
-                                                                                .getSender(),
-                                                                        IntegerArgumentType
-                                                                                .getInteger(
-                                                                                        context,
-                                                                                        "page")))))
-                .then(
-                        Commands.literal("invitations")
+                        Commands.argument("page", IntegerArgumentType.integer(1))
                                 .executes(
                                         context ->
-                                                listInvitations(context.getSource().getSender(), 1))
+                                                listUsers(
+                                                        context.getSource().getSender(),
+                                                        IntegerArgumentType.getInteger(
+                                                                context, "page"))))
+                .executes(context -> listUsers(context.getSource().getSender(), 1));
+    }
+
+    private LiteralArgumentBuilder<CommandSourceStack> invitesCommand() {
+        return Commands.literal("invites")
+                .requires(source -> hasAdminPermission(source.getSender()))
+                .then(
+                        Commands.argument("page", IntegerArgumentType.integer(1))
+                                .executes(
+                                        context ->
+                                                listInvitations(
+                                                        context.getSource().getSender(),
+                                                        IntegerArgumentType.getInteger(
+                                                                context, "page"))))
+                .executes(context -> listInvitations(context.getSource().getSender(), 1));
+    }
+
+    private LiteralArgumentBuilder<CommandSourceStack> inviteCommand() {
+        return Commands.literal("invite")
+                .requires(source -> hasAdminPermission(source.getSender()))
+                .then(
+                        Commands.literal("create")
+                                .executes(
+                                        context ->
+                                                createInvitation(context.getSource().getSender())))
+                .then(
+                        Commands.literal("revoke")
                                 .then(
-                                        Commands.argument("page", IntegerArgumentType.integer(1))
+                                        Commands.argument("id", StringArgumentType.word())
                                                 .executes(
                                                         context ->
-                                                                listInvitations(
+                                                                revokeInvitation(
                                                                         context.getSource()
                                                                                 .getSender(),
-                                                                        IntegerArgumentType
-                                                                                .getInteger(
+                                                                        StringArgumentType
+                                                                                .getString(
                                                                                         context,
-                                                                                        "page")))))
-                .then(
-                        Commands.literal("invite")
-                                .then(
-                                        Commands.literal("create")
-                                                .executes(
-                                                        context ->
-                                                                createInvitation(
-                                                                        context.getSource()
-                                                                                .getSender())))
-                                .then(
-                                        Commands.literal("revoke")
-                                                .then(
-                                                        Commands.argument(
-                                                                        "id",
-                                                                        StringArgumentType.word())
-                                                                .executes(
-                                                                        context ->
-                                                                                revokeInvitation(
-                                                                                        context.getSource()
-                                                                                                .getSender(),
-                                                                                        StringArgumentType
-                                                                                                .getString(
-                                                                                                        context,
-                                                                                                        "id"))))))
-                .then(userCommand());
+                                                                                        "id")))));
     }
 
     private LiteralArgumentBuilder<CommandSourceStack> userCommand() {
-        LiteralArgumentBuilder<CommandSourceStack> user = Commands.literal("user");
+        LiteralArgumentBuilder<CommandSourceStack> user =
+                Commands.literal("user").requires(source -> hasAdminPermission(source.getSender()));
         user.then(userAction("disable", this.access::disableUser, "disabled"));
         user.then(userAction("enable", this.access::enableUser, "enabled"));
         user.then(
@@ -198,8 +193,8 @@ public final class DirtAdminCommand {
         message.append(Component.text(DESCRIPTION, NamedTextColor.GRAY));
         message.append(Component.newline()).append(Component.newline());
         if (hasAdminPermission(sender)) {
-            appendCommand(message, "/dirt access users", "View dashboard users");
-            appendCommand(message, "/dirt access invitations", "View dashboard invitations");
+            appendCommand(message, "/dirt users", "View dashboard users");
+            appendCommand(message, "/dirt invites", "View dashboard invitations");
             appendCommand(message, "/dirt status", "View live server and bridge status");
             appendCommand(message, "/dirt config", "Inspect the active configuration");
             appendCommand(message, "/dirt version", "Show plugin version information");
@@ -432,7 +427,7 @@ public final class DirtAdminCommand {
     }
 
     private Component usersMessage(AccessControl.UserPage result) {
-        TextComponent.Builder message = panel("Access / Users");
+        TextComponent.Builder message = panel("Users");
         appendPageSummary(message, result.page(), result.totalPages(), result.totalItems());
         if (result.items().isEmpty()) {
             message.append(Component.newline());
@@ -466,7 +461,7 @@ public final class DirtAdminCommand {
     }
 
     private Component invitationsMessage(AccessControl.InvitationPage result) {
-        TextComponent.Builder message = panel("Access / Invitations");
+        TextComponent.Builder message = panel("Invites");
         appendPageSummary(message, result.page(), result.totalPages(), result.totalItems());
         if (result.items().isEmpty()) {
             message.append(Component.newline());
@@ -489,7 +484,7 @@ public final class DirtAdminCommand {
             message.append(
                     Component.text("    Expires: " + invitation.expiresAt(), NamedTextColor.GRAY));
         }
-        appendPageControls(message, "invitations", result.page(), result.totalPages());
+        appendPageControls(message, "invites", result.page(), result.totalPages());
         return message.build();
     }
 
@@ -639,7 +634,7 @@ public final class DirtAdminCommand {
 
     private static void appendPageControl(
             TextComponent.Builder message, String collection, int page, String label) {
-        String command = "/dirt access " + collection + ' ' + page;
+        String command = "/dirt " + collection + ' ' + page;
         message.append(
                 Component.text(label, SECONDARY_ACCENT)
                         .clickEvent(ClickEvent.runCommand(command))

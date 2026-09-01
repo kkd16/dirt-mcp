@@ -86,8 +86,8 @@ authorization generation, immediately invalidating previously issued access
 tokens. Every MCP request also reloads the account and requires it to be active
 and linked.
 
-Paper operators create and revoke invitations, disable or enable accounts,
-issue recovery links, and unlink Minecraft identities through `/dirt access`.
+Paper operators create and revoke invitations through `/dirt invite`, and manage
+accounts through `/dirt user`.
 An online player starts linking with `/dirt link`; Paper supplies the
 online-mode-authenticated UUID and current name to the private control API and
 returns a short-lived link URL only to that player. A recently authenticated
