@@ -67,10 +67,23 @@ final class DirtAdminCommandTest {
         assertEquals(1, operator.execute("dirt"));
         assertEquals(1, linker.execute("dirt help"));
         assertEquals(1, unprivileged.execute("dirt"));
-        assertTrue(operator.lastPlainMessage().contains("/dirt users"));
+        for (String command :
+                List.of(
+                        "/dirt users",
+                        "/dirt invites",
+                        "/dirt invite create",
+                        "/dirt invite revoke <id>",
+                        "/dirt user disable <handle>",
+                        "/dirt user enable <handle>",
+                        "/dirt user recover <handle>",
+                        "/dirt user unlink <handle>")) {
+            assertTrue(operator.lastPlainMessage().contains(command));
+        }
         assertTrue(operator.lastPlainMessage().contains("/dirt link"));
         assertFalse(linker.lastPlainMessage().contains("/dirt users"));
         assertFalse(linker.lastPlainMessage().contains("/dirt invites"));
+        assertFalse(linker.lastPlainMessage().contains("/dirt invite create"));
+        assertFalse(linker.lastPlainMessage().contains("/dirt user disable"));
         assertTrue(linker.lastPlainMessage().contains("/dirt link"));
         assertFalse(unprivileged.lastPlainMessage().contains("/dirt link"));
         assertFalse(unprivileged.lastPlainMessage().contains("/dirt status"));

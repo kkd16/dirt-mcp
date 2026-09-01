@@ -194,7 +194,13 @@ public final class DirtAdminCommand {
         message.append(Component.newline()).append(Component.newline());
         if (hasAdminPermission(sender)) {
             appendCommand(message, "/dirt users", "View dashboard users");
-            appendCommand(message, "/dirt invites", "View dashboard invitations");
+            appendCommand(message, "/dirt invites", "View dashboard invites");
+            appendCommand(message, "/dirt invite create", "Create an invite");
+            appendCommand(message, "/dirt invite revoke <id>", "Revoke an invite");
+            appendCommand(message, "/dirt user disable <handle>", "Disable a user");
+            appendCommand(message, "/dirt user enable <handle>", "Enable a user");
+            appendCommand(message, "/dirt user recover <handle>", "Create a recovery link");
+            appendCommand(message, "/dirt user unlink <handle>", "Unlink a Minecraft account");
             appendCommand(message, "/dirt status", "View live server and bridge status");
             appendCommand(message, "/dirt config", "Inspect the active configuration");
             appendCommand(message, "/dirt version", "Show plugin version information");
