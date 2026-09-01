@@ -213,8 +213,15 @@ jobs:
       - name: Print native service diagnostics
         if: failure()
         run: |
+          sudo systemctl stop dirt-mcp.service || true
+          sudo systemctl reset-failed dirt-mcp.service || true
+          sudo systemctl set-environment SYSTEMD_LOG_LEVEL=debug
+          sudo systemd-analyze log-level debug
+          sudo systemctl start dirt-mcp.service || true
+          sudo systemd-analyze log-level info
+          sudo systemctl unset-environment SYSTEMD_LOG_LEVEL
           sudo systemctl status dirt-mcp.service caddy.service --no-pager || true
-          sudo journalctl --unit dirt-mcp.service --unit caddy.service --no-pager --lines 100 || true
+          sudo journalctl --unit dirt-mcp.service --no-pager --lines 200 || true
 
       - name: Stop the managed development stack
         if: always()
