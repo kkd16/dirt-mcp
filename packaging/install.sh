@@ -527,14 +527,15 @@ render_templates() {
   "${application_directory}/node/bin/node" --input-type=module --eval '
     import { readFileSync, writeFileSync } from "node:fs";
     const [input, output, hostname, rawPaperDirectory] = process.argv.slice(1);
-    const paperDirectory = rawPaperDirectory
+    const credentialPaperDirectory = rawPaperDirectory.replaceAll("%", "%%");
+    const paperDirectory = credentialPaperDirectory
       .replaceAll("\\", "\\\\")
       .replaceAll("\"", "\\\"")
-      .replaceAll("%", "%%")
       .replaceAll("\t", "\\t");
     const placeholder = (name) => String.fromCharCode(64) + name + String.fromCharCode(64);
     const rendered = readFileSync(input, "utf8")
       .replaceAll(placeholder("HOSTNAME"), hostname)
+      .replaceAll(placeholder("PAPER_CREDENTIAL_DIR"), credentialPaperDirectory)
       .replaceAll(placeholder("PAPER_DIR"), paperDirectory);
     if (/@[A-Z0-9_]+@/u.test(rendered)) throw new Error("Unresolved service template placeholder");
     writeFileSync(output, rendered, { mode: 0o600 });

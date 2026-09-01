@@ -127,9 +127,14 @@ cp -- "\${DIRT_TEST_ARCHIVE}" "\${output}"
 
   const renderedUnit = (await readFile(join(bundle, 'dirt-mcp.service.in'), 'utf8'))
     .replaceAll('@HOSTNAME@', 'dirt.example')
-    .replaceAll('@PAPER_DIR@', '/srv/paper')
+    .replaceAll('@PAPER_CREDENTIAL_DIR@', '/srv/paper instance')
+    .replaceAll('@PAPER_DIR@', '/srv/paper instance')
     .replaceAll('/opt/dirt-mcp', bundle);
   if (/@[A-Z0-9_]+@/u.test(renderedUnit)) throw new Error('Rendered systemd unit has an unresolved placeholder.');
+  for (const credential of ['bridge-token', 'control-token']) {
+    const expected = `LoadCredential=${credential}:/srv/paper instance/plugins/DirtMCP/secrets/${credential}`;
+    if (!renderedUnit.includes(expected)) throw new Error(`Rendered systemd unit has an invalid ${credential} source.`);
+  }
   const unit = join(temporaryDirectory, 'dirt-mcp.service');
   await writeFile(unit, renderedUnit);
   await run('systemd-analyze', ['verify', unit]);

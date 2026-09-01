@@ -213,54 +213,8 @@ jobs:
       - name: Print native service diagnostics
         if: failure()
         run: |
-          sudo systemctl stop dirt-mcp.service || true
-          sudo systemctl reset-failed dirt-mcp.service || true
-          sudo systemctl set-environment SYSTEMD_LOG_LEVEL=debug
-          sudo systemd-analyze log-level debug
-          sudo systemd-run --wait --collect --unit=dirt-credential-inline \
-            --property=SetCredential=probe:ok /usr/bin/true || true
-          sudo systemd-run --wait --collect --unit=dirt-credential-auth \
-            --property=LoadCredential=auth-secret:/etc/dirt-mcp/credentials/auth-secret \
-            /usr/bin/true || true
-          sudo systemd-run --wait --collect --unit=dirt-credential-bridge \
-            --property=LoadCredential=bridge-token:/srv/dirt-ci-paper/plugins/DirtMCP/secrets/bridge-token \
-            /usr/bin/true || true
-          sudo systemd-run --wait --collect --unit=dirt-credential-user \
-            --property=User=dirt-mcp \
-            --property=LoadCredential=auth-secret:/etc/dirt-mcp/credentials/auth-secret \
-            /usr/bin/true || true
-          probe_service_override() {
-            local label="$1"
-            local setting="$2"
-            printf '[Service]\n%s\n' "${setting}" \
-              | sudo tee /run/systemd/system/dirt-mcp.service.d/diagnostic.conf > /dev/null
-            sudo systemctl daemon-reload
-            sudo systemctl reset-failed dirt-mcp.service
-            if sudo systemctl start dirt-mcp.service; then
-              printf 'Service probe %s started successfully.\n' "${label}"
-            else
-              printf 'Service probe %s failed.\n' "${label}"
-            fi
-            sudo systemctl stop dirt-mcp.service || true
-          }
-          sudo install -d /run/systemd/system/dirt-mcp.service.d
-          probe_service_override restrict-namespaces 'RestrictNamespaces=false'
-          probe_service_override capability-bounding-set 'CapabilityBoundingSet=CAP_SYS_ADMIN'
-          probe_service_override inaccessible-paths 'InaccessiblePaths='
-          probe_service_override private-devices 'PrivateDevices=false'
-          probe_service_override exec-start-pre 'ExecStartPre='
-          sudo rm /run/systemd/system/dirt-mcp.service.d/diagnostic.conf
-          sudo systemctl daemon-reload
-          sudo systemd-analyze log-level info
-          sudo systemctl unset-environment SYSTEMD_LOG_LEVEL
           sudo systemctl status dirt-mcp.service caddy.service --no-pager || true
-          sudo journalctl \
-            --unit dirt-mcp.service \
-            --unit dirt-credential-inline.service \
-            --unit dirt-credential-auth.service \
-            --unit dirt-credential-bridge.service \
-            --unit dirt-credential-user.service \
-            --no-pager --lines 300 || true
+          sudo journalctl --unit dirt-mcp.service --unit caddy.service --no-pager --lines 100 || true
 
       - name: Stop the managed development stack
         if: always()

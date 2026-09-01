@@ -17,8 +17,8 @@ Environment=DIRT_AUTH_SECRET_FILE=%d/auth-secret
 Environment=DIRT_BRIDGE_TOKEN_FILE=%d/bridge-token
 Environment=DIRT_CONTROL_TOKEN_FILE=%d/control-token
 LoadCredential=auth-secret:/etc/dirt-mcp/credentials/auth-secret
-LoadCredential="bridge-token:@PAPER_DIR@/plugins/DirtMCP/secrets/bridge-token"
-LoadCredential="control-token:@PAPER_DIR@/plugins/DirtMCP/secrets/control-token"
+LoadCredential=bridge-token:@PAPER_CREDENTIAL_DIR@/plugins/DirtMCP/secrets/bridge-token
+LoadCredential=control-token:@PAPER_CREDENTIAL_DIR@/plugins/DirtMCP/secrets/control-token
 ExecStartPre=/opt/dirt-mcp/node/bin/node /opt/dirt-mcp/app/dist/init-db.js
 ExecStart=/opt/dirt-mcp/node/bin/node /opt/dirt-mcp/app/dist/index.js
 Restart=on-failure
