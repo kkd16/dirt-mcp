@@ -2,6 +2,10 @@
 set -Eeuo pipefail
 umask 077
 
+if [[ "${DIRT_INSTALL_DIAGNOSTICS:-}" == true ]]; then
+  trap 'printf "Installer failed in %s at line %s.\n" "${FUNCNAME[0]:-main}" "${LINENO}" >&2' ERR
+fi
+
 readonly release_version='@VERSION@'
 readonly supported_paper_version='@PAPER_VERSION@'
 readonly supported_paper_build='@PAPER_BUILD@'

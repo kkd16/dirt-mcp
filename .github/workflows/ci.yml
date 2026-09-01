@@ -208,7 +208,8 @@ jobs:
             "${plugin_secret_directory}/control-token" \
             /etc/dirt-mcp/credentials/auth-secret | tee "${fixture_files}/secret-hashes" > /dev/null
           sudo --preserve-env=DEBIAN_FRONTEND,NEEDRESTART_MODE \
-            "${installers[0]}" --paper-dir "${paper_fixture}" --hostname ci.dirt-mcp.internal
+            env DIRT_INSTALL_DIAGNOSTICS=true "${installers[0]}" \
+            --paper-dir "${paper_fixture}" --hostname ci.dirt-mcp.internal
           sudo sha256sum --check "${fixture_files}/secret-hashes"
 
       - name: Print native service diagnostics
