@@ -201,6 +201,7 @@ public final class DirtRuntime implements AutoCloseable {
                 new DirtAdminCommand(
                         metadata.getName(),
                         metadata.getVersion(),
+                        plugin.getServer(),
                         config,
                         status,
                         accessControl,

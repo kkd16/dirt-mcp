@@ -11,9 +11,9 @@ import { AccessError, type AccessRepository, type UserSummary } from '../access/
 import { internalError, readJsonBody, registerInternalRoutes, validCallIdOrNull } from '../access/routes.ts';
 import {
   createOnboardingTicket,
-  normalizeHandle,
   onboardingCookieName,
   onboardingCookieHeader,
+  readOnboardingClaim,
   SESSION_FRESH_AGE_SECONDS,
   type DirtAuth,
 } from '../auth.ts';
@@ -35,7 +35,7 @@ import {
 
 const onboardingTokenSchema = z.string().min(20).max(256);
 const onboardingExchangeSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('invitation'), token: onboardingTokenSchema, handle: z.string().max(64) }).strict(),
+  z.object({ kind: z.literal('invitation'), token: onboardingTokenSchema }).strict(),
   z.object({ kind: z.literal('recovery'), token: onboardingTokenSchema }).strict(),
 ]);
 const linkSchema = z.object({ code: z.string().trim().min(8).max(24) }).strict();
@@ -167,7 +167,7 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
       }
       return context.json({ error: 'Recent passkey authentication is required.' }, 403);
     }
-    if (sessionUser.user.minecraftAccount === null) {
+    if (sessionUser.user.minecraftUuid === null) {
       if (authorizationRequest) {
         context.status(403);
         return context.render(
@@ -192,13 +192,9 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
     const body = await readJsonBody(context.req.raw, onboardingExchangeSchema);
     const claim =
       body.kind === 'invitation' ? repository.resolveInvitation(body.token) : repository.resolveRecovery(body.token);
-    const handle = body.kind === 'invitation' ? normalizeHandle(body.handle) : claim.handle;
-    if (body.kind === 'invitation' && !repository.isHandleAvailable(handle)) {
-      throw new AccessError('conflict', 'That handle is already in use.');
-    }
-    const ticket = createOnboardingTicket({ ...claim, handle }, config.authSecret);
+    const ticket = createOnboardingTicket(claim, config.authSecret);
     context.header('Set-Cookie', onboardingCookieHeader(config.publicOrigin, ticket));
-    return context.json({ ok: true, handle });
+    return context.json({ ok: true, username: claim.username });
   });
 
   app.post('/api/access/minecraft-link', async (context) => {
@@ -229,8 +225,19 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
     if (sessionUser !== null) return context.redirect('/dashboard', 303);
     return context.render(SignInPage({}));
   });
-  app.get('/invite', (context) => context.render(OnboardingPage({ kind: 'invitation' })));
-  app.get('/recover', (context) => context.render(OnboardingPage({ kind: 'recovery' })));
+  app.get('/invite', (context) =>
+    context.render(
+      OnboardingPage({
+        kind: 'invitation',
+        claim: currentOnboardingClaim(context.req.raw.headers, config, 'invitation'),
+      }),
+    ),
+  );
+  app.get('/recover', (context) =>
+    context.render(
+      OnboardingPage({ kind: 'recovery', claim: currentOnboardingClaim(context.req.raw.headers, config, 'recovery') }),
+    ),
+  );
   app.get('/dashboard', async (context) => {
     const sessionUser = await currentSessionUser(auth, repository, context.req.raw.headers);
     if (sessionUser === null) return context.render(SignInPage({ continueToDashboard: true }));
@@ -243,7 +250,7 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
     if (sessionUser === null || !isRecentlyAuthenticated(sessionUser.sessionCreatedAt)) {
       return context.redirect(`/${new URL(context.req.url).search}`, 303);
     }
-    if (sessionUser.user.minecraftAccount === null) {
+    if (sessionUser.user.minecraftUuid === null) {
       context.status(403);
       return context.render(
         ErrorPage({ title: 'Minecraft link required', message: 'Link a Minecraft account before authorizing MCP.' }),
@@ -345,6 +352,19 @@ async function dashboardReadiness(bridge: Pick<BridgeClient, 'request'>): Promis
 function expiredOnboardingCookie(publicOrigin: string): string {
   const secure = publicOrigin.startsWith('https://');
   return `${onboardingCookieName(publicOrigin)}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? '; Secure' : ''}`;
+}
+
+function currentOnboardingClaim(
+  headers: Headers,
+  config: RuntimeConfig,
+  kind: 'invitation' | 'recovery',
+): { readonly username: string } | null {
+  try {
+    const claim = readOnboardingClaim(headers, config.authSecret, config.publicOrigin);
+    return claim.kind === kind ? { username: claim.username } : null;
+  } catch {
+    return null;
+  }
 }
 
 function withNoStore(response: Response): Response {

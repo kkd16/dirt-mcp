@@ -31,18 +31,18 @@ interface ShellProperties {
   readonly title: string;
   readonly pageName: string;
   readonly children: JSX.Element;
-  readonly signedIn?: boolean;
+  readonly username?: string;
 }
 
-function Shell({ title, pageName, children, signedIn = false }: ShellProperties): JSX.Element {
+function Shell({ title, pageName, children, username }: ShellProperties): JSX.Element {
   return (
     <html lang="en">
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="color-scheme" content="light dark" />
-        <meta name="theme-color" content="#f2f4ef" media="(prefers-color-scheme: light)" />
-        <meta name="theme-color" content="#111918" media="(prefers-color-scheme: dark)" />
+        <meta name="theme-color" content="#f2f5f1" media="(prefers-color-scheme: light)" />
+        <meta name="theme-color" content="#101713" media="(prefers-color-scheme: dark)" />
         <title>{title} · Dirt</title>
         <link rel="stylesheet" href={STYLESHEET} />
       </head>
@@ -51,23 +51,19 @@ function Shell({ title, pageName, children, signedIn = false }: ShellProperties)
           Skip to content
         </a>
         <header class="site-header">
-          <a class="brand" href={signedIn ? '/dashboard' : '/'} aria-label="Dirt home">
-            <span class="brand-mark" aria-hidden="true">
-              <span />
-            </span>
+          <a class="brand" href={username === undefined ? '/' : '/dashboard'} aria-label="Dirt home">
+            <BrandMark />
             <span>Dirt</span>
           </a>
-          {signedIn ? (
-            <>
-              <span class="header-note">Minecraft MCP</span>
-              <div class="header-action action-zone">
-                <span class="form-status compact-status" data-form-status role="status" aria-live="polite" />
-                <button class="quiet-button" type="button" data-action="sign-out">
-                  Sign out
-                </button>
-              </div>
-            </>
-          ) : null}
+          {username === undefined ? null : (
+            <div class="header-account action-zone">
+              <span class="header-username">{username}</span>
+              <span class="form-status compact-status" data-form-status role="status" aria-live="polite" />
+              <button class="text-button" type="button" data-action="sign-out">
+                Sign out
+              </button>
+            </div>
+          )}
         </header>
         <main id="main" tabindex={-1}>
           {children}
@@ -78,258 +74,337 @@ function Shell({ title, pageName, children, signedIn = false }: ShellProperties)
   );
 }
 
+function BrandMark(): JSX.Element {
+  return (
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M3.5 12V3.5H12M20 3.5h8.5V12M28.5 20v8.5H20M12 28.5H3.5V20" />
+      <path d="M10.5 9.5h12v12h-12zM16.5 9.5v12M10.5 15.5h12" />
+      <path class="coordinate-cell" d="M21.5 20.5h7v7h-7z" />
+    </svg>
+  );
+}
+
 export function SignInPage({ continueToDashboard = false }: { readonly continueToDashboard?: boolean }): JSX.Element {
   return (
     <Shell title={continueToDashboard ? 'Sign in to continue' : 'Sign in'} pageName="sign-in">
-      <div class="sign-in-layout">
+      <div class="task-layout">
         <section class="task-card action-zone" aria-labelledby="sign-in-title">
-          <p class="eyebrow">Invite-only access</p>
+          <p class="eyebrow">Private server access</p>
           <h1 id="sign-in-title">{continueToDashboard ? 'Sign in to continue' : 'Sign in to Dirt'}</h1>
-          <p class="task-intro">Use your passkey to access the dashboard.</p>
-          <div class="sign-in-action">
-            <button class="primary-button" type="button" data-action="sign-in">
-              {continueToDashboard ? 'Sign in and continue' : 'Sign in with a passkey'}
-            </button>
-            <p class="form-status" data-form-status role="status" aria-live="polite">
-              {continueToDashboard ? 'The link code stays in this browser.' : ''}
-            </p>
-          </div>
-          <p class="sign-in-note">Need an account? Ask your server operator for an invitation.</p>
+          <p class="task-intro">Use the passkey for your linked Minecraft account.</p>
+          <button class="primary-button" type="button" data-action="sign-in">
+            Sign in with a passkey
+          </button>
+          <p class="form-status" data-form-status role="status" aria-live="polite" />
+          <p class="task-footnote">Need access? Ask an operator to invite you in Minecraft.</p>
         </section>
       </div>
     </Shell>
   );
 }
 
-export function OnboardingPage({ kind }: { readonly kind: 'invitation' | 'recovery' }): JSX.Element {
+export function OnboardingPage({
+  kind,
+  claim,
+}: {
+  readonly kind: 'invitation' | 'recovery';
+  readonly claim: { readonly username: string } | null;
+}): JSX.Element {
   const invitation = kind === 'invitation';
+  const title = invitation ? 'Create your Dirt passkey' : 'Replace your passkey';
   return (
     <Shell title={invitation ? 'Accept invitation' : 'Recover account'} pageName={kind}>
-      <TaskLayout marker={invitation ? 'Invitation' : 'Recovery'}>
-        <section class="task-card action-zone">
-          <p class="eyebrow">{invitation ? 'Invitation' : 'Account recovery'}</p>
-          <h1>{invitation ? 'Create your account' : 'Replace your passkey'}</h1>
-          <p class="task-intro">
-            {invitation
-              ? 'Choose a handle, then create a passkey.'
-              : 'Creates a new passkey and revokes current sessions and MCP access.'}
-          </p>
-          <p class="security-note">This link is single-use. Its secret stays in this browser.</p>
-          <form data-onboarding={kind}>
-            {invitation ? (
-              <label class="field-label" for="handle">
-                <span>Account handle</span>
-                <input
-                  id="handle"
-                  name="handle"
-                  autocomplete="username"
-                  minlength={3}
-                  maxlength={32}
-                  pattern="[a-z0-9][a-z0-9_-]{1,30}[a-z0-9]"
-                  aria-describedby="handle-hint"
-                  required
-                />
-                <span class="field-hint" id="handle-hint">
-                  3–32 lowercase letters, numbers, underscores, or hyphens.
+      <div class="task-layout">
+        <section class="task-card action-zone" aria-labelledby="onboarding-title" data-onboarding-page={kind}>
+          <p class="eyebrow">{invitation ? 'Minecraft invitation' : 'Account recovery'}</p>
+          <h1 id="onboarding-title">{claim === null ? 'Checking your link' : title}</h1>
+          {claim === null ? (
+            <div data-onboarding-prepare={kind}>
+              <p class="task-intro">Verifying the private link from Minecraft…</p>
+            </div>
+          ) : (
+            <div class="onboarding-ready" data-onboarding-ready>
+              <div class="verified-player">
+                <span class="survey-node" aria-hidden="true" />
+                <span>
+                  <small>Verified Minecraft account</small>
+                  <strong>{claim.username}</strong>
                 </span>
-              </label>
-            ) : null}
-            <button class="primary-button" type="submit">
-              {invitation ? 'Create account and passkey' : 'Create replacement passkey'}
-            </button>
-          </form>
+              </div>
+              <p class="task-intro">
+                {invitation
+                  ? 'Create a passkey to finish your account. Your Minecraft identity is already linked.'
+                  : 'Create a replacement passkey. Existing sessions and MCP access will be revoked.'}
+              </p>
+              <form data-onboarding={kind}>
+                <button class="primary-button" type="submit">
+                  {invitation ? 'Create passkey' : 'Replace passkey'}
+                </button>
+              </form>
+            </div>
+          )}
           <p class="form-status" data-form-status role="status" aria-live="polite" />
         </section>
-      </TaskLayout>
+      </div>
     </Shell>
   );
 }
 
 export function DashboardPage({ model }: { readonly model: DashboardViewModel }): JSX.Element {
   const { user, readiness, clients, passkeys, mcpEndpoint } = model;
-  const minecraft = user.minecraftAccount;
-  const overall = overallReadiness(model);
+  const task = dashboardTask(model);
   return (
-    <Shell title="Dashboard" pageName="dashboard" signedIn>
+    <Shell title="Dashboard" pageName="dashboard" username={user.username}>
       <div class="dashboard-shell">
-        <section class="dashboard-hero" aria-labelledby="dashboard-title">
-          <div>
-            <p class="eyebrow">{user.handle}</p>
-            <h1 id="dashboard-title">{overall.title}</h1>
-            <p>{overall.detail}</p>
+        <header class="dashboard-intro">
+          <p class="eyebrow">{user.username}</p>
+          <h1 id="dashboard-task-title">{task.title}</h1>
+          <p>{task.detail}</p>
+        </header>
+
+        {clients.length === 0 ? <SetupSteps linked={user.minecraftUuid !== null} /> : null}
+
+        <section class={`primary-task task-${task.tone}`} aria-labelledby="dashboard-task-title">
+          <div class="task-heading">
+            <span class="task-coordinate" aria-hidden="true">
+              {task.coordinate}
+            </span>
+            <p class="eyebrow">{task.label}</p>
           </div>
-          <div class={`readiness-seal ${overall.tone}`}>
-            <span class="seal-dot" aria-hidden="true" />
-            <span>{overall.title}</span>
-          </div>
+          {user.minecraftUuid === null ? (
+            <div class="task-body task-body-split">
+              <p>
+                Join the server as <strong>{user.username}</strong>, run <code>/dirt link</code>, then enter the
+                one-time code.
+              </p>
+              <form class="link-form action-zone" data-link>
+                <label class="field-label" for="code">
+                  <span>Link code</span>
+                  <input
+                    id="code"
+                    name="code"
+                    autocomplete="one-time-code"
+                    inputmode="text"
+                    minlength={8}
+                    maxlength={24}
+                    required
+                  />
+                </label>
+                <button class="primary-button" type="submit">
+                  Link Minecraft
+                </button>
+                <p class="form-status" data-form-status role="status" aria-live="polite" />
+              </form>
+            </div>
+          ) : clients.length === 0 ? (
+            <div class="task-body">
+              <p>Paste this endpoint into your MCP client. Dirt will return here so you can approve access.</p>
+              <CopyField value={mcpEndpoint} />
+            </div>
+          ) : (
+            <div class="task-body ready-body">
+              <p>{task.action}</p>
+              <span class="status-chip">{clients.length} authorized</span>
+            </div>
+          )}
         </section>
 
-        <div class="dashboard-grid">
-          <section class="panel panel-wide" aria-labelledby="minecraft-title">
-            <PanelHeading label="Identity" title="Minecraft account" id="minecraft-title" />
-            {minecraft === null ? (
-              <div class="panel-content split-content">
-                <div>
-                  <p class="section-state warning-state">Not linked</p>
-                  <p>
-                    Join the server and run <code>/dirt link</code>. Enter the one-time code here within ten minutes.
-                  </p>
-                </div>
-                <form class="link-form action-zone" data-link>
-                  <label class="field-label" for="code">
-                    <span>One-time link code</span>
-                    <input
-                      id="code"
-                      name="code"
-                      autocomplete="one-time-code"
-                      inputmode="text"
-                      minlength={8}
-                      maxlength={24}
-                      required
-                    />
-                  </label>
-                  <button class="primary-button" type="submit">
-                    Link Minecraft
-                  </button>
-                  <p class="form-status" data-form-status role="status" aria-live="polite" />
-                </form>
-              </div>
-            ) : (
-              <dl class="record-list identity-record">
-                <div>
-                  <dt>Status</dt>
-                  <dd class="success-state">Linked</dd>
-                </div>
-                <div>
-                  <dt>Player</dt>
-                  <dd>{minecraft.name}</dd>
-                </div>
-                <div>
-                  <dt>Online-mode UUID</dt>
-                  <dd>
-                    <code>{minecraft.uuid}</code>
-                  </dd>
-                </div>
-              </dl>
-            )}
-          </section>
-
-          <section class="panel panel-left" aria-labelledby="connection-title">
-            <PanelHeading label="Paper bridge" title="Connection" id="connection-title" />
-            <div class="connection-reading">
-              <p class={`section-state ${readiness.bridgeAvailable ? 'success-state' : 'danger-state'}`}>
-                {readiness.bridgeAvailable ? 'Paper and FAWE online' : 'Paper offline'}
-              </p>
-              <p class="tool-count">
-                <span>{readiness.enabledTools}</span>
-                <span>of {readiness.totalTools} MCP tools enabled</span>
-              </p>
-              <p class="supporting-copy">
-                {readiness.bridgeAvailable
-                  ? 'Inspect the live world and make bounded, undoable edits through an authorized MCP client.'
-                  : 'Account controls remain available.'}
-              </p>
-            </div>
-          </section>
-
-          <section class="panel" aria-labelledby="endpoint-title">
-            <PanelHeading label="Client setup" title="MCP endpoint" id="endpoint-title" />
-            <p class="supporting-copy">Use this URL in your MCP client.</p>
-            <div class="copy-field action-zone">
-              <code>{mcpEndpoint}</code>
-              <button class="quiet-button" type="button" data-copy={mcpEndpoint}>
-                Copy
-              </button>
-              <p class="form-status" data-form-status role="status" aria-live="polite" />
-            </div>
-          </section>
-
-          <section class="panel panel-wide" aria-labelledby="clients-title">
-            <PanelHeading label="OAuth" title="Authorized clients" id="clients-title" />
-            {clients.length === 0 ? (
-              <div class="empty-state">
-                <p>No authorized clients.</p>
-                <p>Connect one using the endpoint above.</p>
-              </div>
-            ) : (
-              <ul class="client-list">
-                {clients.map((client) => {
-                  const hostname = hostnameFromUrl(client.clientId);
-                  return (
-                    <li>
-                      <div class="client-heading">
-                        <div>
-                          <h3>{client.name ?? hostname ?? 'MCP client'}</h3>
-                          {client.name !== null && hostname !== null ? <p>{hostname}</p> : null}
-                        </div>
-                        <span>Full Dirt access</span>
-                      </div>
-                      <dl class="record-list compact-record">
-                        <div>
-                          <dt>Client ID</dt>
-                          <dd>
-                            <code>{client.clientId}</code>
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Access</dt>
-                          <dd>{client.scopes.join(', ')}</dd>
-                        </div>
-                        <div>
-                          <dt>Authorized</dt>
-                          <dd>
-                            <DateValue value={client.authorizedAt} />
-                          </dd>
-                        </div>
-                      </dl>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-
-          <section class="panel panel-left" aria-labelledby="security-title">
-            <PanelHeading label="Security" title="Passkeys" id="security-title" />
-            {passkeys.length === 0 ? (
-              <p class="danger-state">No passkey found.</p>
-            ) : (
-              <ul class="passkey-list">
-                {passkeys.map((passkey) => (
-                  <li>
-                    <span>{passkey.name}</span>
-                    <DateValue value={passkey.createdAt} />
-                  </li>
-                ))}
-              </ul>
-            )}
-            <p class="supporting-copy">
-              For a replacement, ask your operator for a recovery link. This revokes sessions and MCP access.
-            </p>
-          </section>
-
-          <section class="panel" aria-labelledby="account-title">
-            <PanelHeading label="Dirt account" title="Account record" id="account-title" />
-            <dl class="record-list">
-              <div>
-                <dt>Handle</dt>
-                <dd>{user.handle}</dd>
-              </div>
-              <div>
-                <dt>Status</dt>
-                <dd class="success-state">Active</dd>
-              </div>
-              <div>
-                <dt>Created</dt>
-                <dd>
-                  <DateValue value={user.createdAt} />
-                </dd>
-              </div>
-            </dl>
-          </section>
+        <div class="status-row" aria-label="Current status">
+          <StatusItem
+            label="Minecraft"
+            value={user.minecraftUuid === null ? 'Not linked' : user.username}
+            tone={user.minecraftUuid === null ? 'warning' : 'success'}
+          />
+          <StatusItem
+            label="Paper & FAWE"
+            value={readiness.bridgeAvailable ? 'Online' : 'Offline'}
+            tone={readiness.bridgeAvailable ? 'success' : 'danger'}
+          />
+          <StatusItem
+            label="MCP tools"
+            value={`${readiness.enabledTools} of ${readiness.totalTools}`}
+            tone={readiness.enabledTools > 0 ? 'success' : 'warning'}
+          />
         </div>
+
+        <section class="detail-stack" aria-label="Account details">
+          <DetailGroup
+            title="Minecraft account"
+            summary={user.minecraftUuid === null ? 'Needs linking' : user.username}
+          >
+            <dl class="record-list">
+              <Record label="Username" value={user.username} />
+              <Record label="Link status" value={user.minecraftUuid === null ? 'Not linked' : 'Linked'} />
+              <Record label="Online-mode UUID" value={user.minecraftUuid ?? 'Available after linking'} code />
+              <Record label="Dirt account ID" value={user.id} code />
+              <Record label="Account status" value={user.status === 'active' ? 'Active' : 'Disabled'} />
+              <Record label="Created" value={<DateValue value={user.createdAt} />} />
+            </dl>
+          </DetailGroup>
+
+          <DetailGroup title="Passkeys" summary={`${passkeys.length} enrolled`}>
+            <div>
+              {passkeys.length === 0 ? (
+                <p class="detail-empty">No passkey found.</p>
+              ) : (
+                <ul class="simple-list">
+                  {passkeys.map((passkey) => (
+                    <li>
+                      <span>{passkey.name}</span>
+                      <span>
+                        Added <DateValue value={passkey.createdAt} />
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p class="supporting-copy">Ask an operator for a recovery link to replace your passkey.</p>
+            </div>
+          </DetailGroup>
+
+          <DetailGroup
+            title="MCP connections"
+            summary={clients.length === 0 ? 'None yet' : `${clients.length} authorized`}
+          >
+            <div>
+              <p class="supporting-copy">Endpoint</p>
+              <CopyField value={mcpEndpoint} />
+              {clients.length === 0 ? (
+                <p class="detail-empty">No clients have been authorized.</p>
+              ) : (
+                <ul class="client-list">
+                  {clients.map((client) => (
+                    <ClientRecord client={client} />
+                  ))}
+                </ul>
+              )}
+            </div>
+          </DetailGroup>
+
+          <DetailGroup
+            title="Server access"
+            summary={readiness.bridgeAvailable ? 'Paper and FAWE online' : 'Paper offline'}
+          >
+            <div>
+              <dl class="record-list">
+                <Record label="Bridge" value={readiness.bridgeAvailable ? 'Available' : 'Unavailable'} />
+                <Record label="Enabled tools" value={`${readiness.enabledTools} of ${readiness.totalTools}`} />
+                <Record label="Access" value="Full Dirt access" />
+              </dl>
+              <p class="supporting-copy">
+                Enabled clients can inspect the live world and make bounded, undoable edits allowed by the server.
+              </p>
+            </div>
+          </DetailGroup>
+        </section>
       </div>
     </Shell>
+  );
+}
+
+function SetupSteps({ linked }: { readonly linked: boolean }): JSX.Element {
+  return (
+    <ol class="setup-steps" aria-label="Account setup">
+      <li class={linked ? 'complete' : 'current'}>
+        <span>1</span>
+        <div>
+          <strong>Minecraft</strong>
+          <small>{linked ? 'Linked' : 'Link required'}</small>
+        </div>
+      </li>
+      <li class="complete">
+        <span>2</span>
+        <div>
+          <strong>Passkey</strong>
+          <small>Created</small>
+        </div>
+      </li>
+      <li class={linked ? 'current' : 'waiting'}>
+        <span>3</span>
+        <div>
+          <strong>MCP client</strong>
+          <small>{linked ? 'Next' : 'Waiting'}</small>
+        </div>
+      </li>
+    </ol>
+  );
+}
+
+function StatusItem({ label, value, tone }: { readonly label: string; readonly value: string; readonly tone: string }) {
+  return (
+    <div class="status-item">
+      <span class={`status-square tone-${tone}`} aria-hidden="true" />
+      <span>
+        <small>{label}</small>
+        <strong>{value}</strong>
+      </span>
+    </div>
+  );
+}
+
+function CopyField({ value }: { readonly value: string }): JSX.Element {
+  return (
+    <div class="copy-field action-zone">
+      <code>{value}</code>
+      <button class="secondary-button" type="button" data-copy={value}>
+        Copy
+      </button>
+      <p class="form-status" data-form-status role="status" aria-live="polite" />
+    </div>
+  );
+}
+
+function DetailGroup({
+  title,
+  summary,
+  children,
+}: {
+  readonly title: string;
+  readonly summary: string;
+  readonly children: JSX.Element;
+}): JSX.Element {
+  return (
+    <details class="detail-group">
+      <summary>
+        <strong>{title}</strong>
+        <span>{summary}</span>
+      </summary>
+      <div class="detail-content">{children}</div>
+    </details>
+  );
+}
+
+function Record({
+  label,
+  value,
+  code = false,
+}: {
+  readonly label: string;
+  readonly value: string | JSX.Element;
+  readonly code?: boolean;
+}): JSX.Element {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>{code && typeof value === 'string' ? <code>{value}</code> : value}</dd>
+    </div>
+  );
+}
+
+function ClientRecord({ client }: { readonly client: AuthorizedClientSummary }): JSX.Element {
+  const hostname = hostnameFromUrl(client.clientId);
+  return (
+    <li>
+      <div class="client-heading">
+        <strong>{client.name ?? hostname ?? 'MCP client'}</strong>
+        <span>Full Dirt access</span>
+      </div>
+      <dl class="record-list compact-record">
+        <Record label="Client ID" value={client.clientId} code />
+        <Record label="Scope" value={client.scopes.join(', ')} code />
+        <Record label="Authorized" value={<DateValue value={client.authorizedAt} />} />
+      </dl>
+    </li>
   );
 }
 
@@ -339,41 +414,36 @@ export function ConsentPage({ model }: { readonly model: ConsentViewModel }): JS
   const clientName = model.client?.name ?? clientHostname ?? 'MCP client';
   const localhostRedirect = redirectHostname !== null && isLoopbackHostname(redirectHostname);
   return (
-    <Shell title="Authorize MCP client" pageName="consent" signedIn>
-      <TaskLayout marker="Authorization">
+    <Shell title="Authorize MCP client" pageName="consent" username={model.user.username}>
+      <div class="task-layout">
         <section class="task-card consent-card action-zone">
-          <p class="eyebrow">Live-world authority</p>
+          <p class="eyebrow">MCP authorization</p>
           <h1>Allow {clientName}?</h1>
           <p class="task-intro">
-            This client will act as <strong>{model.user.handle}</strong> in a live Minecraft world. Only continue if you
-            recognize the client and destination.
+            This client will act as <strong>{model.user.username}</strong> in the live Minecraft world.
           </p>
 
-          <div class="destination-block">
-            <p class="note-label">Client identity</p>
-            <p class="destination-name">{clientHostname ?? model.requestedClientId}</p>
+          <div class="consent-detail">
+            <p class="detail-label">Client</p>
+            <strong>{clientHostname ?? model.requestedClientId}</strong>
             <code>{model.requestedClientId}</code>
           </div>
-          <div class="destination-block">
-            <p class="note-label">Returns to</p>
-            <p class="destination-name">{redirectHostname ?? 'Destination not provided'}</p>
+          <div class="consent-detail">
+            <p class="detail-label">Returns to</p>
+            <strong>{redirectHostname ?? 'Destination not provided'}</strong>
             {model.redirectUri === null ? null : <code>{model.redirectUri}</code>}
-            {localhostRedirect ? (
-              <p class="security-warning">This request returns to a local app on your device.</p>
-            ) : null}
+            {localhostRedirect ? <p class="inline-warning">This request returns to an app on your device.</p> : null}
           </div>
-
-          <div class="authority-block">
-            <p class="note-label">Requested authority</p>
-            <ul>
-              <li>Inspect worlds, blocks, server context, and online player context.</li>
-              <li>Edit live blocks and use bounded undo history.</li>
-              <li>
-                Run Minecraft commands through <code>run_minecraft_commands</code>.
-              </li>
-            </ul>
-            <p class="scope-line">
-              Scope: <code>{model.scopes.join(' ')}</code>
+          <div class="consent-detail">
+            <p class="detail-label">Access</p>
+            <p>
+              Inspect worlds, edit blocks with bounded undo, and run commands through{' '}
+              <code>run_minecraft_commands</code>.
+            </p>
+            <code>{model.scopes.join(' ')}</code>
+            <p class="authority-warning">
+              Minecraft commands can have console-equivalent authority. Only continue if you recognize the client and
+              return address.
             </p>
           </div>
 
@@ -381,13 +451,13 @@ export function ConsentPage({ model }: { readonly model: ConsentViewModel }): JS
             <button class="primary-button danger-button" type="submit" name="decision" value="allow">
               Allow client
             </button>
-            <button class="quiet-button" type="submit" name="decision" value="deny">
+            <button class="secondary-button" type="submit" name="decision" value="deny">
               Deny
             </button>
           </form>
           <p class="form-status" data-form-status role="status" aria-live="polite" />
         </section>
-      </TaskLayout>
+      </div>
     </Shell>
   );
 }
@@ -395,38 +465,17 @@ export function ConsentPage({ model }: { readonly model: ConsentViewModel }): JS
 export function ErrorPage({ title, message }: { readonly title: string; readonly message: string }): JSX.Element {
   return (
     <Shell title={title} pageName="error">
-      <TaskLayout marker="Dirt">
+      <div class="task-layout">
         <section class="task-card">
-          <p class="eyebrow">Error</p>
+          <p class="eyebrow">Dirt</p>
           <h1>{title}</h1>
           <p class="task-intro">{message}</p>
           <a class="text-link" href="/">
             Return home
           </a>
         </section>
-      </TaskLayout>
-    </Shell>
-  );
-}
-
-function TaskLayout({ marker, children }: { readonly marker: string; readonly children: JSX.Element }): JSX.Element {
-  return (
-    <div class="task-layout">
-      <div class="task-marker" aria-hidden="true">
-        <span>{marker}</span>
-        <span>Field station</span>
       </div>
-      {children}
-    </div>
-  );
-}
-
-function PanelHeading({ label, title, id }: { readonly label: string; readonly title: string; readonly id: string }) {
-  return (
-    <header class="panel-heading">
-      <p class="note-label">{label}</p>
-      <h2 id={id}>{title}</h2>
-    </header>
+    </Shell>
   );
 }
 
@@ -443,35 +492,60 @@ function isLoopbackHostname(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 }
 
-function overallReadiness(model: DashboardViewModel): {
+function dashboardTask(model: DashboardViewModel): {
   readonly title: string;
   readonly detail: string;
+  readonly action: string;
+  readonly label: string;
+  readonly coordinate: string;
   readonly tone: string;
 } {
-  if (model.user.minecraftAccount === null) {
+  if (model.user.minecraftUuid === null) {
     return {
-      title: 'Link Minecraft',
-      detail: 'Link your account before connecting a client.',
-      tone: 'warning-seal',
+      title: 'Link Minecraft again',
+      detail: 'Your account needs a verified Minecraft identity before it can use MCP.',
+      action: '',
+      label: 'Next step',
+      coordinate: '01',
+      tone: 'warning',
+    };
+  }
+  if (model.clients.length === 0) {
+    return {
+      title: 'Connect your MCP client',
+      detail: 'Minecraft and your passkey are ready. One connection step remains.',
+      action: '',
+      label: 'Final setup step',
+      coordinate: '03',
+      tone: 'active',
     };
   }
   if (!model.readiness.bridgeAvailable) {
     return {
-      title: 'Paper offline',
-      detail: 'Account controls remain available.',
-      tone: 'danger-seal',
+      title: 'Paper is offline',
+      detail: 'Your account and MCP authorization are ready; the live server is unavailable.',
+      action: 'Account controls remain available while the operator restores Paper and FAWE.',
+      label: 'Server status',
+      coordinate: '--',
+      tone: 'danger',
     };
   }
   if (model.readiness.enabledTools === 0) {
     return {
-      title: 'No tools enabled',
-      detail: 'Ask the operator to enable Dirt tools.',
-      tone: 'warning-seal',
+      title: 'No tools are enabled',
+      detail: 'Your account is connected, but the operator has not enabled any Dirt tools.',
+      action: 'Ask the server operator to enable the tools you need.',
+      label: 'Server status',
+      coordinate: '--',
+      tone: 'warning',
     };
   }
   return {
-    title: 'MCP ready',
-    detail: 'Minecraft and Paper are connected.',
-    tone: 'ready-seal',
+    title: 'Dirt is ready',
+    detail: 'Your Minecraft account and MCP client are connected.',
+    action: 'Open your MCP client to inspect or edit the live world.',
+    label: 'Ready',
+    coordinate: '✓',
+    tone: 'ready',
   };
 }

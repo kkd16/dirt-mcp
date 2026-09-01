@@ -130,7 +130,7 @@ validate_bundle() {
     'LICENSE'
     'app/dist/backup.js'
     'app/dist/index.js'
-    'app/dist/migrate.js'
+    'app/dist/init-db.js'
     'dirt-mcp.service.in'
     'node/bin/node'
     'paper-plugin.jar'

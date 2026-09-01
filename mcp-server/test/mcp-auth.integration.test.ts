@@ -46,26 +46,24 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
 
   try {
     const repository = new AccessRepository(database);
-    const migration = await getMigrations(createAuthOptions(config, database, repository));
-    await migration.runMigrations();
+    const freshSchema = await getMigrations(createAuthOptions(config, database, repository));
+    await freshSchema.runMigrations();
     const auth = createAuth(config, database, repository);
     await auth.$context;
 
     const now = new Date().toISOString();
     database
       .prepare(
-        'INSERT INTO "user" (id, name, email, emailVerified, image, createdAt, updatedAt, handle, status, minecraftUuid, minecraftName, authorizationVersion) VALUES (?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, 0)',
+        'INSERT INTO "user" (id, name, email, emailVerified, image, createdAt, updatedAt, status, minecraftUuid, authorizationVersion) VALUES (?, ?, ?, 0, NULL, ?, ?, ?, ?, 0)',
       )
       .run(
         'linked-user',
-        'linked',
+        'LinkedPlayer',
         'linked-user@dirt.placeholder.invalid',
         now,
         now,
-        'linked',
         'active',
         'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-        'LinkedPlayer',
       );
 
     let bridgeRequests = 0;
@@ -226,13 +224,13 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
     assert.equal(streamedBodyCanceled, true);
     assert.equal(bridgeRequests, 1);
 
-    repository.disableUser('linked');
+    repository.disableUser('LinkedPlayer');
     const disabled = await mcp.fetch(mcpRequest(resource, issued.token));
     assert.equal(disabled.status, 403);
     assert.equal(disabled.headers.get('WWW-Authenticate'), null);
     assert.equal(bridgeRequests, 1);
 
-    repository.enableUser('linked');
+    repository.enableUser('LinkedPlayer');
     const superseded = await mcp.fetch(mcpRequest(resource, issued.token));
     assert.equal(superseded.status, 403);
     assert.equal(bridgeRequests, 1);
@@ -279,7 +277,7 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
     const bridgeRequestsAfterLegacyHandshake = bridgeRequests;
     assert.ok(bridgeRequestsAfterLegacyHandshake > 2);
 
-    repository.unlinkUser('linked');
+    repository.unlinkUser('LinkedPlayer');
     const supersededByUnlink = await mcp.fetch(mcpRequest(resource, current.token));
     assert.equal(supersededByUnlink.status, 403);
     assert.equal(bridgeRequests, bridgeRequestsAfterLegacyHandshake);

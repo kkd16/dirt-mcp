@@ -74,11 +74,15 @@ is the separate private Paper-to-web account-control contract. The
 
 ## Identity and authorization
 
-Registration is invite-only and passkey-only. Raw invitation, recovery, and
-link secrets are random, short-lived, single-use values; only their SHA-256
-digests are stored. Browser-facing links keep secrets in URL fragments, exchange
-them through a POST, clear the fragment, and continue with a secure, HTTP-only,
-same-site enrollment cookie. Passkey ceremonies require user verification.
+Registration is invite-only and passkey-only. Each invitation is bound to one
+online-mode Minecraft UUID and current Minecraft name before it is created.
+Paper sends its URL only to that online player's private chat. The Minecraft
+name becomes the Dirt username when the player enrolls a passkey; Dirt has no
+separate user-chosen username. Raw invitation, recovery, and link secrets are
+random, short-lived, single-use values; only their SHA-256 digests are stored.
+Browser-facing links keep secrets in URL fragments, exchange them through a
+POST, clear the fragment, and continue with a secure, HTTP-only, same-site
+enrollment cookie. Passkey ceremonies require user verification.
 Recovery is an operator-issued re-enrollment that removes the account's prior
 passkeys and revokes its sessions, consent, authorization codes, and refresh
 grants. Recovery and every account eligibility transition rotate the account's
@@ -86,8 +90,8 @@ authorization generation, immediately invalidating previously issued access
 tokens. Every MCP request also reloads the account and requires it to be active
 and linked.
 
-Paper operators create and revoke invitations through `/dirt invite`, and manage
-accounts through `/dirt user`.
+Paper operators create targeted invitations with `/dirt invite create <player>`,
+revoke them through `/dirt invite`, and manage accounts through `/dirt user`.
 An online player starts linking with `/dirt link`; Paper supplies the
 online-mode-authenticated UUID and current name to the private control API and
 returns a short-lived link URL only to that player. A recently authenticated

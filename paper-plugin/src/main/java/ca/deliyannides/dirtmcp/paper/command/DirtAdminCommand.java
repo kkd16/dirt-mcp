@@ -30,6 +30,7 @@ import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import org.bukkit.Server;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
@@ -44,6 +45,7 @@ public final class DirtAdminCommand {
 
     private final String pluginName;
     private final String pluginVersion;
+    private final Server server;
     private final DirtConfig config;
     private final GetServerStatus status;
     private final AccessControl access;
@@ -53,6 +55,7 @@ public final class DirtAdminCommand {
     public DirtAdminCommand(
             String pluginName,
             String pluginVersion,
+            Server server,
             DirtConfig config,
             GetServerStatus status,
             AccessControl access,
@@ -60,6 +63,7 @@ public final class DirtAdminCommand {
             DirtLog log) {
         this.pluginName = Objects.requireNonNull(pluginName, "pluginName");
         this.pluginVersion = Objects.requireNonNull(pluginVersion, "pluginVersion");
+        this.server = Objects.requireNonNull(server, "server");
         this.config = Objects.requireNonNull(config, "config");
         this.status = Objects.requireNonNull(status, "status");
         this.access = Objects.requireNonNull(access, "access");
@@ -129,9 +133,26 @@ public final class DirtAdminCommand {
                 .requires(source -> hasAdminPermission(source.getSender()))
                 .then(
                         Commands.literal("create")
-                                .executes(
-                                        context ->
-                                                createInvitation(context.getSource().getSender())))
+                                .then(
+                                        Commands.argument("player", StringArgumentType.word())
+                                                .suggests(
+                                                        (context, builder) -> {
+                                                            for (Player player :
+                                                                    this.server
+                                                                            .getOnlinePlayers()) {
+                                                                builder.suggest(player.getName());
+                                                            }
+                                                            return builder.buildFuture();
+                                                        })
+                                                .executes(
+                                                        context ->
+                                                                createInvitation(
+                                                                        context.getSource()
+                                                                                .getSender(),
+                                                                        StringArgumentType
+                                                                                .getString(
+                                                                                        context,
+                                                                                        "player")))))
                 .then(
                         Commands.literal("revoke")
                                 .then(
@@ -155,13 +176,13 @@ public final class DirtAdminCommand {
         user.then(
                 Commands.literal("recover")
                         .then(
-                                Commands.argument("handle", StringArgumentType.word())
+                                Commands.argument("selector", StringArgumentType.word())
                                         .executes(
                                                 context ->
                                                         createUserRecovery(
                                                                 context.getSource().getSender(),
                                                                 StringArgumentType.getString(
-                                                                        context, "handle")))));
+                                                                        context, "selector")))));
         user.then(userAction("unlink", this.access::unlinkUser, "unlinked"));
         return user;
     }
@@ -172,14 +193,15 @@ public final class DirtAdminCommand {
             String completedAction) {
         return Commands.literal(command)
                 .then(
-                        Commands.argument("handle", StringArgumentType.word())
+                        Commands.argument("selector", StringArgumentType.word())
                                 .executes(
                                         context -> {
-                                            String handle =
-                                                    StringArgumentType.getString(context, "handle");
+                                            String selector =
+                                                    StringArgumentType.getString(
+                                                            context, "selector");
                                             return runAsync(
                                                     context.getSource().getSender(),
-                                                    () -> action.apply(handle),
+                                                    () -> action.apply(selector),
                                                     result ->
                                                             userMutationMessage(
                                                                     result.user(),
@@ -195,12 +217,12 @@ public final class DirtAdminCommand {
         if (hasAdminPermission(sender)) {
             appendCommand(message, "/dirt users", "View dashboard users");
             appendCommand(message, "/dirt invites", "View dashboard invites");
-            appendCommand(message, "/dirt invite create", "Create an invite");
+            appendCommand(message, "/dirt invite create <player>", "Invite an online player");
             appendCommand(message, "/dirt invite revoke <id>", "Revoke an invite");
-            appendCommand(message, "/dirt user disable <handle>", "Disable a user");
-            appendCommand(message, "/dirt user enable <handle>", "Enable a user");
-            appendCommand(message, "/dirt user recover <handle>", "Create a recovery link");
-            appendCommand(message, "/dirt user unlink <handle>", "Unlink a Minecraft account");
+            appendCommand(message, "/dirt user disable <username|id>", "Disable a user");
+            appendCommand(message, "/dirt user enable <username|id>", "Enable a user");
+            appendCommand(message, "/dirt user recover <username|id>", "Create a recovery link");
+            appendCommand(message, "/dirt user unlink <username|id>", "Unlink a Minecraft account");
             appendCommand(message, "/dirt status", "View live server and bridge status");
             appendCommand(message, "/dirt config", "Inspect the active configuration");
             appendCommand(message, "/dirt version", "Show plugin version information");
@@ -345,12 +367,78 @@ public final class DirtAdminCommand {
         return runAsync(sender, () -> this.access.listInvitations(page), this::invitationsMessage);
     }
 
-    private int createInvitation(CommandSender sender) {
-        Player operator = requireInGameOperator(sender);
-        if (operator == null) {
+    private int createInvitation(CommandSender sender, String playerName) {
+        Player target = this.server.getPlayerExact(playerName);
+        if (target == null || !target.isOnline()) {
+            sender.sendMessage(
+                    failureMessage("That player must be online to receive an invitation."));
             return 0;
         }
-        return runAsync(operator, this.access::createInvitation, this::createdInvitationMessage);
+        sender.sendMessage(progressMessage());
+        final CompletionStage<AccessControl.CreateInvitationResult> pending;
+        try {
+            pending = this.access.createInvitation(target.getUniqueId(), target.getName());
+        } catch (RuntimeException failure) {
+            deliver(sender, accessFailureMessage(failure));
+            return 0;
+        }
+        pending.whenComplete(
+                (result, failure) -> {
+                    if (failure != null) {
+                        deliver(sender, accessFailureMessage(failure));
+                        return;
+                    }
+                    deliverInvitation(sender, target.getUniqueId(), result);
+                });
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private void deliverInvitation(
+            CommandSender sender,
+            java.util.UUID targetUuid,
+            AccessControl.CreateInvitationResult result) {
+        try {
+            this.mainThread.run(
+                    () -> {
+                        Player target = this.server.getPlayer(targetUuid);
+                        if (target == null || !target.isOnline()) {
+                            revokeUndeliveredInvitation(sender, result.invitation().id());
+                            return;
+                        }
+                        target.sendMessage(createdInvitationMessage(result));
+                        if (!(sender instanceof Player player)
+                                || !player.getUniqueId().equals(targetUuid)) {
+                            sender.sendMessage(
+                                    confirmation(
+                                            "Invitation Sent",
+                                            "Invitation sent privately to "
+                                                    + target.getName()
+                                                    + '.'));
+                        }
+                    });
+        } catch (PaperMainThreadException ignored) {
+            revokeUndeliveredInvitation(sender, result.invitation().id());
+        }
+    }
+
+    private void revokeUndeliveredInvitation(CommandSender sender, String invitationId) {
+        try {
+            this.access
+                    .revokeInvitation(invitationId)
+                    .whenComplete(
+                            (ignored, failure) ->
+                                    deliver(
+                                            sender,
+                                            failureMessage(
+                                                    failure == null
+                                                            ? "The player left before the invitation could be sent. Try again when they return."
+                                                            : "The player left before the invitation could be sent. The unused invitation will expire automatically.")));
+        } catch (RuntimeException failure) {
+            deliver(
+                    sender,
+                    failureMessage(
+                            "The player left before the invitation could be sent. The unused invitation will expire automatically."));
+        }
     }
 
     private int revokeInvitation(CommandSender sender, String id) {
@@ -363,13 +451,15 @@ public final class DirtAdminCommand {
                                 "Invitation " + result.invitation().id() + " is revoked."));
     }
 
-    private int createUserRecovery(CommandSender sender, String handle) {
+    private int createUserRecovery(CommandSender sender, String selector) {
         Player operator = requireInGameOperator(sender);
         if (operator == null) {
             return 0;
         }
         return runAsync(
-                operator, () -> this.access.createUserRecovery(handle), this::userRecoveryMessage);
+                operator,
+                () -> this.access.createUserRecovery(selector),
+                this::userRecoveryMessage);
     }
 
     private int link(CommandSender sender) {
@@ -441,7 +531,7 @@ public final class DirtAdminCommand {
         }
         for (AccessControl.UserSummary user : result.items()) {
             message.append(Component.newline()).append(Component.newline());
-            message.append(Component.text("  " + user.handle(), SECONDARY_ACCENT));
+            message.append(Component.text("  " + user.username(), SECONDARY_ACCENT));
             message.append(
                     Component.text(
                             "  " + user.status().wireName(),
@@ -449,18 +539,15 @@ public final class DirtAdminCommand {
                                     ? NamedTextColor.GREEN
                                     : NamedTextColor.RED));
             message.append(Component.newline());
-            if (user.minecraftAccount() == null) {
+            if (user.minecraftUuid() == null) {
                 message.append(Component.text("    Minecraft: unlinked", NamedTextColor.GRAY));
             } else {
                 message.append(
-                        Component.text(
-                                "    Minecraft: "
-                                        + user.minecraftAccount().name()
-                                        + " ("
-                                        + user.minecraftAccount().uuid()
-                                        + ')',
-                                NamedTextColor.GRAY));
+                        Component.text("    UUID: " + user.minecraftUuid(), NamedTextColor.GRAY));
             }
+            message.append(Component.newline());
+            message.append(
+                    Component.text("    Account ID: " + user.id(), NamedTextColor.DARK_GRAY));
         }
         appendPageControls(message, "users", result.page(), result.totalPages());
         return message.build();
@@ -488,6 +575,15 @@ public final class DirtAdminCommand {
                                     : NamedTextColor.GRAY));
             message.append(Component.newline());
             message.append(
+                    Component.text(
+                            "    Player: "
+                                    + invitation.minecraftAccount().name()
+                                    + " ("
+                                    + invitation.minecraftAccount().uuid()
+                                    + ')',
+                            NamedTextColor.GRAY));
+            message.append(Component.newline());
+            message.append(
                     Component.text("    Expires: " + invitation.expiresAt(), NamedTextColor.GRAY));
         }
         appendPageControls(message, "invites", result.page(), result.totalPages());
@@ -496,19 +592,19 @@ public final class DirtAdminCommand {
 
     private Component createdInvitationMessage(AccessControl.CreateInvitationResult result) {
         return privateUrlMessage(
-                "Invitation Created",
-                "Invitation "
-                        + result.invitation().id()
-                        + " expires at "
+                "Your Dirt Invitation",
+                "Linked to "
+                        + result.invitation().minecraftAccount().name()
+                        + " • expires at "
                         + result.invitation().expiresAt(),
-                "Private invitation URL",
+                "Open invitation",
                 result.inviteUrl());
     }
 
     private Component userRecoveryMessage(AccessControl.UserRecoveryResult result) {
         return privateUrlMessage(
                 "User Recovery",
-                "Recovery for " + result.user().handle() + " expires at " + result.expiresAt(),
+                "Recovery for " + result.user().username() + " expires at " + result.expiresAt(),
                 "Private recovery URL",
                 result.recoveryUrl());
     }
@@ -549,6 +645,13 @@ public final class DirtAdminCommand {
         message.append(Component.text("  " + label + "  ", NamedTextColor.GRAY));
         message.append(
                 Component.text(value, SECONDARY_ACCENT)
+                        .clickEvent(ClickEvent.openUrl(value))
+                        .hoverEvent(
+                                HoverEvent.showText(
+                                        Component.text("Click to open", NamedTextColor.GRAY))));
+        message.append(Component.text("  ", NamedTextColor.DARK_GRAY));
+        message.append(
+                Component.text("[copy]", SECONDARY_ACCENT)
                         .clickEvent(ClickEvent.copyToClipboard(value))
                         .hoverEvent(copyHover("private URL")));
     }
@@ -556,7 +659,7 @@ public final class DirtAdminCommand {
     private static Component userMutationMessage(
             AccessControl.UserSummary user, String completedAction) {
         return confirmation(
-                "User Updated", "User " + user.handle() + " was " + completedAction + '.');
+                "User Updated", "User " + user.username() + " was " + completedAction + '.');
     }
 
     private static Component confirmation(String title, String detail) {

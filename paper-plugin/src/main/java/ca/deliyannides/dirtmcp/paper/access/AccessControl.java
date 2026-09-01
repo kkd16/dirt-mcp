@@ -13,17 +13,18 @@ public interface AccessControl extends AutoCloseable {
 
     CompletionStage<InvitationPage> listInvitations(int page);
 
-    CompletionStage<CreateInvitationResult> createInvitation();
+    CompletionStage<CreateInvitationResult> createInvitation(
+            UUID minecraftUuid, String minecraftName);
 
     CompletionStage<InvitationMutationResult> revokeInvitation(String id);
 
-    CompletionStage<UserMutationResult> disableUser(String handle);
+    CompletionStage<UserMutationResult> disableUser(String selector);
 
-    CompletionStage<UserMutationResult> enableUser(String handle);
+    CompletionStage<UserMutationResult> enableUser(String selector);
 
-    CompletionStage<UserRecoveryResult> createUserRecovery(String handle);
+    CompletionStage<UserRecoveryResult> createUserRecovery(String selector);
 
-    CompletionStage<UserMutationResult> unlinkUser(String handle);
+    CompletionStage<UserMutationResult> unlinkUser(String selector);
 
     CompletionStage<MinecraftLinkChallenge> createMinecraftLinkChallenge(
             UUID minecraftUuid, String minecraftName);
@@ -54,29 +55,30 @@ public interface AccessControl extends AutoCloseable {
     record MinecraftAccount(UUID uuid, String name) {
         public MinecraftAccount {
             Objects.requireNonNull(uuid, "uuid");
-            name = nonBlank(name, "name", 16);
+            name = minecraftUsername(name, "name");
         }
     }
 
     record UserSummary(
-            String id,
-            String handle,
-            UserStatus status,
-            MinecraftAccount minecraftAccount,
-            Instant createdAt) {
+            String id, String username, UserStatus status, UUID minecraftUuid, Instant createdAt) {
         public UserSummary {
             id = nonBlank(id, "id", 256);
-            handle = nonBlank(handle, "handle", 256);
+            username = minecraftUsername(username, "username");
             Objects.requireNonNull(status, "status");
             Objects.requireNonNull(createdAt, "createdAt");
         }
     }
 
     record InvitationSummary(
-            String id, InvitationStatus status, Instant createdAt, Instant expiresAt) {
+            String id,
+            InvitationStatus status,
+            MinecraftAccount minecraftAccount,
+            Instant createdAt,
+            Instant expiresAt) {
         public InvitationSummary {
             id = nonBlank(id, "id", 256);
             Objects.requireNonNull(status, "status");
+            Objects.requireNonNull(minecraftAccount, "minecraftAccount");
             Objects.requireNonNull(createdAt, "createdAt");
             Objects.requireNonNull(expiresAt, "expiresAt");
         }
@@ -180,6 +182,14 @@ public interface AccessControl extends AutoCloseable {
         if (value == null || value.isBlank() || value.length() > maximumLength) {
             throw new IllegalArgumentException(
                     name + " must be non-blank and at most " + maximumLength + " characters");
+        }
+        return value;
+    }
+
+    private static String minecraftUsername(String value, String name) {
+        if (value == null || !value.matches("[A-Za-z0-9_]{3,16}")) {
+            throw new IllegalArgumentException(
+                    name + " must be a valid 3-16 character Minecraft username");
         }
         return value;
     }

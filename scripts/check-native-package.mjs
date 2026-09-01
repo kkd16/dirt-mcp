@@ -102,7 +102,7 @@ cp -- "\${DIRT_TEST_ARCHIVE}" "\${output}"
     'Caddyfile.in',
     'app/dist/backup.js',
     'app/dist/index.js',
-    'app/dist/migrate.js',
+    'app/dist/init-db.js',
     'app/node_modules/better-sqlite3/build/Release/better_sqlite3.node',
     'dirt-mcp.service.in',
     'install.sh',
@@ -167,11 +167,11 @@ cp -- "\${DIRT_TEST_ARCHIVE}" "\${output}"
     DIRT_PUBLIC_ORIGIN: 'http://localhost:3000',
     NODE_ENV: 'production',
   };
-  await run(node, [join(bundle, 'app', 'dist', 'migrate.js')], {
+  await run(node, [join(bundle, 'app', 'dist', 'init-db.js')], {
     cwd: bundle,
     env: runtimeEnvironment,
   });
-  await requireRegularFile(database, 'migrated SQLite database');
+  await requireRegularFile(database, 'initialized SQLite database');
   await assertPackagedServiceHealth(node, bundle, runtimeEnvironment);
   const backup = join(temporaryDirectory, 'dirt-backup.sqlite3');
   await run(node, [join(bundle, 'app', 'dist', 'backup.js'), backup], {

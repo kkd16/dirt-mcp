@@ -244,11 +244,11 @@ async function prepareFreshStack() {
   await run('pnpm', ['install', '--frozen-lockfile']);
   await run('./gradlew', [':paper-plugin:assemble']);
   await run('pnpm', ['run', 'build']);
-  await migrate();
+  await initializeDatabase();
 }
 
-async function migrate() {
-  await run('overmind', ['run', 'pnpm', 'migrate']);
+async function initializeDatabase() {
+  await run('overmind', ['run', 'pnpm', 'init-db']);
 }
 
 async function probeJson(url, options, accepts) {
@@ -531,7 +531,7 @@ async function restartWeb() {
   if (await stopProcess('web', shutdownTimeoutMilliseconds)) issues.push('web required SIGKILL to stop');
   await run('pnpm', ['install', '--frozen-lockfile']);
   await run('pnpm', ['run', 'build']);
-  await migrate();
+  await initializeDatabase();
   await restartProcess('web');
   await waitForReady();
   throwIssues(issues);

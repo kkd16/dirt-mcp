@@ -69,7 +69,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/EmptyRequest'
+              $ref: '#/components/schemas/MinecraftIdentityRequest'
       responses:
         '200':
           description: Created invitation and its one-time secret URL
@@ -119,10 +119,10 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
-  /internal/v1/access/users/{handle}/disable:
+  /internal/v1/access/users/{selector}/disable:
     parameters:
       - $ref: '#/components/parameters/DirtCallId'
-      - $ref: '#/components/parameters/UserHandle'
+      - $ref: '#/components/parameters/UserSelector'
     post:
       operationId: disableAccessUser
       summary: Disable a user account
@@ -147,10 +147,10 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
-  /internal/v1/access/users/{handle}/enable:
+  /internal/v1/access/users/{selector}/enable:
     parameters:
       - $ref: '#/components/parameters/DirtCallId'
-      - $ref: '#/components/parameters/UserHandle'
+      - $ref: '#/components/parameters/UserSelector'
     post:
       operationId: enableAccessUser
       summary: Enable a user account
@@ -175,10 +175,10 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
-  /internal/v1/access/users/{handle}/recovery:
+  /internal/v1/access/users/{selector}/recovery:
     parameters:
       - $ref: '#/components/parameters/DirtCallId'
-      - $ref: '#/components/parameters/UserHandle'
+      - $ref: '#/components/parameters/UserSelector'
     post:
       operationId: createAccessUserRecovery
       summary: Create a short-lived account recovery URL and return it once
@@ -207,10 +207,10 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
-  /internal/v1/access/users/{handle}/unlink:
+  /internal/v1/access/users/{selector}/unlink:
     parameters:
       - $ref: '#/components/parameters/DirtCallId'
-      - $ref: '#/components/parameters/UserHandle'
+      - $ref: '#/components/parameters/UserSelector'
     post:
       operationId: unlinkAccessUserMinecraftAccount
       summary: Remove a user's linked Minecraft account
@@ -246,7 +246,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MinecraftLinkChallengeRequest'
+              $ref: '#/components/schemas/MinecraftIdentityRequest'
       responses:
         '200':
           description: Private challenge code and link URL
@@ -292,10 +292,11 @@ components:
       required: true
       schema:
         $ref: '#/components/schemas/OpaqueSelector'
-    UserHandle:
-      name: handle
+    UserSelector:
+      name: selector
       in: path
       required: true
+      description: Current Minecraft username or stable Dirt account ID.
       schema:
         $ref: '#/components/schemas/OpaqueSelector'
   responses:
@@ -369,9 +370,9 @@ components:
       pattern: '.*\S.*'
     MinecraftName:
       type: string
-      minLength: 1
+      minLength: 3
       maxLength: 16
-      pattern: '.*\S.*'
+      pattern: '^[A-Za-z0-9_]{3,16}$'
     SafeWebUrl:
       type: string
       format: uri
@@ -405,20 +406,20 @@ components:
       additionalProperties: false
       required:
         - id
-        - handle
+        - username
         - status
-        - minecraftAccount
+        - minecraftUuid
         - createdAt
       properties:
         id:
           $ref: '#/components/schemas/NonBlankString'
-        handle:
-          $ref: '#/components/schemas/NonBlankString'
+        username:
+          $ref: '#/components/schemas/MinecraftName'
         status:
           $ref: '#/components/schemas/UserStatus'
-        minecraftAccount:
+        minecraftUuid:
           oneOf:
-            - $ref: '#/components/schemas/MinecraftAccount'
+            - $ref: '#/components/schemas/Uuid'
             - type: 'null'
         createdAt:
           type: string
@@ -429,6 +430,7 @@ components:
       required:
         - id
         - status
+        - minecraftAccount
         - createdAt
         - expiresAt
       properties:
@@ -436,6 +438,8 @@ components:
           $ref: '#/components/schemas/NonBlankString'
         status:
           $ref: '#/components/schemas/InvitationStatus'
+        minecraftAccount:
+          $ref: '#/components/schemas/MinecraftAccount'
         createdAt:
           type: string
           format: date-time
@@ -570,7 +574,7 @@ components:
               type: string
               format: date-time
       unevaluatedProperties: false
-    MinecraftLinkChallengeRequest:
+    MinecraftIdentityRequest:
       type: object
       additionalProperties: false
       required:

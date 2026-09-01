@@ -51,7 +51,8 @@ function runUserAction(source: HTMLElement, action: () => Promise<void>): void {
 function actionControls(source: HTMLElement): HTMLButtonElement[] {
   const form = source instanceof HTMLFormElement ? source : source.closest('form');
   if (form !== null) return Array.from(form.querySelectorAll<HTMLButtonElement>('button'));
-  return source instanceof HTMLButtonElement ? [source] : [];
+  if (source instanceof HTMLButtonElement) return [source];
+  return Array.from(source.querySelectorAll<HTMLButtonElement>('button'));
 }
 
 document.querySelector<HTMLButtonElement>('[data-action="sign-in"]')?.addEventListener('click', (event) => {
@@ -72,31 +73,50 @@ document.querySelector<HTMLButtonElement>('[data-action="sign-in"]')?.addEventLi
   });
 });
 
+const onboardingPage = document.querySelector<HTMLElement>('[data-onboarding-page]');
+if (onboardingPage !== null) {
+  const token = new URLSearchParams(location.hash.slice(1)).get('token');
+  const needsPreparation = onboardingPage.querySelector('[data-onboarding-prepare]') !== null;
+  if (token !== null) {
+    history.replaceState(null, '', location.pathname);
+    const ready = onboardingPage.querySelector<HTMLElement>('[data-onboarding-ready]');
+    if (ready !== null) ready.hidden = true;
+    const title = onboardingPage.querySelector<HTMLElement>('#onboarding-title');
+    if (title !== null) title.textContent = 'Checking your link';
+    report(onboardingPage, 'Verifying the private link…');
+    runUserAction(onboardingPage, async () => {
+      const kind = onboardingPage.dataset.onboardingPage;
+      if (kind !== 'invitation' && kind !== 'recovery') {
+        report(onboardingPage, 'This setup page is invalid. Ask an operator for a new link.', 'error');
+        return;
+      }
+      const exchange = await fetch('/api/onboarding/exchange', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind, token }),
+      });
+      const exchangeBody = await responseObject(exchange);
+      if (!exchange.ok) {
+        report(onboardingPage, optionalString(exchangeBody, 'error') ?? 'This link could not be verified.', 'error');
+        return;
+      }
+      location.reload();
+    });
+  } else if (needsPreparation) {
+    report(onboardingPage, 'This link is invalid or expired. Ask an operator for a new one.', 'error');
+  }
+}
+
 document.querySelector<HTMLFormElement>('[data-onboarding]')?.addEventListener('submit', (event) => {
   const form = event.currentTarget;
   if (!(form instanceof HTMLFormElement)) return;
   event.preventDefault();
   runUserAction(form, async () => {
     const kind = form.dataset.onboarding;
-    const token = new URLSearchParams(location.hash.slice(1)).get('token');
-    if ((kind !== 'invitation' && kind !== 'recovery') || token === null) {
-      report(form, 'Invalid link. Request a new one.', 'error');
+    if (kind !== 'invitation' && kind !== 'recovery') {
+      report(form, 'This setup page is invalid. Ask an operator for a new link.', 'error');
       return;
     }
-    const formData = new FormData(form);
-    report(form, 'Checking link…');
-    const body = kind === 'invitation' ? { kind, token, handle: formString(formData, 'handle') } : { kind, token };
-    const exchange = await fetch('/api/onboarding/exchange', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const exchangeBody = await responseObject(exchange);
-    if (!exchange.ok) {
-      report(form, optionalString(exchangeBody, 'error') ?? 'The link could not be accepted.', 'error');
-      return;
-    }
-    history.replaceState(null, '', location.pathname);
     const signedOut = await authClient.signOut();
     if (signedOut.error !== null) {
       report(form, signedOut.error.message ?? 'Sign out failed. Try again.', 'error');

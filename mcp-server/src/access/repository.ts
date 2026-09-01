@@ -10,9 +10,9 @@ type UserStatus = 'active' | 'disabled';
 
 export interface UserSummary {
   readonly id: string;
-  readonly handle: string;
+  readonly username: string;
   readonly status: UserStatus;
-  readonly minecraftAccount: { readonly uuid: string; readonly name: string } | null;
+  readonly minecraftUuid: string | null;
   readonly createdAt: string;
 }
 
@@ -34,9 +34,10 @@ export interface PasskeySummary {
   readonly createdAt: string;
 }
 
-interface InvitationSummary {
+export interface InvitationSummary {
   readonly id: string;
   readonly status: 'pending' | 'accepted' | 'revoked' | 'expired';
+  readonly minecraftAccount: { readonly uuid: string; readonly name: string };
   readonly createdAt: string;
   readonly expiresAt: string;
 }
@@ -68,7 +69,8 @@ interface LinkChallenge {
 export interface OnboardingClaim {
   readonly kind: 'invitation' | 'recovery';
   readonly recordId: string;
-  readonly handle: string;
+  readonly username: string;
+  readonly minecraftUuid: string | null;
 }
 
 interface McpUser {
@@ -78,15 +80,16 @@ interface McpUser {
 
 type UserRow = {
   id: string;
-  handle: string;
+  name: string;
   status: string;
   minecraftUuid: string | null;
-  minecraftName: string | null;
   createdAt: string;
 };
 
 type InvitationRow = {
   id: string;
+  minecraftUuid: string;
+  minecraftName: string;
   createdAt: string;
   expiresAt: string;
   acceptedAt: string | null;
@@ -101,13 +104,16 @@ type LinkChallengeRow = {
   usedAt: string | null;
 };
 
-type InvitationClaimRow = Pick<InvitationRow, 'id' | 'expiresAt' | 'acceptedAt' | 'revokedAt'>;
+type InvitationClaimRow = Pick<
+  InvitationRow,
+  'id' | 'minecraftUuid' | 'minecraftName' | 'expiresAt' | 'acceptedAt' | 'revokedAt'
+>;
 
 type RecoveryClaimRow = {
   id: string;
   expiresAt: string;
   usedAt: string | null;
-  handle: string;
+  username: string;
 };
 
 type AuthorizedClientRow = {
@@ -170,7 +176,38 @@ export class AccessRepository {
       )
       .all(...required);
     if (rows.length !== required.length) {
-      throw new Error('The Dirt database is not migrated; run `pnpm migrate`.');
+      throw new Error('The Dirt database schema is incompatible with this release. Start with an empty database.');
+    }
+    this.assertExactColumns('user', [
+      'id',
+      'name',
+      'email',
+      'emailVerified',
+      'image',
+      'createdAt',
+      'updatedAt',
+      'status',
+      'minecraftUuid',
+      'authorizationVersion',
+    ]);
+    this.assertExactColumns('invitation', [
+      'id',
+      'tokenHash',
+      'minecraftUuid',
+      'minecraftName',
+      'createdAt',
+      'expiresAt',
+      'acceptedAt',
+      'revokedAt',
+      'acceptedByUserId',
+    ]);
+  }
+
+  private assertExactColumns(table: 'invitation' | 'user', expected: readonly string[]): void {
+    const rows = this.database.prepare<[], { name: string }>(`PRAGMA table_info("${table}")`).all();
+    const actual = rows.map((row) => row.name).toSorted();
+    if (actual.length !== expected.length || actual.some((name, index) => name !== expected.toSorted()[index])) {
+      throw new Error('The Dirt database schema is incompatible with this release. Start with an empty database.');
     }
   }
 
@@ -178,7 +215,7 @@ export class AccessRepository {
     const totalItems = scalarCount(this.database, 'SELECT COUNT(*) AS count FROM "user"');
     const rows = this.database
       .prepare<[number, number], UserRow>(
-        'SELECT id, handle, status, minecraftUuid, minecraftName, createdAt FROM "user" ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?',
+        'SELECT id, name, status, minecraftUuid, createdAt FROM "user" ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?',
       )
       .all(PAGE_SIZE, (page - 1) * PAGE_SIZE);
     return pageEnvelope(page, totalItems, rows.map(toUserSummary));
@@ -188,7 +225,7 @@ export class AccessRepository {
     const totalItems = scalarCount(this.database, 'SELECT COUNT(*) AS count FROM invitation');
     const rows = this.database
       .prepare<[number, number], InvitationRow>(
-        'SELECT id, createdAt, expiresAt, acceptedAt, revokedAt FROM invitation ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?',
+        'SELECT id, minecraftUuid, minecraftName, createdAt, expiresAt, acceptedAt, revokedAt FROM invitation ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?',
       )
       .all(PAGE_SIZE, (page - 1) * PAGE_SIZE);
     return pageEnvelope(
@@ -198,19 +235,38 @@ export class AccessRepository {
     );
   }
 
-  createInvitation(now = new Date()): SecretInvitation {
+  createInvitation(minecraftUuid: string, minecraftName: string, now = new Date()): SecretInvitation {
     const id = randomUUID();
     const secret = randomSecret();
     const expiresAt = new Date(now.getTime() + INVITATION_TTL_MS);
-    this.database
-      .prepare(
-        'INSERT INTO invitation (id, tokenHash, createdAt, expiresAt, acceptedAt, revokedAt, acceptedByUserId) VALUES (?, ?, ?, ?, NULL, NULL, NULL)',
-      )
-      .run(id, hashSecret(secret), now.toISOString(), expiresAt.toISOString());
+    const transaction = this.database.transaction(() => {
+      this.database
+        .prepare('DELETE FROM invitation WHERE expiresAt <= ? AND acceptedAt IS NULL')
+        .run(now.toISOString());
+      const linked = this.database
+        .prepare<[string], { found: number }>('SELECT 1 AS found FROM "user" WHERE minecraftUuid = ? LIMIT 1')
+        .get(minecraftUuid);
+      if (linked !== undefined) throw new AccessError('conflict', 'That Minecraft account already has Dirt access.');
+      const pending = this.database
+        .prepare<[string], { found: number }>(
+          'SELECT 1 AS found FROM invitation WHERE minecraftUuid = ? AND acceptedAt IS NULL AND revokedAt IS NULL LIMIT 1',
+        )
+        .get(minecraftUuid);
+      if (pending !== undefined) {
+        throw new AccessError('conflict', 'That player already has a pending invitation.');
+      }
+      this.database
+        .prepare(
+          'INSERT INTO invitation (id, tokenHash, minecraftUuid, minecraftName, createdAt, expiresAt, acceptedAt, revokedAt, acceptedByUserId) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL)',
+        )
+        .run(id, hashSecret(secret), minecraftUuid, minecraftName, now.toISOString(), expiresAt.toISOString());
+    });
+    transaction.immediate();
     return {
       invitation: {
         id,
         status: 'pending',
+        minecraftAccount: { uuid: minecraftUuid, name: minecraftName },
         createdAt: now.toISOString(),
         expiresAt: expiresAt.toISOString(),
       },
@@ -233,29 +289,30 @@ export class AccessRepository {
     return invitation;
   }
 
-  disableUser(handle: string): UserSummary {
-    return this.setUserStatus(handle, 'disabled');
+  disableUser(selector: string): UserSummary {
+    return this.setUserStatus(selector, 'disabled');
   }
 
-  enableUser(handle: string): UserSummary {
-    return this.setUserStatus(handle, 'active');
+  enableUser(selector: string): UserSummary {
+    return this.setUserStatus(selector, 'active');
   }
 
-  unlinkUser(handle: string): UserSummary {
+  unlinkUser(selector: string): UserSummary {
     const now = new Date();
     const transaction = this.database.transaction(() => {
+      const user = this.requireUserBySelector(selector);
       const changed = this.database
         .prepare<[string, string], { id: string }>(
-          'UPDATE "user" SET minecraftUuid = NULL, minecraftName = NULL, updatedAt = ? WHERE handle = ? AND (minecraftUuid IS NOT NULL OR minecraftName IS NOT NULL) RETURNING id',
+          'UPDATE "user" SET minecraftUuid = NULL, updatedAt = ? WHERE id = ? AND minecraftUuid IS NOT NULL RETURNING id',
         )
-        .get(now.toISOString(), handle);
-      return this.completeEligibilityUpdate(handle, changed?.id, now);
+        .get(now.toISOString(), user.id);
+      return this.completeEligibilityUpdate(user.id, changed?.id, now);
     });
     return transaction.immediate();
   }
 
-  createRecovery(handle: string, now = new Date()): SecretRecovery {
-    const user = this.requireUserByHandle(handle);
+  createRecovery(selector: string, now = new Date()): SecretRecovery {
+    const user = this.requireUserBySelector(selector);
     const secret = randomSecret();
     const expiresAt = new Date(now.getTime() + RECOVERY_TTL_MS);
     const transaction = this.database.transaction(() => {
@@ -311,8 +368,8 @@ export class AccessRepository {
         throw new AccessError('expired', 'The link code has expired.');
       }
       const user = this.database
-        .prepare<[string], { status: string; minecraftUuid: string | null; minecraftName: string | null }>(
-          'SELECT status, minecraftUuid, minecraftName FROM "user" WHERE id = ?',
+        .prepare<[string], { status: string; minecraftUuid: string | null }>(
+          'SELECT status, minecraftUuid FROM "user" WHERE id = ?',
         )
         .get(userId);
       if (user === undefined) throw new AccessError('not_found', 'User not found.');
@@ -325,12 +382,12 @@ export class AccessRepository {
         .get(challenge.minecraftUuid, userId);
       if (linked !== undefined) throw new AccessError('conflict', 'That Minecraft account is already linked.');
       this.database
-        .prepare('UPDATE "user" SET minecraftUuid = ?, minecraftName = ?, updatedAt = ? WHERE id = ?')
-        .run(challenge.minecraftUuid, challenge.minecraftName, now.toISOString(), userId);
+        .prepare('UPDATE "user" SET name = ?, minecraftUuid = ?, updatedAt = ? WHERE id = ?')
+        .run(challenge.minecraftName, challenge.minecraftUuid, now.toISOString(), userId);
       // Rotate the OAuth generation on every authorization-eligibility
       // transition. Keep this fresh browser session so the user can continue
       // from linking into a new authorization ceremony.
-      if (user.minecraftUuid === null || user.minecraftName === null) this.rotateAuthorization(userId, now);
+      if (user.minecraftUuid === null) this.rotateAuthorization(userId, now);
       const consumed = this.database
         .prepare('UPDATE minecraftLinkChallenge SET usedAt = ?, usedByUserId = ? WHERE id = ? AND usedAt IS NULL')
         .run(now.toISOString(), userId, challenge.id);
@@ -343,31 +400,31 @@ export class AccessRepository {
   resolveInvitation(secret: string, now = new Date()): OnboardingClaim {
     const row = this.database
       .prepare<[string], InvitationClaimRow>(
-        'SELECT id, expiresAt, acceptedAt, revokedAt FROM invitation WHERE tokenHash = ?',
+        'SELECT id, minecraftUuid, minecraftName, expiresAt, acceptedAt, revokedAt FROM invitation WHERE tokenHash = ?',
       )
       .get(hashSecret(secret));
     if (row === undefined || row.acceptedAt !== null || row.revokedAt !== null) {
       throw new AccessError('invalid', 'Invalid invitation.');
     }
     if (toEpochMilliseconds(row.expiresAt) <= now.getTime()) throw new AccessError('expired', 'Invitation expired.');
-    return { kind: 'invitation', recordId: row.id, handle: '' };
+    return { kind: 'invitation', recordId: row.id, username: row.minecraftName, minecraftUuid: row.minecraftUuid };
   }
 
   resolveRecovery(secret: string, now = new Date()): OnboardingClaim {
     const row = this.database
       .prepare<[string], RecoveryClaimRow>(
-        'SELECT credentialRecovery.id, credentialRecovery.expiresAt, credentialRecovery.usedAt, "user".handle FROM credentialRecovery JOIN "user" ON "user".id = credentialRecovery.userId WHERE credentialRecovery.tokenHash = ?',
+        'SELECT credentialRecovery.id, credentialRecovery.expiresAt, credentialRecovery.usedAt, "user".name AS username FROM credentialRecovery JOIN "user" ON "user".id = credentialRecovery.userId WHERE credentialRecovery.tokenHash = ?',
       )
       .get(hashSecret(secret));
     if (row === undefined || row.usedAt !== null) throw new AccessError('invalid', 'Invalid recovery link.');
     if (toEpochMilliseconds(row.expiresAt) <= now.getTime()) throw new AccessError('expired', 'Recovery link expired.');
-    return { kind: 'recovery', recordId: row.id, handle: row.handle };
+    return { kind: 'recovery', recordId: row.id, username: row.username, minecraftUuid: null };
   }
 
   findMcpUser(userId: string, authorizationVersion: number): McpUser | null {
     const row = this.database
       .prepare<[string, UserStatus, number], McpUser>(
-        'SELECT id, minecraftUuid FROM "user" WHERE id = ? AND status = ? AND authorizationVersion = ? AND minecraftUuid IS NOT NULL AND minecraftName IS NOT NULL',
+        'SELECT id, minecraftUuid FROM "user" WHERE id = ? AND status = ? AND authorizationVersion = ? AND minecraftUuid IS NOT NULL',
       )
       .get(userId, 'active', authorizationVersion);
     return row ?? null;
@@ -451,20 +508,10 @@ export class AccessRepository {
 
   requireUserById(id: string): UserSummary {
     const row = this.database
-      .prepare<[string], UserRow>(
-        'SELECT id, handle, status, minecraftUuid, minecraftName, createdAt FROM "user" WHERE id = ?',
-      )
+      .prepare<[string], UserRow>('SELECT id, name, status, minecraftUuid, createdAt FROM "user" WHERE id = ?')
       .get(id);
     if (row === undefined) throw new AccessError('not_found', 'User not found.');
     return toUserSummary(row);
-  }
-
-  isHandleAvailable(handle: string): boolean {
-    return (
-      this.database
-        .prepare<[string], { found: number }>('SELECT 1 AS found FROM "user" WHERE handle = ? LIMIT 1')
-        .get(handle) === undefined
-    );
   }
 
   assertCredentialUserActive(credentialId: string): void {
@@ -481,38 +528,46 @@ export class AccessRepository {
   private getInvitation(id: string, now: Date): InvitationSummary | null {
     const row = this.database
       .prepare<[string], InvitationRow>(
-        'SELECT id, createdAt, expiresAt, acceptedAt, revokedAt FROM invitation WHERE id = ?',
+        'SELECT id, minecraftUuid, minecraftName, createdAt, expiresAt, acceptedAt, revokedAt FROM invitation WHERE id = ?',
       )
       .get(id);
     return row === undefined ? null : toInvitationSummary(row, now);
   }
 
-  private setUserStatus(handle: string, status: UserStatus): UserSummary {
+  private setUserStatus(selector: string, status: UserStatus): UserSummary {
     const now = new Date();
     const transaction = this.database.transaction(() => {
+      const user = this.requireUserBySelector(selector);
       const changed = this.database
         .prepare<[UserStatus, string, string, UserStatus], { id: string }>(
-          'UPDATE "user" SET status = ?, updatedAt = ? WHERE handle = ? AND status <> ? RETURNING id',
+          'UPDATE "user" SET status = ?, updatedAt = ? WHERE id = ? AND status <> ? RETURNING id',
         )
-        .get(status, now.toISOString(), handle, status);
-      return this.completeEligibilityUpdate(handle, changed?.id, now);
+        .get(status, now.toISOString(), user.id, status);
+      return this.completeEligibilityUpdate(user.id, changed?.id, now);
     });
     return transaction.immediate();
   }
 
-  private requireUserByHandle(handle: string): UserSummary {
-    const row = this.database
+  private requireUserBySelector(selector: string): UserSummary {
+    const byId = this.database
+      .prepare<[string], UserRow>('SELECT id, name, status, minecraftUuid, createdAt FROM "user" WHERE id = ?')
+      .get(selector);
+    if (byId !== undefined) return toUserSummary(byId);
+    const matches = this.database
       .prepare<[string], UserRow>(
-        'SELECT id, handle, status, minecraftUuid, minecraftName, createdAt FROM "user" WHERE handle = ?',
+        'SELECT id, name, status, minecraftUuid, createdAt FROM "user" WHERE name = ? COLLATE NOCASE ORDER BY id LIMIT 2',
       )
-      .get(handle);
-    if (row === undefined) throw new AccessError('not_found', 'User not found.');
-    return toUserSummary(row);
+      .all(selector);
+    if (matches.length === 0) throw new AccessError('not_found', 'User not found.');
+    if (matches.length > 1) {
+      throw new AccessError('conflict', 'That Minecraft username is ambiguous. Use the Dirt account ID.');
+    }
+    return toUserSummary(matches[0]!);
   }
 
-  private completeEligibilityUpdate(handle: string, updatedUserId: string | undefined, now: Date): UserSummary {
+  private completeEligibilityUpdate(userId: string, updatedUserId: string | undefined, now: Date): UserSummary {
     if (updatedUserId !== undefined) this.revokeAuthorization(updatedUserId, now);
-    return this.requireUserByHandle(handle);
+    return this.requireUserById(userId);
   }
 }
 
@@ -556,12 +611,9 @@ function toUserSummary(row: UserRow): UserSummary {
   }
   return {
     id: row.id,
-    handle: row.handle,
+    username: row.name,
     status: row.status,
-    minecraftAccount:
-      row.minecraftUuid === null || row.minecraftName === null
-        ? null
-        : { uuid: row.minecraftUuid, name: row.minecraftName },
+    minecraftUuid: row.minecraftUuid,
     createdAt: toRfc3339(row.createdAt),
   };
 }
@@ -578,6 +630,7 @@ function toInvitationSummary(row: InvitationRow, now: Date): InvitationSummary {
   return {
     id: row.id,
     status,
+    minecraftAccount: { uuid: row.minecraftUuid, name: row.minecraftName },
     createdAt: toRfc3339(row.createdAt),
     expiresAt: toRfc3339(row.expiresAt),
   };

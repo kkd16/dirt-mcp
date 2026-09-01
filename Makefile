@@ -85,7 +85,7 @@ restart: ## Build, then gracefully restart the complete development stack.
 restart-paper: ## Build and safely restart Paper, draining web/MCP first.
 	@node scripts/dev.mjs restart-paper
 
-restart-web: ## Build, migrate, and restart only the web/MCP service.
+restart-web: ## Build, initialize the current database schema, and restart only web/MCP.
 	@node scripts/dev.mjs restart-web
 
 down: ## Stop the complete development stack cleanly.

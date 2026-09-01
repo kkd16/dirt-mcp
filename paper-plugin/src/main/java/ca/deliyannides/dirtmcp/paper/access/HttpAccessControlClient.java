@@ -102,8 +102,14 @@ public final class HttpAccessControlClient implements AccessControl {
     }
 
     @Override
-    public CompletionStage<CreateInvitationResult> createInvitation() {
-        return post("/internal/v1/access/invitations", EMPTY_BODY, this::decodeCreateInvitation);
+    public CompletionStage<CreateInvitationResult> createInvitation(
+            UUID minecraftUuid, String minecraftName) {
+        String requestBody = minecraftIdentityBody(minecraftUuid, minecraftName);
+        return post(
+                "/internal/v1/access/invitations",
+                requestBody,
+                (body, callId) ->
+                        decodeCreateInvitation(body, callId, minecraftUuid, minecraftName));
     }
 
     @Override
@@ -115,38 +121,31 @@ public final class HttpAccessControlClient implements AccessControl {
     }
 
     @Override
-    public CompletionStage<UserMutationResult> disableUser(String handle) {
-        return userMutation(handle, "disable");
+    public CompletionStage<UserMutationResult> disableUser(String selector) {
+        return userMutation(selector, "disable");
     }
 
     @Override
-    public CompletionStage<UserMutationResult> enableUser(String handle) {
-        return userMutation(handle, "enable");
+    public CompletionStage<UserMutationResult> enableUser(String selector) {
+        return userMutation(selector, "enable");
     }
 
     @Override
-    public CompletionStage<UserRecoveryResult> createUserRecovery(String handle) {
-        return post(userPath(handle, "recovery"), EMPTY_BODY, this::decodeUserRecovery);
+    public CompletionStage<UserRecoveryResult> createUserRecovery(String selector) {
+        return post(userPath(selector, "recovery"), EMPTY_BODY, this::decodeUserRecovery);
     }
 
     @Override
-    public CompletionStage<UserMutationResult> unlinkUser(String handle) {
-        return userMutation(handle, "unlink");
+    public CompletionStage<UserMutationResult> unlinkUser(String selector) {
+        return userMutation(selector, "unlink");
     }
 
     @Override
     public CompletionStage<MinecraftLinkChallenge> createMinecraftLinkChallenge(
             UUID minecraftUuid, String minecraftName) {
-        if (minecraftUuid == null) {
-            throw new IllegalArgumentException("minecraftUuid is required");
-        }
-        requireNonBlank(minecraftName, "minecraftName", 16);
-        JsonObject body = new JsonObject();
-        body.addProperty("minecraftUuid", minecraftUuid.toString());
-        body.addProperty("minecraftName", minecraftName);
         return post(
                 "/internal/v1/access/minecraft-links/challenges",
-                body.toString(),
+                minecraftIdentityBody(minecraftUuid, minecraftName),
                 this::decodeMinecraftLinkChallenge);
     }
 
@@ -188,12 +187,23 @@ public final class HttpAccessControlClient implements AccessControl {
                 .build();
     }
 
-    private CompletionStage<UserMutationResult> userMutation(String handle, String action) {
-        return post(userPath(handle, action), EMPTY_BODY, this::decodeUserMutation);
+    private CompletionStage<UserMutationResult> userMutation(String selector, String action) {
+        return post(userPath(selector, action), EMPTY_BODY, this::decodeUserMutation);
     }
 
-    private static String userPath(String handle, String action) {
-        return "/internal/v1/access/users/" + pathSegment(handle, "handle") + '/' + action;
+    private static String userPath(String selector, String action) {
+        return "/internal/v1/access/users/" + pathSegment(selector, "selector") + '/' + action;
+    }
+
+    private static String minecraftIdentityBody(UUID minecraftUuid, String minecraftName) {
+        if (minecraftUuid == null) {
+            throw new IllegalArgumentException("minecraftUuid is required");
+        }
+        MinecraftAccount account = new MinecraftAccount(minecraftUuid, minecraftName);
+        JsonObject body = new JsonObject();
+        body.addProperty("minecraftUuid", account.uuid().toString());
+        body.addProperty("minecraftName", account.name());
+        return body.toString();
     }
 
     private <T> CompletionStage<T> get(String path, ResponseDecoder<T> decoder) {
@@ -329,12 +339,19 @@ public final class HttpAccessControlClient implements AccessControl {
                 items);
     }
 
-    private CreateInvitationResult decodeCreateInvitation(JsonObject body, UUID callId) {
+    private CreateInvitationResult decodeCreateInvitation(
+            JsonObject body, UUID callId, UUID expectedUuid, String expectedName) {
         requireExactFields(body, Set.of("callId", "invitation", "inviteUrl"));
-        return new CreateInvitationResult(
-                verifiedCallId(body, callId),
-                invitation(object(body, "invitation")),
-                uri(body, "inviteUrl"));
+        CreateInvitationResult result =
+                new CreateInvitationResult(
+                        verifiedCallId(body, callId),
+                        invitation(object(body, "invitation")),
+                        uri(body, "inviteUrl"));
+        MinecraftAccount account = result.invitation().minecraftAccount();
+        if (!account.uuid().equals(expectedUuid) || !account.name().equals(expectedName)) {
+            throw protocolFailure();
+        }
+        return result;
     }
 
     private InvitationMutationResult decodeInvitationMutation(JsonObject body, UUID callId) {
@@ -394,35 +411,32 @@ public final class HttpAccessControlClient implements AccessControl {
 
     private static UserSummary user(JsonObject object) {
         requireExactFields(
-                object, Set.of("id", "handle", "status", "minecraftAccount", "createdAt"));
-        JsonElement accountElement = object.get("minecraftAccount");
-        MinecraftAccount account = null;
-        if (accountElement == null) {
+                object, Set.of("id", "username", "status", "minecraftUuid", "createdAt"));
+        JsonElement uuidElement = object.get("minecraftUuid");
+        UUID minecraftUuid = null;
+        if (uuidElement == null) {
             throw protocolFailure();
         }
-        if (!accountElement.isJsonNull()) {
-            if (!accountElement.isJsonObject()) {
-                throw protocolFailure();
-            }
-            JsonObject accountObject = accountElement.getAsJsonObject();
-            requireExactFields(accountObject, Set.of("uuid", "name"));
-            account =
-                    new MinecraftAccount(
-                            uuid(accountObject, "uuid"), string(accountObject, "name", 16));
+        if (!uuidElement.isJsonNull()) {
+            minecraftUuid = uuid(object, "minecraftUuid");
         }
         return new UserSummary(
                 string(object, "id", 256),
-                string(object, "handle", 256),
+                string(object, "username", 16),
                 userStatus(string(object, "status", 16)),
-                account,
+                minecraftUuid,
                 instant(object, "createdAt"));
     }
 
     private static InvitationSummary invitation(JsonObject object) {
-        requireExactFields(object, Set.of("id", "status", "createdAt", "expiresAt"));
+        requireExactFields(
+                object, Set.of("id", "status", "minecraftAccount", "createdAt", "expiresAt"));
+        JsonObject account = object(object, "minecraftAccount");
+        requireExactFields(account, Set.of("uuid", "name"));
         return new InvitationSummary(
                 string(object, "id", 256),
                 invitationStatus(string(object, "status", 16)),
+                new MinecraftAccount(uuid(account, "uuid"), string(account, "name", 16)),
                 instant(object, "createdAt"),
                 instant(object, "expiresAt"));
     }

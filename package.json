@@ -20,7 +20,7 @@
     "lint:markdown": "markdownlint-cli2",
     "lint:shell": "shellcheck scripts/*.sh packaging/*.sh",
     "lint:workflows": "actionlint",
-    "migrate": "pnpm --filter @dirt-mcp/server migrate",
+    "init-db": "pnpm --filter @dirt-mcp/server init-db",
     "start": "pnpm --filter @dirt-mcp/server start",
     "test": "pnpm --filter @dirt-mcp/server test",
     "generate:openapi-types": "openapi-typescript protocol/openapi.yaml --output mcp-server/src/generated/openapi.ts --immutable",

@@ -13,13 +13,14 @@ import { dirtAccessSchema } from './access/schema.ts';
 
 const ONBOARDING_TTL_SECONDS = 10 * 60;
 export const SESSION_FRESH_AGE_SECONDS = 5 * 60;
-const HANDLE_PATTERN = /^[a-z0-9][a-z0-9_-]{1,30}[a-z0-9]$/u;
+const MINECRAFT_USERNAME_PATTERN = /^[A-Za-z0-9_]{3,16}$/u;
 
 const ticketPayloadSchema = z
   .object({
     kind: z.enum(['invitation', 'recovery']),
     recordId: z.string().min(1),
-    handle: z.string().regex(HANDLE_PATTERN),
+    username: z.string().regex(MINECRAFT_USERNAME_PATTERN),
+    minecraftUuid: z.uuid().nullable(),
     exp: z.number().int().safe(),
   })
   .strict();
@@ -47,7 +48,6 @@ export function createAuthOptions(
     emailAndPassword: { enabled: false },
     user: {
       additionalFields: {
-        handle: { type: 'string', required: true, unique: true, sortable: true, returned: true, input: false },
         status: {
           type: 'string',
           required: true,
@@ -57,7 +57,6 @@ export function createAuthOptions(
           input: false,
         },
         minecraftUuid: { type: 'string', required: false, unique: true, returned: true, input: false },
-        minecraftName: { type: 'string', required: false, returned: true, input: false },
         authorizationVersion: {
           type: 'number',
           required: true,
@@ -116,8 +115,8 @@ export function createAuthOptions(
             const ticket = requireTicket(ctx.headers, config.authSecret, config.publicOrigin);
             return {
               id: ticket.kind === 'invitation' ? `invite-${ticket.recordId}` : `recovery-${ticket.recordId}`,
-              name: ticket.handle,
-              displayName: ticket.handle,
+              name: ticket.username,
+              displayName: ticket.username,
             };
           },
           async afterVerification({ ctx, verification, user }) {
@@ -133,7 +132,7 @@ export function createAuthOptions(
             }
             const ticket = requireTicket(ctx.headers, config.authSecret, config.publicOrigin);
             const expectedUserId = `${ticket.kind === 'invitation' ? 'invite' : 'recovery'}-${ticket.recordId}`;
-            if (user.id !== expectedUserId || user.name !== ticket.handle) {
+            if (user.id !== expectedUserId || user.name !== ticket.username) {
               throw new APIError('UNAUTHORIZED', { message: 'The onboarding ceremony does not match this link.' });
             }
             const adapter = await getCurrentAdapter(ctx.context.adapter);
@@ -164,12 +163,17 @@ export function createAuthOptions(
 
             const invitation = await adapter.findOne<{
               id: string;
+              minecraftUuid: string;
+              minecraftName: string;
               expiresAt: Date;
               acceptedAt: Date | null;
               revokedAt: Date | null;
             }>({ model: 'invitation', where: [{ field: 'id', value: ticket.recordId }] });
             if (
               invitation === null ||
+              ticket.minecraftUuid === null ||
+              invitation.minecraftUuid !== ticket.minecraftUuid ||
+              invitation.minecraftName !== ticket.username ||
               invitation.acceptedAt !== null ||
               invitation.revokedAt !== null ||
               invitation.expiresAt.getTime() <= now.getTime()
@@ -182,13 +186,11 @@ export function createAuthOptions(
               forceAllowId: true,
               data: {
                 id: userId,
-                name: ticket.handle,
+                name: ticket.username,
                 email: `${userId}@dirt.placeholder.invalid`,
                 emailVerified: false,
-                handle: ticket.handle,
                 status: 'active',
-                minecraftUuid: null,
-                minecraftName: null,
+                minecraftUuid: ticket.minecraftUuid,
                 createdAt: now,
                 updatedAt: now,
               },
@@ -254,14 +256,6 @@ export function createAuthOptions(
 
 export type DirtAuth = ReturnType<typeof createAuth>;
 
-export function normalizeHandle(input: string): string {
-  const handle = input.trim().toLowerCase();
-  if (!HANDLE_PATTERN.test(handle)) {
-    throw new AccessError('invalid', 'Use 3–32 lowercase letters, numbers, underscores, or hyphens.');
-  }
-  return handle;
-}
-
 export function createOnboardingTicket(
   claim: OnboardingClaim,
   secret: string,
@@ -285,6 +279,16 @@ export function onboardingCookieHeader(
 ): string {
   const secure = publicOrigin.startsWith('https://');
   return `${onboardingCookieName(publicOrigin)}=${ticket.value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${ticket.maxAge}${secure ? '; Secure' : ''}`;
+}
+
+export function readOnboardingClaim(headers: Headers, secret: string, publicOrigin: string): OnboardingClaim {
+  const ticket = requireTicket(headers, secret, publicOrigin);
+  return {
+    kind: ticket.kind,
+    recordId: ticket.recordId,
+    username: ticket.username,
+    minecraftUuid: ticket.minecraftUuid,
+  };
 }
 
 function requireTicket(headers: Headers | undefined, secret: string, publicOrigin: string): TicketPayload {

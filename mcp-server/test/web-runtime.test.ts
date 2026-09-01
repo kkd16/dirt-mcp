@@ -6,13 +6,7 @@ import { after, test } from 'node:test';
 import { getCurrentAdapter } from 'better-auth';
 import { getMigrations } from 'better-auth/db/migration';
 import { AccessError, AccessRepository } from '../dist/access/repository.js';
-import {
-  createAuth,
-  createAuthOptions,
-  createOnboardingTicket,
-  normalizeHandle,
-  onboardingCookieName,
-} from '../dist/auth.js';
+import { createAuth, createAuthOptions, createOnboardingTicket, onboardingCookieName } from '../dist/auth.js';
 import { BridgeClient } from '../dist/bridge/client.js';
 import { BRIDGE_OPERATION_IDS } from '../dist/bridge/contract.js';
 import type { RuntimeConfig } from '../dist/config.js';
@@ -36,8 +30,8 @@ const config: RuntimeConfig = {
 const database = openDatabase(config.databasePath);
 const repository = new AccessRepository(database);
 const readyBridge = testBridge(BRIDGE_OPERATION_IDS);
-const migration = await getMigrations(createAuthOptions(config, database, repository));
-await migration.runMigrations();
+const freshSchema = await getMigrations(createAuthOptions(config, database, repository));
+await freshSchema.runMigrations();
 repository.assertSchema();
 const auth = createAuth(config, database, repository);
 const authContext = await auth.$context;
@@ -59,9 +53,11 @@ test('Better Auth is passkey-only and MCP OAuth uses the fixed narrow policy', a
   assert.deepEqual(auth.options.advanced?.ipAddress?.trustedProxies, ['127.0.0.1/32', '::1/128']);
   assert.deepEqual(auth.options.disabledPaths, ['/passkey/delete-passkey', '/token']);
   const userFields = auth.options.user?.additionalFields ?? {};
-  for (const field of ['handle', 'status', 'minecraftUuid', 'minecraftName', 'authorizationVersion']) {
+  for (const field of ['status', 'minecraftUuid', 'authorizationVersion']) {
     assert.equal(userFields[field]?.input, false);
   }
+  assert.equal(userFields.handle, undefined);
+  assert.equal(userFields.minecraftName, undefined);
   assert.equal(userFields.authorizationVersion?.returned, false);
   assert.equal(userFields.authorizationVersion?.defaultValue, 0);
 
@@ -109,7 +105,12 @@ test('Better Auth is passkey-only and MCP OAuth uses the fixed narrow policy', a
   );
 
   const ticket = createOnboardingTicket(
-    { kind: 'invitation', recordId: 'record', handle: 'builder' },
+    {
+      kind: 'invitation',
+      recordId: 'record',
+      username: 'Builder',
+      minecraftUuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    },
     config.authSecret,
   );
   const ticketHeaders = new Headers({
@@ -120,7 +121,7 @@ test('Better Auth is passkey-only and MCP OAuth uses the fixed narrow policy', a
       afterVerification({
         ctx: { body: { createSession: true }, headers: ticketHeaders },
         verification: { registrationInfo: { userVerified: true } },
-        user: { id: 'invite-other-record', name: 'builder' },
+        user: { id: 'invite-other-record', name: 'Builder' },
       }),
     (error) => error instanceof Error && /does not match this link/u.test(error.message),
   );
@@ -140,13 +141,13 @@ test('Better Auth is passkey-only and MCP OAuth uses the fixed narrow policy', a
           headers: new Headers({ Cookie: `dirt-onboarding=${ticket.value}` }),
         },
         verification: { registrationInfo: { userVerified: true } },
-        user: { id: 'invite-record', name: 'builder' },
+        user: { id: 'invite-record', name: 'Builder' },
       }),
     (error) => error instanceof Error && /valid invitation or recovery link/u.test(error.message),
   );
 });
 
-test('migration is deterministic and idempotent', async () => {
+test('the generated schema matches the current database exactly', async () => {
   const second = await getMigrations(auth.options);
   assert.deepEqual(second.unsafeChanges, []);
   assert.deepEqual(second.toBeCreated, []);
@@ -208,8 +209,22 @@ test('unexpected auth transport failures use the sanitized web error boundary', 
 
 test('invite, recovery, account status, and link transitions are atomic and bounded', async () => {
   const now = new Date('2026-08-30T12:00:00.000Z');
-  const invitation = repository.createInvitation(now);
+  const invitation = repository.createInvitation('11111111-1111-4111-8111-111111111111', 'InvitedPlayer', now);
   assert.equal(invitation.invitation.status, 'pending');
+  assert.deepEqual(invitation.invitation.minecraftAccount, {
+    uuid: '11111111-1111-4111-8111-111111111111',
+    name: 'InvitedPlayer',
+  });
+  assert.deepEqual(repository.resolveInvitation(invitation.secret, now), {
+    kind: 'invitation',
+    recordId: invitation.invitation.id,
+    username: 'InvitedPlayer',
+    minecraftUuid: '11111111-1111-4111-8111-111111111111',
+  });
+  assert.throws(
+    () => repository.createInvitation('11111111-1111-4111-8111-111111111111', 'InvitedPlayer', now),
+    (error) => error instanceof AccessError && error.code === 'conflict',
+  );
   assert.deepEqual(
     database
       .prepare<[string], { createdAt: string; expiresAt: string }>(
@@ -224,11 +239,10 @@ test('invite, recovery, account status, and link transitions are atomic and boun
   });
   assert.equal(adaptedInvitation?.createdAt.toISOString(), now.toISOString());
   assert.equal(adaptedInvitation?.expiresAt.toISOString(), invitation.invitation.expiresAt);
-  assert.equal(repository.resolveInvitation(invitation.secret, now).recordId, invitation.invitation.id);
   assert.ok(repository.listInvitations(1, now).items.some(({ id }) => id === invitation.invitation.id));
   assert.equal(repository.revokeInvitation(invitation.invitation.id, now).status, 'revoked');
   assert.throws(() => repository.resolveInvitation(invitation.secret, now), AccessError);
-  const corruptInvitation = repository.createInvitation(now);
+  const corruptInvitation = repository.createInvitation('22222222-2222-4222-8222-222222222222', 'OtherPlayer', now);
   database
     .prepare('UPDATE invitation SET expiresAt = ? WHERE id = ?')
     .run('not-a-date', corruptInvitation.invitation.id);
@@ -241,7 +255,7 @@ test('invite, recovery, account status, and link transitions are atomic and boun
   const recovery = repository.createRecovery('builder', now);
   assert.equal(new Date(recovery.expiresAt).getTime() - now.getTime(), 15 * 60 * 1_000);
   const recoveryClaim = repository.resolveRecovery(recovery.secret, now);
-  assert.equal(recoveryClaim.handle, 'builder');
+  assert.equal(recoveryClaim.username, 'builder');
   const adaptedRecovery = await authAdapter.findOne<{ createdAt: Date; expiresAt: Date }>({
     model: 'credentialRecovery',
     where: [{ field: 'id', value: recoveryClaim.recordId }],
@@ -260,10 +274,8 @@ test('invite, recovery, account status, and link transitions are atomic and boun
   );
   insertAuthorizationArtifacts('user-one', 'link', now);
   const linked = repository.consumeMinecraftLinkChallenge('user-one', first.code, now);
-  assert.deepEqual(linked.minecraftAccount, {
-    uuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-    name: 'Builder',
-  });
+  assert.equal(linked.minecraftUuid, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+  assert.equal(linked.username, 'Builder');
   assert.equal(repository.requireAuthorizationVersion('user-one'), 1);
   assert.equal(authorizationArtifactCount('user-one'), 1);
   assert.equal(
@@ -403,7 +415,10 @@ test('internal routes enforce loopback, UUIDv4 calls, exact envelopes, and bound
   const create = await app.request('/internal/v1/access/invitations', {
     method: 'POST',
     headers: baseHeaders,
-    body: '{}',
+    body: JSON.stringify({
+      minecraftUuid: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      minecraftName: 'InvitedPlayer',
+    }),
   });
   assert.equal(create.status, 200);
   const created = (await create.json()) as Record<string, unknown>;
@@ -474,7 +489,7 @@ test('internal routes enforce loopback, UUIDv4 calls, exact envelopes, and bound
     throw new Error('secret database detail');
   };
   try {
-    const failed = await app.request('/internal/v1/access/users/private-handle/disable', {
+    const failed = await app.request('/internal/v1/access/users/private-selector/disable', {
       method: 'POST',
       headers: baseHeaders,
       body: '{}',
@@ -486,10 +501,10 @@ test('internal routes enforce loopback, UUIDv4 calls, exact envelopes, and bound
     });
     assert.equal(internalErrors.length, 1);
     assert.equal(internalErrors[0]?.event, 'access_control.request_failed');
-    assert.equal(internalErrors[0]?.fields?.route, '/internal/v1/access/users/:handle/disable');
+    assert.equal(internalErrors[0]?.fields?.route, '/internal/v1/access/users/:selector/disable');
     assert.equal(internalErrors[0]?.fields?.error_type, 'Error');
     assert.doesNotMatch(JSON.stringify(internalErrors), /secret database detail/u);
-    assert.doesNotMatch(JSON.stringify(internalErrors), /private-handle/u);
+    assert.doesNotMatch(JSON.stringify(internalErrors), /private-selector/u);
   } finally {
     repository.disableUser = originalDisableUser;
   }
@@ -507,13 +522,13 @@ test('web shell exposes a loopback health check and hardened consent copy', asyn
   assert.match(homeHtml, /^<!DOCTYPE html>/u);
   assert.match(homeHtml, /Sign in to Dirt/u);
   assert.match(homeHtml, /Sign in with a passkey/u);
-  assert.match(homeHtml, /Ask your server operator for an invitation/u);
+  assert.match(homeHtml, /Ask an operator to invite you in Minecraft/u);
   assert.doesNotMatch(homeHtml, /Inspect and edit|Gateway|How Dirt works|Paper world/u);
   assert.doesNotMatch(homeHtml, /Paper and FAWE online/u);
 
   const signedOutDashboard = await app.request('/dashboard', { headers: { Host: 'localhost:3000' } });
   assert.equal(signedOutDashboard.status, 200);
-  assert.match(await signedOutDashboard.text(), /Sign in and continue/u);
+  assert.match(await signedOutDashboard.text(), /Sign in to continue/u);
 
   const removedPages = await Promise.all(
     ['/sign-in', '/link'].map((path) => app.request(path, { headers: { Host: 'localhost:3000' } })),
@@ -524,7 +539,7 @@ test('web shell exposes a loopback health check and hardened consent copy', asyn
 
   const invite = await app.request('/invite', { headers: { Host: 'localhost:3000' } });
   assert.equal(invite.status, 200);
-  assert.match(await invite.text(), /Create your account/u);
+  assert.match(await invite.text(), /Checking your link/u);
   assert.equal(invite.headers.get('Cache-Control'), 'no-store');
   assert.equal(invite.headers.get('Content-Security-Policy')?.includes("frame-ancestors 'none'"), true);
   assert.equal(
@@ -538,13 +553,13 @@ test('web shell exposes a loopback health check and hardened consent copy', asyn
 
   const malformedFailures = await Promise.all(
     [
-      { body: { kind: 'invitation', token: 'x'.repeat(20) }, expectedError: 'The request is invalid.' },
+      { body: { kind: 'invitation', token: 'short' }, expectedError: 'The request is invalid.' },
       {
-        body: { kind: 'recovery', token: 'x'.repeat(20), handle: 'ignored' },
+        body: { kind: 'recovery', token: 'x'.repeat(20), username: 'ignored' },
         expectedError: 'The request is invalid.',
       },
       {
-        body: { kind: 'invitation', token: 'x'.repeat(20), handle: 'builder' },
+        body: { kind: 'invitation', token: 'x'.repeat(20) },
         expectedError: 'Invalid invitation.',
       },
     ].map(async ({ body, expectedError }) => {
@@ -705,8 +720,8 @@ test('the public gateway preserves OAuth and Minecraft-link continuations', asyn
   const now = new Date();
   insertUser('navigation-user', 'navigator', now);
   database
-    .prepare('UPDATE "user" SET minecraftUuid = ?, minecraftName = ? WHERE id = ?')
-    .run('12121212-1212-4121-8121-121212121212', 'Navigator', 'navigation-user');
+    .prepare('UPDATE "user" SET name = ?, minecraftUuid = ? WHERE id = ?')
+    .run('Navigator', '12121212-1212-4121-8121-121212121212', 'navigation-user');
   let sessionCreatedAt = new Date();
   const app = testWebApp(sessionAuth('navigation-user', () => sessionCreatedAt));
   const headers = { Host: 'localhost:3000' };
@@ -730,8 +745,8 @@ test('dashboard presents safe identity, readiness, client, and passkey summaries
   const now = new Date('2026-08-31T12:00:00.000Z');
   insertUser('dashboard-user', 'fieldworker', now);
   database
-    .prepare('UPDATE "user" SET minecraftUuid = ?, minecraftName = ? WHERE id = ?')
-    .run('34343434-3434-4343-8343-343434343434', 'FieldWorker', 'dashboard-user');
+    .prepare('UPDATE "user" SET name = ?, minecraftUuid = ? WHERE id = ?')
+    .run('FieldWorker', '34343434-3434-4343-8343-343434343434', 'dashboard-user');
   database
     .prepare(
       'INSERT INTO passkey (id, name, publicKey, userId, credentialID, counter, deviceType, backedUp, createdAt) VALUES (?, ?, ?, ?, ?, 0, ?, 1, ?)',
@@ -769,10 +784,10 @@ test('dashboard presents safe identity, readiness, client, and passkey summaries
   const response = await app.request('/dashboard', { headers: { Host: 'localhost:3000' } });
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /MCP ready/u);
+  assert.match(html, /Dirt is ready/u);
   assert.match(html, /Paper and FAWE online/u);
-  assert.match(html, /Inspect the live world and make bounded, undoable edits/u);
-  assert.match(html, />12<\/span>\s*<span>of 12 MCP tools enabled/u);
+  assert.match(html, /bounded, undoable edits/u);
+  assert.match(html, /12 of 12/u);
   assert.match(html, /FieldWorker/u);
   assert.match(html, /34343434-3434-4343-8343-343434343434/u);
   assert.match(html, /http:\/\/localhost:3000\/mcp/u);
@@ -792,8 +807,8 @@ test('dashboard presents safe identity, readiness, client, and passkey summaries
     testBridge([]),
   ).request('/dashboard', { headers: { Host: 'localhost:3000' } });
   const zeroToolsHtml = await zeroTools.text();
-  assert.match(zeroToolsHtml, /No tools enabled/u);
-  assert.match(zeroToolsHtml, />0<\/span>\s*<span>of 12 MCP tools enabled/u);
+  assert.match(zeroToolsHtml, /No tools are enabled/u);
+  assert.match(zeroToolsHtml, /0 of 12/u);
 
   const degraded = await testWebApp(
     sessionAuth('dashboard-user', () => new Date()),
@@ -810,9 +825,9 @@ test('dashboard presents safe identity, readiness, client, and passkey summaries
     headers: { Host: 'localhost:3000' },
   });
   const unlinkedHtml = await unlinked.text();
-  assert.match(unlinkedHtml, /Link Minecraft/u);
-  assert.match(unlinkedHtml, /One-time link code/u);
-  assert.match(unlinkedHtml, /No authorized clients/u);
+  assert.match(unlinkedHtml, /Link Minecraft again/u);
+  assert.match(unlinkedHtml, /Link code/u);
+  assert.match(unlinkedHtml, /No clients have been authorized/u);
 });
 
 test('onboarding exchanges invitation and recovery secrets, and fresh sessions link Minecraft', async () => {
@@ -824,19 +839,29 @@ test('onboarding exchanges invitation and recovery secrets, and fresh sessions l
     Origin: config.publicOrigin,
   };
 
-  const invitation = repository.createInvitation(now);
+  const invitation = repository.createInvitation('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'RoutePlayer', now);
   const invitationExchange = await app.request('/api/onboarding/exchange', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ kind: 'invitation', token: invitation.secret, handle: 'Route_User' }),
+    body: JSON.stringify({ kind: 'invitation', token: invitation.secret }),
   });
   assert.equal(invitationExchange.status, 200);
   assert.equal(invitationExchange.headers.get('Cache-Control'), 'no-store');
-  assert.deepEqual(await invitationExchange.json(), { ok: true, handle: 'route_user' });
+  assert.deepEqual(await invitationExchange.json(), { ok: true, username: 'RoutePlayer' });
+  const invitationCookie = invitationExchange.headers.get('Set-Cookie')?.split(';', 1)[0];
+  assert.ok(invitationCookie !== undefined);
   assert.match(
     invitationExchange.headers.get('Set-Cookie') ?? '',
     /^dirt-onboarding=[^;]+; Path=\/; HttpOnly; SameSite=Strict; Max-Age=600$/u,
   );
+  const preparedInvitation = await app.request('/invite', {
+    headers: { Cookie: invitationCookie, Host: 'localhost:3000' },
+  });
+  const preparedInvitationHtml = await preparedInvitation.text();
+  assert.match(preparedInvitationHtml, /data-onboarding-ready/u);
+  assert.match(preparedInvitationHtml, /Verified Minecraft account/u);
+  assert.match(preparedInvitationHtml, /RoutePlayer/u);
+  assert.doesNotMatch(preparedInvitationHtml, /name="username"/u);
 
   insertUser('route-user', 'routeuser', now);
   const recovery = repository.createRecovery('routeuser', now);
@@ -846,7 +871,7 @@ test('onboarding exchanges invitation and recovery secrets, and fresh sessions l
     body: JSON.stringify({ kind: 'recovery', token: recovery.secret }),
   });
   assert.equal(recoveryExchange.status, 200);
-  assert.deepEqual(await recoveryExchange.json(), { ok: true, handle: 'routeuser' });
+  assert.deepEqual(await recoveryExchange.json(), { ok: true, username: 'routeuser' });
 
   const challenge = repository.createMinecraftLinkChallenge('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'RoutePlayer', now);
   let sessionCreatedAt = new Date(now.getTime() - 6 * 60 * 1_000);
@@ -861,18 +886,17 @@ test('onboarding exchanges invitation and recovery secrets, and fresh sessions l
   sessionCreatedAt = new Date();
   const linked = await linkApp.request('/api/access/minecraft-link', linkRequest);
   assert.equal(linked.status, 200);
-  assert.deepEqual((await linked.json()).user.minecraftAccount, {
-    uuid: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
-    name: 'RoutePlayer',
-  });
+  const linkedUser = (await linked.json()).user;
+  assert.equal(linkedUser.minecraftUuid, 'dddddddd-dddd-4ddd-8ddd-dddddddddddd');
+  assert.equal(linkedUser.username, 'RoutePlayer');
 });
 
 test('OAuth grants require a fresh passkey session and a linked account', async () => {
   const now = new Date();
   insertUser('oauth-user', 'oauthuser', now);
   database
-    .prepare('UPDATE "user" SET minecraftUuid = ?, minecraftName = ? WHERE id = ?')
-    .run('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'OAuthPlayer', 'oauth-user');
+    .prepare('UPDATE "user" SET name = ?, minecraftUuid = ? WHERE id = ?')
+    .run('OAuthPlayer', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'oauth-user');
   database
     .prepare('INSERT INTO oauthClient (id, clientId, name, redirectUris) VALUES (?, ?, ?, ?)')
     .run(
@@ -933,15 +957,16 @@ test('OAuth grants require a fresh passkey session and a linked account', async 
   assert.match(knownConsentHtml, /Allow Map Room/u);
   assert.match(knownConsentHtml, /client\.example/u);
   assert.match(knownConsentHtml, /run_minecraft_commands/u);
+  assert.match(knownConsentHtml, /console-equivalent authority/u);
 
   const localhostConsent = await app.request(
     '/consent?client_id=https%3A%2F%2Fclient.example%2Fclient.json&redirect_uri=http%3A%2F%2Flocalhost%3A3456%2Fcallback&scope=dirt%3Amcp',
     { headers: browserHeaders },
   );
   assert.equal(localhostConsent.status, 200);
-  assert.match(await localhostConsent.text(), /returns to a local app/u);
+  assert.match(await localhostConsent.text(), /returns to an app on your device/u);
 
-  repository.unlinkUser('oauthuser');
+  repository.unlinkUser('OAuthPlayer');
   const unlinkedConsentPost = await app.request('/api/auth/oauth2/consent', {
     method: 'POST',
     headers: {
@@ -955,13 +980,6 @@ test('OAuth grants require a fresh passkey session and a linked account', async 
   assert.deepEqual(await unlinkedConsentPost.json(), {
     error: 'Link a Minecraft account before authorizing MCP.',
   });
-});
-
-test('handle normalization rejects ambiguous account names', () => {
-  assert.equal(normalizeHandle('  Player_One  '), 'player_one');
-  for (const invalid of ['a', 'ab', '-player', 'player-', 'white space', 'UPPER CASE', 'a'.repeat(33)]) {
-    assert.throws(() => normalizeHandle(invalid), AccessError);
-  }
 });
 
 test('access-token parsing accepts Bearer and DPoP token68 credentials', () => {
@@ -983,12 +1001,12 @@ test('access-token parsing accepts Bearer and DPoP token68 credentials', () => {
   }
 });
 
-function insertUser(id: string, handle: string, now: Date): void {
+function insertUser(id: string, username: string, now: Date): void {
   database
     .prepare(
-      'INSERT INTO "user" (id, name, email, emailVerified, image, createdAt, updatedAt, handle, status, minecraftUuid, minecraftName, authorizationVersion) VALUES (?, ?, ?, 0, NULL, ?, ?, ?, ?, NULL, NULL, 0)',
+      'INSERT INTO "user" (id, name, email, emailVerified, image, createdAt, updatedAt, status, minecraftUuid, authorizationVersion) VALUES (?, ?, ?, 0, NULL, ?, ?, ?, NULL, 0)',
     )
-    .run(id, handle, `${id}@dirt.placeholder.invalid`, now.toISOString(), now.toISOString(), handle, 'active');
+    .run(id, username, `${id}@dirt.placeholder.invalid`, now.toISOString(), now.toISOString(), 'active');
 }
 
 function insertAuthorizationArtifacts(userId: string, suffix: string, now: Date): void {

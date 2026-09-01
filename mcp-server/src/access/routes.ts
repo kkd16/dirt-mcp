@@ -5,13 +5,13 @@ import type { RuntimeConfig } from '../config.ts';
 import { BodyTooLargeError, InvalidBodyEncodingError, readBoundedText } from '../http-body.ts';
 import { AccessError, type AccessRepository, type UserSummary } from './repository.ts';
 
-const emptyBodySchema = z.object({}).strict();
 const linkChallengeSchema = z
   .object({
     minecraftUuid: z.uuid(),
-    minecraftName: z.string().trim().min(1).max(16),
+    minecraftName: z.string().regex(/^[A-Za-z0-9_]{3,16}$/u),
   })
   .strict();
+const emptyBodySchema = z.object({}).strict();
 const CALL_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 interface InternalRouteDependencies {
@@ -56,8 +56,8 @@ export function registerInternalRoutes(app: Hono, dependencies: InternalRouteDep
 
   app.post('/internal/v1/access/invitations', async (context) => {
     const callId = requireCallId(context.req.header('X-Dirt-Call-Id'));
-    await readJsonBody(context.req.raw, emptyBodySchema);
-    const result = repository.createInvitation();
+    const body = await readJsonBody(context.req.raw, linkChallengeSchema);
+    const result = repository.createInvitation(body.minecraftUuid, body.minecraftName);
     return context.json({
       callId,
       invitation: result.invitation,
@@ -71,14 +71,14 @@ export function registerInternalRoutes(app: Hono, dependencies: InternalRouteDep
     return context.json({ callId, invitation: repository.revokeInvitation(requirePathValue(context.req.param('id'))) });
   });
 
-  registerUserMutation(app, 'disable', (accessRepository, handle) => accessRepository.disableUser(handle));
-  registerUserMutation(app, 'enable', (accessRepository, handle) => accessRepository.enableUser(handle));
-  registerUserMutation(app, 'unlink', (accessRepository, handle) => accessRepository.unlinkUser(handle));
+  registerUserMutation(app, 'disable', (accessRepository, selector) => accessRepository.disableUser(selector));
+  registerUserMutation(app, 'enable', (accessRepository, selector) => accessRepository.enableUser(selector));
+  registerUserMutation(app, 'unlink', (accessRepository, selector) => accessRepository.unlinkUser(selector));
 
-  app.post('/internal/v1/access/users/:handle/recovery', async (context) => {
+  app.post('/internal/v1/access/users/:selector/recovery', async (context) => {
     const callId = requireCallId(context.req.header('X-Dirt-Call-Id'));
     await readJsonBody(context.req.raw, emptyBodySchema);
-    const result = repository.createRecovery(requirePathValue(context.req.param('handle')));
+    const result = repository.createRecovery(requirePathValue(context.req.param('selector')));
     return context.json({
       callId,
       user: result.user,
@@ -102,12 +102,12 @@ export function registerInternalRoutes(app: Hono, dependencies: InternalRouteDep
   function registerUserMutation(
     target: Hono,
     action: 'disable' | 'enable' | 'unlink',
-    mutate: (repository: AccessRepository, handle: string) => UserSummary,
+    mutate: (repository: AccessRepository, selector: string) => UserSummary,
   ): void {
-    target.post(`/internal/v1/access/users/:handle/${action}`, async (context) => {
+    target.post(`/internal/v1/access/users/:selector/${action}`, async (context) => {
       const callId = requireCallId(context.req.header('X-Dirt-Call-Id'));
       await readJsonBody(context.req.raw, emptyBodySchema);
-      return context.json({ callId, user: mutate(repository, requirePathValue(context.req.param('handle'))) });
+      return context.json({ callId, user: mutate(repository, requirePathValue(context.req.param('selector'))) });
     });
   }
 }

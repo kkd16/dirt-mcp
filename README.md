@@ -129,31 +129,36 @@ web/MCP service without granting it access to the Paper tree.
 
 ### 2. Create and link the first account
 
-Join Minecraft as an operator and run:
+Have the player join the server. Then run this as an in-game operator or from
+the server console:
 
 ```text
-/dirt invite create
+/dirt invite create <player>
 ```
 
-Open the private click-to-copy URL, choose a handle, and enroll a passkey. Then
-run `/dirt link` as the same online Minecraft player and open its private link
-while recently signed in. Dirt enforces one web account to one Minecraft UUID.
+The named player must be online. Dirt sends the private invitation URL only to
+that player's in-game chat; the operator sees confirmation without the secret.
+The player opens the URL and enrolls a passkey. Their current Minecraft name is
+their Dirt username, and the new account is linked to that authenticated
+online-mode UUID immediately. There is no separate username to choose.
 
 Operators can list and administer access in game:
 
 ```text
 /dirt users [page]
 /dirt invites [page]
-/dirt invite create
+/dirt invite create <player>
 /dirt invite revoke <id>
-/dirt user disable <handle>
-/dirt user enable <handle>
-/dirt user recover <handle>
-/dirt user unlink <handle>
+/dirt user disable <username|id>
+/dirt user enable <username|id>
+/dirt user recover <username|id>
+/dirt user unlink <username|id>
 ```
 
-Invite and recovery creation are in-game-only because they return secrets.
-They are never printed to the server console or detail logs.
+Invitation creation targets an online player and may be initiated from the
+console without revealing the link there. Recovery creation remains
+in-game-operator-only because it returns a secret. Secrets are never written to
+the server console or detail logs.
 
 ### 3. Connect an MCP client
 
@@ -186,8 +191,9 @@ The destination must not already exist. Backups are published atomically with
 mode `0600`; keep copies off-host and test restoration periodically.
 
 To restore, stop Dirt, stage a selected backup with the service ownership,
-replace the database while it is closed, and start Dirt. Its systemd unit runs
-the schema migration before serving traffic.
+replace the database while it is closed, and start Dirt. Its systemd unit
+validates the current schema before serving traffic. Dirt has no legacy schema
+upgrade path; an incompatible database is rejected.
 
 ```bash
 sudo systemctl stop dirt-mcp
@@ -257,7 +263,7 @@ doctor` is the authoritative check.
 | `make up`            | Build and start or reuse the complete managed stack.         |
 | `make restart`       | Rebuild and restart Paper and web together.                  |
 | `make restart-paper` | Rebuild Paper, safely draining and restoring web/MCP.        |
-| `make restart-web`   | Rebuild, migrate, and restart only web/MCP.                  |
+| `make restart-web`   | Rebuild, initialize the schema, and restart only web/MCP.    |
 | `make down`          | Stop the complete managed stack cleanly.                     |
 | `make status`        | Show both managed process states.                            |
 | `make health`        | Check the authenticated bridge and web health endpoint.      |

@@ -66,6 +66,14 @@ final class AccessControlTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new AccessControl.MinecraftAccount(CALL_ID, "x".repeat(17)));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new AccessControl.MinecraftAccount(CALL_ID, "not-valid"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new AccessControl.UserSummary(
+                                "usr_1", "xy", AccessControl.UserStatus.ACTIVE, null, NOW));
     }
 
     @Test
@@ -105,11 +113,15 @@ final class AccessControlTest {
 
     private static AccessControl.UserSummary user() {
         return new AccessControl.UserSummary(
-                "usr_1", "builder", AccessControl.UserStatus.ACTIVE, null, NOW);
+                "usr_1", "Builder", AccessControl.UserStatus.ACTIVE, null, NOW);
     }
 
     private static AccessControl.InvitationSummary invitation() {
         return new AccessControl.InvitationSummary(
-                "invite_1", AccessControl.InvitationStatus.PENDING, NOW, NOW.plusSeconds(600));
+                "invite_1",
+                AccessControl.InvitationStatus.PENDING,
+                new AccessControl.MinecraftAccount(CALL_ID, "Builder"),
+                NOW,
+                NOW.plusSeconds(600));
     }
 }

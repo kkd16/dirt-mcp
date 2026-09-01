@@ -37,6 +37,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Location;
+import org.bukkit.Server;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Entity;
@@ -71,12 +72,12 @@ final class DirtAdminCommandTest {
                 List.of(
                         "/dirt users",
                         "/dirt invites",
-                        "/dirt invite create",
+                        "/dirt invite create <player>",
                         "/dirt invite revoke <id>",
-                        "/dirt user disable <handle>",
-                        "/dirt user enable <handle>",
-                        "/dirt user recover <handle>",
-                        "/dirt user unlink <handle>")) {
+                        "/dirt user disable <username|id>",
+                        "/dirt user enable <username|id>",
+                        "/dirt user recover <username|id>",
+                        "/dirt user unlink <username|id>")) {
             assertTrue(operator.lastPlainMessage().contains(command));
         }
         assertTrue(operator.lastPlainMessage().contains("/dirt link"));
@@ -159,10 +160,9 @@ final class DirtAdminCommandTest {
                                 List.of(
                                         new AccessControl.UserSummary(
                                                 "usr_1",
-                                                "builder",
+                                                "Builder",
                                                 AccessControl.UserStatus.ACTIVE,
-                                                new AccessControl.MinecraftAccount(
-                                                        PLAYER_ID, "Builder"),
+                                                PLAYER_ID,
                                                 CREATED_AT))));
         access.invitations =
                 CompletableFuture.completedFuture(
@@ -173,8 +173,8 @@ final class DirtAdminCommandTest {
 
         assertEquals(1, fixture.execute("dirt users 2"));
         assertEquals(2, access.requestedUsersPage);
-        assertTrue(fixture.lastPlainMessage().contains("builder  active"));
-        assertTrue(fixture.lastPlainMessage().contains("Builder (" + PLAYER_ID + ")"));
+        assertTrue(fixture.lastPlainMessage().contains("Builder  active"));
+        assertTrue(fixture.lastPlainMessage().contains("UUID: " + PLAYER_ID));
         assertEquals(1, fixture.execute("dirt invites"));
         assertEquals(1, access.requestedInvitationsPage);
         assertTrue(fixture.lastPlainMessage().contains("invite_1  pending"));
@@ -210,30 +210,48 @@ final class DirtAdminCommandTest {
         assertEquals("builder", access.enabledUser);
         assertEquals(1, fixture.execute("dirt user unlink builder"));
         assertEquals("builder", access.unlinkedUser);
-        assertTrue(fixture.lastPlainMessage().contains("builder was unlinked"));
+        assertTrue(fixture.lastPlainMessage().contains("Builder was unlinked"));
     }
 
     @Test
-    void invitationAndRecoverySecretsRequireAnInGameOperatorAndAreClickToCopy() throws Exception {
+    void invitationIsSentOnlyToTheNamedPlayersChat() throws Exception {
         StubAccessControl consoleAccess = new StubAccessControl();
         CommandFixture console =
                 fixture(new SenderAccess(true, true, false, false), status(), consoleAccess);
 
-        assertEquals(0, console.execute("dirt invite create"));
-        assertEquals(0, console.execute("dirt user recover builder"));
-        assertEquals(0, consoleAccess.createdInvitations);
+        assertTrue(console.suggestions("dirt invite create ").contains("Builder"));
+        assertEquals(1, console.execute("dirt invite create Builder"));
+        assertEquals(1, consoleAccess.createdInvitations);
+        assertEquals(PLAYER_ID, consoleAccess.linkedUuid);
+        assertEquals("Builder", consoleAccess.linkedName);
+        assertTrue(console.lastPlainMessage().contains("Invitation sent privately to Builder"));
+        assertFalse(console.messagesContain("https://dashboard.example/invite/secret"));
+        assertTrue(
+                console.lastTargetPlainMessage()
+                        .contains("https://dashboard.example/invite/secret"));
+        assertTrue(
+                hasCopyValue(
+                        console.lastTargetMessage(), "https://dashboard.example/invite/secret"));
+
+        assertEquals(0, console.execute("dirt invite create Missing"));
+        assertTrue(console.lastPlainMessage().contains("must be online"));
+    }
+
+    @Test
+    void recoverySecretsRequireAnInGameOperatorAndAreClickToCopy() throws Exception {
+        StubAccessControl consoleAccess = new StubAccessControl();
+        CommandFixture console =
+                fixture(new SenderAccess(true, true, false, false), status(), consoleAccess);
+
+        assertEquals(0, console.execute("dirt user recover Builder"));
         assertEquals(null, consoleAccess.recoveredUser);
         assertTrue(console.lastPlainMessage().contains("run in-game by an operator"));
 
         StubAccessControl playerAccess = new StubAccessControl();
         CommandFixture player =
                 fixture(new SenderAccess(true, true, false, true), status(), playerAccess);
-        assertEquals(1, player.execute("dirt invite create"));
-        assertEquals(1, playerAccess.createdInvitations);
-        assertTrue(player.lastPlainMessage().contains("https://dashboard.example/invite/secret"));
-        assertTrue(hasCopyValue(player.lastMessage(), "https://dashboard.example/invite/secret"));
-        assertEquals(1, player.execute("dirt user recover builder"));
-        assertEquals("builder", playerAccess.recoveredUser);
+        assertEquals(1, player.execute("dirt user recover Builder"));
+        assertEquals("Builder", playerAccess.recoveredUser);
         assertTrue(player.lastPlainMessage().contains("https://dashboard.example/recover/secret"));
         assertTrue(hasCopyValue(player.lastMessage(), "https://dashboard.example/recover/secret"));
     }
@@ -304,9 +322,18 @@ final class DirtAdminCommandTest {
             StubAccessControl access,
             DirectMainThread mainThread) {
         DirtLog log = DirtLog.consoleOnly(NOPLogger.NOP_LOGGER, DirtConfig.ConsoleLogLevel.ERROR);
+        ServerFixture server = testServer();
         DirtAdminCommand command =
-                new DirtAdminCommand("DirtMCP", "0.1.0", config(), status, access, mainThread, log);
-        return new CommandFixture(senderAccess, command);
+                new DirtAdminCommand(
+                        "DirtMCP",
+                        "0.1.0",
+                        server.server(),
+                        config(),
+                        status,
+                        access,
+                        mainThread,
+                        log);
+        return new CommandFixture(senderAccess, command, server.targetMessages());
     }
 
     private static DirtConfig config() {
@@ -358,12 +385,16 @@ final class DirtAdminCommandTest {
 
     private static AccessControl.UserSummary user() {
         return new AccessControl.UserSummary(
-                "usr_1", "builder", AccessControl.UserStatus.ACTIVE, null, CREATED_AT);
+                "usr_1", "Builder", AccessControl.UserStatus.ACTIVE, null, CREATED_AT);
     }
 
     private static AccessControl.InvitationSummary invitation(String id) {
         return new AccessControl.InvitationSummary(
-                id, AccessControl.InvitationStatus.PENDING, CREATED_AT, EXPIRES_AT);
+                id,
+                AccessControl.InvitationStatus.PENDING,
+                new AccessControl.MinecraftAccount(PLAYER_ID, "Builder"),
+                CREATED_AT,
+                EXPIRES_AT);
     }
 
     private static boolean hasCopyValue(Component component, String value) {
@@ -402,10 +433,13 @@ final class DirtAdminCommandTest {
 
     private static final class CommandFixture {
         private final List<Component> messages = new ArrayList<>();
+        private final List<Component> targetMessages;
         private final CommandDispatcher<CommandSourceStack> dispatcher = new CommandDispatcher<>();
         private final CommandSourceStack source;
 
-        private CommandFixture(SenderAccess access, DirtAdminCommand command) {
+        private CommandFixture(
+                SenderAccess access, DirtAdminCommand command, List<Component> targetMessages) {
+            this.targetMessages = targetMessages;
             this.source = new TestSource(sender(access, this.messages));
             this.dispatcher.getRoot().addChild(command.command());
         }
@@ -430,6 +464,20 @@ final class DirtAdminCommandTest {
 
         private String lastPlainMessage() {
             return PLAIN.serialize(lastMessage());
+        }
+
+        private Component lastTargetMessage() {
+            return this.targetMessages.getLast();
+        }
+
+        private String lastTargetPlainMessage() {
+            return PLAIN.serialize(lastTargetMessage());
+        }
+
+        private boolean messagesContain(String value) {
+            return this.messages.stream()
+                    .map(PLAIN::serialize)
+                    .anyMatch(text -> text.contains(value));
         }
     }
 
@@ -473,6 +521,40 @@ final class DirtAdminCommandTest {
     private record SenderAccess(
             boolean operator, boolean adminPermission, boolean linkPermission, boolean player) {}
 
+    private record ServerFixture(Server server, List<Component> targetMessages) {}
+
+    private static ServerFixture testServer() {
+        List<Component> targetMessages = new ArrayList<>();
+        Player target = (Player) sender(new SenderAccess(false, false, true, true), targetMessages);
+        Server server =
+                (Server)
+                        Proxy.newProxyInstance(
+                                DirtAdminCommandTest.class.getClassLoader(),
+                                new Class<?>[] {Server.class},
+                                (proxy, method, arguments) -> {
+                                    if (method.getName().equals("getPlayerExact")) {
+                                        return "Builder".equals(arguments[0]) ? target : null;
+                                    }
+                                    if (method.getName().equals("getPlayer")) {
+                                        return PLAYER_ID.equals(arguments[0]) ? target : null;
+                                    }
+                                    if (method.getName().equals("getOnlinePlayers")) {
+                                        return List.of(target);
+                                    }
+                                    if (method.getName().equals("toString")) {
+                                        return "TestServer";
+                                    }
+                                    if (method.getReturnType().equals(boolean.class)) {
+                                        return false;
+                                    }
+                                    if (method.getReturnType().equals(int.class)) {
+                                        return 0;
+                                    }
+                                    return null;
+                                });
+        return new ServerFixture(server, targetMessages);
+    }
+
     private static CommandSender sender(SenderAccess access, List<Component> messages) {
         Class<?> senderType = access.player() ? Player.class : CommandSender.class;
         return (CommandSender)
@@ -505,6 +587,9 @@ final class DirtAdminCommandTest {
                             }
                             if (method.getName().equals("isOp")) {
                                 return access.operator();
+                            }
+                            if (method.getName().equals("isOnline")) {
+                                return true;
                             }
                             if (method.getName().equals("toString")) {
                                 return "TestCommandSender";
@@ -575,8 +660,11 @@ final class DirtAdminCommandTest {
         }
 
         @Override
-        public CompletionStage<CreateInvitationResult> createInvitation() {
+        public CompletionStage<CreateInvitationResult> createInvitation(
+                UUID minecraftUuid, String minecraftName) {
             this.createdInvitations++;
+            this.linkedUuid = minecraftUuid;
+            this.linkedName = minecraftName;
             return CompletableFuture.completedFuture(
                     new CreateInvitationResult(
                             CALL_ID,
@@ -592,20 +680,20 @@ final class DirtAdminCommandTest {
         }
 
         @Override
-        public CompletionStage<UserMutationResult> disableUser(String handle) {
-            this.disabledUser = handle;
+        public CompletionStage<UserMutationResult> disableUser(String selector) {
+            this.disabledUser = selector;
             return CompletableFuture.completedFuture(new UserMutationResult(CALL_ID, user()));
         }
 
         @Override
-        public CompletionStage<UserMutationResult> enableUser(String handle) {
-            this.enabledUser = handle;
+        public CompletionStage<UserMutationResult> enableUser(String selector) {
+            this.enabledUser = selector;
             return CompletableFuture.completedFuture(new UserMutationResult(CALL_ID, user()));
         }
 
         @Override
-        public CompletionStage<UserRecoveryResult> createUserRecovery(String handle) {
-            this.recoveredUser = handle;
+        public CompletionStage<UserRecoveryResult> createUserRecovery(String selector) {
+            this.recoveredUser = selector;
             return CompletableFuture.completedFuture(
                     new UserRecoveryResult(
                             CALL_ID,
@@ -615,8 +703,8 @@ final class DirtAdminCommandTest {
         }
 
         @Override
-        public CompletionStage<UserMutationResult> unlinkUser(String handle) {
-            this.unlinkedUser = handle;
+        public CompletionStage<UserMutationResult> unlinkUser(String selector) {
+            this.unlinkedUser = selector;
             return CompletableFuture.completedFuture(new UserMutationResult(CALL_ID, user()));
         }
 

@@ -6,6 +6,8 @@ export const dirtAccessSchema = {
     invitation: {
       fields: {
         tokenHash: { type: 'string', unique: true, returned: false, sortable: true },
+        minecraftUuid: { type: 'string', sortable: true },
+        minecraftName: { type: 'string' },
         createdAt: { type: 'date', input: false, defaultValue: () => new Date() },
         expiresAt: { type: 'date', sortable: true },
         acceptedAt: { type: 'date', required: false },
@@ -16,7 +18,7 @@ export const dirtAccessSchema = {
           references: { model: 'user', field: 'id', onDelete: 'set null' },
         },
       },
-      indexes: [{ fields: ['createdAt'] }, { fields: ['expiresAt'] }],
+      indexes: [{ fields: ['createdAt'] }, { fields: ['expiresAt'] }, { fields: ['minecraftUuid'] }],
     },
     credentialRecovery: {
       fields: {
