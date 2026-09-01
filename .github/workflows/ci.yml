@@ -229,7 +229,28 @@ jobs:
             --property=User=dirt-mcp \
             --property=LoadCredential=auth-secret:/etc/dirt-mcp/credentials/auth-secret \
             /usr/bin/true || true
-          sudo systemctl start dirt-mcp.service || true
+          probe_service_override() {
+            local label="$1"
+            local setting="$2"
+            printf '[Service]\n%s\n' "${setting}" \
+              | sudo tee /run/systemd/system/dirt-mcp.service.d/diagnostic.conf > /dev/null
+            sudo systemctl daemon-reload
+            sudo systemctl reset-failed dirt-mcp.service
+            if sudo systemctl start dirt-mcp.service; then
+              printf 'Service probe %s started successfully.\n' "${label}"
+            else
+              printf 'Service probe %s failed.\n' "${label}"
+            fi
+            sudo systemctl stop dirt-mcp.service || true
+          }
+          sudo install -d /run/systemd/system/dirt-mcp.service.d
+          probe_service_override restrict-namespaces 'RestrictNamespaces=false'
+          probe_service_override capability-bounding-set 'CapabilityBoundingSet=CAP_SYS_ADMIN'
+          probe_service_override inaccessible-paths 'InaccessiblePaths='
+          probe_service_override private-devices 'PrivateDevices=false'
+          probe_service_override exec-start-pre 'ExecStartPre='
+          sudo rm /run/systemd/system/dirt-mcp.service.d/diagnostic.conf
+          sudo systemctl daemon-reload
           sudo systemd-analyze log-level info
           sudo systemctl unset-environment SYSTEMD_LOG_LEVEL
           sudo systemctl status dirt-mcp.service caddy.service --no-pager || true
