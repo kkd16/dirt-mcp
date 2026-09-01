@@ -2,10 +2,6 @@
 set -Eeuo pipefail
 umask 077
 
-if [[ "${DIRT_INSTALL_DIAGNOSTICS:-}" == true ]]; then
-  trap 'printf "Installer failed in %s at line %s.\n" "${FUNCNAME[0]:-main}" "${LINENO}" >&2' ERR
-fi
-
 readonly release_version='@VERSION@'
 readonly supported_paper_version='@PAPER_VERSION@'
 readonly supported_paper_build='@PAPER_BUILD@'
@@ -320,7 +316,7 @@ prepare_downloads() {
 }
 
 write_install_state() {
-  [[ "${resume_installation}" == false ]] || return
+  [[ "${resume_installation}" == false ]] || return 0
   configuration_staging_directory=$(mktemp --directory --tmpdir=/etc '.dirt-mcp.install.XXXXXX')
   printf '%s\n' "${release_version}" >"${configuration_staging_directory}/install-version"
   printf '%s\n' "${public_hostname}" >"${configuration_staging_directory}/hostname"

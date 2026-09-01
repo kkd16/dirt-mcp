@@ -162,7 +162,6 @@ jobs:
             --resolve ci.dirt-mcp.internal:80:127.0.0.1 \
             http://ci.dirt-mcp.internal/)" == '400' ]]
           sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-          set -x
           sudo systemd-analyze verify /etc/systemd/system/dirt-mcp.service
 
           for unused_port in 25565 8765; do
@@ -208,8 +207,7 @@ jobs:
             "${plugin_secret_directory}/control-token" \
             /etc/dirt-mcp/credentials/auth-secret | tee "${fixture_files}/secret-hashes" > /dev/null
           sudo --preserve-env=DEBIAN_FRONTEND,NEEDRESTART_MODE \
-            env DIRT_INSTALL_DIAGNOSTICS=true "${installers[0]}" \
-            --paper-dir "${paper_fixture}" --hostname ci.dirt-mcp.internal
+            "${installers[0]}" --paper-dir "${paper_fixture}" --hostname ci.dirt-mcp.internal
           sudo sha256sum --check "${fixture_files}/secret-hashes"
 
       - name: Print native service diagnostics
