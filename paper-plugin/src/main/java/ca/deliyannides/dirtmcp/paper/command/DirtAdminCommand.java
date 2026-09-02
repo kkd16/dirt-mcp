@@ -2,6 +2,7 @@ package ca.deliyannides.dirtmcp.paper.command;
 
 import ca.deliyannides.dirtmcp.paper.access.AccessControl;
 import ca.deliyannides.dirtmcp.paper.access.AccessControlException;
+import ca.deliyannides.dirtmcp.paper.catalog.ToolCatalog;
 import ca.deliyannides.dirtmcp.paper.config.DirtConfig;
 import ca.deliyannides.dirtmcp.paper.logging.DirtLog;
 import ca.deliyannides.dirtmcp.paper.logging.LogContext;
@@ -10,13 +11,17 @@ import ca.deliyannides.dirtmcp.paper.platform.MainThread;
 import ca.deliyannides.dirtmcp.paper.platform.PaperMainThreadException;
 import ca.deliyannides.dirtmcp.paper.status.GetServerStatus;
 import com.mojang.brigadier.Command;
+import com.mojang.brigadier.LiteralMessage;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import java.net.URI;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CompletionException;
@@ -42,6 +47,9 @@ public final class DirtAdminCommand {
     private static final TextColor ACCENT = TextColor.color(0x38BDF8);
     private static final TextColor SECONDARY_ACCENT = TextColor.color(0x22D3EE);
     private static final String DESCRIPTION = "Secure access to live Minecraft worlds";
+    private static final DynamicCommandExceptionType INVALID_ACCESS_PROFILE =
+            new DynamicCommandExceptionType(
+                    value -> new LiteralMessage("Unknown access profile: " + value));
 
     private final String pluginName;
     private final String pluginVersion;
@@ -51,6 +59,7 @@ public final class DirtAdminCommand {
     private final AccessControl access;
     private final MainThread mainThread;
     private final DirtLog log;
+    private final ToolCatalog toolCatalog;
 
     public DirtAdminCommand(
             String pluginName,
@@ -69,6 +78,7 @@ public final class DirtAdminCommand {
         this.access = Objects.requireNonNull(access, "access");
         this.mainThread = Objects.requireNonNull(mainThread, "mainThread");
         this.log = Objects.requireNonNull(log, "log");
+        this.toolCatalog = ToolCatalog.load();
     }
 
     public LiteralCommandNode<CommandSourceStack> command() {
@@ -89,6 +99,7 @@ public final class DirtAdminCommand {
                         Commands.literal("config")
                                 .requires(source -> hasAdminPermission(source.getSender()))
                                 .executes(context -> showConfig(context.getSource().getSender())))
+                .then(toolsCommand())
                 .then(usersCommand())
                 .then(invitesCommand())
                 .then(inviteCommand())
@@ -112,6 +123,28 @@ public final class DirtAdminCommand {
                                                         IntegerArgumentType.getInteger(
                                                                 context, "page"))))
                 .executes(context -> listUsers(context.getSource().getSender(), 1));
+    }
+
+    private LiteralArgumentBuilder<CommandSourceStack> toolsCommand() {
+        return Commands.literal("tools")
+                .requires(source -> canBrowseTools(source.getSender()))
+                .then(
+                        Commands.argument("tool", StringArgumentType.word())
+                                .suggests(
+                                        (context, builder) -> {
+                                            for (ToolCatalog.Entry entry :
+                                                    this.toolCatalog.entries()) {
+                                                builder.suggest(entry.name());
+                                            }
+                                            return builder.buildFuture();
+                                        })
+                                .executes(
+                                        context ->
+                                                showTools(
+                                                        context.getSource().getSender(),
+                                                        StringArgumentType.getString(
+                                                                context, "tool"))))
+                .executes(context -> showTools(context.getSource().getSender(), null));
     }
 
     private LiteralArgumentBuilder<CommandSourceStack> invitesCommand() {
@@ -144,15 +177,39 @@ public final class DirtAdminCommand {
                                                             }
                                                             return builder.buildFuture();
                                                         })
-                                                .executes(
-                                                        context ->
-                                                                createInvitation(
-                                                                        context.getSource()
-                                                                                .getSender(),
-                                                                        StringArgumentType
-                                                                                .getString(
-                                                                                        context,
-                                                                                        "player")))))
+                                                .then(
+                                                        Commands.argument(
+                                                                        "profile",
+                                                                        StringArgumentType.word())
+                                                                .suggests(
+                                                                        (context, builder) -> {
+                                                                            for (AccessControl
+                                                                                            .AccessProfile
+                                                                                    profile :
+                                                                                            AccessControl
+                                                                                                    .AccessProfile
+                                                                                                    .values()) {
+                                                                                builder.suggest(
+                                                                                        profile
+                                                                                                .wireName());
+                                                                            }
+                                                                            return builder
+                                                                                    .buildFuture();
+                                                                        })
+                                                                .executes(
+                                                                        context ->
+                                                                                createInvitation(
+                                                                                        context.getSource()
+                                                                                                .getSender(),
+                                                                                        StringArgumentType
+                                                                                                .getString(
+                                                                                                        context,
+                                                                                                        "player"),
+                                                                                        accessProfile(
+                                                                                                StringArgumentType
+                                                                                                        .getString(
+                                                                                                                context,
+                                                                                                                "profile")))))))
                 .then(
                         Commands.literal("revoke")
                                 .then(
@@ -184,6 +241,53 @@ public final class DirtAdminCommand {
                                                                 StringArgumentType.getString(
                                                                         context, "selector")))));
         user.then(userAction("unlink", this.access::unlinkUser, "unlinked"));
+        user.then(
+                Commands.literal("access")
+                        .then(
+                                Commands.argument("selector", StringArgumentType.word())
+                                        .then(
+                                                Commands.argument(
+                                                                "profile",
+                                                                StringArgumentType.word())
+                                                        .suggests(
+                                                                (context, builder) -> {
+                                                                    for (AccessControl.AccessProfile
+                                                                            profile :
+                                                                                    AccessControl
+                                                                                            .AccessProfile
+                                                                                            .values()) {
+                                                                        builder.suggest(
+                                                                                profile.wireName());
+                                                                    }
+                                                                    return builder.buildFuture();
+                                                                })
+                                                        .executes(
+                                                                context -> {
+                                                                    String selector =
+                                                                            StringArgumentType
+                                                                                    .getString(
+                                                                                            context,
+                                                                                            "selector");
+                                                                    AccessControl.AccessProfile
+                                                                            profile =
+                                                                                    accessProfile(
+                                                                                            StringArgumentType
+                                                                                                    .getString(
+                                                                                                            context,
+                                                                                                            "profile"));
+                                                                    return runAsync(
+                                                                            context.getSource()
+                                                                                    .getSender(),
+                                                                            () ->
+                                                                                    this.access
+                                                                                            .setAccessProfile(
+                                                                                                    selector,
+                                                                                                    profile),
+                                                                            result ->
+                                                                                    accessProfileMessage(
+                                                                                            result
+                                                                                                    .user()));
+                                                                }))));
         return user;
     }
 
@@ -217,18 +321,28 @@ public final class DirtAdminCommand {
         if (hasAdminPermission(sender)) {
             appendCommand(message, "/dirt users", "View dashboard users");
             appendCommand(message, "/dirt invites", "View dashboard invites");
-            appendCommand(message, "/dirt invite create <player>", "Invite an online player");
+            appendCommand(
+                    message,
+                    "/dirt invite create <player> <profile>",
+                    "Invite with explicit access");
             appendCommand(message, "/dirt invite revoke <id>", "Revoke an invite");
             appendCommand(message, "/dirt user disable <username|id>", "Disable a user");
             appendCommand(message, "/dirt user enable <username|id>", "Enable a user");
             appendCommand(message, "/dirt user recover <username|id>", "Create a recovery link");
             appendCommand(message, "/dirt user unlink <username|id>", "Unlink a Minecraft account");
+            appendCommand(
+                    message,
+                    "/dirt user access <username|id> <profile>",
+                    "Assign Viewer, Builder, or Operator");
             appendCommand(message, "/dirt status", "View live server and bridge status");
             appendCommand(message, "/dirt config", "Inspect the active configuration");
             appendCommand(message, "/dirt version", "Show plugin version information");
         }
         if (sender instanceof Player && hasLinkPermission(sender)) {
             appendCommand(message, "/dirt link", "Link this Minecraft account privately");
+        }
+        if (canBrowseTools(sender)) {
+            appendCommand(message, "/dirt tools", "Browse supported tools and your access");
         }
         sender.sendMessage(message.build());
         return Command.SINGLE_SUCCESS;
@@ -363,11 +477,228 @@ public final class DirtAdminCommand {
         return runAsync(sender, () -> this.access.listUsers(page), this::usersMessage);
     }
 
+    private int showTools(CommandSender sender, String requestedTool) {
+        ToolCatalog.Entry selected =
+                requestedTool == null ? null : this.toolCatalog.byName(requestedTool);
+        if (requestedTool != null && selected == null) {
+            sender.sendMessage(failureMessage("That Dirt tool is not supported."));
+            return 0;
+        }
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(toolsMessage(selected, null, PersonalAccessState.NOT_APPLICABLE));
+            return Command.SINGLE_SUCCESS;
+        }
+
+        sender.sendMessage(progressMessage());
+        final CompletionStage<AccessControl.MinecraftAccountUserResult> pending;
+        try {
+            pending = this.access.findUserByMinecraftUuid(player.getUniqueId());
+        } catch (RuntimeException failure) {
+            deliver(sender, toolsMessage(selected, null, PersonalAccessState.UNKNOWN));
+            return Command.SINGLE_SUCCESS;
+        }
+        pending.whenComplete(
+                (result, failure) -> {
+                    if (failure != null) {
+                        deliver(sender, toolsMessage(selected, null, PersonalAccessState.UNKNOWN));
+                        return;
+                    }
+                    AccessControl.UserSummary user = result.user();
+                    deliver(
+                            sender,
+                            toolsMessage(
+                                    selected,
+                                    user,
+                                    user == null
+                                            ? PersonalAccessState.UNLINKED
+                                            : PersonalAccessState.ACCOUNT));
+                });
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private Component toolsMessage(
+            ToolCatalog.Entry selected,
+            AccessControl.UserSummary user,
+            PersonalAccessState personalState) {
+        return selected == null
+                ? toolListMessage(user, personalState)
+                : toolDetailMessage(selected, user, personalState);
+    }
+
+    private Component toolListMessage(
+            AccessControl.UserSummary user, PersonalAccessState personalState) {
+        TextComponent.Builder message = panel("Tool Field Guide");
+        List<ToolCatalog.Entry> entries = this.toolCatalog.entries();
+        long enabled = entries.stream().filter(this::isToolEnabled).count();
+        long accessible =
+                entries.stream()
+                        .filter(entry -> isToolAccessible(entry, user, personalState))
+                        .count();
+        message.append(Component.newline());
+        message.append(
+                Component.text(
+                        entries.size() + " supported  •  " + enabled + " enabled",
+                        NamedTextColor.GRAY));
+        if (personalState == PersonalAccessState.ACCOUNT && user != null) {
+            message.append(
+                    Component.text(
+                            "  •  "
+                                    + accessible
+                                    + " available as "
+                                    + profileTitle(user.accessProfile()),
+                            NamedTextColor.GRAY));
+        } else {
+            message.append(Component.newline());
+            message.append(
+                    Component.text("  " + personalSummary(personalState), NamedTextColor.GRAY));
+        }
+
+        String category = null;
+        for (ToolCatalog.Entry entry : entries) {
+            if (!entry.category().equals(category)) {
+                appendSection(message, categoryTitle(entry.category()));
+                category = entry.category();
+            }
+            message.append(Component.newline());
+            String command = "/dirt tools " + entry.name();
+            message.append(
+                    Component.text("  " + entry.name(), SECONDARY_ACCENT)
+                            .clickEvent(ClickEvent.runCommand(command))
+                            .hoverEvent(
+                                    HoverEvent.showText(
+                                            Component.text(
+                                                    "Open " + entry.title(),
+                                                    NamedTextColor.GRAY))));
+            appendToolState(message, entry, user, personalState);
+        }
+        message.append(Component.newline()).append(Component.newline());
+        message.append(
+                Component.text(
+                        "Select a tool to see inputs, results, and safety notes.",
+                        NamedTextColor.DARK_GRAY));
+        return message.build();
+    }
+
+    private Component toolDetailMessage(
+            ToolCatalog.Entry entry,
+            AccessControl.UserSummary user,
+            PersonalAccessState personalState) {
+        TextComponent.Builder message = panel(entry.title());
+        message.append(Component.newline());
+        message.append(Component.text(entry.description(), NamedTextColor.GRAY));
+        appendValue(message, "Tool", entry.name());
+        appendValue(message, "Category", categoryTitle(entry.category()));
+        appendValue(message, "Required", profileTitle(entry.minimumProfile()));
+        appendValue(message, "Server", isToolEnabled(entry) ? "enabled" : "disabled");
+        appendValue(message, "Your access", toolState(entry, user, personalState));
+        appendValue(message, "Changes world", entry.changesWorld() ? "yes" : "no");
+        appendSection(message, "Use it when");
+        message.append(Component.newline());
+        message.append(Component.text("  " + entry.useWhen(), NamedTextColor.GRAY));
+        appendSection(message, "Inputs");
+        message.append(Component.newline());
+        message.append(Component.text("  " + entry.inputs(), NamedTextColor.GRAY));
+        appendSection(message, "Returns");
+        message.append(Component.newline());
+        message.append(Component.text("  " + entry.returns(), NamedTextColor.GRAY));
+        appendSection(message, "Safety");
+        message.append(Component.newline());
+        message.append(Component.text("  " + entry.caution(), NamedTextColor.GRAY));
+        message.append(Component.newline()).append(Component.newline());
+        message.append(
+                Component.text("‹ All tools", SECONDARY_ACCENT)
+                        .clickEvent(ClickEvent.runCommand("/dirt tools"))
+                        .hoverEvent(
+                                HoverEvent.showText(
+                                        Component.text(
+                                                "Return to the tool list", NamedTextColor.GRAY))));
+        return message.build();
+    }
+
+    private void appendToolState(
+            TextComponent.Builder message,
+            ToolCatalog.Entry entry,
+            AccessControl.UserSummary user,
+            PersonalAccessState personalState) {
+        boolean available = isToolAccessible(entry, user, personalState);
+        NamedTextColor color;
+        if (available) {
+            color = NamedTextColor.GREEN;
+        } else if (!isToolEnabled(entry)) {
+            color = NamedTextColor.DARK_GRAY;
+        } else {
+            color = NamedTextColor.YELLOW;
+        }
+        message.append(Component.text("  " + toolState(entry, user, personalState), color));
+    }
+
+    private String toolState(
+            ToolCatalog.Entry entry,
+            AccessControl.UserSummary user,
+            PersonalAccessState personalState) {
+        if (!isToolEnabled(entry)) {
+            return "disabled";
+        }
+        return switch (personalState) {
+            case NOT_APPLICABLE -> "enabled";
+            case UNKNOWN -> "access unknown";
+            case UNLINKED -> "link required";
+            case ACCOUNT -> {
+                if (user == null || user.status() != AccessControl.UserStatus.ACTIVE) {
+                    yield "account disabled";
+                }
+                yield user.accessProfile().grants(entry.minimumProfile())
+                        ? "available"
+                        : "needs " + profileTitle(entry.minimumProfile());
+            }
+        };
+    }
+
+    private boolean isToolEnabled(ToolCatalog.Entry entry) {
+        return this.config.bridge().allowedOperations().contains(entry.operation());
+    }
+
+    private boolean isToolAccessible(
+            ToolCatalog.Entry entry,
+            AccessControl.UserSummary user,
+            PersonalAccessState personalState) {
+        return personalState == PersonalAccessState.ACCOUNT
+                && user != null
+                && user.status() == AccessControl.UserStatus.ACTIVE
+                && isToolEnabled(entry)
+                && user.accessProfile().grants(entry.minimumProfile());
+    }
+
+    private static String personalSummary(PersonalAccessState state) {
+        return switch (state) {
+            case NOT_APPLICABLE -> "Personal access is available to linked in-game players.";
+            case UNKNOWN -> "Personal access is unknown because the dashboard is unavailable.";
+            case UNLINKED -> "No linked Dirt account; use /dirt link after signing in.";
+            case ACCOUNT -> throw new IllegalArgumentException("Account summary requires a user");
+        };
+    }
+
+    private static String categoryTitle(String category) {
+        return switch (category) {
+            case "status" -> "Status";
+            case "inspection" -> "Inspection";
+            case "editing" -> "Editing and undo";
+            case "commands" -> "Commands";
+            default -> throw new IllegalArgumentException("Unknown tool category");
+        };
+    }
+
+    private static String profileTitle(AccessControl.AccessProfile profile) {
+        String name = profile.wireName();
+        return Character.toUpperCase(name.charAt(0)) + name.substring(1);
+    }
+
     private int listInvitations(CommandSender sender, int page) {
         return runAsync(sender, () -> this.access.listInvitations(page), this::invitationsMessage);
     }
 
-    private int createInvitation(CommandSender sender, String playerName) {
+    private int createInvitation(
+            CommandSender sender, String playerName, AccessControl.AccessProfile accessProfile) {
         Player target = this.server.getPlayerExact(playerName);
         if (target == null || !target.isOnline()) {
             sender.sendMessage(
@@ -377,7 +708,9 @@ public final class DirtAdminCommand {
         sender.sendMessage(progressMessage());
         final CompletionStage<AccessControl.CreateInvitationResult> pending;
         try {
-            pending = this.access.createInvitation(target.getUniqueId(), target.getName());
+            pending =
+                    this.access.createInvitation(
+                            target.getUniqueId(), target.getName(), accessProfile);
         } catch (RuntimeException failure) {
             deliver(sender, accessFailureMessage(failure));
             return 0;
@@ -539,6 +872,11 @@ public final class DirtAdminCommand {
                                     ? NamedTextColor.GREEN
                                     : NamedTextColor.RED));
             message.append(Component.newline());
+            message.append(
+                    Component.text(
+                            "    Access: " + profileTitle(user.accessProfile()),
+                            NamedTextColor.GRAY));
+            message.append(Component.newline());
             if (user.minecraftUuid() == null) {
                 message.append(Component.text("    Minecraft: unlinked", NamedTextColor.GRAY));
             } else {
@@ -584,6 +922,11 @@ public final class DirtAdminCommand {
                             NamedTextColor.GRAY));
             message.append(Component.newline());
             message.append(
+                    Component.text(
+                            "    Access: " + profileTitle(invitation.accessProfile()),
+                            NamedTextColor.GRAY));
+            message.append(Component.newline());
+            message.append(
                     Component.text("    Expires: " + invitation.expiresAt(), NamedTextColor.GRAY));
         }
         appendPageControls(message, "invites", result.page(), result.totalPages());
@@ -595,6 +938,8 @@ public final class DirtAdminCommand {
                 "Your Dirt Invitation",
                 "Linked to "
                         + result.invitation().minecraftAccount().name()
+                        + " as "
+                        + profileTitle(result.invitation().accessProfile())
                         + " • expires at "
                         + result.invitation().expiresAt(),
                 "Open invitation",
@@ -660,6 +1005,15 @@ public final class DirtAdminCommand {
             AccessControl.UserSummary user, String completedAction) {
         return confirmation(
                 "User Updated", "User " + user.username() + " was " + completedAction + '.');
+    }
+
+    private static Component accessProfileMessage(AccessControl.UserSummary user) {
+        return confirmation(
+                "Access Updated",
+                user.username()
+                        + " has "
+                        + profileTitle(user.accessProfile())
+                        + " access. Profile changes require MCP clients to reconnect.");
     }
 
     private static Component confirmation(String title, String detail) {
@@ -790,11 +1144,33 @@ public final class DirtAdminCommand {
         message.append(Component.text(String.valueOf(value), NamedTextColor.WHITE));
     }
 
+    private static AccessControl.AccessProfile accessProfile(String value)
+            throws CommandSyntaxException {
+        return switch (value.toLowerCase(Locale.ROOT)) {
+            case "viewer" -> AccessControl.AccessProfile.VIEWER;
+            case "builder" -> AccessControl.AccessProfile.BUILDER;
+            case "operator" -> AccessControl.AccessProfile.OPERATOR;
+            default -> throw INVALID_ACCESS_PROFILE.create(value);
+        };
+    }
+
+    private static boolean canBrowseTools(CommandSender sender) {
+        return hasAdminPermission(sender)
+                || (sender instanceof Player && hasLinkPermission(sender));
+    }
+
     private static boolean hasAdminPermission(CommandSender sender) {
         return sender.isOp() && sender.hasPermission(ADMIN_PERMISSION);
     }
 
     private static boolean hasLinkPermission(CommandSender sender) {
         return sender.hasPermission(LINK_PERMISSION);
+    }
+
+    private enum PersonalAccessState {
+        ACCOUNT,
+        UNLINKED,
+        UNKNOWN,
+        NOT_APPLICABLE
     }
 }

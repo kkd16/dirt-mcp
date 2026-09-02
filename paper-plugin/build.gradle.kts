@@ -31,6 +31,7 @@ abstract class VerifyPluginJar : DefaultTask() {
                 "META-INF/LICENSE",
                 "plugin.yml",
                 "config.yml",
+                "dirt-tool-catalog.json",
                 "ca/deliyannides/dirtmcp/paper/DirtMcpPlugin.class",
             )
         val missingEntries = requiredEntries - entries
@@ -177,6 +178,10 @@ tasks {
 
         filesMatching("plugin.yml") {
             expand(properties)
+        }
+
+        from(rootProject.file("mcp-server/src/tools/catalog.json")) {
+            rename { "dirt-tool-catalog.json" }
         }
     }
 

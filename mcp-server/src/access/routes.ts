@@ -4,13 +4,16 @@ import * as z from 'zod';
 import type { RuntimeConfig } from '../config.ts';
 import { BodyTooLargeError, InvalidBodyEncodingError, readBoundedText } from '../http-body.ts';
 import { AccessError, type AccessRepository, type UserSummary } from './repository.ts';
+import { AccessProfileSchema } from './profiles.ts';
 
-const linkChallengeSchema = z
+const minecraftIdentitySchema = z
   .object({
     minecraftUuid: z.uuid(),
     minecraftName: z.string().regex(/^[A-Za-z0-9_]{3,16}$/u),
   })
   .strict();
+const invitationSchema = minecraftIdentitySchema.extend({ accessProfile: AccessProfileSchema }).strict();
+const accessProfileSchema = z.object({ accessProfile: AccessProfileSchema }).strict();
 const emptyBodySchema = z.object({}).strict();
 const CALL_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
@@ -56,8 +59,8 @@ export function registerInternalRoutes(app: Hono, dependencies: InternalRouteDep
 
   app.post('/internal/v1/access/invitations', async (context) => {
     const callId = requireCallId(context.req.header('X-Dirt-Call-Id'));
-    const body = await readJsonBody(context.req.raw, linkChallengeSchema);
-    const result = repository.createInvitation(body.minecraftUuid, body.minecraftName);
+    const body = await readJsonBody(context.req.raw, invitationSchema);
+    const result = repository.createInvitation(body.minecraftUuid, body.minecraftName, body.accessProfile);
     return context.json({
       callId,
       invitation: result.invitation,
@@ -75,6 +78,19 @@ export function registerInternalRoutes(app: Hono, dependencies: InternalRouteDep
   registerUserMutation(app, 'enable', (accessRepository, selector) => accessRepository.enableUser(selector));
   registerUserMutation(app, 'unlink', (accessRepository, selector) => accessRepository.unlinkUser(selector));
 
+  app.post('/internal/v1/access/users/:selector/access-profile', async (context) => {
+    const callId = requireCallId(context.req.header('X-Dirt-Call-Id'));
+    const body = await readJsonBody(context.req.raw, accessProfileSchema);
+    const user = repository.setAccessProfile(requirePathValue(context.req.param('selector')), body.accessProfile);
+    return context.json({ callId, user });
+  });
+
+  app.get('/internal/v1/access/minecraft-accounts/:uuid', (context) => {
+    const callId = requireCallId(context.req.header('X-Dirt-Call-Id'));
+    const uuid = z.uuid().parse(context.req.param('uuid'));
+    return context.json({ callId, user: repository.findUserByMinecraftUuid(uuid) });
+  });
+
   app.post('/internal/v1/access/users/:selector/recovery', async (context) => {
     const callId = requireCallId(context.req.header('X-Dirt-Call-Id'));
     await readJsonBody(context.req.raw, emptyBodySchema);
@@ -89,7 +105,7 @@ export function registerInternalRoutes(app: Hono, dependencies: InternalRouteDep
 
   app.post('/internal/v1/access/minecraft-links/challenges', async (context) => {
     const callId = requireCallId(context.req.header('X-Dirt-Call-Id'));
-    const body = await readJsonBody(context.req.raw, linkChallengeSchema);
+    const body = await readJsonBody(context.req.raw, minecraftIdentitySchema);
     const result = repository.createMinecraftLinkChallenge(body.minecraftUuid, body.minecraftName);
     return context.json({
       callId,

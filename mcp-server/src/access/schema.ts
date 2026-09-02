@@ -8,6 +8,7 @@ export const dirtAccessSchema = {
         tokenHash: { type: 'string', unique: true, returned: false, sortable: true },
         minecraftUuid: { type: 'string', sortable: true },
         minecraftName: { type: 'string' },
+        accessProfile: { type: 'string', sortable: true },
         createdAt: { type: 'date', input: false, defaultValue: () => new Date() },
         expiresAt: { type: 'date', sortable: true },
         acceptedAt: { type: 'date', required: false },

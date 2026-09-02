@@ -28,18 +28,20 @@ Dashboard + OAuth + MCP service ---- SQLite accounts and credentials
 `mcp-server` is one Node.js process that owns the user-facing and agent-facing
 interfaces:
 
-- server-rendered dashboard pages and their small WebAuthn browser client;
+- server-rendered dashboard and view-only tool-reference pages plus their small
+  WebAuthn browser client;
 - invite-only passkey accounts, browser sessions, recovery, and Minecraft links;
 - OAuth authorization and the stateless Streamable HTTP `POST /mcp` endpoint;
-- the public tool catalog, descriptions, annotations, and fixed input defaults;
+- the public tool schemas, annotations, and fixed input defaults;
+- the shared human-facing tool catalog used by web and Paper commands;
 - Zod input, success-output, and structured failure schemas;
 - environment validation and authenticated loopback clients; and
 - a private loopback API used by Paper's access commands.
 
 Each MCP request authenticates an OAuth access token, then checks the current
-account is active and linked to exactly one Minecraft UUID. It reads Paper's
-authenticated capabilities, maps allowed bridge operation IDs to its own tool
-catalog, and creates a request-scoped MCP server with only admitted tools. It
+account is active and linked to exactly one Minecraft UUID. It reads the
+account's access profile and Paper's authenticated capabilities, then creates a
+request-scoped MCP server with only tools admitted by both. It
 forwards a generated UUID with every bridge request so web and Paper logs can be
 correlated. It does not read world files, implement Minecraft parsing, or
 delegate account policy to Paper.
@@ -50,6 +52,8 @@ delegate account policy to Paper.
 
 - plugin lifecycle, configuration, authentication, and request admission;
 - operator access commands and the asynchronous private control client;
+- the resource adapter that decodes the shared human-facing catalog for
+  `/dirt tools`;
 - the bridge operation allowlist and capabilities response;
 - world, player, chunk, block-state, and command access;
 - explicit transitions onto and off Paper's main thread;
@@ -75,7 +79,9 @@ is the separate private Paper-to-web account-control contract. The
 ## Identity and authorization
 
 Registration is invite-only and passkey-only. Each invitation is bound to one
-online-mode Minecraft UUID and current Minecraft name before it is created.
+online-mode Minecraft UUID, current Minecraft name, and explicit Viewer,
+Builder, or Operator profile before it is created. There is no invitation
+default.
 Paper sends its URL only to that online player's private chat. The Minecraft
 name becomes the Dirt username when the player enrolls a passkey; Dirt has no
 separate user-chosen username. Raw invitation, recovery, and link secrets are
@@ -95,8 +101,16 @@ access tokens because every MCP request also requires current consent. Calls
 already admitted before disconnection may finish; reconnecting requires OAuth
 authorization again.
 
-Paper operators create targeted invitations with `/dirt invite create <player>`,
-revoke them through `/dirt invite`, and manage accounts through `/dirt user`.
+Viewer grants inspection and history tools, Builder adds bounded edits and
+undo, and Operator adds console-equivalent Minecraft commands. Changing a
+profile is transactional: it preserves passkeys, the Minecraft link, and
+browser sessions, but rotates the authorization generation and removes MCP
+consent, codes, access tokens, and refresh tokens. Assigning the same profile
+is a no-op.
+
+Paper operators create targeted invitations with
+`/dirt invite create <player> <profile>`, revoke them through `/dirt invite`,
+and manage accounts and profiles through `/dirt user`.
 An online player starts linking with `/dirt link`; Paper supplies the
 online-mode-authenticated UUID and current name to the private control API and
 returns a short-lived link URL only to that player. A recently authenticated
@@ -108,11 +122,11 @@ client metadata discovery plus authorization code flow with PKCE S256; it does
 not support dynamic client registration, client credentials, legacy MCP
 transports, or version-specific endpoints. The single Streamable HTTP endpoint
 intentionally serves both `2025-06-18` and `2026-07-28` through one server
-factory, with identical authentication and tools. Every MCP request validates
+factory, with identical authentication and profile policy. Every MCP request validates
 the token's issuer, audience, expiry, scope, and current authorization
-generation, then reloads the account's active and linked state. There are
-deliberately no roles or per-account capability records in v1: every active,
-linked account receives the same Paper-limited tool catalog.
+generation, then reloads the account's active, linked, and profile state. The
+fixed OAuth scope does not encode profiles; effective access is the intersection
+of supported tools, Paper enablement, and the current profile grant.
 
 ## Execution model
 
@@ -125,7 +139,9 @@ credentials, sessions, OAuth state, invitations, and link challenges.
 Every authenticated bridge request carries `X-Dirt-Call-Id`. The mandatory
 `getCapabilities` control-plane operation reports the configurable operation
 IDs currently admitted by Paper. Disabled configurable operations fail with
-`operation_disabled`; Paper does not know MCP tool names or schemas.
+`operation_disabled`. The bridge remains implementation-neutral and does not
+use MCP tool names or schemas; only the administrative command UI reads the
+shared descriptive catalog.
 
 Bridge requests are fully materialized. MCP applies fixed tool defaults and
 generates omitted edit seeds before HTTP dispatch; Paper receives explicit
@@ -256,18 +272,20 @@ results privately, and never write the secret to console or server logs.
 
 Dirt intentionally provides synchronous, semantic world operations rather than
 a general Minecraft automation platform. Its dashboard is limited to account,
-security, linking, and MCP connection status. It does not provide persistent
-jobs or persistent world history, remote bridge access, roles or per-account
-permissions, direct world-file editing, a renderer, world controls, player
-control, schematics, or support for multiple Paper generations.
+security, linking, MCP connection status, and a view-only tool field guide. It
+does not provide persistent jobs or persistent world history, remote bridge
+access, custom roles or per-tool grants, direct world-file editing, a renderer,
+world controls, player control, schematics, or support for multiple Paper
+generations.
 
 Dependencies point inward through Dirt-owned operation contracts:
 
 ```text
 public edge -> web/auth/MCP -> bridge operation contracts <- feature services
-                    ^                    ^                       |
-                    |                    |                Paper / FAWE adapters
-                    +---- SQLite   Paper control client
+                    ^        ^           ^                       |
+                    |        |           |                Paper / FAWE adapters
+                    |    tool catalog    +---- Paper control client
+                    +---- SQLite
 ```
 
 This boundary keeps the public tool and wire contracts independent of Paper and

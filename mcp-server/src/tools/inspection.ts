@@ -22,7 +22,12 @@ import {
   type Bounds,
 } from './common.ts';
 import type { McpToolConfiguration } from './configuration.ts';
+import { catalogTool } from './catalog.ts';
 import { executeToolCall, successResult } from './execution.ts';
+
+const CountRegionBlockStatesTool = catalogTool('count_region_block_states');
+const GetBlocksTool = catalogTool('get_blocks');
+const ScanOrthographicViewTool = catalogTool('scan_orthographic_view');
 
 const DEFAULT_MAX_RESULTS = 1_024;
 
@@ -366,8 +371,8 @@ export function registerInspectionTools(
     server.registerTool(
       'count_region_block_states',
       {
-        title: 'Count region block states',
-        description: 'Return a complete canonical block-state histogram for an inclusive region.',
+        title: CountRegionBlockStatesTool.title,
+        description: CountRegionBlockStatesTool.description,
         inputSchema: CountRegionBlockStatesInputSchema,
         outputSchema: CountRegionBlockStatesOutputSchema,
         annotations: READ_WORLD_ANNOTATIONS,
@@ -403,8 +408,8 @@ export function registerInspectionTools(
     server.registerTool(
       'get_blocks',
       {
-        title: 'Get blocks',
-        description: 'Return filtered exact block states as replay-ready palettes, placements, and cuboid runs.',
+        title: GetBlocksTool.title,
+        description: GetBlocksTool.description,
         inputSchema: GetBlocksInputSchema,
         outputSchema: ExactBlockStructureOutputSchema,
         annotations: READ_WORLD_ANNOTATIONS,
@@ -432,8 +437,8 @@ export function registerInspectionTools(
     server.registerTool(
       'scan_orthographic_view',
       {
-        title: 'Scan an orthographic view',
-        description: 'Return a selected non-air depth on bounded world-axis sightlines as replay-ready block geometry.',
+        title: ScanOrthographicViewTool.title,
+        description: ScanOrthographicViewTool.description,
         inputSchema: ScanOrthographicViewInputSchema,
         outputSchema: ExactBlockStructureOutputSchema,
         annotations: READ_WORLD_ANNOTATIONS,

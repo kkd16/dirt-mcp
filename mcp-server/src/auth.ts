@@ -7,6 +7,7 @@ import { jwt } from 'better-auth/plugins';
 import type Database from 'better-sqlite3';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import * as z from 'zod';
+import { AccessProfileSchema } from './access/profiles.ts';
 import type { AuthConfig } from './config.ts';
 import { AccessError, type AccessRepository, type OnboardingClaim } from './access/repository.ts';
 import { dirtAccessSchema } from './access/schema.ts';
@@ -21,6 +22,7 @@ const ticketPayloadSchema = z
     recordId: z.string().min(1),
     username: z.string().regex(MINECRAFT_USERNAME_PATTERN),
     minecraftUuid: z.uuid().nullable(),
+    accessProfile: AccessProfileSchema,
     exp: z.number().int().safe(),
   })
   .strict();
@@ -53,6 +55,12 @@ export function createAuthOptions(
           required: true,
           defaultValue: 'active',
           sortable: true,
+          returned: true,
+          input: false,
+        },
+        accessProfile: {
+          type: 'string',
+          required: true,
           returned: true,
           input: false,
         },
@@ -172,6 +180,7 @@ export function createAuthOptions(
               id: string;
               minecraftUuid: string;
               minecraftName: string;
+              accessProfile: string;
               expiresAt: Date;
               acceptedAt: Date | null;
               revokedAt: Date | null;
@@ -181,6 +190,7 @@ export function createAuthOptions(
               ticket.minecraftUuid === null ||
               invitation.minecraftUuid !== ticket.minecraftUuid ||
               invitation.minecraftName !== ticket.username ||
+              invitation.accessProfile !== ticket.accessProfile ||
               invitation.acceptedAt !== null ||
               invitation.revokedAt !== null ||
               invitation.expiresAt.getTime() <= now.getTime()
@@ -197,6 +207,7 @@ export function createAuthOptions(
                 email: `${userId}@dirt.placeholder.invalid`,
                 emailVerified: false,
                 status: 'active',
+                accessProfile: ticket.accessProfile,
                 minecraftUuid: ticket.minecraftUuid,
                 createdAt: now,
                 updatedAt: now,
@@ -295,6 +306,7 @@ export function readOnboardingClaim(headers: Headers, secret: string, publicOrig
     recordId: ticket.recordId,
     username: ticket.username,
     minecraftUuid: ticket.minecraftUuid,
+    accessProfile: ticket.accessProfile,
   };
 }
 

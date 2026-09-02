@@ -69,7 +69,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MinecraftIdentityRequest'
+              $ref: '#/components/schemas/CreateInvitationRequest'
       responses:
         '200':
           description: Created invitation and its one-time secret URL
@@ -235,6 +235,54 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
+  /internal/v1/access/users/{selector}/access-profile:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
+      - $ref: '#/components/parameters/UserSelector'
+    post:
+      operationId: setAccessUserProfile
+      summary: Assign a built-in MCP access profile and revoke existing MCP authorizations when changed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetAccessProfileRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/UserMutationSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /internal/v1/access/minecraft-accounts/{minecraftUuid}:
+    parameters:
+      - $ref: '#/components/parameters/DirtCallId'
+      - $ref: '#/components/parameters/MinecraftUuid'
+    get:
+      operationId: findAccessUserByMinecraftUuid
+      summary: Find the Dirt account linked to an authenticated online-mode Minecraft UUID
+      responses:
+        '200':
+          description: The linked user, or null when the Minecraft account is not linked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MinecraftAccountUserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /internal/v1/access/minecraft-links/challenges:
     parameters:
       - $ref: '#/components/parameters/DirtCallId'
@@ -299,6 +347,12 @@ components:
       description: Current Minecraft username or stable Dirt account ID.
       schema:
         $ref: '#/components/schemas/OpaqueSelector'
+    MinecraftUuid:
+      name: minecraftUuid
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Uuid'
   responses:
     UserMutationSuccess:
       description: Updated user summary
@@ -383,6 +437,12 @@ components:
       enum:
         - active
         - disabled
+    AccessProfile:
+      type: string
+      enum:
+        - viewer
+        - builder
+        - operator
     InvitationStatus:
       type: string
       enum:
@@ -408,6 +468,7 @@ components:
         - id
         - username
         - status
+        - accessProfile
         - minecraftUuid
         - createdAt
       properties:
@@ -417,6 +478,8 @@ components:
           $ref: '#/components/schemas/MinecraftName'
         status:
           $ref: '#/components/schemas/UserStatus'
+        accessProfile:
+          $ref: '#/components/schemas/AccessProfile'
         minecraftUuid:
           oneOf:
             - $ref: '#/components/schemas/Uuid'
@@ -430,6 +493,7 @@ components:
       required:
         - id
         - status
+        - accessProfile
         - minecraftAccount
         - createdAt
         - expiresAt
@@ -438,6 +502,8 @@ components:
           $ref: '#/components/schemas/NonBlankString'
         status:
           $ref: '#/components/schemas/InvitationStatus'
+        accessProfile:
+          $ref: '#/components/schemas/AccessProfile'
         minecraftAccount:
           $ref: '#/components/schemas/MinecraftAccount'
         createdAt:
@@ -557,6 +623,18 @@ components:
             user:
               $ref: '#/components/schemas/UserSummary'
       unevaluatedProperties: false
+    MinecraftAccountUserResponse:
+      allOf:
+        - $ref: '#/components/schemas/CallResponse'
+        - type: object
+          required:
+            - user
+          properties:
+            user:
+              oneOf:
+                - $ref: '#/components/schemas/UserSummary'
+                - type: 'null'
+      unevaluatedProperties: false
     UserRecoveryResponse:
       allOf:
         - $ref: '#/components/schemas/CallResponse'
@@ -585,6 +663,28 @@ components:
           $ref: '#/components/schemas/Uuid'
         minecraftName:
           $ref: '#/components/schemas/MinecraftName'
+    CreateInvitationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - minecraftUuid
+        - minecraftName
+        - accessProfile
+      properties:
+        minecraftUuid:
+          $ref: '#/components/schemas/Uuid'
+        minecraftName:
+          $ref: '#/components/schemas/MinecraftName'
+        accessProfile:
+          $ref: '#/components/schemas/AccessProfile'
+    SetAccessProfileRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - accessProfile
+      properties:
+        accessProfile:
+          $ref: '#/components/schemas/AccessProfile'
     MinecraftLinkChallengeResponse:
       allOf:
         - $ref: '#/components/schemas/CallResponse'

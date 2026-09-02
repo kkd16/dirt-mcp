@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { AccessProfileSchema, type AccessProfile } from './profiles.ts';
 
 const PAGE_SIZE = 20;
 const INVITATION_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -12,6 +13,7 @@ export interface UserSummary {
   readonly id: string;
   readonly username: string;
   readonly status: UserStatus;
+  readonly accessProfile: AccessProfile;
   readonly minecraftUuid: string | null;
   readonly createdAt: string;
 }
@@ -38,6 +40,7 @@ export interface PasskeySummary {
 export interface InvitationSummary {
   readonly id: string;
   readonly status: 'pending' | 'accepted' | 'revoked' | 'expired';
+  readonly accessProfile: AccessProfile;
   readonly minecraftAccount: { readonly uuid: string; readonly name: string };
   readonly createdAt: string;
   readonly expiresAt: string;
@@ -72,17 +75,20 @@ export interface OnboardingClaim {
   readonly recordId: string;
   readonly username: string;
   readonly minecraftUuid: string | null;
+  readonly accessProfile: AccessProfile;
 }
 
 interface McpUser {
   readonly id: string;
   readonly minecraftUuid: string;
+  readonly accessProfile: AccessProfile;
 }
 
 type UserRow = {
   id: string;
   name: string;
   status: string;
+  accessProfile: string;
   minecraftUuid: string | null;
   createdAt: string;
 };
@@ -91,6 +97,7 @@ type InvitationRow = {
   id: string;
   minecraftUuid: string;
   minecraftName: string;
+  accessProfile: string;
   createdAt: string;
   expiresAt: string;
   acceptedAt: string | null;
@@ -107,14 +114,21 @@ type LinkChallengeRow = {
 
 type InvitationClaimRow = Pick<
   InvitationRow,
-  'id' | 'minecraftUuid' | 'minecraftName' | 'expiresAt' | 'acceptedAt' | 'revokedAt'
+  'id' | 'minecraftUuid' | 'minecraftName' | 'accessProfile' | 'expiresAt' | 'acceptedAt' | 'revokedAt'
 >;
+
+type McpUserRow = {
+  id: string;
+  minecraftUuid: string;
+  accessProfile: string;
+};
 
 type RecoveryClaimRow = {
   id: string;
   expiresAt: string;
   usedAt: string | null;
   username: string;
+  accessProfile: string;
 };
 
 type AuthorizedClientRow = {
@@ -189,6 +203,7 @@ export class AccessRepository {
       'createdAt',
       'updatedAt',
       'status',
+      'accessProfile',
       'minecraftUuid',
       'authorizationVersion',
     ]);
@@ -197,6 +212,7 @@ export class AccessRepository {
       'tokenHash',
       'minecraftUuid',
       'minecraftName',
+      'accessProfile',
       'createdAt',
       'expiresAt',
       'acceptedAt',
@@ -217,7 +233,7 @@ export class AccessRepository {
     const totalItems = scalarCount(this.database, 'SELECT COUNT(*) AS count FROM "user"');
     const rows = this.database
       .prepare<[number, number], UserRow>(
-        'SELECT id, name, status, minecraftUuid, createdAt FROM "user" ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?',
+        'SELECT id, name, status, accessProfile, minecraftUuid, createdAt FROM "user" ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?',
       )
       .all(PAGE_SIZE, (page - 1) * PAGE_SIZE);
     return pageEnvelope(page, totalItems, rows.map(toUserSummary));
@@ -227,7 +243,7 @@ export class AccessRepository {
     const totalItems = scalarCount(this.database, 'SELECT COUNT(*) AS count FROM invitation');
     const rows = this.database
       .prepare<[number, number], InvitationRow>(
-        'SELECT id, minecraftUuid, minecraftName, createdAt, expiresAt, acceptedAt, revokedAt FROM invitation ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?',
+        'SELECT id, minecraftUuid, minecraftName, accessProfile, createdAt, expiresAt, acceptedAt, revokedAt FROM invitation ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?',
       )
       .all(PAGE_SIZE, (page - 1) * PAGE_SIZE);
     return pageEnvelope(
@@ -237,7 +253,13 @@ export class AccessRepository {
     );
   }
 
-  createInvitation(minecraftUuid: string, minecraftName: string, now = new Date()): SecretInvitation {
+  createInvitation(
+    minecraftUuid: string,
+    minecraftName: string,
+    accessProfile: AccessProfile,
+    now = new Date(),
+  ): SecretInvitation {
+    const validatedProfile = AccessProfileSchema.parse(accessProfile);
     const id = randomUUID();
     const secret = randomSecret();
     const expiresAt = new Date(now.getTime() + INVITATION_TTL_MS);
@@ -259,15 +281,24 @@ export class AccessRepository {
       }
       this.database
         .prepare(
-          'INSERT INTO invitation (id, tokenHash, minecraftUuid, minecraftName, createdAt, expiresAt, acceptedAt, revokedAt, acceptedByUserId) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL)',
+          'INSERT INTO invitation (id, tokenHash, minecraftUuid, minecraftName, accessProfile, createdAt, expiresAt, acceptedAt, revokedAt, acceptedByUserId) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)',
         )
-        .run(id, hashSecret(secret), minecraftUuid, minecraftName, now.toISOString(), expiresAt.toISOString());
+        .run(
+          id,
+          hashSecret(secret),
+          minecraftUuid,
+          minecraftName,
+          validatedProfile,
+          now.toISOString(),
+          expiresAt.toISOString(),
+        );
     });
     transaction.immediate();
     return {
       invitation: {
         id,
         status: 'pending',
+        accessProfile: validatedProfile,
         minecraftAccount: { uuid: minecraftUuid, name: minecraftName },
         createdAt: now.toISOString(),
         expiresAt: expiresAt.toISOString(),
@@ -297,6 +328,31 @@ export class AccessRepository {
 
   enableUser(selector: string): UserSummary {
     return this.setUserStatus(selector, 'active');
+  }
+
+  setAccessProfile(selector: string, accessProfile: AccessProfile): UserSummary {
+    const validatedProfile = AccessProfileSchema.parse(accessProfile);
+    const now = new Date();
+    const transaction = this.database.transaction(() => {
+      const user = this.requireUserBySelector(selector);
+      const changed = this.database
+        .prepare<[AccessProfile, string, string, AccessProfile], { id: string }>(
+          'UPDATE "user" SET accessProfile = ?, updatedAt = ? WHERE id = ? AND accessProfile <> ? RETURNING id',
+        )
+        .get(validatedProfile, now.toISOString(), user.id, validatedProfile);
+      if (changed !== undefined) this.rotateAuthorization(changed.id, now);
+      return this.requireUserById(user.id);
+    });
+    return transaction.immediate();
+  }
+
+  findUserByMinecraftUuid(minecraftUuid: string): UserSummary | null {
+    const row = this.database
+      .prepare<[string], UserRow>(
+        'SELECT id, name, status, accessProfile, minecraftUuid, createdAt FROM "user" WHERE minecraftUuid = ?',
+      )
+      .get(minecraftUuid);
+    return row === undefined ? null : toUserSummary(row);
   }
 
   unlinkUser(selector: string): UserSummary {
@@ -402,34 +458,46 @@ export class AccessRepository {
   resolveInvitation(secret: string, now = new Date()): OnboardingClaim {
     const row = this.database
       .prepare<[string], InvitationClaimRow>(
-        'SELECT id, minecraftUuid, minecraftName, expiresAt, acceptedAt, revokedAt FROM invitation WHERE tokenHash = ?',
+        'SELECT id, minecraftUuid, minecraftName, accessProfile, expiresAt, acceptedAt, revokedAt FROM invitation WHERE tokenHash = ?',
       )
       .get(hashSecret(secret));
     if (row === undefined || row.acceptedAt !== null || row.revokedAt !== null) {
       throw new AccessError('invalid', 'Invalid invitation.');
     }
     if (toEpochMilliseconds(row.expiresAt) <= now.getTime()) throw new AccessError('expired', 'Invitation expired.');
-    return { kind: 'invitation', recordId: row.id, username: row.minecraftName, minecraftUuid: row.minecraftUuid };
+    return {
+      kind: 'invitation',
+      recordId: row.id,
+      username: row.minecraftName,
+      minecraftUuid: row.minecraftUuid,
+      accessProfile: parseAccessProfile(row.accessProfile),
+    };
   }
 
   resolveRecovery(secret: string, now = new Date()): OnboardingClaim {
     const row = this.database
       .prepare<[string], RecoveryClaimRow>(
-        'SELECT credentialRecovery.id, credentialRecovery.expiresAt, credentialRecovery.usedAt, "user".name AS username FROM credentialRecovery JOIN "user" ON "user".id = credentialRecovery.userId WHERE credentialRecovery.tokenHash = ?',
+        'SELECT credentialRecovery.id, credentialRecovery.expiresAt, credentialRecovery.usedAt, "user".name AS username, "user".accessProfile FROM credentialRecovery JOIN "user" ON "user".id = credentialRecovery.userId WHERE credentialRecovery.tokenHash = ?',
       )
       .get(hashSecret(secret));
     if (row === undefined || row.usedAt !== null) throw new AccessError('invalid', 'Invalid recovery link.');
     if (toEpochMilliseconds(row.expiresAt) <= now.getTime()) throw new AccessError('expired', 'Recovery link expired.');
-    return { kind: 'recovery', recordId: row.id, username: row.username, minecraftUuid: null };
+    return {
+      kind: 'recovery',
+      recordId: row.id,
+      username: row.username,
+      minecraftUuid: null,
+      accessProfile: parseAccessProfile(row.accessProfile),
+    };
   }
 
   findMcpUser(userId: string, authorizationVersion: number): McpUser | null {
     const row = this.database
-      .prepare<[string, UserStatus, number], McpUser>(
-        'SELECT id, minecraftUuid FROM "user" WHERE id = ? AND status = ? AND authorizationVersion = ? AND minecraftUuid IS NOT NULL',
+      .prepare<[string, UserStatus, number], McpUserRow>(
+        'SELECT id, minecraftUuid, accessProfile FROM "user" WHERE id = ? AND status = ? AND authorizationVersion = ? AND minecraftUuid IS NOT NULL',
       )
       .get(userId, 'active', authorizationVersion);
-    return row ?? null;
+    return row === undefined ? null : { ...row, accessProfile: parseAccessProfile(row.accessProfile) };
   }
 
   hasMcpClientConsent(userId: string, clientId: string): boolean {
@@ -550,7 +618,9 @@ export class AccessRepository {
 
   requireUserById(id: string): UserSummary {
     const row = this.database
-      .prepare<[string], UserRow>('SELECT id, name, status, minecraftUuid, createdAt FROM "user" WHERE id = ?')
+      .prepare<[string], UserRow>(
+        'SELECT id, name, status, accessProfile, minecraftUuid, createdAt FROM "user" WHERE id = ?',
+      )
       .get(id);
     if (row === undefined) throw new AccessError('not_found', 'User not found.');
     return toUserSummary(row);
@@ -570,7 +640,7 @@ export class AccessRepository {
   private getInvitation(id: string, now: Date): InvitationSummary | null {
     const row = this.database
       .prepare<[string], InvitationRow>(
-        'SELECT id, minecraftUuid, minecraftName, createdAt, expiresAt, acceptedAt, revokedAt FROM invitation WHERE id = ?',
+        'SELECT id, minecraftUuid, minecraftName, accessProfile, createdAt, expiresAt, acceptedAt, revokedAt FROM invitation WHERE id = ?',
       )
       .get(id);
     return row === undefined ? null : toInvitationSummary(row, now);
@@ -592,12 +662,14 @@ export class AccessRepository {
 
   private requireUserBySelector(selector: string): UserSummary {
     const byId = this.database
-      .prepare<[string], UserRow>('SELECT id, name, status, minecraftUuid, createdAt FROM "user" WHERE id = ?')
+      .prepare<[string], UserRow>(
+        'SELECT id, name, status, accessProfile, minecraftUuid, createdAt FROM "user" WHERE id = ?',
+      )
       .get(selector);
     if (byId !== undefined) return toUserSummary(byId);
     const matches = this.database
       .prepare<[string], UserRow>(
-        'SELECT id, name, status, minecraftUuid, createdAt FROM "user" WHERE name = ? COLLATE NOCASE ORDER BY id LIMIT 2',
+        'SELECT id, name, status, accessProfile, minecraftUuid, createdAt FROM "user" WHERE name = ? COLLATE NOCASE ORDER BY id LIMIT 2',
       )
       .all(selector);
     if (matches.length === 0) throw new AccessError('not_found', 'User not found.');
@@ -655,6 +727,7 @@ function toUserSummary(row: UserRow): UserSummary {
     id: row.id,
     username: row.name,
     status: row.status,
+    accessProfile: parseAccessProfile(row.accessProfile),
     minecraftUuid: row.minecraftUuid,
     createdAt: toRfc3339(row.createdAt),
   };
@@ -672,10 +745,17 @@ function toInvitationSummary(row: InvitationRow, now: Date): InvitationSummary {
   return {
     id: row.id,
     status,
+    accessProfile: parseAccessProfile(row.accessProfile),
     minecraftAccount: { uuid: row.minecraftUuid, name: row.minecraftName },
     createdAt: toRfc3339(row.createdAt),
     expiresAt: toRfc3339(row.expiresAt),
   };
+}
+
+function parseAccessProfile(value: string): AccessProfile {
+  const profile = AccessProfileSchema.safeParse(value);
+  if (!profile.success) throw new Error('The Dirt database contains an invalid access profile.');
+  return profile.data;
 }
 
 function toRfc3339(value: string): string {

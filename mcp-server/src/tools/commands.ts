@@ -6,7 +6,10 @@ import type { components } from '../generated/openapi.ts';
 import type { DirtLogger } from '../logging.ts';
 import { NON_IDEMPOTENT_MUTATION_ANNOTATIONS, NonBlankStringSchema } from './common.ts';
 import type { McpToolConfiguration } from './configuration.ts';
+import { catalogTool } from './catalog.ts';
 import { executeToolCall, successResult } from './execution.ts';
+
+const RunMinecraftCommandsTool = catalogTool('run_minecraft_commands');
 
 const MinecraftCommandInputSchema = NonBlankStringSchema.describe(
   'One Minecraft command. Paper owns command normalization, parsing, and dispatch validation.',
@@ -188,9 +191,8 @@ export function registerCommandTools(
     server.registerTool(
       'run_minecraft_commands',
       {
-        title: 'Run Minecraft commands',
-        description:
-          'Run Minecraft commands in order as an operator-level non-player sender. Execution stops at the first dispatch failure. Command effects are not atomic or undoable; after an ambiguous transport failure, inspect state before retrying.',
+        title: RunMinecraftCommandsTool.title,
+        description: RunMinecraftCommandsTool.description,
         inputSchema: RunMinecraftCommandsInputSchema,
         outputSchema: RunMinecraftCommandsOutputSchema,
         annotations: NON_IDEMPOTENT_MUTATION_ANNOTATIONS,

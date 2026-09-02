@@ -9,6 +9,7 @@ import { getMigrations } from 'better-auth/db/migration';
 import { AccessRepository } from '../dist/access/repository.js';
 import { createAuth, createAuthOptions } from '../dist/auth.js';
 import { BridgeClient } from '../dist/bridge/client.js';
+import { BRIDGE_OPERATION_IDS } from '../dist/bridge/contract.js';
 import type { RuntimeConfig } from '../dist/config.js';
 import type { DirtLogger } from '../dist/logging.js';
 import { createDirtMcpHandler } from '../dist/mcp-http.js';
@@ -54,7 +55,7 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
     const now = new Date().toISOString();
     database
       .prepare(
-        'INSERT INTO "user" (id, name, email, emailVerified, image, createdAt, updatedAt, status, minecraftUuid, authorizationVersion) VALUES (?, ?, ?, 0, NULL, ?, ?, ?, ?, 0)',
+        'INSERT INTO "user" (id, name, email, emailVerified, image, createdAt, updatedAt, status, minecraftUuid, accessProfile, authorizationVersion) VALUES (?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, 0)',
       )
       .run(
         'linked-user',
@@ -64,6 +65,7 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
         now,
         'active',
         'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        'viewer',
       );
     const clientId = 'https://client.example/client.json';
     database
@@ -87,7 +89,7 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
     let bridgeRequests = 0;
     const bridge = new BridgeClient(config.bridge, async () => {
       bridgeRequests += 1;
-      return Response.json({ operations: [] });
+      return Response.json({ operations: BRIDGE_OPERATION_IDS });
     });
     mcp = createDirtMcpHandler(auth, bridge, repository, config, silentLogger);
     const app = createWebApp({
@@ -223,8 +225,18 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
 
     const authorized = await mcp.fetch(mcpRequest(resource, issued.token));
     assert.equal(authorized.status, 200);
-    const result = (await authorized.json()) as { result?: { tools?: unknown[]; resultType?: string } };
-    assert.deepEqual(result.result?.tools, []);
+    const result = (await authorized.json()) as {
+      result?: { tools?: Array<{ readonly name?: string }>; resultType?: string };
+    };
+    assert.equal(result.result?.tools?.length, 8);
+    assert.equal(
+      result.result?.tools?.some(({ name }) => name === 'get_blocks'),
+      true,
+    );
+    assert.equal(
+      result.result?.tools?.some(({ name }) => name === 'set_blocks'),
+      false,
+    );
     assert.equal(result.result?.resultType, 'complete');
     assert.equal(jwksRequests, 1);
     assert.equal(jwksHost, `127.0.0.1:${config.port}`);
@@ -328,7 +340,9 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
       legacyRequest(resource, current.token, { jsonrpc: '2.0', id: 2, method: 'tools/list' }),
     );
     assert.equal(legacyTools.status, 200);
-    assert.match(await legacyTools.text(), /"tools":\[\]/u);
+    const legacyToolsBody = await legacyTools.text();
+    assert.match(legacyToolsBody, /"name":"get_blocks"/u);
+    assert.doesNotMatch(legacyToolsBody, /"name":"set_blocks"/u);
     const bridgeRequestsAfterLegacyHandshake = bridgeRequests;
     assert.ok(bridgeRequestsAfterLegacyHandshake > 3);
 

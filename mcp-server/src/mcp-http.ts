@@ -2,6 +2,7 @@ import { requireMcpAuth } from '@better-auth/mcp';
 import { createMcpHandler, isJsonContentType, type AuthInfo, type McpHttpHandler } from '@modelcontextprotocol/server';
 import { randomUUID } from 'node:crypto';
 import type { AccessRepository } from './access/repository.ts';
+import { AccessProfileSchema } from './access/profiles.ts';
 import type { DirtAuth } from './auth.ts';
 import type { BridgeClient } from './bridge/client.ts';
 import { BRIDGE_ROUTES, BridgeCapabilitiesSchema } from './bridge/contract.ts';
@@ -9,6 +10,7 @@ import type { RuntimeConfig } from './config.ts';
 import { BodyTooLargeError, readBoundedText } from './http-body.ts';
 import { safeErrorFields, type DirtLogger } from './logging.ts';
 import { createDirtServer } from './server.ts';
+import { intersectToolConfigurations, profileToolConfiguration } from './tools/catalog.ts';
 import { toolConfigurationFromCapabilities } from './tools/configuration.ts';
 
 const MAX_MCP_BODY_BYTES = 4 * 1_024 * 1_024;
@@ -30,9 +32,14 @@ export function createDirtMcpHandler(
   const resource = `${config.publicOrigin}/mcp`;
   const httpLogger = logger.child({ component: 'mcp_http' });
   const sdkHandler: McpHttpHandler = createMcpHandler(
-    async () => {
+    async ({ authInfo }) => {
+      const accessProfile = AccessProfileSchema.parse(authInfo?.extra?.accessProfile);
       const capabilities = await bridge.request(BRIDGE_ROUTES.capabilities, randomUUID(), BridgeCapabilitiesSchema);
-      return createDirtServer(bridge, toolConfigurationFromCapabilities(capabilities), logger);
+      const toolConfiguration = intersectToolConfigurations(
+        toolConfigurationFromCapabilities(capabilities),
+        profileToolConfiguration(accessProfile),
+      );
+      return createDirtServer(bridge, toolConfiguration, logger);
     },
     {
       // Keep 2025-06-18 compatibility alongside 2026-07-28.
@@ -83,7 +90,7 @@ export function createDirtMcpHandler(
         scopes: parseScopes(claims.scope),
         ...(typeof claims.exp === 'number' ? { expiresAt: claims.exp } : {}),
         resource: new URL(resource),
-        extra: { userId: user.id, minecraftUuid: user.minecraftUuid },
+        extra: { userId: user.id, minecraftUuid: user.minecraftUuid, accessProfile: user.accessProfile },
       };
       return sdkHandler.fetch(request, { authInfo, parsedBody });
     },

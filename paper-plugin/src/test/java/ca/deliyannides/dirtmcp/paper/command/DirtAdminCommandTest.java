@@ -62,8 +62,8 @@ final class DirtAdminCommandTest {
 
         assertEquals(
                 Set.of(
-                        "config", "help", "invite", "invites", "link", "status", "user", "users",
-                        "version"),
+                        "config", "help", "invite", "invites", "link", "status", "tools", "user",
+                        "users", "version"),
                 operator.suggestions("dirt "));
         assertEquals(1, operator.execute("dirt"));
         assertEquals(1, linker.execute("dirt help"));
@@ -72,12 +72,14 @@ final class DirtAdminCommandTest {
                 List.of(
                         "/dirt users",
                         "/dirt invites",
-                        "/dirt invite create <player>",
+                        "/dirt invite create <player> <profile>",
                         "/dirt invite revoke <id>",
                         "/dirt user disable <username|id>",
                         "/dirt user enable <username|id>",
                         "/dirt user recover <username|id>",
-                        "/dirt user unlink <username|id>")) {
+                        "/dirt user unlink <username|id>",
+                        "/dirt user access <username|id> <profile>",
+                        "/dirt tools")) {
             assertTrue(operator.lastPlainMessage().contains(command));
         }
         assertTrue(operator.lastPlainMessage().contains("/dirt link"));
@@ -162,6 +164,7 @@ final class DirtAdminCommandTest {
                                                 "usr_1",
                                                 "Builder",
                                                 AccessControl.UserStatus.ACTIVE,
+                                                AccessControl.AccessProfile.BUILDER,
                                                 PLAYER_ID,
                                                 CREATED_AT))));
         access.invitations =
@@ -211,6 +214,10 @@ final class DirtAdminCommandTest {
         assertEquals(1, fixture.execute("dirt user unlink builder"));
         assertEquals("builder", access.unlinkedUser);
         assertTrue(fixture.lastPlainMessage().contains("Builder was unlinked"));
+        assertEquals(1, fixture.execute("dirt user access builder viewer"));
+        assertEquals("builder", access.accessUser);
+        assertEquals(AccessControl.AccessProfile.VIEWER, access.changedAccessProfile);
+        assertTrue(fixture.lastPlainMessage().contains("Viewer"));
     }
 
     @Test
@@ -220,8 +227,14 @@ final class DirtAdminCommandTest {
                 fixture(new SenderAccess(true, true, false, false), status(), consoleAccess);
 
         assertTrue(console.suggestions("dirt invite create ").contains("Builder"));
-        assertEquals(1, console.execute("dirt invite create Builder"));
+        assertEquals(
+                Set.of("viewer", "builder", "operator"),
+                console.suggestions("dirt invite create Builder "));
+        assertThrows(
+                CommandSyntaxException.class, () -> console.execute("dirt invite create Builder"));
+        assertEquals(1, console.execute("dirt invite create Builder builder"));
         assertEquals(1, consoleAccess.createdInvitations);
+        assertEquals(AccessControl.AccessProfile.BUILDER, consoleAccess.createdAccessProfile);
         assertEquals(PLAYER_ID, consoleAccess.linkedUuid);
         assertEquals("Builder", consoleAccess.linkedName);
         assertTrue(console.lastPlainMessage().contains("Invitation sent privately to Builder"));
@@ -233,8 +246,39 @@ final class DirtAdminCommandTest {
                 hasCopyValue(
                         console.lastTargetMessage(), "https://dashboard.example/invite/secret"));
 
-        assertEquals(0, console.execute("dirt invite create Missing"));
+        assertEquals(0, console.execute("dirt invite create Missing viewer"));
         assertTrue(console.lastPlainMessage().contains("must be online"));
+    }
+
+    @Test
+    void toolFieldGuideShowsServerAndPersonalAccessWithDetails() throws Exception {
+        StubAccessControl consoleAccess = new StubAccessControl();
+        CommandFixture console =
+                fixture(new SenderAccess(true, true, false, false), status(), consoleAccess);
+
+        assertEquals(1, console.execute("dirt tools"));
+        assertTrue(console.lastPlainMessage().contains("12 supported  •  2 enabled"));
+        assertTrue(console.lastPlainMessage().contains("ping_server"));
+        assertTrue(console.lastPlainMessage().contains("set_blocks"));
+        assertTrue(hasRunCommand(console.lastMessage(), "/dirt tools set_blocks"));
+        assertEquals(1, console.execute("dirt tools set_blocks"));
+        assertTrue(console.lastPlainMessage().contains("INPUTS"));
+        assertTrue(console.lastPlainMessage().contains("Changes world  yes"));
+        assertEquals(0, console.execute("dirt tools not_a_tool"));
+        assertTrue(console.lastPlainMessage().contains("not supported"));
+
+        StubAccessControl playerAccess = new StubAccessControl();
+        CommandFixture player =
+                fixture(new SenderAccess(false, false, true, true), status(), playerAccess);
+        assertEquals(1, player.execute("dirt tools"));
+        assertEquals(PLAYER_ID, playerAccess.accountLookupUuid);
+        assertTrue(player.lastPlainMessage().contains("2 available as Builder"));
+        assertEquals(1, player.execute("dirt tools set_blocks"));
+        assertTrue(player.lastPlainMessage().contains("Your access  available"));
+
+        CommandFixture unprivileged =
+                fixture(new SenderAccess(false, false, false, false), status());
+        assertThrows(CommandSyntaxException.class, () -> unprivileged.execute("dirt tools"));
     }
 
     @Test
@@ -385,13 +429,19 @@ final class DirtAdminCommandTest {
 
     private static AccessControl.UserSummary user() {
         return new AccessControl.UserSummary(
-                "usr_1", "Builder", AccessControl.UserStatus.ACTIVE, null, CREATED_AT);
+                "usr_1",
+                "Builder",
+                AccessControl.UserStatus.ACTIVE,
+                AccessControl.AccessProfile.BUILDER,
+                PLAYER_ID,
+                CREATED_AT);
     }
 
     private static AccessControl.InvitationSummary invitation(String id) {
         return new AccessControl.InvitationSummary(
                 id,
                 AccessControl.InvitationStatus.PENDING,
+                AccessControl.AccessProfile.BUILDER,
                 new AccessControl.MinecraftAccount(PLAYER_ID, "Builder"),
                 CREATED_AT,
                 EXPIRES_AT);
@@ -639,11 +689,15 @@ final class DirtAdminCommandTest {
         private int requestedUsersPage;
         private int requestedInvitationsPage;
         private int createdInvitations;
+        private AccessProfile createdAccessProfile;
         private String revokedInvitation;
         private String disabledUser;
         private String enabledUser;
         private String recoveredUser;
         private String unlinkedUser;
+        private String accessUser;
+        private AccessProfile changedAccessProfile;
+        private UUID accountLookupUuid;
         private UUID linkedUuid;
         private String linkedName;
 
@@ -661,8 +715,9 @@ final class DirtAdminCommandTest {
 
         @Override
         public CompletionStage<CreateInvitationResult> createInvitation(
-                UUID minecraftUuid, String minecraftName) {
+                UUID minecraftUuid, String minecraftName, AccessProfile accessProfile) {
             this.createdInvitations++;
+            this.createdAccessProfile = accessProfile;
             this.linkedUuid = minecraftUuid;
             this.linkedName = minecraftName;
             return CompletableFuture.completedFuture(
@@ -706,6 +761,31 @@ final class DirtAdminCommandTest {
         public CompletionStage<UserMutationResult> unlinkUser(String selector) {
             this.unlinkedUser = selector;
             return CompletableFuture.completedFuture(new UserMutationResult(CALL_ID, user()));
+        }
+
+        @Override
+        public CompletionStage<UserMutationResult> setAccessProfile(
+                String selector, AccessProfile accessProfile) {
+            this.accessUser = selector;
+            this.changedAccessProfile = accessProfile;
+            return CompletableFuture.completedFuture(
+                    new UserMutationResult(
+                            CALL_ID,
+                            new UserSummary(
+                                    "usr_1",
+                                    "Builder",
+                                    UserStatus.ACTIVE,
+                                    accessProfile,
+                                    PLAYER_ID,
+                                    CREATED_AT)));
+        }
+
+        @Override
+        public CompletionStage<MinecraftAccountUserResult> findUserByMinecraftUuid(
+                UUID minecraftUuid) {
+            this.accountLookupUuid = minecraftUuid;
+            return CompletableFuture.completedFuture(
+                    new MinecraftAccountUserResult(CALL_ID, user()));
         }
 
         @Override

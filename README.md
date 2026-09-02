@@ -24,13 +24,14 @@ inspect -> preview -> edit -> verify -> undo if needed
 | Preview  | Preview edits with reproducible seeds before committing them.                   |
 | Undo     | Inspect labeled in-memory history and undo an exact newest-first edit prefix.   |
 | Commands | Run bounded command batches through an operator-level, non-player sender.       |
-| Access   | Invite-only passkey accounts linked one-to-one with Minecraft identities.       |
+| Access   | Explicit Viewer, Builder, or Operator profiles on linked passkey accounts.      |
 
-The dashboard intentionally contains only sign-in, enrollment, account,
-Minecraft-link, and MCP connection surfaces. Users can disconnect an authorized
-MCP client there; Dirt immediately rejects its later requests, and reconnecting
-requires a new OAuth authorization. The dashboard is not a world editor. See
-the [tool reference](docs/tools.md) for the complete MCP catalog and schemas.
+The dashboard contains sign-in, enrollment, account, Minecraft-link, MCP
+connection, and view-only tool-reference surfaces. Users can see which tools
+are supported, enabled, and available to their profile, but cannot execute
+tools there. They can disconnect an authorized MCP client; Dirt immediately
+rejects its later requests, and reconnecting requires a new OAuth authorization.
+See the [tool reference](docs/tools.md) for the complete catalog and schemas.
 
 ## Architecture
 
@@ -52,9 +53,9 @@ different bearer credentials.
 The public MCP endpoint is current, stateless Streamable HTTP at `POST /mcp`.
 It uses OAuth authorization code flow with PKCE S256 and the single
 `dirt:mcp` scope. Every request rechecks that its account is active and linked
-to an online-mode Minecraft UUID. There are no roles or per-account permission
-records: every eligible account receives the same tool set permitted by Paper's
-global operation allowlist.
+to an online-mode Minecraft UUID. Its advertised tools are the intersection of
+this Dirt release, Paper's global operation allowlist, and the account's Viewer,
+Builder, or Operator access profile.
 
 ## Installation
 
@@ -135,12 +136,13 @@ Have the player join the server. Then run this as an in-game operator or from
 the server console:
 
 ```text
-/dirt invite create <player>
+/dirt invite create <player> <viewer|builder|operator>
 ```
 
-The named player must be online. Dirt sends the private invitation URL only to
-that player's in-game chat; the operator sees confirmation without the secret.
-The player opens the URL and enrolls a passkey. Their current Minecraft name is
+The named player must be online, and every invitation requires an explicit
+profile; there is no default. Dirt sends the private invitation URL only to that
+player's in-game chat; the operator sees confirmation without the secret. The
+player opens the URL and enrolls a passkey. Their current Minecraft name is
 their Dirt username, and the new account is linked to that authenticated
 online-mode UUID immediately. There is no separate username to choose.
 
@@ -149,12 +151,14 @@ Operators can list and administer access in game:
 ```text
 /dirt users [page]
 /dirt invites [page]
-/dirt invite create <player>
+/dirt invite create <player> <viewer|builder|operator>
 /dirt invite revoke <id>
 /dirt user disable <username|id>
 /dirt user enable <username|id>
 /dirt user recover <username|id>
 /dirt user unlink <username|id>
+/dirt user access <username|id> <viewer|builder|operator>
+/dirt tools [tool]
 ```
 
 Invitation creation targets an online player and may be initiated from the
@@ -170,10 +174,12 @@ audience-bound access tokens to the MCP resource. Dirt does not support stdio,
 legacy SSE, dynamic client registration, client credentials, or compatibility
 endpoints.
 
-The authorization screen warns that Dirt includes
-`run_minecraft_commands`, which has console-equivalent authority. Paper's
-`bridge.allowed-operations` list is the single global upper bound. Remove an
-operation ID and restart Paper to remove the corresponding tool for everyone.
+The authorization screen describes the account's current profile and gives an
+extra warning for Operators because `run_minecraft_commands` has
+console-equivalent authority. Paper's `bridge.allowed-operations` list remains
+the global upper bound. Remove an operation ID and restart Paper to remove the
+corresponding tool for everyone. Signed-in users can browse the same concise
+reference at `/tools`; linked players can use `/dirt tools [tool]` in game.
 
 ## Backup and restore
 
@@ -222,6 +228,9 @@ sudo systemctl start dirt-mcp
   and revokes the account's sessions, consent, authorization codes, and refresh
   grants. Recovery, disable, enable, link, and unlink transitions also rotate an
   authorization generation that immediately invalidates existing access tokens.
+- Changing an access profile preserves passkeys and browser sessions, but
+  revokes MCP consent, authorization codes, and access and refresh tokens so the
+  user must explicitly authorize clients again under the new profile.
 - Edits are synchronous and bounded, with one Dirt mutation at a time per world.
   Undo history is memory-only and clears on world unload or restart.
 - Command batches are non-atomic and outside Dirt's FAWE limits and undo. Do not

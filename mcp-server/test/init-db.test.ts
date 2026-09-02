@@ -36,14 +36,16 @@ test('database initialization creates the current schema and accepts it on resta
         .prepare<[string], { count: number }>('SELECT COUNT(*) AS count FROM oauthResource WHERE identifier = ?')
         .get('http://localhost:3000/mcp');
       assert.equal(resource?.count, 1);
-      const userColumns = new Set(
+      const userColumns = new Map(
         database
-          .prepare<[], { name: string }>('PRAGMA table_info("user")')
+          .prepare<[], { name: string; notnull: number; dflt_value: string | null }>('PRAGMA table_info("user")')
           .all()
-          .map((row) => row.name),
+          .map((row) => [row.name, row] as const),
       );
       assert.equal(userColumns.has('handle'), false);
       assert.equal(userColumns.has('minecraftName'), false);
+      assert.equal(userColumns.get('accessProfile')?.notnull, 1);
+      assert.equal(userColumns.get('accessProfile')?.dflt_value, null);
     } finally {
       database.close();
     }

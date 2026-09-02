@@ -60,13 +60,15 @@ test('Better Auth is passkey-only and MCP OAuth uses the fixed narrow policy', a
     '/token',
   ]);
   const userFields = auth.options.user?.additionalFields ?? {};
-  for (const field of ['status', 'minecraftUuid', 'authorizationVersion']) {
+  for (const field of ['status', 'minecraftUuid', 'accessProfile', 'authorizationVersion']) {
     assert.equal(userFields[field]?.input, false);
   }
   assert.equal(userFields.handle, undefined);
   assert.equal(userFields.minecraftName, undefined);
   assert.equal(userFields.authorizationVersion?.returned, false);
   assert.equal(userFields.authorizationVersion?.defaultValue, 0);
+  assert.equal(userFields.accessProfile?.required, true);
+  assert.equal(userFields.accessProfile?.defaultValue, undefined);
 
   const plugins = auth.options.plugins ?? [];
   const jwt = plugins.find((plugin: { id: string }) => plugin.id === 'jwt') as
@@ -117,6 +119,7 @@ test('Better Auth is passkey-only and MCP OAuth uses the fixed narrow policy', a
       recordId: 'record',
       username: 'Builder',
       minecraftUuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      accessProfile: 'builder',
     },
     config.authSecret,
   );
@@ -216,8 +219,14 @@ test('unexpected auth transport failures use the sanitized web error boundary', 
 
 test('invite, recovery, account status, and link transitions are atomic and bounded', async () => {
   const now = new Date('2026-08-30T12:00:00.000Z');
-  const invitation = repository.createInvitation('11111111-1111-4111-8111-111111111111', 'InvitedPlayer', now);
+  const invitation = repository.createInvitation(
+    '11111111-1111-4111-8111-111111111111',
+    'InvitedPlayer',
+    'viewer',
+    now,
+  );
   assert.equal(invitation.invitation.status, 'pending');
+  assert.equal(invitation.invitation.accessProfile, 'viewer');
   assert.deepEqual(invitation.invitation.minecraftAccount, {
     uuid: '11111111-1111-4111-8111-111111111111',
     name: 'InvitedPlayer',
@@ -227,9 +236,10 @@ test('invite, recovery, account status, and link transitions are atomic and boun
     recordId: invitation.invitation.id,
     username: 'InvitedPlayer',
     minecraftUuid: '11111111-1111-4111-8111-111111111111',
+    accessProfile: 'viewer',
   });
   assert.throws(
-    () => repository.createInvitation('11111111-1111-4111-8111-111111111111', 'InvitedPlayer', now),
+    () => repository.createInvitation('11111111-1111-4111-8111-111111111111', 'InvitedPlayer', 'operator', now),
     (error) => error instanceof AccessError && error.code === 'conflict',
   );
   assert.deepEqual(
@@ -249,7 +259,12 @@ test('invite, recovery, account status, and link transitions are atomic and boun
   assert.ok(repository.listInvitations(1, now).items.some(({ id }) => id === invitation.invitation.id));
   assert.equal(repository.revokeInvitation(invitation.invitation.id, now).status, 'revoked');
   assert.throws(() => repository.resolveInvitation(invitation.secret, now), AccessError);
-  const corruptInvitation = repository.createInvitation('22222222-2222-4222-8222-222222222222', 'OtherPlayer', now);
+  const corruptInvitation = repository.createInvitation(
+    '22222222-2222-4222-8222-222222222222',
+    'OtherPlayer',
+    'builder',
+    now,
+  );
   database
     .prepare('UPDATE invitation SET expiresAt = ? WHERE id = ?')
     .run('not-a-date', corruptInvitation.invitation.id);
@@ -263,6 +278,7 @@ test('invite, recovery, account status, and link transitions are atomic and boun
   assert.equal(new Date(recovery.expiresAt).getTime() - now.getTime(), 15 * 60 * 1_000);
   const recoveryClaim = repository.resolveRecovery(recovery.secret, now);
   assert.equal(recoveryClaim.username, 'builder');
+  assert.equal(recoveryClaim.accessProfile, 'builder');
   const adaptedRecovery = await authAdapter.findOne<{ createdAt: Date; expiresAt: Date }>({
     model: 'credentialRecovery',
     where: [{ field: 'id', value: recoveryClaim.recordId }],
@@ -311,6 +327,7 @@ test('invite, recovery, account status, and link transitions are atomic and boun
   assert.deepEqual(repository.findMcpUser('user-one', 1), {
     id: 'user-one',
     minecraftUuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    accessProfile: 'builder',
   });
 
   insertAuthorizationArtifacts('user-one', 'disable', now);
@@ -331,6 +348,7 @@ test('invite, recovery, account status, and link transitions are atomic and boun
   assert.deepEqual(repository.findMcpUser('user-one', 3), {
     id: 'user-one',
     minecraftUuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    accessProfile: 'builder',
   });
 
   insertAuthorizationArtifacts('user-one', 'unlink', now);
@@ -386,6 +404,36 @@ test('MCP client revocation removes only one user-client authorization', () => {
       .get(selected.clientId)?.count,
     1,
   );
+});
+
+test('changing an access profile revokes MCP authorization but preserves web identity', () => {
+  const now = new Date('2026-08-30T13:30:00.000Z');
+  insertUser('profile-user', 'profileuser', now, 'builder');
+  database
+    .prepare('UPDATE "user" SET minecraftUuid = ? WHERE id = ?')
+    .run('abababab-abab-4aba-8aba-abababababab', 'profile-user');
+  insertAuthorizationArtifacts('profile-user', 'profile-change', now);
+
+  const changed = repository.setAccessProfile('profileuser', 'viewer');
+  assert.equal(changed.accessProfile, 'viewer');
+  assert.equal(repository.requireAuthorizationVersion('profile-user'), 1);
+  assert.equal(authorizationArtifactCount('profile-user'), 1);
+  assert.equal(hasPasskey('profile-user'), true);
+  assert.equal(
+    database
+      .prepare<[string], { count: number }>('SELECT COUNT(*) AS count FROM session WHERE userId = ?')
+      .get('profile-user')?.count,
+    1,
+  );
+  assert.deepEqual(repository.findMcpUser('profile-user', 1), {
+    id: 'profile-user',
+    minecraftUuid: 'abababab-abab-4aba-8aba-abababababab',
+    accessProfile: 'viewer',
+  });
+
+  repository.setAccessProfile('profileuser', 'viewer');
+  assert.equal(repository.requireAuthorizationVersion('profile-user'), 1);
+  assert.equal(repository.findUserByMinecraftUuid('abababab-abab-4aba-8aba-abababababab')?.accessProfile, 'viewer');
 });
 
 test('internal routes enforce loopback, UUIDv4 calls, exact envelopes, and bounded JSON', async () => {
@@ -460,19 +508,49 @@ test('internal routes enforce loopback, UUIDv4 calls, exact envelopes, and bound
   });
   assert.equal(nonStandardBearer.status, 401);
 
+  const missingProfile = await app.request('/internal/v1/access/invitations', {
+    method: 'POST',
+    headers: baseHeaders,
+    body: JSON.stringify({
+      minecraftUuid: 'fefefefe-fefe-4efe-8efe-fefefefefefe',
+      minecraftName: 'NoProfile',
+    }),
+  });
+  assert.equal(missingProfile.status, 400);
+
   const create = await app.request('/internal/v1/access/invitations', {
     method: 'POST',
     headers: baseHeaders,
     body: JSON.stringify({
       minecraftUuid: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
       minecraftName: 'InvitedPlayer',
+      accessProfile: 'viewer',
     }),
   });
   assert.equal(create.status, 200);
   const created = (await create.json()) as Record<string, unknown>;
   assert.equal(created.callId, validCallId);
   assert.match(String(created.inviteUrl), /^http:\/\/localhost:3000\/invite#token=/u);
+  assert.equal((created.invitation as { accessProfile: string }).accessProfile, 'viewer');
   assert.equal(create.headers.get('Cache-Control'), 'no-store');
+
+  insertUser('control-profile-user', 'controlprofile', new Date(), 'viewer');
+  database
+    .prepare('UPDATE "user" SET minecraftUuid = ? WHERE id = ?')
+    .run('cdcdcdcd-cdcd-4cdc-8cdc-cdcdcdcdcdcd', 'control-profile-user');
+  const accessUpdate = await app.request('/internal/v1/access/users/controlprofile/access-profile', {
+    method: 'POST',
+    headers: baseHeaders,
+    body: JSON.stringify({ accessProfile: 'operator' }),
+  });
+  assert.equal(accessUpdate.status, 200);
+  assert.equal(((await accessUpdate.json()).user as { accessProfile: string }).accessProfile, 'operator');
+  const minecraftLookup = await app.request(
+    '/internal/v1/access/minecraft-accounts/cdcdcdcd-cdcd-4cdc-8cdc-cdcdcdcdcdcd',
+    { headers: baseHeaders },
+  );
+  assert.equal(minecraftLookup.status, 200);
+  assert.equal(((await minecraftLookup.json()).user as { username: string }).username, 'controlprofile');
 
   const linkChallenge = await app.request('/internal/v1/access/minecraft-links/challenges', {
     method: 'POST',
@@ -854,8 +932,9 @@ test('dashboard presents safe identity, readiness, client, and passkey summaries
   const html = await response.text();
   assert.match(html, /Dirt is ready/u);
   assert.match(html, /Paper and FAWE online/u);
-  assert.match(html, /bounded, undoable edits/u);
+  assert.match(html, /overlap of this Dirt release/u);
   assert.match(html, /12 of 12/u);
+  assert.match(html, /11 of 12/u);
   assert.match(html, /FieldWorker/u);
   assert.match(html, /34343434-3434-4343-8343-343434343434/u);
   assert.match(html, /http:\/\/localhost:3000\/mcp/u);
@@ -863,7 +942,7 @@ test('dashboard presents safe identity, readiness, client, and passkey summaries
   assert.doesNotMatch(html, /<script>Survey client<\/script>/u);
   assert.match(html, /client-dashboard\.example/u);
   assert.match(html, /dirt:mcp/u);
-  assert.match(html, /Full Dirt access/u);
+  assert.match(html, /Builder access/u);
   assert.match(html, /Disconnect/u);
   assert.match(html, /data-disconnect-client="dashboard-consent"/u);
   assert.match(html, /Workshop key/u);
@@ -899,6 +978,55 @@ test('dashboard presents safe identity, readiness, client, and passkey summaries
   assert.match(unlinkedHtml, /No clients have been authorized/u);
 });
 
+test('authenticated users can browse supported, enabled, and profile-granted tools', async () => {
+  const app = testWebApp(sessionAuth('dashboard-user', () => new Date()));
+  const index = await app.request('/tools', { headers: { Host: 'localhost:3000' } });
+  assert.equal(index.status, 200);
+  assert.equal(index.headers.get('Cache-Control'), 'no-store');
+  const html = await index.text();
+  assert.match(html, /Tool field guide/u);
+  assert.match(html, /Supported/u);
+  assert.match(html, /Enabled/u);
+  assert.match(html, /Builder/u);
+  assert.match(html, /set_blocks/u);
+  assert.match(html, /run_minecraft_commands/u);
+  assert.match(html, /Operator required/u);
+
+  const availableDetail = await app.request('/tools/set_blocks', { headers: { Host: 'localhost:3000' } });
+  assert.equal(availableDetail.status, 200);
+  const detailHtml = await availableDetail.text();
+  assert.match(detailHtml, /Set blocks/u);
+  assert.match(detailHtml, /Your access/u);
+  assert.match(detailHtml, /Available/u);
+  assert.match(detailHtml, /Example request/u);
+  assert.match(detailHtml, /Place marker block/u);
+
+  const restrictedDetail = await app.request('/tools/run_minecraft_commands', {
+    headers: { Host: 'localhost:3000' },
+  });
+  assert.equal(restrictedDetail.status, 200);
+  assert.match(await restrictedDetail.text(), /Operator required/u);
+
+  const offline = await testWebApp(
+    sessionAuth('dashboard-user', () => new Date()),
+    config,
+    testBridge(BRIDGE_OPERATION_IDS, true, false),
+  ).request('/tools/run_minecraft_commands', { headers: { Host: 'localhost:3000' } });
+  const offlineHtml = await offline.text();
+  assert.match(offlineHtml, /<dt>Enabled<\/dt><dd>Unknown<\/dd>/u);
+  assert.match(offlineHtml, /Operator required/u);
+
+  insertUser('tool-unlinked-user', 'toolunlinked', new Date());
+  const unlinked = await testWebApp(sessionAuth('tool-unlinked-user', () => new Date())).request('/tools/set_blocks', {
+    headers: { Host: 'localhost:3000' },
+  });
+  assert.match(await unlinked.text(), /Link Minecraft/u);
+
+  const missing = await app.request('/tools/not-a-tool', { headers: { Host: 'localhost:3000' } });
+  assert.equal(missing.status, 404);
+  assert.match(await missing.text(), /Tool not found/u);
+});
+
 test('onboarding exchanges invitation and recovery secrets, and fresh sessions link Minecraft', async () => {
   const now = new Date();
   const app = testWebApp();
@@ -908,7 +1036,12 @@ test('onboarding exchanges invitation and recovery secrets, and fresh sessions l
     Origin: config.publicOrigin,
   };
 
-  const invitation = repository.createInvitation('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'RoutePlayer', now);
+  const invitation = repository.createInvitation(
+    'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    'RoutePlayer',
+    'operator',
+    now,
+  );
   const invitationExchange = await app.request('/api/onboarding/exchange', {
     method: 'POST',
     headers,
@@ -930,6 +1063,7 @@ test('onboarding exchanges invitation and recovery secrets, and fresh sessions l
   assert.match(preparedInvitationHtml, /data-onboarding-ready/u);
   assert.match(preparedInvitationHtml, /Verified Minecraft account/u);
   assert.match(preparedInvitationHtml, /RoutePlayer/u);
+  assert.match(preparedInvitationHtml, /Operator profile/u);
   assert.doesNotMatch(preparedInvitationHtml, /name="username"/u);
 
   insertUser('route-user', 'routeuser', now);
@@ -1011,7 +1145,7 @@ test('signed-in users can disconnect an authorized MCP client', async () => {
 
 test('OAuth grants require a fresh passkey session and a linked account', async () => {
   const now = new Date();
-  insertUser('oauth-user', 'oauthuser', now);
+  insertUser('oauth-user', 'oauthuser', now, 'operator');
   database
     .prepare('UPDATE "user" SET name = ?, minecraftUuid = ? WHERE id = ?')
     .run('OAuthPlayer', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'oauth-user');
@@ -1074,7 +1208,7 @@ test('OAuth grants require a fresh passkey session and a linked account', async 
   const knownConsentHtml = await knownConsentPage.text();
   assert.match(knownConsentHtml, /Allow Map Room/u);
   assert.match(knownConsentHtml, /client\.example/u);
-  assert.match(knownConsentHtml, /run_minecraft_commands/u);
+  assert.match(knownConsentHtml, /every Dirt tool/u);
   assert.match(knownConsentHtml, /console-equivalent authority/u);
 
   const localhostConsent = await app.request(
@@ -1119,12 +1253,12 @@ test('access-token parsing accepts Bearer and DPoP token68 credentials', () => {
   }
 });
 
-function insertUser(id: string, username: string, now: Date): void {
+function insertUser(id: string, username: string, now: Date, accessProfile = 'builder'): void {
   database
     .prepare(
-      'INSERT INTO "user" (id, name, email, emailVerified, image, createdAt, updatedAt, status, minecraftUuid, authorizationVersion) VALUES (?, ?, ?, 0, NULL, ?, ?, ?, NULL, 0)',
+      'INSERT INTO "user" (id, name, email, emailVerified, image, createdAt, updatedAt, status, minecraftUuid, accessProfile, authorizationVersion) VALUES (?, ?, ?, 0, NULL, ?, ?, ?, NULL, ?, 0)',
     )
-    .run(id, username, `${id}@dirt.placeholder.invalid`, now.toISOString(), now.toISOString(), 'active');
+    .run(id, username, `${id}@dirt.placeholder.invalid`, now.toISOString(), now.toISOString(), 'active', accessProfile);
 }
 
 function insertAuthorizationArtifacts(
@@ -1286,11 +1420,14 @@ function testWebApp(
   });
 }
 
-function testBridge(operations: readonly string[], pingAvailable = true): BridgeClient {
+function testBridge(operations: readonly string[], pingAvailable = true, capabilitiesAvailable = true): BridgeClient {
   return new BridgeClient(config.bridge, async (request) => {
     const input = request instanceof Request ? request.url : request.toString();
     const path = new URL(input).pathname;
     if (path === '/v1/ping' && !pingAvailable) return Response.json({ unavailable: true }, { status: 503 });
+    if (path === '/v1/capabilities' && !capabilitiesAvailable) {
+      return Response.json({ unavailable: true }, { status: 503 });
+    }
     return Response.json(path === '/v1/ping' ? { status: 'ok' } : { operations });
   });
 }

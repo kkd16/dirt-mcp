@@ -15,7 +15,11 @@ import {
   SignedInt32Schema,
 } from './common.ts';
 import type { McpToolConfiguration } from './configuration.ts';
+import { catalogTool } from './catalog.ts';
 import { executeToolCall, successResult } from './execution.ts';
+
+const PingServerTool = catalogTool('ping_server');
+const GetServerStatusTool = catalogTool('get_server_status');
 
 const DEFAULT_STATUS_INCLUDE = {
   players: false,
@@ -258,9 +262,8 @@ export function registerStatusTools(
     server.registerTool(
       'ping_server',
       {
-        title: 'Ping Dirt server',
-        description:
-          'Run a non-mutating end-to-end health check across the authenticated bridge, Dirt plugin, Paper, and a Paper-backed FAWE session. Returns only status ok on success.',
+        title: PingServerTool.title,
+        description: PingServerTool.description,
         inputSchema: EmptyInputSchema,
         outputSchema: PingServerOutputSchema,
         annotations: READ_WORLD_ANNOTATIONS,
@@ -291,9 +294,8 @@ export function registerStatusTools(
     server.registerTool(
       'get_server_status',
       {
-        title: 'Get Dirt server status',
-        description:
-          'Return current builds and performance plus selected player, world, and configuration sections. Worlds default on; players and configuration default off.',
+        title: GetServerStatusTool.title,
+        description: GetServerStatusTool.description,
         inputSchema: GetServerStatusInputSchema,
         outputSchema: GetServerStatusOutputSchema,
         annotations: READ_WORLD_ANNOTATIONS,

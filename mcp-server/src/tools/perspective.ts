@@ -17,7 +17,10 @@ import {
   matchesPlayerSelector,
 } from './common.ts';
 import type { McpToolConfiguration } from './configuration.ts';
+import { catalogTool } from './catalog.ts';
 import { executeToolCall, successResult } from './execution.ts';
+
+const GetPerspectiveViewTool = catalogTool('get_perspective_view');
 
 const DEFAULT_VIEW = {
   width: 21,
@@ -300,9 +303,8 @@ export function registerPerspectiveTools(
     server.registerTool(
       'get_perspective_view',
       {
-        title: 'Get perspective view',
-        description:
-          "Trace a grid of first block-collision hits from an online player's eye pose or a loaded-world camera position.",
+        title: GetPerspectiveViewTool.title,
+        description: GetPerspectiveViewTool.description,
         inputSchema: GetPerspectiveViewInputSchema,
         outputSchema: PerspectiveViewOutputSchema,
         annotations: READ_WORLD_ANNOTATIONS,

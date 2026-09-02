@@ -1,7 +1,9 @@
 package ca.deliyannides.dirtmcp.paper.access;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.URI;
 import java.time.Instant;
@@ -30,6 +32,13 @@ final class AccessControlTest {
         assertEquals("accepted", AccessControl.InvitationStatus.ACCEPTED.wireName());
         assertEquals("revoked", AccessControl.InvitationStatus.REVOKED.wireName());
         assertEquals("expired", AccessControl.InvitationStatus.EXPIRED.wireName());
+        assertEquals("viewer", AccessControl.AccessProfile.VIEWER.wireName());
+        assertEquals("builder", AccessControl.AccessProfile.BUILDER.wireName());
+        assertEquals("operator", AccessControl.AccessProfile.OPERATOR.wireName());
+        assertTrue(AccessControl.AccessProfile.BUILDER.grants(AccessControl.AccessProfile.VIEWER));
+        assertTrue(
+                AccessControl.AccessProfile.OPERATOR.grants(AccessControl.AccessProfile.BUILDER));
+        assertFalse(AccessControl.AccessProfile.VIEWER.grants(AccessControl.AccessProfile.BUILDER));
     }
 
     @Test
@@ -62,7 +71,12 @@ final class AccessControlTest {
                 IllegalArgumentException.class,
                 () ->
                         new AccessControl.UserSummary(
-                                "", "builder", AccessControl.UserStatus.ACTIVE, null, NOW));
+                                "",
+                                "builder",
+                                AccessControl.UserStatus.ACTIVE,
+                                AccessControl.AccessProfile.BUILDER,
+                                null,
+                                NOW));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new AccessControl.MinecraftAccount(CALL_ID, "x".repeat(17)));
@@ -73,7 +87,22 @@ final class AccessControlTest {
                 IllegalArgumentException.class,
                 () ->
                         new AccessControl.UserSummary(
-                                "usr_1", "xy", AccessControl.UserStatus.ACTIVE, null, NOW));
+                                "usr_1",
+                                "xy",
+                                AccessControl.UserStatus.ACTIVE,
+                                AccessControl.AccessProfile.BUILDER,
+                                null,
+                                NOW));
+        assertThrows(
+                NullPointerException.class,
+                () ->
+                        new AccessControl.UserSummary(
+                                "usr_1",
+                                "Builder",
+                                AccessControl.UserStatus.ACTIVE,
+                                null,
+                                null,
+                                NOW));
     }
 
     @Test
@@ -113,13 +142,19 @@ final class AccessControlTest {
 
     private static AccessControl.UserSummary user() {
         return new AccessControl.UserSummary(
-                "usr_1", "Builder", AccessControl.UserStatus.ACTIVE, null, NOW);
+                "usr_1",
+                "Builder",
+                AccessControl.UserStatus.ACTIVE,
+                AccessControl.AccessProfile.BUILDER,
+                null,
+                NOW);
     }
 
     private static AccessControl.InvitationSummary invitation() {
         return new AccessControl.InvitationSummary(
                 "invite_1",
                 AccessControl.InvitationStatus.PENDING,
+                AccessControl.AccessProfile.VIEWER,
                 new AccessControl.MinecraftAccount(CALL_ID, "Builder"),
                 NOW,
                 NOW.plusSeconds(600));

@@ -17,6 +17,11 @@ import {
   setBlocksBridgeOutputSchema,
   undoEditsBridgeOutputSchema,
 } from '../dist/tools/editing.js';
+import { GetBlocksInputSchema, ScanOrthographicViewInputSchema } from '../dist/tools/inspection.js';
+import { GetPerspectiveViewInputSchema } from '../dist/tools/perspective.js';
+import { GetPlayerContextInputSchema } from '../dist/tools/player.js';
+import { RunMinecraftCommandsInputSchema } from '../dist/tools/commands.js';
+import { MCP_TOOL_NAMES, TOOL_CATALOG, profileToolConfiguration } from '../dist/tools/catalog.js';
 import { MCP_TOOL_OPERATIONS, toolConfigurationFromCapabilities } from '../dist/tools/configuration.js';
 import {
   GetServerStatusInputSchema,
@@ -53,6 +58,33 @@ test('capability snapshots map one-to-one to the MCP tool catalog', () => {
   assert.equal(selected.ping_server, true);
   assert.equal(selected.set_blocks, true);
   assert.equal(selected.get_blocks, false);
+});
+
+test('the shared tool catalog is complete, profile-aware, and uses valid examples', () => {
+  assert.deepEqual(
+    TOOL_CATALOG.map(({ name }) => name),
+    [...MCP_TOOL_NAMES],
+  );
+  assert.equal(Object.values(profileToolConfiguration('viewer')).filter(Boolean).length, 8);
+  assert.equal(Object.values(profileToolConfiguration('builder')).filter(Boolean).length, 11);
+  assert.equal(Object.values(profileToolConfiguration('operator')).filter(Boolean).length, 12);
+
+  const schemas = {
+    get_server_status: GetServerStatusInputSchema,
+    get_blocks: GetBlocksInputSchema,
+    scan_orthographic_view: ScanOrthographicViewInputSchema,
+    get_player_context: GetPlayerContextInputSchema,
+    get_perspective_view: GetPerspectiveViewInputSchema,
+    replace_region_blocks: ReplaceRegionBlocksInputSchema,
+    set_blocks: SetBlocksInputSchema,
+    undo_edits: UndoEditsInputSchema,
+    run_minecraft_commands: RunMinecraftCommandsInputSchema,
+  } as const;
+  for (const [name, schema] of Object.entries(schemas)) {
+    const catalog = TOOL_CATALOG.find((tool) => tool.name === name);
+    assert.ok(catalog !== undefined);
+    assert.equal(schema.safeParse(catalog.exampleInput).success, true, `${name} example must match its input schema`);
+  }
 });
 
 test('status schemas validate defaults, ordering, limits, and requested sections', () => {

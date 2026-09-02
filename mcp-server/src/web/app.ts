@@ -8,6 +8,7 @@ import { routePath } from 'hono/route';
 import { secureHeaders } from 'hono/secure-headers';
 import * as z from 'zod';
 import { AccessError, type AccessRepository, type UserSummary } from '../access/repository.ts';
+import { profileGrants } from '../access/profiles.ts';
 import { internalError, readJsonBody, registerInternalRoutes, validCallIdOrNull } from '../access/routes.ts';
 import {
   createOnboardingTicket,
@@ -21,15 +22,19 @@ import { BRIDGE_ROUTES, BridgeCapabilitiesSchema } from '../bridge/contract.ts';
 import type { RuntimeConfig } from '../config.ts';
 import { safeErrorFields, type DirtLogger } from '../logging.ts';
 import type { DirtMcpHandler } from '../mcp-http.ts';
-import { MCP_TOOL_OPERATIONS, toolConfigurationFromCapabilities } from '../tools/configuration.ts';
+import { TOOL_CATALOG } from '../tools/catalog.ts';
+import { toolConfigurationFromCapabilities } from '../tools/configuration.ts';
 import {
   ConsentPage,
   DashboardPage,
   ErrorPage,
   OnboardingPage,
   SignInPage,
+  ToolDetailPage,
+  ToolIndexPage,
   type DashboardViewModel,
   type ReadinessSummary,
+  type ToolBrowserViewModel,
 } from './pages.tsx';
 
 const onboardingTokenSchema = z.string().min(20).max(256);
@@ -129,7 +134,8 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
     if (
       path.startsWith('/api/') ||
       path === '/mcp' ||
-      (context.req.method === 'GET' && ['/', '/invite', '/recover', '/dashboard', '/consent'].includes(path))
+      (context.req.method === 'GET' && ['/', '/invite', '/recover', '/dashboard', '/consent'].includes(path)) ||
+      (context.req.method === 'GET' && (path === '/tools' || path.startsWith('/tools/')))
     ) {
       context.header('Cache-Control', 'no-store');
     }
@@ -254,6 +260,27 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
     const model = await dashboardViewModel(bridge, repository, sessionUser.user, config.publicOrigin);
     return context.render(DashboardPage({ model }));
   });
+  app.get('/tools', async (context) => {
+    const sessionUser = await currentSessionUser(auth, repository, context.req.raw.headers);
+    if (sessionUser === null) return context.render(SignInPage({ continueToDashboard: true }));
+    const model = await toolBrowserViewModel(bridge, sessionUser.user);
+    return context.render(ToolIndexPage({ model }));
+  });
+  app.get('/tools/:tool', async (context) => {
+    const sessionUser = await currentSessionUser(auth, repository, context.req.raw.headers);
+    if (sessionUser === null) return context.render(SignInPage({ continueToDashboard: true }));
+    const name = context.req.param('tool');
+    if (!TOOL_CATALOG.some((tool) => tool.name === name)) {
+      context.status(404);
+      return context.render(
+        ErrorPage({ title: 'Tool not found', message: 'That tool is not part of this Dirt release.' }),
+      );
+    }
+    const model = await toolBrowserViewModel(bridge, sessionUser.user);
+    const selected = model.tools.find(({ tool }) => tool.name === name);
+    if (selected === undefined) throw new Error('The Dirt tool catalog is inconsistent.');
+    return context.render(ToolDetailPage({ model, selected }));
+  });
   app.get('/consent', async (context) => {
     const sessionUser = await currentSessionUser(auth, repository, context.req.raw.headers);
     if (sessionUser === null || !isRecentlyAuthenticated(sessionUser.sessionCreatedAt)) {
@@ -334,7 +361,7 @@ async function dashboardViewModel(
   user: UserSummary,
   publicOrigin: string,
 ): Promise<DashboardViewModel> {
-  const readiness = await dashboardReadiness(bridge);
+  const readiness = await dashboardReadiness(bridge, user);
   return {
     user,
     passkeys: repository.listPasskeys(user.id),
@@ -344,7 +371,7 @@ async function dashboardViewModel(
   };
 }
 
-async function dashboardReadiness(bridge: Pick<BridgeClient, 'request'>): Promise<ReadinessSummary> {
+async function dashboardReadiness(bridge: Pick<BridgeClient, 'request'>, user: UserSummary): Promise<ReadinessSummary> {
   const [ping, capabilities] = await Promise.allSettled([
     bridge.request(BRIDGE_ROUTES.ping, randomUUID(), PingResponseSchema),
     bridge.request(BRIDGE_ROUTES.capabilities, randomUUID(), BridgeCapabilitiesSchema),
@@ -353,8 +380,43 @@ async function dashboardReadiness(bridge: Pick<BridgeClient, 'request'>): Promis
     capabilities.status === 'fulfilled' ? toolConfigurationFromCapabilities(capabilities.value) : null;
   return {
     bridgeAvailable: ping.status === 'fulfilled' && capabilities.status === 'fulfilled',
-    enabledTools: configuration === null ? 0 : Object.values(configuration).filter(Boolean).length,
-    totalTools: Object.keys(MCP_TOOL_OPERATIONS).length,
+    enabledTools: configuration === null ? null : Object.values(configuration).filter(Boolean).length,
+    accessibleTools:
+      configuration === null
+        ? null
+        : TOOL_CATALOG.filter(
+            (tool) =>
+              configuration[tool.name] &&
+              user.status === 'active' &&
+              user.minecraftUuid !== null &&
+              profileGrants(user.accessProfile, tool.minimumProfile),
+          ).length,
+    totalTools: TOOL_CATALOG.length,
+  };
+}
+
+async function toolBrowserViewModel(
+  bridge: Pick<BridgeClient, 'request'>,
+  user: UserSummary,
+): Promise<ToolBrowserViewModel> {
+  let configuration: ReturnType<typeof toolConfigurationFromCapabilities> | null = null;
+  try {
+    const capabilities = await bridge.request(BRIDGE_ROUTES.capabilities, randomUUID(), BridgeCapabilitiesSchema);
+    configuration = toolConfigurationFromCapabilities(capabilities);
+  } catch {
+    // Static reference content remains useful while Paper is unavailable.
+  }
+  return {
+    user,
+    tools: TOOL_CATALOG.map((tool) => {
+      const enabled = configuration?.[tool.name] ?? null;
+      const granted = profileGrants(user.accessProfile, tool.minimumProfile);
+      return {
+        tool,
+        enabled,
+        granted,
+      };
+    }),
   };
 }
 
@@ -366,7 +428,7 @@ function currentOnboardingClaim(
   headers: Headers,
   config: RuntimeConfig,
   kind: 'invitation' | 'recovery',
-): { readonly username: string } | null {
+): { readonly username: string; readonly accessProfile: UserSummary['accessProfile'] } | null {
   try {
     const claim = readOnboardingClaim(headers, config.authSecret, config.publicOrigin);
     return claim.kind === kind ? claim : null;

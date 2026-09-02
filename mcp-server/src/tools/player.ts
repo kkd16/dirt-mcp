@@ -19,7 +19,10 @@ import {
   matchesPlayerSelector,
 } from './common.ts';
 import type { McpToolConfiguration } from './configuration.ts';
+import { catalogTool } from './catalog.ts';
 import { executeToolCall, successResult } from './execution.ts';
+
+const GetPlayerContextTool = catalogTool('get_player_context');
 
 const DEFAULT_INCLUDE = {
   equipment: true,
@@ -297,9 +300,8 @@ export function registerPlayerTools(
     server.registerTool(
       'get_player_context',
       {
-        title: 'Get player context',
-        description:
-          "Capture an online player's position, orientation, pose, and selected optional state. Player names are matched exactly but case-insensitively; UUID selectors are also accepted.",
+        title: GetPlayerContextTool.title,
+        description: GetPlayerContextTool.description,
         inputSchema: GetPlayerContextInputSchema,
         outputSchema: PlayerContextOutputSchema,
         annotations: READ_WORLD_ANNOTATIONS,

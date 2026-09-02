@@ -9,8 +9,30 @@ inspect -> preview -> edit -> verify -> undo if needed
 
 The web service owns this catalog, its schemas, annotations, and model-facing
 defaults. For each authenticated MCP request it reads Paper's allowed bridge
-operation IDs from `/v1/capabilities` and registers only the corresponding
-tools. Operations that are not admitted do not appear in MCP discovery.
+operation IDs from `/v1/capabilities` and intersects them with the current
+account's access profile. Operations outside that intersection do not appear in
+MCP discovery.
+
+## Availability and access profiles
+
+A tool is available only when it is supported by this Dirt release, enabled by
+Paper's `bridge.allowed-operations`, granted by the account's profile, and the
+account is active and linked to Minecraft. The three built-in profiles are
+deliberately cumulative:
+
+- **Viewer** can use status, inspection, player/view, and edit-history reads.
+- **Builder** adds bounded replace/set edits and undo.
+- **Operator** adds console-equivalent Minecraft command batches.
+
+Every invitation requires the inviter to choose one profile explicitly. There
+is no default profile and no custom per-tool grant layer. The fixed OAuth scope
+remains `dirt:mcp`; changing a profile revokes existing MCP grants and tokens so
+clients must be authorized again.
+
+Signed-in users can browse concise, human-readable status and usage notes at
+`/tools` and `/tools/<name>`. Linked players can use `/dirt tools [tool]`; Paper
+operators and the console can browse the global catalog too. These surfaces are
+references only and never execute a tool.
 
 ## What is sent over MCP?
 
@@ -80,20 +102,20 @@ defaults before sending it.
 
 ## Tools at a glance
 
-| Tool                        | Use it to                                             | Changes state |
-| --------------------------- | ----------------------------------------------------- | ------------- |
-| `ping_server`               | Check Dirt, Paper, the bridge, and FAWE end to end    | No            |
-| `get_server_status`         | Read builds, performance, worlds, players, and limits | No            |
-| `count_region_block_states` | Count block states without returning positions        | No            |
-| `get_blocks`                | Read exact, replay-ready block geometry               | No            |
-| `scan_orthographic_view`    | Inspect a flat world-axis view at a chosen depth      | No            |
-| `get_player_context`        | Capture a player's pose, location, and optional state | No            |
-| `get_perspective_view`      | Trace block-collision hits from a player or camera    | No            |
-| `replace_region_blocks`     | Replace matching states throughout a cuboid           | Yes           |
-| `set_blocks`                | Place singleton blocks and inclusive cuboids          | Yes           |
-| `get_edit_history`          | Read retained, undoable Dirt edits                    | No            |
-| `undo_edits`                | Restore an exact newest-first history prefix          | Yes           |
-| `run_minecraft_commands`    | Dispatch an ordered operator-level command batch      | Yes           |
+| Tool                        | Minimum profile | Use it to                                             | Changes state |
+| --------------------------- | --------------- | ----------------------------------------------------- | ------------- |
+| `ping_server`               | Viewer          | Check Dirt, Paper, the bridge, and FAWE end to end    | No            |
+| `get_server_status`         | Viewer          | Read builds, performance, worlds, players, and limits | No            |
+| `count_region_block_states` | Viewer          | Count block states without returning positions        | No            |
+| `get_blocks`                | Viewer          | Read exact, replay-ready block geometry               | No            |
+| `scan_orthographic_view`    | Viewer          | Inspect a flat world-axis view at a chosen depth      | No            |
+| `get_player_context`        | Viewer          | Capture a player's pose, location, and optional state | No            |
+| `get_perspective_view`      | Viewer          | Trace block-collision hits from a player or camera    | No            |
+| `replace_region_blocks`     | Builder         | Replace matching states throughout a cuboid           | Yes           |
+| `set_blocks`                | Builder         | Place singleton blocks and inclusive cuboids          | Yes           |
+| `get_edit_history`          | Viewer          | Read retained, undoable Dirt edits                    | No            |
+| `undo_edits`                | Builder         | Restore an exact newest-first history prefix          | Yes           |
+| `run_minecraft_commands`    | Operator        | Dispatch an ordered operator-level command batch      | Yes           |
 
 ## Rules shared by tools
 

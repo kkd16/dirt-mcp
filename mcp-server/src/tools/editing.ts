@@ -23,7 +23,13 @@ import {
   type Bounds,
 } from './common.ts';
 import type { McpToolConfiguration } from './configuration.ts';
+import { catalogTool } from './catalog.ts';
 import { executeToolCall, successResult } from './execution.ts';
+
+const ReplaceRegionBlocksTool = catalogTool('replace_region_blocks');
+const SetBlocksTool = catalogTool('set_blocks');
+const GetEditHistoryTool = catalogTool('get_edit_history');
+const UndoEditsTool = catalogTool('undo_edits');
 
 function uniqueStrings(values: readonly string[]): boolean {
   return new Set(values).size === values.length;
@@ -618,9 +624,8 @@ export function registerEditingTools(
     server.registerTool(
       'replace_region_blocks',
       {
-        title: 'Replace region blocks',
-        description:
-          'Replace matching block states throughout an inclusive region. Supply a concise edit label; use dryRun to preview and reuse the returned seed to reproduce a palette choice.',
+        title: ReplaceRegionBlocksTool.title,
+        description: ReplaceRegionBlocksTool.description,
         inputSchema: ReplaceRegionBlocksInputSchema,
         outputSchema: ReplaceRegionBlocksOutputSchema,
         annotations: NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
@@ -658,9 +663,8 @@ export function registerEditingTools(
     server.registerTool(
       'set_blocks',
       {
-        title: 'Set blocks',
-        description:
-          'Place blocks from weighted palettes using origin-relative placements and cuboid runs. Supply a concise edit label; use dryRun to preview.',
+        title: SetBlocksTool.title,
+        description: SetBlocksTool.description,
         inputSchema: SetBlocksInputSchema,
         outputSchema: SetBlocksOutputSchema,
         annotations: NON_IDEMPOTENT_MUTATION_ANNOTATIONS,
@@ -695,8 +699,8 @@ export function registerEditingTools(
     server.registerTool(
       'get_edit_history',
       {
-        title: 'Get edit history',
-        description: 'Return currently retained undoable Dirt edits for one loaded world, newest first.',
+        title: GetEditHistoryTool.title,
+        description: GetEditHistoryTool.description,
         inputSchema: GetEditHistoryInputSchema,
         outputSchema: GetEditHistoryOutputSchema,
         annotations: READ_WORLD_ANNOTATIONS,
@@ -730,8 +734,8 @@ export function registerEditingTools(
     server.registerTool(
       'undo_edits',
       {
-        title: 'Undo edits',
-        description: 'Undo a non-empty newest-first prefix of retained Dirt edits in one loaded world.',
+        title: UndoEditsTool.title,
+        description: UndoEditsTool.description,
         inputSchema: UndoEditsInputSchema,
         outputSchema: UndoEditsOutputSchema,
         annotations: NON_IDEMPOTENT_MUTATION_ANNOTATIONS,

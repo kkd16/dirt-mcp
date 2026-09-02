@@ -103,13 +103,16 @@ public final class HttpAccessControlClient implements AccessControl {
 
     @Override
     public CompletionStage<CreateInvitationResult> createInvitation(
-            UUID minecraftUuid, String minecraftName) {
-        String requestBody = minecraftIdentityBody(minecraftUuid, minecraftName);
+            UUID minecraftUuid, String minecraftName, AccessProfile accessProfile) {
+        Objects.requireNonNull(accessProfile, "accessProfile");
+        JsonObject requestBody = minecraftIdentity(minecraftUuid, minecraftName);
+        requestBody.addProperty("accessProfile", accessProfile.wireName());
         return post(
                 "/internal/v1/access/invitations",
-                requestBody,
+                requestBody.toString(),
                 (body, callId) ->
-                        decodeCreateInvitation(body, callId, minecraftUuid, minecraftName));
+                        decodeCreateInvitation(
+                                body, callId, minecraftUuid, minecraftName, accessProfile));
     }
 
     @Override
@@ -141,11 +144,37 @@ public final class HttpAccessControlClient implements AccessControl {
     }
 
     @Override
+    public CompletionStage<UserMutationResult> setAccessProfile(
+            String selector, AccessProfile accessProfile) {
+        Objects.requireNonNull(accessProfile, "accessProfile");
+        JsonObject body = new JsonObject();
+        body.addProperty("accessProfile", accessProfile.wireName());
+        return post(
+                userPath(selector, "access-profile"),
+                body.toString(),
+                (response, callId) -> {
+                    UserMutationResult result = decodeUserMutation(response, callId);
+                    if (result.user().accessProfile() != accessProfile) {
+                        throw protocolFailure();
+                    }
+                    return result;
+                });
+    }
+
+    @Override
+    public CompletionStage<MinecraftAccountUserResult> findUserByMinecraftUuid(UUID minecraftUuid) {
+        Objects.requireNonNull(minecraftUuid, "minecraftUuid");
+        return get(
+                "/internal/v1/access/minecraft-accounts/" + minecraftUuid,
+                (body, callId) -> decodeMinecraftAccountUser(body, callId, minecraftUuid));
+    }
+
+    @Override
     public CompletionStage<MinecraftLinkChallenge> createMinecraftLinkChallenge(
             UUID minecraftUuid, String minecraftName) {
         return post(
                 "/internal/v1/access/minecraft-links/challenges",
-                minecraftIdentityBody(minecraftUuid, minecraftName),
+                minecraftIdentity(minecraftUuid, minecraftName).toString(),
                 this::decodeMinecraftLinkChallenge);
     }
 
@@ -195,7 +224,7 @@ public final class HttpAccessControlClient implements AccessControl {
         return "/internal/v1/access/users/" + pathSegment(selector, "selector") + '/' + action;
     }
 
-    private static String minecraftIdentityBody(UUID minecraftUuid, String minecraftName) {
+    private static JsonObject minecraftIdentity(UUID minecraftUuid, String minecraftName) {
         if (minecraftUuid == null) {
             throw new IllegalArgumentException("minecraftUuid is required");
         }
@@ -203,7 +232,7 @@ public final class HttpAccessControlClient implements AccessControl {
         JsonObject body = new JsonObject();
         body.addProperty("minecraftUuid", account.uuid().toString());
         body.addProperty("minecraftName", account.name());
-        return body.toString();
+        return body;
     }
 
     private <T> CompletionStage<T> get(String path, ResponseDecoder<T> decoder) {
@@ -340,7 +369,11 @@ public final class HttpAccessControlClient implements AccessControl {
     }
 
     private CreateInvitationResult decodeCreateInvitation(
-            JsonObject body, UUID callId, UUID expectedUuid, String expectedName) {
+            JsonObject body,
+            UUID callId,
+            UUID expectedUuid,
+            String expectedName,
+            AccessProfile expectedProfile) {
         requireExactFields(body, Set.of("callId", "invitation", "inviteUrl"));
         CreateInvitationResult result =
                 new CreateInvitationResult(
@@ -348,7 +381,9 @@ public final class HttpAccessControlClient implements AccessControl {
                         invitation(object(body, "invitation")),
                         uri(body, "inviteUrl"));
         MinecraftAccount account = result.invitation().minecraftAccount();
-        if (!account.uuid().equals(expectedUuid) || !account.name().equals(expectedName)) {
+        if (!account.uuid().equals(expectedUuid)
+                || !account.name().equals(expectedName)
+                || result.invitation().accessProfile() != expectedProfile) {
             throw protocolFailure();
         }
         return result;
@@ -363,6 +398,21 @@ public final class HttpAccessControlClient implements AccessControl {
     private UserMutationResult decodeUserMutation(JsonObject body, UUID callId) {
         requireExactFields(body, Set.of("callId", "user"));
         return new UserMutationResult(verifiedCallId(body, callId), user(object(body, "user")));
+    }
+
+    private MinecraftAccountUserResult decodeMinecraftAccountUser(
+            JsonObject body, UUID callId, UUID expectedMinecraftUuid) {
+        requireExactFields(body, Set.of("callId", "user"));
+        JsonElement userElement = body.get("user");
+        if (userElement == null) {
+            throw protocolFailure();
+        }
+        UserSummary linkedUser =
+                userElement.isJsonNull() ? null : user(userElement.getAsJsonObject());
+        if (linkedUser != null && !expectedMinecraftUuid.equals(linkedUser.minecraftUuid())) {
+            throw protocolFailure();
+        }
+        return new MinecraftAccountUserResult(verifiedCallId(body, callId), linkedUser);
     }
 
     private UserRecoveryResult decodeUserRecovery(JsonObject body, UUID callId) {
@@ -411,7 +461,8 @@ public final class HttpAccessControlClient implements AccessControl {
 
     private static UserSummary user(JsonObject object) {
         requireExactFields(
-                object, Set.of("id", "username", "status", "minecraftUuid", "createdAt"));
+                object,
+                Set.of("id", "username", "status", "accessProfile", "minecraftUuid", "createdAt"));
         JsonElement uuidElement = object.get("minecraftUuid");
         UUID minecraftUuid = null;
         if (uuidElement == null) {
@@ -424,18 +475,27 @@ public final class HttpAccessControlClient implements AccessControl {
                 string(object, "id", 256),
                 string(object, "username", 16),
                 userStatus(string(object, "status", 16)),
+                accessProfile(string(object, "accessProfile", 16)),
                 minecraftUuid,
                 instant(object, "createdAt"));
     }
 
     private static InvitationSummary invitation(JsonObject object) {
         requireExactFields(
-                object, Set.of("id", "status", "minecraftAccount", "createdAt", "expiresAt"));
+                object,
+                Set.of(
+                        "id",
+                        "status",
+                        "accessProfile",
+                        "minecraftAccount",
+                        "createdAt",
+                        "expiresAt"));
         JsonObject account = object(object, "minecraftAccount");
         requireExactFields(account, Set.of("uuid", "name"));
         return new InvitationSummary(
                 string(object, "id", 256),
                 invitationStatus(string(object, "status", 16)),
+                accessProfile(string(object, "accessProfile", 16)),
                 new MinecraftAccount(uuid(account, "uuid"), string(account, "name", 16)),
                 instant(object, "createdAt"),
                 instant(object, "expiresAt"));
@@ -455,6 +515,15 @@ public final class HttpAccessControlClient implements AccessControl {
             case "accepted" -> InvitationStatus.ACCEPTED;
             case "revoked" -> InvitationStatus.REVOKED;
             case "expired" -> InvitationStatus.EXPIRED;
+            default -> throw protocolFailure();
+        };
+    }
+
+    private static AccessProfile accessProfile(String value) {
+        return switch (value) {
+            case "viewer" -> AccessProfile.VIEWER;
+            case "builder" -> AccessProfile.BUILDER;
+            case "operator" -> AccessProfile.OPERATOR;
             default -> throw protocolFailure();
         };
     }

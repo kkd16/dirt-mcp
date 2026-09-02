@@ -109,6 +109,7 @@ final class ArchitectureTest {
                 .resideOutsideOfPackages(
                         "ca.deliyannides.dirtmcp.paper.bridge..",
                         "ca.deliyannides.dirtmcp.paper.access..",
+                        "ca.deliyannides.dirtmcp.paper.catalog..",
                         "ca.deliyannides.dirtmcp.paper.logging..")
                 .should()
                 .dependOnClassesThat()

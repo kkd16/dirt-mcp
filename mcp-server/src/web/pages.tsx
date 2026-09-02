@@ -1,14 +1,44 @@
 import type { JSX } from 'hono/jsx/jsx-runtime';
 import type { AuthorizedClientSummary, OAuthClientSummary, PasskeySummary, UserSummary } from '../access/repository.ts';
+import { ACCESS_PROFILE_DETAILS, type AccessProfile } from '../access/profiles.ts';
+import { TOOL_CATEGORIES, type ToolCatalogEntry, type ToolCategory } from '../tools/catalog.ts';
 
 const STYLESHEET = '/assets/app.css';
 const SCRIPT = '/assets/app.js';
 const DATE_FORMAT = new Intl.DateTimeFormat('en', { dateStyle: 'medium' });
+const TOOL_CATEGORY_DETAILS: Readonly<
+  Record<ToolCategory, { readonly marker: string; readonly title: string; readonly description: string }>
+> = {
+  status: { marker: 'ST', title: 'Status', description: 'Confirm the Dirt path and discover the live server.' },
+  inspection: {
+    marker: 'IN',
+    title: 'Inspection',
+    description: 'Read world geometry and player context without changing blocks.',
+  },
+  editing: { marker: 'ED', title: 'Editing', description: 'Plan, commit, review, and undo bounded world edits.' },
+  commands: {
+    marker: 'CM',
+    title: 'Commands',
+    description: 'Use Minecraft console authority for actions outside semantic tools.',
+  },
+};
 
 export interface ReadinessSummary {
   readonly bridgeAvailable: boolean;
-  readonly enabledTools: number;
+  readonly enabledTools: number | null;
+  readonly accessibleTools: number | null;
   readonly totalTools: number;
+}
+
+export interface ToolViewModel {
+  readonly tool: ToolCatalogEntry;
+  readonly enabled: boolean | null;
+  readonly granted: boolean;
+}
+
+export interface ToolBrowserViewModel {
+  readonly user: UserSummary;
+  readonly tools: readonly ToolViewModel[];
 }
 
 export interface DashboardViewModel {
@@ -56,12 +86,22 @@ function Shell({ title, pageName, children, username }: ShellProperties): JSX.El
             <span>Dirt</span>
           </a>
           {username === undefined ? null : (
-            <div class="header-account action-zone">
-              <span class="header-username">{username}</span>
-              <span class="form-status compact-status" data-form-status role="status" aria-live="polite" />
-              <button class="text-button" type="button" data-action="sign-out">
-                Sign out
-              </button>
+            <div class="header-session">
+              <nav class="header-navigation" aria-label="Account">
+                <a href="/dashboard" aria-current={pageName === 'dashboard' ? 'page' : undefined}>
+                  Dashboard
+                </a>
+                <a href="/tools" aria-current={pageName.startsWith('tools') ? 'page' : undefined}>
+                  Tools
+                </a>
+              </nav>
+              <div class="header-account action-zone">
+                <span class="header-username">{username}</span>
+                <span class="form-status compact-status" data-form-status role="status" aria-live="polite" />
+                <button class="text-button" type="button" data-action="sign-out">
+                  Sign out
+                </button>
+              </div>
             </div>
           )}
         </header>
@@ -108,7 +148,7 @@ export function OnboardingPage({
   claim,
 }: {
   readonly kind: 'invitation' | 'recovery';
-  readonly claim: { readonly username: string } | null;
+  readonly claim: { readonly username: string; readonly accessProfile: AccessProfile } | null;
 }): JSX.Element {
   const invitation = kind === 'invitation';
   const title = invitation ? 'Create your Dirt passkey' : 'Replace your passkey';
@@ -133,7 +173,7 @@ export function OnboardingPage({
               </div>
               <p class="task-intro">
                 {invitation
-                  ? 'Create a passkey to finish your account. Your Minecraft identity is already linked.'
+                  ? `Create a passkey to finish your account. You will join with the ${ACCESS_PROFILE_DETAILS[claim.accessProfile].title} profile.`
                   : 'Create a replacement passkey. Existing sessions and MCP access will be revoked.'}
               </p>
               <form data-onboarding={kind}>
@@ -222,8 +262,8 @@ export function DashboardPage({ model }: { readonly model: DashboardViewModel })
           />
           <StatusItem
             label="MCP tools"
-            value={`${readiness.enabledTools} of ${readiness.totalTools}`}
-            tone={readiness.enabledTools > 0 ? 'success' : 'warning'}
+            value={toolCountLabel(readiness.accessibleTools, readiness.totalTools)}
+            tone={readiness.accessibleTools !== null && readiness.accessibleTools > 0 ? 'success' : 'warning'}
           />
         </div>
 
@@ -237,6 +277,7 @@ export function DashboardPage({ model }: { readonly model: DashboardViewModel })
               <Record label="Link status" value={user.minecraftUuid === null ? 'Not linked' : 'Linked'} />
               <Record label="Online-mode UUID" value={user.minecraftUuid ?? 'Available after linking'} code />
               <Record label="Dirt account ID" value={user.id} code />
+              <Record label="Access profile" value={ACCESS_PROFILE_DETAILS[user.accessProfile].title} />
               <Record label="Account status" value={user.status === 'active' ? 'Active' : 'Disabled'} />
               <Record label="Created" value={<DateValue value={user.createdAt} />} />
             </dl>
@@ -274,7 +315,7 @@ export function DashboardPage({ model }: { readonly model: DashboardViewModel })
               ) : (
                 <ul class="client-list">
                   {clients.map((client) => (
-                    <ClientRecord client={client} />
+                    <ClientRecord client={client} accessProfile={user.accessProfile} />
                   ))}
                 </ul>
               )}
@@ -288,11 +329,13 @@ export function DashboardPage({ model }: { readonly model: DashboardViewModel })
             <div>
               <dl class="record-list">
                 <Record label="Bridge" value={readiness.bridgeAvailable ? 'Available' : 'Unavailable'} />
-                <Record label="Enabled tools" value={`${readiness.enabledTools} of ${readiness.totalTools}`} />
-                <Record label="Access" value="Full Dirt access" />
+                <Record label="Enabled tools" value={toolCountLabel(readiness.enabledTools, readiness.totalTools)} />
+                <Record label="Your tools" value={toolCountLabel(readiness.accessibleTools, readiness.totalTools)} />
+                <Record label="Access profile" value={ACCESS_PROFILE_DETAILS[user.accessProfile].title} />
               </dl>
               <p class="supporting-copy">
-                Enabled clients can inspect the live world and make bounded, undoable edits allowed by the server.
+                Your available tools are the overlap of this Dirt release, the server configuration, and your access
+                profile. <a href="/tools">Browse the tool field guide.</a>
               </p>
             </div>
           </DetailGroup>
@@ -391,14 +434,20 @@ function Record({
   );
 }
 
-function ClientRecord({ client }: { readonly client: AuthorizedClientSummary }): JSX.Element {
+function ClientRecord({
+  client,
+  accessProfile,
+}: {
+  readonly client: AuthorizedClientSummary;
+  readonly accessProfile: AccessProfile;
+}): JSX.Element {
   const hostname = hostnameFromUrl(client.clientId);
   const label = client.name ?? hostname ?? 'this MCP client';
   return (
     <li>
       <div class="client-heading">
         <strong>{label}</strong>
-        <span>Full Dirt access</span>
+        <span>{ACCESS_PROFILE_DETAILS[accessProfile].title} access</span>
       </div>
       <dl class="record-list compact-record">
         <Record label="Client ID" value={client.clientId} code />
@@ -443,15 +492,15 @@ export function ConsentPage({ model }: { readonly model: ConsentViewModel }): JS
           </div>
           <div class="consent-detail">
             <p class="detail-label">Access</p>
-            <p>
-              Inspect worlds, edit blocks with bounded undo, and run commands through{' '}
-              <code>run_minecraft_commands</code>.
-            </p>
+            <p>{ACCESS_PROFILE_DETAILS[model.user.accessProfile].description}</p>
+            <strong>{ACCESS_PROFILE_DETAILS[model.user.accessProfile].title} profile</strong>
             <code>{model.scopes.join(' ')}</code>
-            <p class="authority-warning">
-              Minecraft commands can have console-equivalent authority. Only continue if you recognize the client and
-              return address.
-            </p>
+            {model.user.accessProfile === 'operator' ? (
+              <p class="authority-warning">
+                This profile includes Minecraft commands with console-equivalent authority. Only continue if you
+                recognize the client and return address.
+              </p>
+            ) : null}
           </div>
 
           <form class="consent-actions" data-consent>
@@ -464,6 +513,183 @@ export function ConsentPage({ model }: { readonly model: ConsentViewModel }): JS
           </form>
           <p class="form-status" data-form-status role="status" aria-live="polite" />
         </section>
+      </div>
+    </Shell>
+  );
+}
+
+export function ToolIndexPage({ model }: { readonly model: ToolBrowserViewModel }): JSX.Element {
+  const accessible = model.tools.filter((view) => isToolAccessible(view, model.user)).length;
+  const knownEnabled = model.tools.every(({ enabled }) => enabled !== null);
+  const enabled = model.tools.filter(({ enabled: isEnabled }) => isEnabled === true).length;
+  const profile = ACCESS_PROFILE_DETAILS[model.user.accessProfile];
+  return (
+    <Shell title="Tool field guide" pageName="tools-index" username={model.user.username}>
+      <div class="tool-shell">
+        <header class="tool-intro">
+          <div>
+            <p class="eyebrow">Supported · enabled · yours</p>
+            <h1>Tool field guide</h1>
+            <p>
+              A concise reference for every MCP call in this Dirt release, what the server enables, and what your{' '}
+              <strong>{profile.title}</strong> profile can use.
+            </p>
+          </div>
+          <dl class="tool-tally" aria-label="Tool access summary">
+            <div>
+              <dt>Supported</dt>
+              <dd>{model.tools.length}</dd>
+            </div>
+            <div>
+              <dt>Enabled</dt>
+              <dd>{knownEnabled ? enabled : '—'}</dd>
+            </div>
+            <div>
+              <dt>Yours</dt>
+              <dd>{knownEnabled ? accessible : '—'}</dd>
+            </div>
+          </dl>
+        </header>
+
+        {knownEnabled ? null : (
+          <p class="tool-notice tool-tone-unknown">
+            Paper is unavailable, so enablement and final access are unknown. The reference remains complete.
+          </p>
+        )}
+
+        <div class="tool-ledger">
+          {TOOL_CATEGORIES.map((category) => {
+            const details = TOOL_CATEGORY_DETAILS[category];
+            const tools = model.tools.filter(({ tool }) => tool.category === category);
+            return (
+              <section class="tool-section" aria-labelledby={`tool-category-${category}`}>
+                <header>
+                  <span class="tool-coordinate" aria-hidden="true">
+                    {details.marker}
+                  </span>
+                  <div>
+                    <h2 id={`tool-category-${category}`}>{details.title}</h2>
+                    <p>{details.description}</p>
+                  </div>
+                </header>
+                <ol class="tool-list">
+                  {tools.map((view) => {
+                    const availability = toolAvailability(view, model.user);
+                    return (
+                      <li>
+                        <a class="tool-row" href={`/tools/${view.tool.name}`}>
+                          <span class={`access-marker tool-tone-${availability.tone}`} aria-hidden="true" />
+                          <span class="tool-row-main">
+                            <strong>{view.tool.title}</strong>
+                            <code>{view.tool.name}</code>
+                            <small>{view.tool.description}</small>
+                          </span>
+                          <span class="tool-row-meta">
+                            <span>{availability.label}</span>
+                            <small>{ACCESS_PROFILE_DETAILS[view.tool.minimumProfile].title}+</small>
+                          </span>
+                          <span class="tool-row-arrow" aria-hidden="true">
+                            →
+                          </span>
+                        </a>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </section>
+            );
+          })}
+        </div>
+      </div>
+    </Shell>
+  );
+}
+
+export function ToolDetailPage({
+  model,
+  selected,
+}: {
+  readonly model: ToolBrowserViewModel;
+  readonly selected: ToolViewModel;
+}): JSX.Element {
+  const { tool } = selected;
+  const availability = toolAvailability(selected, model.user);
+  const profile = ACCESS_PROFILE_DETAILS[tool.minimumProfile];
+  return (
+    <Shell title={tool.title} pageName="tools-detail" username={model.user.username}>
+      <div class="tool-shell tool-detail-shell">
+        <nav class="tool-breadcrumb" aria-label="Breadcrumb">
+          <a href="/tools">Tool field guide</a>
+          <span aria-hidden="true">/</span>
+          <span>{TOOL_CATEGORY_DETAILS[tool.category].title}</span>
+        </nav>
+
+        <header class="tool-detail-intro">
+          <div>
+            <p class="eyebrow">{TOOL_CATEGORY_DETAILS[tool.category].title}</p>
+            <h1>{tool.title}</h1>
+            <code>{tool.name}</code>
+            <p>{tool.description}</p>
+          </div>
+          <div class={`tool-access-stamp tool-tone-${availability.tone}`}>
+            <span class="access-marker" aria-hidden="true" />
+            <small>Your access</small>
+            <strong>{availability.label}</strong>
+          </div>
+        </header>
+
+        <section class="tool-facts" aria-label="Tool availability">
+          <dl>
+            <div>
+              <dt>Supported</dt>
+              <dd>Yes</dd>
+            </div>
+            <div>
+              <dt>Enabled</dt>
+              <dd>{selected.enabled === null ? 'Unknown' : selected.enabled ? 'Yes' : 'No'}</dd>
+            </div>
+            <div>
+              <dt>Profile</dt>
+              <dd>{profile.title} or higher</dd>
+            </div>
+            <div>
+              <dt>World effects</dt>
+              <dd>{tool.changesWorld ? 'May change state' : 'Read only'}</dd>
+            </div>
+          </dl>
+        </section>
+
+        <div class="tool-manual-grid">
+          <article class="tool-manual">
+            <section>
+              <p class="manual-coordinate">01 · Purpose</p>
+              <h2>When to use it</h2>
+              <p>{tool.useWhen}</p>
+            </section>
+            <section>
+              <p class="manual-coordinate">02 · Request</p>
+              <h2>What to provide</h2>
+              <p>{tool.inputs}</p>
+            </section>
+            <section>
+              <p class="manual-coordinate">03 · Result</p>
+              <h2>What comes back</h2>
+              <p>{tool.returns}</p>
+            </section>
+            <section>
+              <p class="manual-coordinate">04 · Safety</p>
+              <h2>Keep in mind</h2>
+              <p>{tool.caution}</p>
+            </section>
+          </article>
+
+          <aside class="tool-example" aria-labelledby="example-heading">
+            <p class="eyebrow">Example request</p>
+            <h2 id="example-heading">Arguments</h2>
+            <pre>{JSON.stringify(tool.exampleInput, null, 2)}</pre>
+            <p>Field names and values are ready to adapt for an MCP call.</p>
+          </aside>
+        </div>
       </div>
     </Shell>
   );
@@ -497,6 +723,30 @@ function hostnameFromUrl(value: string): string | null {
 
 function isLoopbackHostname(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
+function toolCountLabel(count: number | null, total: number): string {
+  return count === null ? `Unknown of ${total}` : `${count} of ${total}`;
+}
+
+type ToolAvailabilityTone = 'disabled' | 'restricted' | 'success' | 'unknown' | 'warning';
+
+function isToolAccessible(view: ToolViewModel, user: UserSummary): boolean {
+  return view.enabled === true && view.granted && user.status === 'active' && user.minecraftUuid !== null;
+}
+
+function toolAvailability(
+  view: ToolViewModel,
+  user: UserSummary,
+): { readonly label: string; readonly tone: ToolAvailabilityTone } {
+  if (view.enabled === false) return { label: 'Disabled', tone: 'disabled' };
+  if (!view.granted) {
+    return { label: `${ACCESS_PROFILE_DETAILS[view.tool.minimumProfile].title} required`, tone: 'restricted' };
+  }
+  if (user.status !== 'active') return { label: 'Account disabled', tone: 'restricted' };
+  if (user.minecraftUuid === null) return { label: 'Link Minecraft', tone: 'warning' };
+  if (view.enabled === null) return { label: 'Unknown', tone: 'unknown' };
+  return { label: 'Available', tone: 'success' };
 }
 
 function dashboardTask(model: DashboardViewModel): {

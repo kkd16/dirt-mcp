@@ -14,7 +14,7 @@ public interface AccessControl extends AutoCloseable {
     CompletionStage<InvitationPage> listInvitations(int page);
 
     CompletionStage<CreateInvitationResult> createInvitation(
-            UUID minecraftUuid, String minecraftName);
+            UUID minecraftUuid, String minecraftName, AccessProfile accessProfile);
 
     CompletionStage<InvitationMutationResult> revokeInvitation(String id);
 
@@ -25,6 +25,11 @@ public interface AccessControl extends AutoCloseable {
     CompletionStage<UserRecoveryResult> createUserRecovery(String selector);
 
     CompletionStage<UserMutationResult> unlinkUser(String selector);
+
+    CompletionStage<UserMutationResult> setAccessProfile(
+            String selector, AccessProfile accessProfile);
+
+    CompletionStage<MinecraftAccountUserResult> findUserByMinecraftUuid(UUID minecraftUuid);
 
     CompletionStage<MinecraftLinkChallenge> createMinecraftLinkChallenge(
             UUID minecraftUuid, String minecraftName);
@@ -52,6 +57,20 @@ public interface AccessControl extends AutoCloseable {
         }
     }
 
+    enum AccessProfile {
+        VIEWER,
+        BUILDER,
+        OPERATOR;
+
+        public String wireName() {
+            return name().toLowerCase(java.util.Locale.ROOT);
+        }
+
+        public boolean grants(AccessProfile required) {
+            return compareTo(Objects.requireNonNull(required, "required")) >= 0;
+        }
+    }
+
     record MinecraftAccount(UUID uuid, String name) {
         public MinecraftAccount {
             Objects.requireNonNull(uuid, "uuid");
@@ -60,11 +79,17 @@ public interface AccessControl extends AutoCloseable {
     }
 
     record UserSummary(
-            String id, String username, UserStatus status, UUID minecraftUuid, Instant createdAt) {
+            String id,
+            String username,
+            UserStatus status,
+            AccessProfile accessProfile,
+            UUID minecraftUuid,
+            Instant createdAt) {
         public UserSummary {
             id = nonBlank(id, "id", 256);
             username = minecraftUsername(username, "username");
             Objects.requireNonNull(status, "status");
+            Objects.requireNonNull(accessProfile, "accessProfile");
             Objects.requireNonNull(createdAt, "createdAt");
         }
     }
@@ -72,12 +97,14 @@ public interface AccessControl extends AutoCloseable {
     record InvitationSummary(
             String id,
             InvitationStatus status,
+            AccessProfile accessProfile,
             MinecraftAccount minecraftAccount,
             Instant createdAt,
             Instant expiresAt) {
         public InvitationSummary {
             id = nonBlank(id, "id", 256);
             Objects.requireNonNull(status, "status");
+            Objects.requireNonNull(accessProfile, "accessProfile");
             Objects.requireNonNull(minecraftAccount, "minecraftAccount");
             Objects.requireNonNull(createdAt, "createdAt");
             Objects.requireNonNull(expiresAt, "expiresAt");
@@ -129,6 +156,12 @@ public interface AccessControl extends AutoCloseable {
         public UserMutationResult {
             Objects.requireNonNull(callId, "callId");
             Objects.requireNonNull(user, "user");
+        }
+    }
+
+    record MinecraftAccountUserResult(UUID callId, UserSummary user) {
+        public MinecraftAccountUserResult {
+            Objects.requireNonNull(callId, "callId");
         }
     }
 

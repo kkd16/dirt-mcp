@@ -53,7 +53,10 @@ final class HttpAccessControlClientTest {
             AccessControl.InvitationPage invitations =
                     client.listInvitations(3).toCompletableFuture().join();
             AccessControl.CreateInvitationResult created =
-                    client.createInvitation(MINECRAFT_UUID, "Builder").toCompletableFuture().join();
+                    client.createInvitation(
+                                    MINECRAFT_UUID, "Builder", AccessControl.AccessProfile.VIEWER)
+                            .toCompletableFuture()
+                            .join();
             AccessControl.InvitationMutationResult revoked =
                     client.revokeInvitation("invite /?#").toCompletableFuture().join();
             AccessControl.UserMutationResult disabled =
@@ -64,6 +67,12 @@ final class HttpAccessControlClientTest {
                     client.createUserRecovery("Builder /?#").toCompletableFuture().join();
             AccessControl.UserMutationResult unlinked =
                     client.unlinkUser("Builder /?#").toCompletableFuture().join();
+            AccessControl.UserMutationResult accessChanged =
+                    client.setAccessProfile("Builder /?#", AccessControl.AccessProfile.OPERATOR)
+                            .toCompletableFuture()
+                            .join();
+            AccessControl.MinecraftAccountUserResult accountUser =
+                    client.findUserByMinecraftUuid(MINECRAFT_UUID).toCompletableFuture().join();
             AccessControl.MinecraftLinkChallenge challenge =
                     client.createMinecraftLinkChallenge(MINECRAFT_UUID, "Builder")
                             .toCompletableFuture()
@@ -75,6 +84,8 @@ final class HttpAccessControlClientTest {
             assertEquals(2, users.totalPages());
             assertEquals("Builder", users.items().getFirst().username());
             assertEquals(AccessControl.UserStatus.ACTIVE, users.items().getFirst().status());
+            assertEquals(
+                    AccessControl.AccessProfile.BUILDER, users.items().getFirst().accessProfile());
             assertEquals(MINECRAFT_UUID, users.items().getFirst().minecraftUuid());
             assertEquals(Instant.parse(CREATED_AT), users.items().getFirst().createdAt());
             assertEquals(3, invitations.page());
@@ -93,11 +104,14 @@ final class HttpAccessControlClientTest {
                     recovery.recoveryUrl());
             assertEquals(Instant.parse(EXPIRES_AT), recovery.expiresAt());
             assertEquals(null, unlinked.user().minecraftUuid());
+            assertEquals(
+                    AccessControl.AccessProfile.OPERATOR, accessChanged.user().accessProfile());
+            assertEquals("Builder", accountUser.user().username());
             assertEquals("LINK-1234", challenge.code());
             assertEquals(URI.create("https://dashboard.example/link/private"), challenge.linkUrl());
 
             List<RecordedRequest> requests = server.requests();
-            assertEquals(9, requests.size());
+            assertEquals(11, requests.size());
             assertRequest(requests.get(0), "GET", "/internal/v1/access/users", "page=2", null);
             assertRequest(
                     requests.get(1), "GET", "/internal/v1/access/invitations", "page=3", null);
@@ -106,7 +120,9 @@ final class HttpAccessControlClientTest {
                     "POST",
                     "/internal/v1/access/invitations",
                     null,
-                    "{\"minecraftUuid\":\"" + MINECRAFT_UUID + "\",\"minecraftName\":\"Builder\"}");
+                    "{\"minecraftUuid\":\""
+                            + MINECRAFT_UUID
+                            + "\",\"minecraftName\":\"Builder\",\"accessProfile\":\"viewer\"}");
             assertRequest(
                     requests.get(3),
                     "POST",
@@ -139,6 +155,18 @@ final class HttpAccessControlClientTest {
                     "{}");
             assertRequest(
                     requests.get(8),
+                    "POST",
+                    "/internal/v1/access/users/Builder%20%2F%3F%23/access-profile",
+                    null,
+                    "{\"accessProfile\":\"operator\"}");
+            assertRequest(
+                    requests.get(9),
+                    "GET",
+                    "/internal/v1/access/minecraft-accounts/" + MINECRAFT_UUID,
+                    null,
+                    null);
+            assertRequest(
+                    requests.get(10),
                     "POST",
                     "/internal/v1/access/minecraft-links/challenges",
                     null,
@@ -260,7 +288,12 @@ final class HttpAccessControlClientTest {
                 HttpAccessControlClient client = client(server)) {
             assertEquals(
                     AccessControlException.Reason.PROTOCOL_ERROR,
-                    failure(client.createInvitation(MINECRAFT_UUID, "Builder")).reason());
+                    failure(
+                                    client.createInvitation(
+                                            MINECRAFT_UUID,
+                                            "Builder",
+                                            AccessControl.AccessProfile.VIEWER))
+                            .reason());
         }
 
         try (ControlServer server =
@@ -287,7 +320,11 @@ final class HttpAccessControlClientTest {
                 List.of(
                         invitation("pending")
                                 .replace(MINECRAFT_UUID.toString(), otherUuid.toString()),
-                        invitation("pending").replace("Builder", "OtherPlayer"))) {
+                        invitation("pending").replace("Builder", "OtherPlayer"),
+                        invitation("pending")
+                                .replace(
+                                        "\"accessProfile\":\"viewer\"",
+                                        "\"accessProfile\":\"builder\""))) {
             try (ControlServer server =
                             new ControlServer(
                                     exchange ->
@@ -302,8 +339,37 @@ final class HttpAccessControlClientTest {
                     HttpAccessControlClient client = client(server)) {
                 assertEquals(
                         AccessControlException.Reason.PROTOCOL_ERROR,
-                        failure(client.createInvitation(MINECRAFT_UUID, "Builder")).reason());
+                        failure(
+                                        client.createInvitation(
+                                                MINECRAFT_UUID,
+                                                "Builder",
+                                                AccessControl.AccessProfile.VIEWER))
+                                .reason());
             }
+        }
+    }
+
+    @Test
+    void rejectsAMinecraftAccountLookupResponseForADifferentUuid() throws Exception {
+        UUID otherUuid = UUID.fromString("323e4567-e89b-42d3-a456-426614174000");
+        try (ControlServer server =
+                        new ControlServer(
+                                exchange ->
+                                        json(
+                                                exchange,
+                                                200,
+                                                "{\"callId\":\""
+                                                        + callId(exchange)
+                                                        + "\",\"user\":"
+                                                        + user("active", true)
+                                                                .replace(
+                                                                        MINECRAFT_UUID.toString(),
+                                                                        otherUuid.toString())
+                                                        + "}"));
+                HttpAccessControlClient client = client(server)) {
+            assertEquals(
+                    AccessControlException.Reason.PROTOCOL_ERROR,
+                    failure(client.findUserByMinecraftUuid(MINECRAFT_UUID)).reason());
         }
     }
 
@@ -408,13 +474,26 @@ final class HttpAccessControlClientTest {
                 assertThrows(IllegalArgumentException.class, () -> client.disableUser(" "));
                 assertThrows(
                         IllegalArgumentException.class,
-                        () -> client.createInvitation(null, "Builder"));
+                        () ->
+                                client.createInvitation(
+                                        null, "Builder", AccessControl.AccessProfile.VIEWER));
                 assertThrows(
                         IllegalArgumentException.class,
-                        () -> client.createInvitation(MINECRAFT_UUID, " "));
+                        () ->
+                                client.createInvitation(
+                                        MINECRAFT_UUID, " ", AccessControl.AccessProfile.VIEWER));
                 assertThrows(
                         IllegalArgumentException.class,
-                        () -> client.createInvitation(MINECRAFT_UUID, "not-valid"));
+                        () ->
+                                client.createInvitation(
+                                        MINECRAFT_UUID,
+                                        "not-valid",
+                                        AccessControl.AccessProfile.VIEWER));
+                assertThrows(
+                        NullPointerException.class,
+                        () -> client.createInvitation(MINECRAFT_UUID, "Builder", null));
+                assertThrows(
+                        NullPointerException.class, () -> client.findUserByMinecraftUuid(null));
                 assertThrows(
                         IllegalArgumentException.class,
                         () -> client.createMinecraftLinkChallenge(null, "Builder"));
@@ -571,6 +650,10 @@ final class HttpAccessControlClientTest {
             body = userMutation(callId, "active", true);
         } else if (rawPath.endsWith("/unlink")) {
             body = userMutation(callId, "active", false);
+        } else if (rawPath.endsWith("/access-profile")) {
+            body = userMutation(callId, "active", true, "operator");
+        } else if (path.startsWith("/internal/v1/access/minecraft-accounts/")) {
+            body = "{\"callId\":\"" + callId + "\",\"user\":" + user("active", true) + "}";
         } else if (path.equals("/internal/v1/access/minecraft-links/challenges")) {
             body =
                     "{\"callId\":\""
@@ -610,10 +693,25 @@ final class HttpAccessControlClientTest {
         return "{\"callId\":\"" + callId + "\",\"user\":" + user(status, linked) + "}";
     }
 
+    private static String userMutation(
+            String callId, String status, boolean linked, String accessProfile) {
+        return "{\"callId\":\""
+                + callId
+                + "\",\"user\":"
+                + user(status, linked, accessProfile)
+                + "}";
+    }
+
     private static String user(String status, boolean linked) {
+        return user(status, linked, "builder");
+    }
+
+    private static String user(String status, boolean linked, String accessProfile) {
         String minecraftUuid = linked ? "\"" + MINECRAFT_UUID + "\"" : "null";
         return "{\"id\":\"usr_1\",\"username\":\"Builder\",\"status\":\""
                 + status
+                + "\",\"accessProfile\":\""
+                + accessProfile
                 + "\",\"minecraftUuid\":"
                 + minecraftUuid
                 + ",\"createdAt\":\""
@@ -624,7 +722,7 @@ final class HttpAccessControlClientTest {
     private static String invitation(String status) {
         return "{\"id\":\"invite_1\",\"status\":\""
                 + status
-                + "\",\"minecraftAccount\":{\"uuid\":\""
+                + "\",\"accessProfile\":\"viewer\",\"minecraftAccount\":{\"uuid\":\""
                 + MINECRAFT_UUID
                 + "\",\"name\":\"Builder\"},\"createdAt\":\""
                 + CREATED_AT

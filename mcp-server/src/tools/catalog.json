@@ -1,0 +1,226 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "name": "ping_server",
+      "operationId": "pingServer",
+      "category": "status",
+      "title": "Ping Dirt server",
+      "minimumProfile": "viewer",
+      "changesWorld": false,
+      "description": "Run a non-mutating end-to-end health check across the authenticated bridge, Dirt plugin, Paper, and a Paper-backed FAWE session. Returns only status ok on success.",
+      "useWhen": "Use this first when you need to confirm that the complete Dirt path is healthy.",
+      "inputs": "No arguments.",
+      "returns": "A single ok status when every dependency responds.",
+      "caution": "This is a health check, not a detailed diagnostic report.",
+      "exampleInput": {}
+    },
+    {
+      "name": "get_server_status",
+      "operationId": "getServerStatus",
+      "category": "status",
+      "title": "Get server status",
+      "minimumProfile": "viewer",
+      "changesWorld": false,
+      "description": "Return current builds and performance plus selected player, world, and configuration sections. Worlds default on; players and configuration default off.",
+      "useWhen": "Use this to discover loaded worlds and players or check the limits that constrain other calls.",
+      "inputs": "Choose whether to include players, worlds, and configuration; worlds are included by default.",
+      "returns": "Build and performance data plus only the selected detail sections.",
+      "caution": "Excluded sections are returned as null, and only loaded worlds can be used by other tools.",
+      "exampleInput": {
+        "include": { "players": false, "worlds": true, "configuration": true }
+      }
+    },
+    {
+      "name": "count_region_block_states",
+      "operationId": "countRegionBlockStates",
+      "category": "inspection",
+      "title": "Count region block states",
+      "minimumProfile": "viewer",
+      "changesWorld": false,
+      "description": "Return a complete canonical block-state histogram for an inclusive region.",
+      "useWhen": "Use this when totals are enough and exact block positions would be unnecessary overhead.",
+      "inputs": "Provide a loaded world and two inclusive block corners in either order.",
+      "returns": "Normalized bounds, dimensions, volume, and a complete block-state histogram.",
+      "caution": "Air is included, and the scan fails rather than truncates when a server limit is exceeded.",
+      "exampleInput": {
+        "world": "world",
+        "min": { "x": 0, "y": 64, "z": 0 },
+        "max": { "x": 15, "y": 79, "z": 15 }
+      }
+    },
+    {
+      "name": "get_blocks",
+      "operationId": "getBlocks",
+      "category": "inspection",
+      "title": "Get blocks",
+      "minimumProfile": "viewer",
+      "changesWorld": false,
+      "description": "Return filtered exact block states as replay-ready palettes, placements, and cuboid runs.",
+      "useWhen": "Use this to inspect exact positions or copy a structure for a later set_blocks call.",
+      "inputs": "Provide a loaded world, inclusive bounds, optional state filters, whether to include air, and a result ceiling.",
+      "returns": "An origin, block-state palettes, singleton placements, and compact cuboid runs.",
+      "caution": "The call fails rather than returning a partial structure when its effective result limit is exceeded.",
+      "exampleInput": {
+        "world": "world",
+        "min": { "x": 0, "y": 64, "z": 0 },
+        "max": { "x": 15, "y": 79, "z": 15 },
+        "includeBlockStatePatterns": ["minecraft:stone"],
+        "excludeBlockStatePatterns": [],
+        "includeAir": false,
+        "maxResults": 1000
+      }
+    },
+    {
+      "name": "scan_orthographic_view",
+      "operationId": "scanOrthographicView",
+      "category": "inspection",
+      "title": "Scan an orthographic view",
+      "minimumProfile": "viewer",
+      "changesWorld": false,
+      "description": "Return a selected non-air depth on bounded world-axis sightlines as replay-ready block geometry.",
+      "useWhen": "Use this for a compact elevation or plan-like view without retrieving the entire volume.",
+      "inputs": "Provide a loaded world, anchor, one of six axis directions, horizontal and vertical radii, ray distance, depth, and a result ceiling.",
+      "returns": "Replay-ready block geometry for the selected visible layer.",
+      "caution": "This is a server-side block scan, not a rendered image with lighting, entities, or resource packs.",
+      "exampleInput": {
+        "world": "world",
+        "origin": { "x": 0, "y": 72, "z": 0 },
+        "direction": "north",
+        "horizontalRadius": 16,
+        "verticalRadius": 8,
+        "maxDistance": 64,
+        "depth": 0,
+        "maxResults": 4096
+      }
+    },
+    {
+      "name": "get_player_context",
+      "operationId": "getPlayerContext",
+      "category": "inspection",
+      "title": "Get player context",
+      "minimumProfile": "viewer",
+      "changesWorld": false,
+      "description": "Capture an online player's position, orientation, pose, and selected optional state. Player names are matched exactly but case-insensitively; UUID selectors are also accepted.",
+      "useWhen": "Use this to anchor later inspection or camera work to what an online player is doing now.",
+      "inputs": "Select an online player by name or UUID and choose optional equipment, inventory, ender chest, vitals, movement, client, and effects sections.",
+      "returns": "The player's identity, world position, rotation, pose, and requested optional state.",
+      "caution": "The player must be online; names match exactly but case-insensitively.",
+      "exampleInput": {
+        "player": "Builder",
+        "include": { "equipment": true, "inventory": false, "vitals": true, "effects": false }
+      }
+    },
+    {
+      "name": "get_perspective_view",
+      "operationId": "getPerspectiveView",
+      "category": "inspection",
+      "title": "Get perspective view",
+      "minimumProfile": "viewer",
+      "changesWorld": false,
+      "description": "Trace a grid of first block-collision hits from an online player's eye pose or a loaded-world camera position.",
+      "useWhen": "Use this to understand what is in front of a player or camera before planning an edit.",
+      "inputs": "Choose a player or explicit loaded-world camera, odd viewport dimensions, field of view, ray distance, fluid collision, and passable-block handling.",
+      "returns": "Camera metadata and a grid of hit or miss samples with canonical block states.",
+      "caution": "This describes server block collisions only; it is not the player's rendered client view.",
+      "exampleInput": {
+        "source": { "type": "player", "player": "Builder" },
+        "width": 21,
+        "height": 13,
+        "verticalFieldOfViewDegrees": 70,
+        "maxDistance": 64,
+        "fluidCollision": "never",
+        "ignorePassableBlocks": false
+      }
+    },
+    {
+      "name": "replace_region_blocks",
+      "operationId": "replaceRegionBlocks",
+      "category": "editing",
+      "title": "Replace region blocks",
+      "minimumProfile": "builder",
+      "changesWorld": true,
+      "description": "Replace matching block states throughout an inclusive region. Supply a concise edit label; use dryRun to preview and reuse the returned seed to reproduce a palette choice.",
+      "useWhen": "Use this for broad material substitutions where matching states, rather than exact positions, define the edit.",
+      "inputs": "Provide a world, bounds, source patterns, destination palette, concise label, preview flag, and optional seed and change ceiling.",
+      "returns": "A preview, no-change result, or committed edit record with exact counts and a reproducible seed.",
+      "caution": "Preview first; committed changes enter bounded in-memory undo history and require loaded chunks.",
+      "exampleInput": {
+        "world": "world",
+        "min": { "x": 0, "y": 64, "z": 0 },
+        "max": { "x": 15, "y": 79, "z": 15 },
+        "sourceBlockStatePatterns": ["minecraft:stone"],
+        "destinationPalette": [{ "blockState": "minecraft:deepslate" }],
+        "label": "Replace stone with deepslate",
+        "dryRun": true
+      }
+    },
+    {
+      "name": "set_blocks",
+      "operationId": "setBlocks",
+      "category": "editing",
+      "title": "Set blocks",
+      "minimumProfile": "builder",
+      "changesWorld": true,
+      "description": "Place blocks from weighted palettes using origin-relative placements and cuboid runs. Supply a concise edit label; use dryRun to preview.",
+      "useWhen": "Use this for exact structures, sparse placements, or geometry previously returned by an inspection tool.",
+      "inputs": "Provide a world, origin, palettes, placements or runs, concise label, preview flag, and optional seed and change ceiling.",
+      "returns": "A preview, no-change result, or committed edit record with exact counts and a reproducible seed.",
+      "caution": "Preview first and keep geometry within loaded chunks; committed changes are retained only in bounded memory.",
+      "exampleInput": {
+        "world": "world",
+        "origin": { "x": 0, "y": 64, "z": 0 },
+        "palettes": [[{ "blockState": "minecraft:stone" }]],
+        "placements": [[0, 0, 0, 0]],
+        "runs": [],
+        "label": "Place marker block",
+        "dryRun": true
+      }
+    },
+    {
+      "name": "get_edit_history",
+      "operationId": "getEditHistory",
+      "category": "editing",
+      "title": "Get edit history",
+      "minimumProfile": "viewer",
+      "changesWorld": false,
+      "description": "Return currently retained undoable Dirt edits for one loaded world, newest first.",
+      "useWhen": "Use this before undo or after an ambiguous mutation result to identify retained edit IDs and order.",
+      "inputs": "Provide one loaded world.",
+      "returns": "Newest-first committed or recovery-required edit records and history capacity information.",
+      "caution": "History is bounded, in memory, world-specific, and cleared by unloads, shutdowns, or restarts.",
+      "exampleInput": { "world": "world" }
+    },
+    {
+      "name": "undo_edits",
+      "operationId": "undoEdits",
+      "category": "editing",
+      "title": "Undo edits",
+      "minimumProfile": "builder",
+      "changesWorld": true,
+      "description": "Undo a non-empty newest-first prefix of retained Dirt edits in one loaded world.",
+      "useWhen": "Use this after reading edit history and deciding which uninterrupted newest-first sequence to restore.",
+      "inputs": "Provide a loaded world and a non-empty newest-first list of retained edit IDs.",
+      "returns": "Completed undo records or a partial result that identifies where restoration stopped.",
+      "caution": "The requested IDs must be an exact newest-first prefix; undo can partially complete if a later restoration fails.",
+      "exampleInput": {
+        "world": "world",
+        "editIds": ["22222222-2222-4222-8222-222222222222"]
+      }
+    },
+    {
+      "name": "run_minecraft_commands",
+      "operationId": "runMinecraftCommands",
+      "category": "commands",
+      "title": "Run Minecraft commands",
+      "minimumProfile": "operator",
+      "changesWorld": true,
+      "description": "Run Minecraft commands in order as an operator-level non-player sender. Execution stops at the first dispatch failure. Command effects are not atomic or undoable; after an ambiguous transport failure, inspect state before retrying.",
+      "useWhen": "Use this only when a bounded semantic Dirt tool cannot perform the required server action.",
+      "inputs": "Provide a non-empty ordered list of command strings without leading slashes.",
+      "returns": "Per-command dispatch status and bounded feedback until the first failure.",
+      "caution": "Effects are non-atomic, are outside Dirt undo, and may have completed after a timeout or disconnect.",
+      "exampleInput": { "commands": ["time set day"] }
+    }
+  ]
+}
