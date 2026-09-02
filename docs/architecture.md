@@ -88,7 +88,12 @@ passkeys and revokes its sessions, consent, authorization codes, and refresh
 grants. Recovery and every account eligibility transition rotate the account's
 authorization generation, immediately invalidating previously issued access
 tokens. Every MCP request also reloads the account and requires it to be active
-and linked.
+and linked. A signed-in user may disconnect one authorized MCP client from the
+dashboard. Dirt transactionally removes that user-client grant and its token
+and authorization-code records, then rejects later requests from its existing
+access tokens because every MCP request also requires current consent. Calls
+already admitted before disconnection may finish; reconnecting requires OAuth
+authorization again.
 
 Paper operators create targeted invitations with `/dirt invite create <player>`,
 revoke them through `/dirt invite`, and manage accounts through `/dirt user`.

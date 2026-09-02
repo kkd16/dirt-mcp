@@ -193,6 +193,34 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('[data-copy]')
   });
 }
 
+for (const form of document.querySelectorAll<HTMLFormElement>('[data-disconnect-client]')) {
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const consentId = form.dataset.disconnectClient;
+    const clientName = form.dataset.clientName ?? 'this MCP client';
+    if (
+      consentId === undefined ||
+      !window.confirm(`Disconnect ${clientName}? It will need to be authorized again before it can use Dirt.`)
+    ) {
+      return;
+    }
+    runUserAction(form, async () => {
+      report(form, 'Disconnecting client…');
+      const response = await fetch('/api/access/mcp-clients/revoke', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consentId }),
+      });
+      const body = await responseObject(response);
+      if (!response.ok) {
+        report(form, optionalString(body, 'error') ?? 'The client could not be disconnected.', 'error');
+        return;
+      }
+      location.reload();
+    });
+  });
+}
+
 document.querySelector<HTMLFormElement>('[data-consent]')?.addEventListener('submit', (event) => {
   const form = event.currentTarget;
   if (!(form instanceof HTMLFormElement)) return;

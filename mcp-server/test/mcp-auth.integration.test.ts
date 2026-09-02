@@ -65,6 +65,24 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
         'active',
         'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       );
+    const clientId = 'https://client.example/client.json';
+    database
+      .prepare('INSERT INTO oauthClient (id, clientId, redirectUris) VALUES (?, ?, ?)')
+      .run('linked-client', clientId, JSON.stringify(['https://client.example/callback']));
+    database
+      .prepare(
+        'INSERT INTO oauthConsent (id, clientId, userId, scopes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run('linked-consent', clientId, 'linked-user', JSON.stringify(['dirt:mcp']), now, now);
+    const retainedClientId = 'https://retained-client.example/client.json';
+    database
+      .prepare('INSERT INTO oauthClient (id, clientId, redirectUris) VALUES (?, ?, ?)')
+      .run('retained-client', retainedClientId, JSON.stringify(['https://retained-client.example/callback']));
+    database
+      .prepare(
+        'INSERT INTO oauthConsent (id, clientId, userId, scopes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run('retained-consent', retainedClientId, 'linked-user', JSON.stringify(['dirt:mcp']), now, now);
 
     let bridgeRequests = 0;
     const bridge = new BridgeClient(config.bridge, async () => {
@@ -132,7 +150,25 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
         payload: {
           sub: 'linked-user',
           aud: resource,
-          azp: 'https://client.example/client.json',
+          azp: clientId,
+          scope: 'dirt:mcp',
+          dirt_auth_version: 0,
+        },
+        overrideOptions: {
+          jwt: {
+            issuer: `${config.publicOrigin}/api/auth`,
+            audience: resource,
+            expirationTime: '5m',
+          },
+        },
+      },
+    });
+    const retainedClientToken = await jwtSigner.signJWT({
+      body: {
+        payload: {
+          sub: 'linked-user',
+          aud: resource,
+          azp: retainedClientId,
           scope: 'dirt:mcp',
           dirt_auth_version: 0,
         },
@@ -151,12 +187,12 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
         {
           sub: 'linked-user',
           aud: resource,
-          azp: 'https://client.example/client.json',
+          azp: clientId,
           scope: 'dirt:mcp',
         },
         {
           aud: resource,
-          azp: 'https://client.example/client.json',
+          azp: clientId,
           scope: 'dirt:mcp',
           dirt_auth_version: 0,
         },
@@ -224,23 +260,42 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
     assert.equal(streamedBodyCanceled, true);
     assert.equal(bridgeRequests, 1);
 
+    repository.revokeMcpClient('linked-user', 'linked-consent');
+    const revoked = await mcp.fetch(mcpRequest(resource, issued.token));
+    assert.equal(revoked.status, 401);
+    assert.match(revoked.headers.get('WWW-Authenticate') ?? '', /error="invalid_token"/u);
+    assert.equal(bridgeRequests, 1);
+    const retainedClient = await mcp.fetch(mcpRequest(resource, retainedClientToken.token));
+    assert.equal(retainedClient.status, 200);
+    assert.equal(bridgeRequests, 2);
+    database
+      .prepare(
+        'INSERT INTO oauthConsent (id, clientId, userId, scopes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run('reauthorized-consent', clientId, 'linked-user', JSON.stringify(['dirt:mcp']), now, now);
+
     repository.disableUser('LinkedPlayer');
     const disabled = await mcp.fetch(mcpRequest(resource, issued.token));
     assert.equal(disabled.status, 403);
     assert.equal(disabled.headers.get('WWW-Authenticate'), null);
-    assert.equal(bridgeRequests, 1);
+    assert.equal(bridgeRequests, 2);
 
     repository.enableUser('LinkedPlayer');
     const superseded = await mcp.fetch(mcpRequest(resource, issued.token));
     assert.equal(superseded.status, 403);
-    assert.equal(bridgeRequests, 1);
+    assert.equal(bridgeRequests, 2);
+    database
+      .prepare(
+        'INSERT INTO oauthConsent (id, clientId, userId, scopes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run('current-consent', clientId, 'linked-user', JSON.stringify(['dirt:mcp']), now, now);
 
     const current = await jwtSigner.signJWT({
       body: {
         payload: {
           sub: 'linked-user',
           aud: resource,
-          azp: 'https://client.example/client.json',
+          azp: clientId,
           scope: 'dirt:mcp',
           dirt_auth_version: 2,
         },
@@ -255,7 +310,7 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
     });
     const reauthorized = await mcp.fetch(mcpRequest(resource, current.token));
     assert.equal(reauthorized.status, 200);
-    assert.equal(bridgeRequests, 2);
+    assert.equal(bridgeRequests, 3);
 
     const legacyInitialize = await mcp.fetch(legacyInitializeRequest(resource, current.token));
     assert.equal(legacyInitialize.status, 200);
@@ -275,7 +330,7 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
     assert.equal(legacyTools.status, 200);
     assert.match(await legacyTools.text(), /"tools":\[\]/u);
     const bridgeRequestsAfterLegacyHandshake = bridgeRequests;
-    assert.ok(bridgeRequestsAfterLegacyHandshake > 2);
+    assert.ok(bridgeRequestsAfterLegacyHandshake > 3);
 
     repository.unlinkUser('LinkedPlayer');
     const supersededByUnlink = await mcp.fetch(mcpRequest(resource, current.token));

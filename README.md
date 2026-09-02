@@ -27,8 +27,10 @@ inspect -> preview -> edit -> verify -> undo if needed
 | Access   | Invite-only passkey accounts linked one-to-one with Minecraft identities.       |
 
 The dashboard intentionally contains only sign-in, enrollment, account,
-Minecraft-link, and MCP connection surfaces. It is not a world editor. See the
-[tool reference](docs/tools.md) for the complete MCP catalog and schemas.
+Minecraft-link, and MCP connection surfaces. Users can disconnect an authorized
+MCP client there; Dirt immediately rejects its later requests, and reconnecting
+requires a new OAuth authorization. The dashboard is not a world editor. See
+the [tool reference](docs/tools.md) for the complete MCP catalog and schemas.
 
 ## Architecture
 

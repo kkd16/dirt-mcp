@@ -98,7 +98,14 @@ export function createAuthOptions(
     telemetry: { enabled: false },
     logger: { disabled: true },
     onAPIError: { throw: true },
-    disabledPaths: ['/passkey/delete-passkey', '/token'],
+    disabledPaths: [
+      '/oauth2/delete-consent',
+      '/oauth2/get-consent',
+      '/oauth2/get-consents',
+      '/oauth2/update-consent',
+      '/passkey/delete-passkey',
+      '/token',
+    ],
     plugins: [
       jwt({ disableSettingJwtHeader: true }),
       passkey({

@@ -38,6 +38,7 @@ const onboardingExchangeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('recovery'), token: onboardingTokenSchema }).strict(),
 ]);
 const linkSchema = z.object({ code: z.string().trim().min(8).max(24) }).strict();
+const revokeMcpClientSchema = z.object({ consentId: z.string().min(1).max(128) }).strict();
 const RECENT_AUTHENTICATION_MS = SESSION_FRESH_AGE_SECONDS * 1_000;
 const PingResponseSchema = z.object({ status: z.literal('ok') }).strict();
 const SENSITIVE_OAUTH_PATHS = new Set([
@@ -206,6 +207,15 @@ export function createWebApp(dependencies: WebAppDependencies): Hono {
     }
     const user = repository.consumeMinecraftLinkChallenge(sessionUser.user.id, body.code);
     return context.json({ user });
+  });
+
+  app.post('/api/access/mcp-clients/revoke', async (context) => {
+    requireSameOrigin(context, config.publicOrigin);
+    const body = await readJsonBody(context.req.raw, revokeMcpClientSchema);
+    const sessionUser = await currentSessionUser(auth, repository, context.req.raw.headers);
+    if (sessionUser === null) return context.json({ error: 'Sign in again before disconnecting this client.' }, 401);
+    repository.revokeMcpClient(sessionUser.user.id, body.consentId);
+    return context.json({ ok: true });
   });
 
   app.all('/mcp', async (context) =>

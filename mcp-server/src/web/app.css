@@ -721,6 +721,14 @@ code {
   border-top: 0;
 }
 
+.client-disconnect {
+  margin-top: 0.6rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.8rem;
+}
+
 /* OAuth consent */
 
 .consent-card {

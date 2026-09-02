@@ -17,6 +17,7 @@ export interface UserSummary {
 }
 
 export interface AuthorizedClientSummary {
+  readonly consentId: string;
   readonly clientId: string;
   readonly name: string | null;
   readonly scopes: readonly string[];
@@ -117,6 +118,7 @@ type RecoveryClaimRow = {
 };
 
 type AuthorizedClientRow = {
+  id: string;
   clientId: string;
   name: string | null;
   scopes: string;
@@ -430,6 +432,16 @@ export class AccessRepository {
     return row ?? null;
   }
 
+  hasMcpClientConsent(userId: string, clientId: string): boolean {
+    return (
+      this.database
+        .prepare<[string, string], { found: number }>(
+          'SELECT 1 AS found FROM oauthConsent WHERE userId = ? AND clientId = ? LIMIT 1',
+        )
+        .get(userId, clientId) !== undefined
+    );
+  }
+
   requireAuthorizationVersion(userId: string): number {
     const row = this.database
       .prepare<[string], { authorizationVersion: number }>('SELECT authorizationVersion FROM "user" WHERE id = ?')
@@ -444,7 +456,7 @@ export class AccessRepository {
   listAuthorizedClients(userId: string): readonly AuthorizedClientSummary[] {
     const rows = this.database
       .prepare<[string], AuthorizedClientRow>(
-        `SELECT oauthConsent.clientId, oauthClient.name, oauthConsent.scopes, oauthConsent.createdAt
+        `SELECT oauthConsent.id, oauthConsent.clientId, oauthClient.name, oauthConsent.scopes, oauthConsent.createdAt
          FROM oauthConsent
          JOIN oauthClient ON oauthClient.clientId = oauthConsent.clientId
          WHERE oauthConsent.userId = ?
@@ -452,11 +464,41 @@ export class AccessRepository {
       )
       .all(userId);
     return rows.map((row) => ({
+      consentId: row.id,
       clientId: row.clientId,
       name: nonBlankOrNull(row.name),
       scopes: parseStringArray(row.scopes, 'OAuth consent scopes'),
       authorizedAt: toRfc3339(row.createdAt),
     }));
+  }
+
+  revokeMcpClient(userId: string, consentId: string): void {
+    const transaction = this.database.transaction(() => {
+      const consent = this.database
+        .prepare<[string, string], { clientId: string }>(
+          'SELECT clientId FROM oauthConsent WHERE id = ? AND userId = ?',
+        )
+        .get(consentId, userId);
+      if (consent === undefined) throw new AccessError('not_found', 'Authorized MCP client not found.');
+
+      this.database
+        .prepare('DELETE FROM oauthAccessToken WHERE userId = ? AND clientId = ?')
+        .run(userId, consent.clientId);
+      this.database
+        .prepare('DELETE FROM oauthRefreshToken WHERE userId = ? AND clientId = ?')
+        .run(userId, consent.clientId);
+      this.database
+        .prepare(
+          `DELETE FROM verification
+           WHERE json_valid(value)
+             AND json_extract(value, '$.type') = 'authorization_code'
+             AND json_extract(value, '$.userId') = ?
+             AND json_extract(value, '$.query.client_id') = ?`,
+        )
+        .run(userId, consent.clientId);
+      this.database.prepare('DELETE FROM oauthConsent WHERE userId = ? AND clientId = ?').run(userId, consent.clientId);
+    });
+    transaction.immediate();
   }
 
   findOAuthClient(clientId: string): OAuthClientSummary | null {

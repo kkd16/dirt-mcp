@@ -393,10 +393,11 @@ function Record({
 
 function ClientRecord({ client }: { readonly client: AuthorizedClientSummary }): JSX.Element {
   const hostname = hostnameFromUrl(client.clientId);
+  const label = client.name ?? hostname ?? 'this MCP client';
   return (
     <li>
       <div class="client-heading">
-        <strong>{client.name ?? hostname ?? 'MCP client'}</strong>
+        <strong>{label}</strong>
         <span>Full Dirt access</span>
       </div>
       <dl class="record-list compact-record">
@@ -404,6 +405,12 @@ function ClientRecord({ client }: { readonly client: AuthorizedClientSummary }):
         <Record label="Scope" value={client.scopes.join(', ')} code />
         <Record label="Authorized" value={<DateValue value={client.authorizedAt} />} />
       </dl>
+      <form class="client-disconnect action-zone" data-disconnect-client={client.consentId} data-client-name={label}>
+        <button class="secondary-button" type="submit">
+          Disconnect
+        </button>
+        <p class="form-status" data-form-status role="status" aria-live="polite" />
+      </form>
     </li>
   );
 }

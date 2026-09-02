@@ -51,7 +51,14 @@ test('Better Auth is passkey-only and MCP OAuth uses the fixed narrow policy', a
   assert.equal(auth.options.session?.freshAge, 300);
   assert.deepEqual(auth.options.advanced?.ipAddress?.ipAddressHeaders, ['x-forwarded-for']);
   assert.deepEqual(auth.options.advanced?.ipAddress?.trustedProxies, ['127.0.0.1/32', '::1/128']);
-  assert.deepEqual(auth.options.disabledPaths, ['/passkey/delete-passkey', '/token']);
+  assert.deepEqual(auth.options.disabledPaths, [
+    '/oauth2/delete-consent',
+    '/oauth2/get-consent',
+    '/oauth2/get-consents',
+    '/oauth2/update-consent',
+    '/passkey/delete-passkey',
+    '/token',
+  ]);
   const userFields = auth.options.user?.additionalFields ?? {};
   for (const field of ['status', 'minecraftUuid', 'authorizationVersion']) {
     assert.equal(userFields[field]?.input, false);
@@ -340,6 +347,47 @@ test('invite, recovery, account status, and link transitions are atomic and boun
   database.prepare('UPDATE "user" SET status = ? WHERE id = ?').run('active', 'user-one');
 });
 
+test('MCP client revocation removes only one user-client authorization', () => {
+  const now = new Date('2026-08-30T13:00:00.000Z');
+  insertUser('revocation-user', 'revoker', now);
+  insertUser('other-revocation-user', 'otherrevoker', now);
+  const selected = insertAuthorizationArtifacts('revocation-user', 'selected-client', now);
+  const retained = insertAuthorizationArtifacts('revocation-user', 'retained-client', now);
+  const otherUser = insertAuthorizationArtifacts(
+    'other-revocation-user',
+    'other-user-selected-client',
+    now,
+    selected.clientId,
+  );
+
+  assert.equal(repository.hasMcpClientConsent('revocation-user', selected.clientId), true);
+  assert.throws(
+    () => repository.revokeMcpClient('revocation-user', otherUser.consentId),
+    (error) => error instanceof AccessError && error.code === 'not_found',
+  );
+  repository.revokeMcpClient('revocation-user', selected.consentId);
+
+  assert.equal(repository.hasMcpClientConsent('revocation-user', selected.clientId), false);
+  assert.equal(repository.hasMcpClientConsent('revocation-user', retained.clientId), true);
+  assert.equal(repository.hasMcpClientConsent('other-revocation-user', selected.clientId), true);
+  assert.equal(pairArtifactCount('revocation-user', selected.clientId), 0);
+  assert.equal(pairArtifactCount('revocation-user', retained.clientId), 4);
+  assert.equal(pairArtifactCount('other-revocation-user', selected.clientId), 4);
+  assert.equal(
+    database
+      .prepare<[string], { count: number }>('SELECT COUNT(*) AS count FROM session WHERE userId = ?')
+      .get('revocation-user')?.count,
+    2,
+  );
+  assert.equal(hasPasskey('revocation-user'), true);
+  assert.equal(
+    database
+      .prepare<[string], { count: number }>('SELECT COUNT(*) AS count FROM oauthClient WHERE clientId = ?')
+      .get(selected.clientId)?.count,
+    1,
+  );
+});
+
 test('internal routes enforce loopback, UUIDv4 calls, exact envelopes, and bounded JSON', async () => {
   const internalErrors: Array<{ readonly event: string; readonly fields: LogFields | undefined }> = [];
   let loopback = true;
@@ -515,6 +563,26 @@ test('web shell exposes a loopback health check and hardened consent copy', asyn
   const health = await app.request('/healthz');
   assert.equal(health.status, 200);
   assert.deepEqual(await health.json(), { status: 'ok' });
+
+  const disabledConsentRoutes = await Promise.all(
+    (
+      [
+        ['POST', '/api/auth/oauth2/delete-consent'],
+        ['GET', '/api/auth/oauth2/get-consent'],
+        ['GET', '/api/auth/oauth2/get-consents'],
+        ['POST', '/api/auth/oauth2/update-consent'],
+      ] as const
+    ).map(([method, path]) =>
+      app.request(path, {
+        method,
+        headers: { Host: 'localhost:3000', Origin: config.publicOrigin },
+      }),
+    ),
+  );
+  assert.deepEqual(
+    disabledConsentRoutes.map((response) => response.status),
+    [404, 404, 404, 404],
+  );
 
   const home = await app.request('/', { headers: { Host: 'localhost:3000' } });
   assert.equal(home.status, 200);
@@ -796,10 +864,11 @@ test('dashboard presents safe identity, readiness, client, and passkey summaries
   assert.match(html, /client-dashboard\.example/u);
   assert.match(html, /dirt:mcp/u);
   assert.match(html, /Full Dirt access/u);
+  assert.match(html, /Disconnect/u);
+  assert.match(html, /data-disconnect-client="dashboard-consent"/u);
   assert.match(html, /Workshop key/u);
   assert.doesNotMatch(html, /private-public-key-material/u);
   assert.doesNotMatch(html, /private-credential-id/u);
-  assert.doesNotMatch(html, /Disconnect|Revoke client/u);
 
   const zeroTools = await testWebApp(
     sessionAuth('dashboard-user', () => new Date()),
@@ -889,6 +958,55 @@ test('onboarding exchanges invitation and recovery secrets, and fresh sessions l
   const linkedUser = (await linked.json()).user;
   assert.equal(linkedUser.minecraftUuid, 'dddddddd-dddd-4ddd-8ddd-dddddddddddd');
   assert.equal(linkedUser.username, 'RoutePlayer');
+});
+
+test('signed-in users can disconnect an authorized MCP client', async () => {
+  const now = new Date('2026-08-31T13:00:00.000Z');
+  insertUser('route-revocation-user', 'routerevoker', now);
+  insertUser('foreign-route-revocation-user', 'foreignrevoker', now);
+  const selected = insertAuthorizationArtifacts('route-revocation-user', 'route-revocation', now);
+  const foreign = insertAuthorizationArtifacts('foreign-route-revocation-user', 'foreign-route-revocation', now);
+  const headers = {
+    'Content-Type': 'application/json',
+    Host: 'localhost:3000',
+    Origin: config.publicOrigin,
+  };
+  const request = {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ consentId: selected.consentId }),
+  } as const;
+
+  const signedOut = await testWebApp().request('/api/access/mcp-clients/revoke', request);
+  assert.equal(signedOut.status, 401);
+  assert.deepEqual(await signedOut.json(), { error: 'Sign in again before disconnecting this client.' });
+
+  const crossOrigin = await testWebApp(sessionAuth('route-revocation-user', () => new Date())).request(
+    '/api/access/mcp-clients/revoke',
+    { ...request, headers: { ...headers, Origin: 'https://attacker.example' } },
+  );
+  assert.equal(crossOrigin.status, 403);
+
+  const malformed = await testWebApp(sessionAuth('route-revocation-user', () => new Date())).request(
+    '/api/access/mcp-clients/revoke',
+    { ...request, body: JSON.stringify({ consentId: selected.consentId, unexpected: true }) },
+  );
+  assert.equal(malformed.status, 400);
+
+  const app = testWebApp(sessionAuth('route-revocation-user', () => new Date(Date.now() - 6 * 60 * 1_000)));
+  const foreignResponse = await app.request('/api/access/mcp-clients/revoke', {
+    ...request,
+    body: JSON.stringify({ consentId: foreign.consentId }),
+  });
+  assert.equal(foreignResponse.status, 404);
+  const response = await app.request('/api/access/mcp-clients/revoke', request);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true });
+  assert.equal(repository.hasMcpClientConsent('route-revocation-user', selected.clientId), false);
+
+  const repeated = await app.request('/api/access/mcp-clients/revoke', request);
+  assert.equal(repeated.status, 404);
+  assert.deepEqual(await repeated.json(), { error: 'Authorized MCP client not found.' });
 });
 
 test('OAuth grants require a fresh passkey session and a linked account', async () => {
@@ -1009,14 +1127,19 @@ function insertUser(id: string, username: string, now: Date): void {
     .run(id, username, `${id}@dirt.placeholder.invalid`, now.toISOString(), now.toISOString(), 'active');
 }
 
-function insertAuthorizationArtifacts(userId: string, suffix: string, now: Date): void {
-  const clientId = `https://client-${suffix}.example/client.json`;
+function insertAuthorizationArtifacts(
+  userId: string,
+  suffix: string,
+  now: Date,
+  clientId = `https://client-${suffix}.example/client.json`,
+): { readonly clientId: string; readonly consentId: string } {
   const sessionId = `session-${suffix}`;
   const refreshId = `refresh-${suffix}`;
+  const consentId = `consent-${suffix}`;
   const createdAt = now.toISOString();
   const expiresAt = new Date(now.getTime() + 60_000).toISOString();
   database
-    .prepare('INSERT INTO oauthClient (id, clientId, redirectUris) VALUES (?, ?, ?)')
+    .prepare('INSERT OR IGNORE INTO oauthClient (id, clientId, redirectUris) VALUES (?, ?, ?)')
     .run(`client-row-${suffix}`, clientId, JSON.stringify([`https://client-${suffix}.example/callback`]));
   database
     .prepare('INSERT INTO session (id, expiresAt, token, createdAt, updatedAt, userId) VALUES (?, ?, ?, ?, ?, ?)')
@@ -1028,14 +1151,14 @@ function insertAuthorizationArtifacts(userId: string, suffix: string, now: Date)
     .run(
       `verification-${suffix}`,
       `authorization-code-${suffix}`,
-      JSON.stringify({ type: 'authorization_code', userId }),
+      JSON.stringify({ type: 'authorization_code', userId, query: { client_id: clientId } }),
       expiresAt,
       createdAt,
       createdAt,
     );
   database
     .prepare('INSERT INTO oauthConsent (id, clientId, userId, scopes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(`consent-${suffix}`, clientId, userId, JSON.stringify(['dirt:mcp']), createdAt, createdAt);
+    .run(consentId, clientId, userId, JSON.stringify(['dirt:mcp']), createdAt, createdAt);
   database
     .prepare(
       'INSERT INTO oauthRefreshToken (id, token, clientId, sessionId, userId, expiresAt, createdAt, scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -1071,15 +1194,16 @@ function insertAuthorizationArtifacts(userId: string, suffix: string, now: Date)
         'INSERT INTO passkey (id, name, publicKey, userId, credentialID, counter, deviceType, backedUp, createdAt) VALUES (?, ?, ?, ?, ?, 0, ?, 0, ?)',
       )
       .run(
-        'passkey-user-one',
+        `passkey-${suffix}`,
         'Primary passkey',
         'public-key',
         userId,
-        'credential-user-one',
+        `credential-${suffix}`,
         'singleDevice',
         createdAt,
       );
   }
+  return { clientId, consentId };
 }
 
 function hasPasskey(userId: string): boolean {
@@ -1103,6 +1227,23 @@ function authorizationArtifactCount(userId: string): number {
   ];
   return queries.reduce((total, query) => {
     const row = database.prepare<[string], { count: number }>(query).get(userId);
+    return total + (row?.count ?? 0);
+  }, 0);
+}
+
+function pairArtifactCount(userId: string, clientId: string): number {
+  const queries = [
+    'SELECT COUNT(*) AS count FROM oauthConsent WHERE userId = ? AND clientId = ?',
+    'SELECT COUNT(*) AS count FROM oauthAccessToken WHERE userId = ? AND clientId = ?',
+    'SELECT COUNT(*) AS count FROM oauthRefreshToken WHERE userId = ? AND clientId = ?',
+    `SELECT COUNT(*) AS count FROM verification
+     WHERE json_valid(value)
+       AND json_extract(value, '$.type') = 'authorization_code'
+       AND json_extract(value, '$.userId') = ?
+       AND json_extract(value, '$.query.client_id') = ?`,
+  ];
+  return queries.reduce((total, query) => {
+    const row = database.prepare<[string, string], { count: number }>(query).get(userId, clientId);
     return total + (row?.count ?? 0);
   }, 0);
 }
