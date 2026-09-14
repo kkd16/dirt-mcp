@@ -28,11 +28,11 @@
     "validate:openapi": "redocly lint protocol/openapi.yaml protocol/access-control.openapi.yaml --lint-config=error && pnpm run check:openapi-types"
   },
   "devDependencies": {
-    "@redocly/cli": "2.49.0",
+    "@redocly/cli": "2.52.1",
     "markdownlint-cli2": "0.23.2",
     "openapi-typescript": "7.13.0",
-    "oxfmt": "0.65.0",
-    "oxlint": "1.80.0",
+    "oxfmt": "0.67.0",
+    "oxlint": "1.82.0",
     "oxlint-tsgolint": "7.0.2001"
   },
   "devEngines": {
