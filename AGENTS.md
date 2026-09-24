@@ -28,8 +28,9 @@ boundaries.
 - Keep Paper/FAWE code in `paper-plugin`, MCP code in `mcp-server`, and wire
   contracts in `protocol`.
 - Keep v1 small: one synchronous mutation per world, bounded in-memory undo, one
-  SQLite database, one fixed MCP scope, and no persistent jobs, roles,
-  per-account permissions, renderer, world UI, or speculative extension points.
+  SQLite database, one fixed MCP scope, and three fixed cumulative access
+  profiles (Viewer, Builder, Operator). No persistent jobs, custom roles,
+  per-tool account grants, renderer, world UI, or speculative extension points.
 
 ## Engineering
 

@@ -256,8 +256,8 @@ export function DashboardPage({ model }: { readonly model: DashboardViewModel })
             tone={user.minecraftUuid === null ? 'warning' : 'success'}
           />
           <StatusItem
-            label="Paper & FAWE"
-            value={readiness.bridgeAvailable ? 'Online' : 'Offline'}
+            label="Paper"
+            value={readiness.bridgeAvailable ? 'Available' : 'Unavailable'}
             tone={readiness.bridgeAvailable ? 'success' : 'danger'}
           />
           <StatusItem
@@ -324,7 +324,7 @@ export function DashboardPage({ model }: { readonly model: DashboardViewModel })
 
           <DetailGroup
             title="Server access"
-            summary={readiness.bridgeAvailable ? 'Paper and FAWE online' : 'Paper offline'}
+            summary={readiness.bridgeAvailable ? 'Paper available' : 'Paper unavailable'}
           >
             <div>
               <dl class="record-list">
@@ -777,7 +777,7 @@ function dashboardTask(model: DashboardViewModel): {
   }
   if (!model.readiness.bridgeAvailable) {
     return {
-      title: 'Paper is offline',
+      title: 'Paper is unavailable',
       detail: 'Your account and MCP authorization are ready; the live server is unavailable.',
       action: 'Account controls remain available while the operator restores Paper and FAWE.',
       label: 'Server status',
@@ -791,6 +791,16 @@ function dashboardTask(model: DashboardViewModel): {
       detail: 'Your account is connected, but the operator has not enabled any Dirt tools.',
       action: 'Ask the server operator to enable the tools you need.',
       label: 'Server status',
+      coordinate: '--',
+      tone: 'warning',
+    };
+  }
+  if (model.readiness.accessibleTools === 0) {
+    return {
+      title: 'No tools are available to you',
+      detail: `Your ${ACCESS_PROFILE_DETAILS[model.user.accessProfile].title} profile does not grant any of the enabled tools.`,
+      action: 'Ask the server operator to review your access profile or enable tools it grants.',
+      label: 'Access status',
       coordinate: '--',
       tone: 'warning',
     };

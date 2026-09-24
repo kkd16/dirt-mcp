@@ -97,9 +97,10 @@ tokens. Every MCP request also reloads the account and requires it to be active
 and linked. A signed-in user may disconnect one authorized MCP client from the
 dashboard. Dirt transactionally removes that user-client grant and its token
 and authorization-code records, then rejects later requests from its existing
-access tokens because every MCP request also requires current consent. Calls
-already admitted before disconnection may finish; reconnecting requires OAuth
-authorization again.
+access tokens because every MCP request also requires the exact consent record
+identified by the token's `dirt_consent_id` claim. Reconnecting creates a new
+consent record and never reactivates old access tokens. Calls already admitted
+before disconnection may finish; reconnecting requires OAuth authorization again.
 
 Viewer grants inspection and history tools, Builder adds bounded edits and
 undo, and Operator adds console-equivalent Minecraft commands. Changing a
@@ -122,11 +123,11 @@ client metadata discovery plus authorization code flow with PKCE S256; it does
 not support dynamic client registration, client credentials, legacy MCP
 transports, or version-specific endpoints. The single Streamable HTTP endpoint
 intentionally serves both `2025-06-18` and `2026-07-28` through one server
-factory, with identical authentication and profile policy. Every MCP request validates
-the token's issuer, audience, expiry, scope, and current authorization
-generation, then reloads the account's active, linked, and profile state. The
-fixed OAuth scope does not encode profiles; effective access is the intersection
-of supported tools, Paper enablement, and the current profile grant.
+factory, with identical authentication and profile policy. Every MCP request
+validates the token's issuer, audience, expiry, scope, current authorization
+generation, and consent record, then reloads the account's active, linked, and
+profile state. The fixed OAuth scope does not encode profiles; effective access
+is the intersection of supported tools, Paper enablement, and the current profile grant.
 
 ## Execution model
 
@@ -142,6 +143,10 @@ IDs currently admitted by Paper. Disabled configurable operations fail with
 `operation_disabled`. The bridge remains implementation-neutral and does not
 use MCP tool names or schemas; only the administrative command UI reads the
 shared descriptive catalog.
+
+The dashboard checks the mandatory capabilities route and runs the end-to-end
+ping only when `pingServer` is enabled. It distinguishes unavailable Paper,
+zero enabled tools, and zero tools granted to the account's profile.
 
 Bridge requests are fully materialized. MCP applies fixed tool defaults and
 generates omitted edit seeds before HTTP dispatch; Paper receives explicit

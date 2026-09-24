@@ -147,77 +147,36 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
 
     assert.ok(hasJwtSigner(auth.api));
     const jwtSigner: JwtSigner = auth.api;
-    const issued = await jwtSigner.signJWT({
-      body: {
-        payload: {
-          sub: 'linked-user',
-          aud: resource,
-          azp: clientId,
-          scope: 'dirt:mcp',
-          dirt_auth_version: 0,
-        },
-        overrideOptions: {
-          jwt: {
-            issuer: `${config.publicOrigin}/api/auth`,
-            audience: resource,
-            expirationTime: '5m',
-          },
-        },
-      },
-    });
-    const retainedClientToken = await jwtSigner.signJWT({
-      body: {
-        payload: {
-          sub: 'linked-user',
-          aud: resource,
-          azp: retainedClientId,
-          scope: 'dirt:mcp',
-          dirt_auth_version: 0,
-        },
-        overrideOptions: {
-          jwt: {
-            issuer: `${config.publicOrigin}/api/auth`,
-            audience: resource,
-            expirationTime: '5m',
-          },
-        },
-      },
+    const claims = {
+      sub: 'linked-user',
+      aud: resource,
+      azp: clientId,
+      scope: 'dirt:mcp',
+      dirt_auth_version: 0,
+      dirt_consent_id: 'linked-consent',
+    };
+    const issued = await signToken(jwtSigner, resource, claims);
+    const retainedClientToken = await signToken(jwtSigner, resource, {
+      ...claims,
+      azp: retainedClientId,
+      dirt_consent_id: 'retained-consent',
     });
 
     const malformedTokens = await Promise.all(
       [
-        {
-          sub: 'linked-user',
-          aud: resource,
-          azp: clientId,
-          scope: 'dirt:mcp',
-        },
-        {
-          aud: resource,
-          azp: clientId,
-          scope: 'dirt:mcp',
-          dirt_auth_version: 0,
-        },
-      ].map((payload) =>
-        jwtSigner.signJWT({
-          body: {
-            payload,
-            overrideOptions: {
-              jwt: {
-                issuer: `${config.publicOrigin}/api/auth`,
-                audience: resource,
-                expirationTime: '5m',
-              },
-            },
-          },
-        }),
-      ),
+        { ...claims, dirt_auth_version: undefined },
+        { ...claims, sub: undefined },
+        { ...claims, azp: undefined },
+        { ...claims, dirt_consent_id: undefined },
+        { ...claims, dirt_consent_id: '' },
+        { ...claims, dirt_consent_id: 123 },
+        { ...claims, dirt_consent_id: 'retained-consent' },
+      ].map((payload) => signToken(jwtSigner, resource, payload)),
     );
-    const rejectedMalformedTokens = [
-      await mcp.fetch(mcpRequest(resource, malformedTokens[0]!.token)),
-      await mcp.fetch(mcpRequest(resource, malformedTokens[1]!.token)),
-    ];
-    for (const rejected of rejectedMalformedTokens) {
+    for (const malformed of malformedTokens) {
+      // Exercise the JWKS cache after the first request has populated it.
+      // oxlint-disable-next-line eslint/no-await-in-loop
+      const rejected = await mcp.fetch(mcpRequest(resource, malformed.token));
       assert.equal(rejected.status, 401);
       assert.match(rejected.headers.get('WWW-Authenticate') ?? '', /error="invalid_token"/u);
     }
@@ -286,43 +245,42 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
       )
       .run('reauthorized-consent', clientId, 'linked-user', JSON.stringify(['dirt:mcp']), now, now);
 
+    const revokedAfterReauthorization = await mcp.fetch(mcpRequest(resource, issued.token));
+    assert.equal(revokedAfterReauthorization.status, 401);
+    assert.equal(bridgeRequests, 2);
+
+    const reconnected = await signToken(jwtSigner, resource, {
+      ...claims,
+      dirt_consent_id: 'reauthorized-consent',
+    });
+    const authorizedAfterReconnection = await mcp.fetch(mcpRequest(resource, reconnected.token));
+    assert.equal(authorizedAfterReconnection.status, 200);
+    assert.equal(bridgeRequests, 3);
+
     repository.disableUser('LinkedPlayer');
     const disabled = await mcp.fetch(mcpRequest(resource, issued.token));
     assert.equal(disabled.status, 403);
     assert.equal(disabled.headers.get('WWW-Authenticate'), null);
-    assert.equal(bridgeRequests, 2);
+    assert.equal(bridgeRequests, 3);
 
     repository.enableUser('LinkedPlayer');
     const superseded = await mcp.fetch(mcpRequest(resource, issued.token));
     assert.equal(superseded.status, 403);
-    assert.equal(bridgeRequests, 2);
+    assert.equal(bridgeRequests, 3);
     database
       .prepare(
         'INSERT INTO oauthConsent (id, clientId, userId, scopes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
       )
       .run('current-consent', clientId, 'linked-user', JSON.stringify(['dirt:mcp']), now, now);
 
-    const current = await jwtSigner.signJWT({
-      body: {
-        payload: {
-          sub: 'linked-user',
-          aud: resource,
-          azp: clientId,
-          scope: 'dirt:mcp',
-          dirt_auth_version: 2,
-        },
-        overrideOptions: {
-          jwt: {
-            issuer: `${config.publicOrigin}/api/auth`,
-            audience: resource,
-            expirationTime: '5m',
-          },
-        },
-      },
+    const current = await signToken(jwtSigner, resource, {
+      ...claims,
+      dirt_auth_version: 2,
+      dirt_consent_id: 'current-consent',
     });
     const reauthorized = await mcp.fetch(mcpRequest(resource, current.token));
     assert.equal(reauthorized.status, 200);
-    assert.equal(bridgeRequests, 3);
+    assert.equal(bridgeRequests, 4);
 
     const legacyInitialize = await mcp.fetch(legacyInitializeRequest(resource, current.token));
     assert.equal(legacyInitialize.status, 200);
@@ -344,7 +302,7 @@ test('signed MCP tokens verify through loopback JWKS and account state stays aut
     assert.match(legacyToolsBody, /"name":"get_blocks"/u);
     assert.doesNotMatch(legacyToolsBody, /"name":"set_blocks"/u);
     const bridgeRequestsAfterLegacyHandshake = bridgeRequests;
-    assert.ok(bridgeRequestsAfterLegacyHandshake > 3);
+    assert.ok(bridgeRequestsAfterLegacyHandshake > 4);
 
     repository.unlinkUser('LinkedPlayer');
     const supersededByUnlink = await mcp.fetch(mcpRequest(resource, current.token));
@@ -438,6 +396,21 @@ interface JwtSigner {
       overrideOptions: { jwt: { issuer: string; audience: string; expirationTime: string } };
     };
   }): Promise<{ token: string }>;
+}
+
+function signToken(signer: JwtSigner, resource: string, payload: Record<string, unknown>) {
+  return signer.signJWT({
+    body: {
+      payload,
+      overrideOptions: {
+        jwt: {
+          issuer: new URL('/api/auth', resource).toString(),
+          audience: resource,
+          expirationTime: '5m',
+        },
+      },
+    },
+  });
 }
 
 function hasJwtSigner(value: object): value is object & JwtSigner {

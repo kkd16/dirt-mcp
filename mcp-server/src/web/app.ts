@@ -372,14 +372,20 @@ async function dashboardViewModel(
 }
 
 async function dashboardReadiness(bridge: Pick<BridgeClient, 'request'>, user: UserSummary): Promise<ReadinessSummary> {
-  const [ping, capabilities] = await Promise.allSettled([
-    bridge.request(BRIDGE_ROUTES.ping, randomUUID(), PingResponseSchema),
-    bridge.request(BRIDGE_ROUTES.capabilities, randomUUID(), BridgeCapabilitiesSchema),
-  ]);
-  const configuration =
-    capabilities.status === 'fulfilled' ? toolConfigurationFromCapabilities(capabilities.value) : null;
+  let configuration: ReturnType<typeof toolConfigurationFromCapabilities> | null = null;
+  let bridgeAvailable = false;
+  try {
+    const capabilities = await bridge.request(BRIDGE_ROUTES.capabilities, randomUUID(), BridgeCapabilitiesSchema);
+    configuration = toolConfigurationFromCapabilities(capabilities);
+    if (configuration.ping_server) {
+      await bridge.request(BRIDGE_ROUTES.ping, randomUUID(), PingResponseSchema);
+    }
+    bridgeAvailable = true;
+  } catch {
+    // Account controls remain available when the bridge or an enabled ping fails.
+  }
   return {
-    bridgeAvailable: ping.status === 'fulfilled' && capabilities.status === 'fulfilled',
+    bridgeAvailable,
     enabledTools: configuration === null ? null : Object.values(configuration).filter(Boolean).length,
     accessibleTools:
       configuration === null

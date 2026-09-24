@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -91,7 +92,6 @@ test('Better Auth is passkey-only and MCP OAuth uses the fixed narrow policy', a
   assert.equal(oauth.options?.clientRegistrationRequirePKCE, true);
   assert.equal((oauth.options?.clientPrivileges as (() => unknown) | undefined)?.(), false);
   assert.equal((oauth.options?.resourcePrivileges as (() => unknown) | undefined)?.(), false);
-  assert.equal(typeof oauth.options?.customAccessTokenClaims, 'function');
 
   const passkey = plugins.find((plugin: { id: string }) => plugin.id === 'passkey') as
     | { options?: Record<string, unknown> }
@@ -378,16 +378,16 @@ test('MCP client revocation removes only one user-client authorization', () => {
     selected.clientId,
   );
 
-  assert.equal(repository.hasMcpClientConsent('revocation-user', selected.clientId), true);
+  assert.equal(repository.findMcpClientConsentId('revocation-user', selected.clientId), selected.consentId);
   assert.throws(
     () => repository.revokeMcpClient('revocation-user', otherUser.consentId),
     (error) => error instanceof AccessError && error.code === 'not_found',
   );
   repository.revokeMcpClient('revocation-user', selected.consentId);
 
-  assert.equal(repository.hasMcpClientConsent('revocation-user', selected.clientId), false);
-  assert.equal(repository.hasMcpClientConsent('revocation-user', retained.clientId), true);
-  assert.equal(repository.hasMcpClientConsent('other-revocation-user', selected.clientId), true);
+  assert.equal(repository.findMcpClientConsentId('revocation-user', selected.clientId), null);
+  assert.equal(repository.findMcpClientConsentId('revocation-user', retained.clientId), retained.consentId);
+  assert.equal(repository.findMcpClientConsentId('other-revocation-user', selected.clientId), otherUser.consentId);
   assert.equal(pairArtifactCount('revocation-user', selected.clientId), 0);
   assert.equal(pairArtifactCount('revocation-user', retained.clientId), 4);
   assert.equal(pairArtifactCount('other-revocation-user', selected.clientId), 4);
@@ -404,6 +404,113 @@ test('MCP client revocation removes only one user-client authorization', () => {
       .get(selected.clientId)?.count,
     1,
   );
+});
+
+test('OAuth code and refresh grants bind access tokens to the current client consent', async () => {
+  const userId = 'oauth-grant-user';
+  const clientId = 'https://grant-client.example/client.json';
+  const redirectUri = 'https://grant-client.example/callback';
+  const resource = `${config.publicOrigin}/mcp`;
+  const scopes = ['dirt:mcp', 'offline_access'];
+  insertUser(userId, 'GrantPlayer', new Date());
+  database
+    .prepare('UPDATE "user" SET minecraftUuid = ? WHERE id = ?')
+    .run('45454545-4545-4545-8545-454545454545', userId);
+  const session = await authContext.internalAdapter.createSession(userId);
+  assert.ok(session !== null);
+  await authAdapter.create({
+    model: 'oauthClient',
+    data: {
+      clientId,
+      redirectUris: [redirectUri],
+      scopes,
+      grantTypes: ['authorization_code', 'refresh_token'],
+      tokenEndpointAuthMethod: 'none',
+      requirePKCE: true,
+    },
+  });
+  await authAdapter.create({
+    model: 'oauthClientResource',
+    data: { clientId, resourceId: resource, createdAt: new Date() },
+  });
+  const consent = await authAdapter.create<{ id: string }>({
+    model: 'oauthConsent',
+    data: { clientId, userId, scopes, createdAt: new Date(), updatedAt: new Date() },
+  });
+
+  const tokenRequest = (fields: Record<string, string>) =>
+    auth.handler(
+      new Request(`${config.publicOrigin}/api/auth/oauth2/token`, {
+        method: 'POST',
+        body: new URLSearchParams({ client_id: clientId, resource, ...fields }),
+      }),
+    );
+  const exchangeCode = async () => {
+    const code = randomBytes(32).toString('base64url');
+    const verifier = randomBytes(32).toString('base64url');
+    await authContext.internalAdapter.createVerificationValue({
+      identifier: createHash('sha256').update(code).digest('base64url'),
+      value: JSON.stringify({
+        type: 'authorization_code',
+        userId,
+        sessionId: session.id,
+        query: {
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          response_type: 'code',
+          scope: scopes.join(' '),
+          resource,
+          code_challenge: createHash('sha256').update(verifier).digest('base64url'),
+          code_challenge_method: 'S256',
+        },
+      }),
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    return tokenRequest({
+      grant_type: 'authorization_code',
+      code,
+      code_verifier: verifier,
+      redirect_uri: redirectUri,
+    });
+  };
+  const readTokens = async (response: Response, consentId: string) => {
+    if (response.status !== 200) {
+      const failure = (await response.json()) as { error?: string; error_description?: string };
+      assert.fail(`OAuth token request failed: ${failure.error}: ${failure.error_description}`);
+    }
+    const tokens = (await response.json()) as { access_token: string; refresh_token: string };
+    assert.equal(typeof tokens.access_token, 'string');
+    assert.equal(typeof tokens.refresh_token, 'string');
+    const payload = JSON.parse(Buffer.from(tokens.access_token.split('.')[1]!, 'base64url').toString()) as Record<
+      string,
+      unknown
+    >;
+    assert.equal(payload.dirt_auth_version, 0);
+    assert.equal(payload.dirt_consent_id, consentId);
+    assert.equal(payload.azp, clientId);
+    assert.equal(payload.sub, userId);
+    return tokens;
+  };
+
+  const issued = await readTokens(await exchangeCode(), consent.id);
+  const refreshed = await readTokens(
+    await tokenRequest({ grant_type: 'refresh_token', refresh_token: issued.refresh_token }),
+    consent.id,
+  );
+  repository.revokeMcpClient(userId, consent.id);
+  const withoutConsent = await exchangeCode();
+  assert.equal(withoutConsent.status, 400);
+  assert.equal(((await withoutConsent.json()) as { error: string }).error, 'invalid_grant');
+
+  const newConsent = await authAdapter.create<{ id: string }>({
+    model: 'oauthConsent',
+    data: { clientId, userId, scopes, createdAt: new Date(), updatedAt: new Date() },
+  });
+  assert.notEqual(newConsent.id, consent.id);
+  const revokedRefresh = await tokenRequest({ grant_type: 'refresh_token', refresh_token: refreshed.refresh_token });
+  assert.equal(revokedRefresh.status, 400);
+  assert.equal(((await revokedRefresh.json()) as { error: string }).error, 'invalid_grant');
+  await readTokens(await exchangeCode(), newConsent.id);
 });
 
 test('changing an access profile revokes MCP authorization but preserves web identity', () => {
@@ -931,7 +1038,7 @@ test('dashboard presents safe identity, readiness, client, and passkey summaries
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Dirt is ready/u);
-  assert.match(html, /Paper and FAWE online/u);
+  assert.match(html, /Paper available/u);
   assert.match(html, /overlap of this Dirt release/u);
   assert.match(html, /12 of 12/u);
   assert.match(html, /11 of 12/u);
@@ -957,6 +1064,27 @@ test('dashboard presents safe identity, readiness, client, and passkey summaries
   const zeroToolsHtml = await zeroTools.text();
   assert.match(zeroToolsHtml, /No tools are enabled/u);
   assert.match(zeroToolsHtml, /0 of 12/u);
+  assert.match(zeroToolsHtml, /Paper available/u);
+
+  const pingDisabled = await testWebApp(
+    sessionAuth('dashboard-user', () => new Date()),
+    config,
+    testBridge(BRIDGE_OPERATION_IDS.filter((operation) => operation !== 'pingServer')),
+  ).request('/dashboard', { headers: { Host: 'localhost:3000' } });
+  const pingDisabledHtml = await pingDisabled.text();
+  assert.match(pingDisabledHtml, /Dirt is ready/u);
+  assert.match(pingDisabledHtml, /Paper available/u);
+
+  const restricted = await testWebApp(
+    sessionAuth('dashboard-user', () => new Date()),
+    config,
+    testBridge(['runMinecraftCommands']),
+  ).request('/dashboard', { headers: { Host: 'localhost:3000' } });
+  const restrictedHtml = await restricted.text();
+  assert.match(restrictedHtml, /No tools are available to you/u);
+  assert.match(restrictedHtml, /0 of 12/u);
+  assert.match(restrictedHtml, /1 of 12/u);
+  assert.doesNotMatch(restrictedHtml, /Dirt is ready/u);
 
   const degraded = await testWebApp(
     sessionAuth('dashboard-user', () => new Date()),
@@ -965,8 +1093,18 @@ test('dashboard presents safe identity, readiness, client, and passkey summaries
   ).request('/dashboard', { headers: { Host: 'localhost:3000' } });
   const degradedHtml = await degraded.text();
   assert.equal(degraded.status, 200);
-  assert.match(degradedHtml, /Paper offline/u);
+  assert.match(degradedHtml, /Paper unavailable/u);
   assert.match(degradedHtml, /Account controls remain available/u);
+
+  const unavailable = await testWebApp(
+    sessionAuth('dashboard-user', () => new Date()),
+    config,
+    testBridge(BRIDGE_OPERATION_IDS, true, false),
+  ).request('/dashboard', { headers: { Host: 'localhost:3000' } });
+  const unavailableHtml = await unavailable.text();
+  assert.equal(unavailable.status, 200);
+  assert.match(unavailableHtml, /Paper unavailable/u);
+  assert.match(unavailableHtml, /Unknown of 12/u);
 
   insertUser('unlinked-dashboard-user', 'unlinkeduser', now);
   const unlinked = await testWebApp(sessionAuth('unlinked-dashboard-user', () => new Date())).request('/dashboard', {
@@ -1136,7 +1274,7 @@ test('signed-in users can disconnect an authorized MCP client', async () => {
   const response = await app.request('/api/access/mcp-clients/revoke', request);
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { ok: true });
-  assert.equal(repository.hasMcpClientConsent('route-revocation-user', selected.clientId), false);
+  assert.equal(repository.findMcpClientConsentId('route-revocation-user', selected.clientId), null);
 
   const repeated = await app.request('/api/access/mcp-clients/revoke', request);
   assert.equal(repeated.status, 404);
@@ -1424,6 +1562,18 @@ function testBridge(operations: readonly string[], pingAvailable = true, capabil
   return new BridgeClient(config.bridge, async (request) => {
     const input = request instanceof Request ? request.url : request.toString();
     const path = new URL(input).pathname;
+    if (path === '/v1/ping' && !operations.includes('pingServer')) {
+      return Response.json(
+        {
+          error: {
+            code: 'operation_disabled',
+            message: 'Operation is disabled.',
+            details: { operationId: 'pingServer' },
+          },
+        },
+        { status: 403 },
+      );
+    }
     if (path === '/v1/ping' && !pingAvailable) return Response.json({ unavailable: true }, { status: 503 });
     if (path === '/v1/capabilities' && !capabilitiesAvailable) {
       return Response.json({ unavailable: true }, { status: 503 });

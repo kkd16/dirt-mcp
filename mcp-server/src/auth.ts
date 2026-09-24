@@ -257,11 +257,25 @@ export function createAuthOptions(
         clientRegistrationRequirePKCE: true,
         clientPrivileges: () => false,
         resourcePrivileges: () => false,
-        customAccessTokenClaims({ user }) {
-          return user === null || user === undefined
-            ? {}
-            : { dirt_auth_version: repository.requireAuthorizationVersion(user.id) };
-        },
+        extensions: [
+          {
+            claims: {
+              accessToken({ user, client }) {
+                const consentId = user == null ? null : repository.findMcpClientConsentId(user.id, client.clientId);
+                if (user == null || consentId === null) {
+                  throw new APIError('BAD_REQUEST', {
+                    error: 'invalid_grant',
+                    error_description: 'This MCP client is no longer authorized.',
+                  });
+                }
+                return {
+                  dirt_auth_version: repository.requireAuthorizationVersion(user.id),
+                  dirt_consent_id: consentId,
+                };
+              },
+            },
+          },
+        ],
       }),
       cimd({
         fetchClientMetadataResource,

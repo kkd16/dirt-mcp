@@ -500,14 +500,13 @@ export class AccessRepository {
     return row === undefined ? null : { ...row, accessProfile: parseAccessProfile(row.accessProfile) };
   }
 
-  hasMcpClientConsent(userId: string, clientId: string): boolean {
-    return (
-      this.database
-        .prepare<[string, string], { found: number }>(
-          'SELECT 1 AS found FROM oauthConsent WHERE userId = ? AND clientId = ? LIMIT 1',
-        )
-        .get(userId, clientId) !== undefined
-    );
+  findMcpClientConsentId(userId: string, clientId: string): string | null {
+    const row = this.database
+      .prepare<[string, string], { id: string }>(
+        'SELECT id FROM oauthConsent WHERE userId = ? AND clientId = ? LIMIT 1',
+      )
+      .get(userId, clientId);
+    return row?.id ?? null;
   }
 
   requireAuthorizationVersion(userId: string): number {

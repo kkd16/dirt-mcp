@@ -54,7 +54,13 @@ export function createDirtMcpHandler(
     auth,
     async (request, claims) => {
       const authorizationVersion = claims.dirt_auth_version;
-      if (typeof claims.sub !== 'string' || !isAuthorizationVersion(authorizationVersion)) {
+      const consentId = claims.dirt_consent_id;
+      if (
+        typeof claims.sub !== 'string' ||
+        !isAuthorizationVersion(authorizationVersion) ||
+        typeof consentId !== 'string' ||
+        consentId.length === 0
+      ) {
         return mcpAuthorizationError('The access token is not a valid Dirt authorization.', resource);
       }
       if (typeof claims.azp !== 'string') {
@@ -64,7 +70,7 @@ export function createDirtMcpHandler(
       if (user === null) {
         return jsonRpcError(403, -32_000, 'The Dirt account must be active and linked to a Minecraft account.');
       }
-      if (!repository.hasMcpClientConsent(user.id, claims.azp)) {
+      if (repository.findMcpClientConsentId(user.id, claims.azp) !== consentId) {
         return mcpAuthorizationError('This MCP client is no longer authorized.', resource);
       }
       const accessToken = extractAccessToken(request.headers.get('Authorization'));
