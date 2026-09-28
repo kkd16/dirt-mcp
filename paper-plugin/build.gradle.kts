@@ -103,7 +103,7 @@ dependencies {
     testImplementation("io.papermc.paper:paper-api:$paperApiVersion")
     testImplementation("com.google.code.gson:gson:2.14.0")
     testImplementation("org.junit.jupiter:junit-jupiter")
-    testImplementation("com.tngtech.archunit:archunit-junit6:1.5.0")
+    testImplementation("com.tngtech.archunit:archunit-junit6:1.5.1")
     testImplementation("com.fastasyncworldedit:FastAsyncWorldEdit-Core:$faweMavenVersion") {
         isTransitive = false
     }
