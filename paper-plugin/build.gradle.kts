@@ -91,7 +91,7 @@ repositories {
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:$paperApiVersion")
-    compileOnly("com.google.code.gson:gson:2.14.0")
+    compileOnly("com.google.code.gson:gson:2.15.0")
     compileOnly("com.fastasyncworldedit:FastAsyncWorldEdit-Core:$faweMavenVersion") {
         isTransitive = false
     }
@@ -101,9 +101,9 @@ dependencies {
 
     testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("io.papermc.paper:paper-api:$paperApiVersion")
-    testImplementation("com.google.code.gson:gson:2.14.0")
+    testImplementation("com.google.code.gson:gson:2.15.0")
     testImplementation("org.junit.jupiter:junit-jupiter")
-    testImplementation("com.tngtech.archunit:archunit-junit6:1.5.0")
+    testImplementation("com.tngtech.archunit:archunit-junit6:1.5.1")
     testImplementation("com.fastasyncworldedit:FastAsyncWorldEdit-Core:$faweMavenVersion") {
         isTransitive = false
     }
